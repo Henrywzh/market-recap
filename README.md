@@ -1,5 +1,7 @@
 # market-recap
 
+Live: **https://market-recap-b5p.pages.dev**
+
 A post-market recap dashboard for the US equity market, built entirely on
 free, attributable data sources and published as a static site.
 
@@ -97,6 +99,12 @@ assembled into `dist/` — `index.html` at the root with `artifacts/` beside it
 locally while production served `/` would mean the deploy step rewrote asset
 paths, and a path rewrite is the kind of build-time magic that works until the
 day it silently does not, on the copy nobody runs locally.
+
+The Pages project is `market-recap`. Creating it needed
+`wrangler pages project create market-recap --production-branch main --force`,
+because current wrangler delegates Pages commands to Workers and reads this
+`wrangler.toml` as a Workers config with no entry point. `--force` is needed
+only once, for the create; deploys run against Pages directly.
 
 Deployment is by direct upload rather than Pages' git integration. The
 artifacts are rebuilt every session and are not in git, so a git-triggered
