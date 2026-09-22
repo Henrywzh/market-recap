@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Market Recap</title>
+<link rel="stylesheet" href="css/terminal.css">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js" defer></script>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="brand-block">
+    <div>
+      <span class="brand" id="brand">MARKET RECAP</span>
+      <span class="brand-sub" id="brand-sub">POST-MARKET RECAP DASHBOARD</span>
+    </div>
+    <span class="asof" id="asof">AS OF —</span>
+  </div>
+  <div class="masthead-right">
+    <select class="control" id="theme-select" aria-label="Theme">
+      <option value="dark">Dark</option>
+      <option value="light">Light</option>
+    </select>
+    <span class="live-pill"><span class="live-dot"></span><span id="clock">--:--:--</span></span>
+    <span class="updated" id="updated">Last updated —</span>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs" role="tablist"></nav>
+
+<main id="main"><div class="loading">Loading artifacts…</div></main>
+
+<footer id="footer"></footer>
+<div class="tooltip" id="tooltip"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

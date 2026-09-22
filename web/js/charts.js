@@ -1,0 +1,172 @@
+// ECharts wrappers carrying the terminal palette. Charts read their colours
+// from the same CSS variables as the tables so a theme switch cannot leave a
+// chart on the old palette.
+
+const registry = new Map();
+
+function css(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+export function palette() {
+  return {
+    text: css('--text'),
+    dim: css('--text-dim'),
+    faint: css('--text-faint'),
+    border: css('--border'),
+    accent: css('--accent'),
+    up: css('--up'),
+    down: css('--down'),
+    blue: css('--blue'),
+    purple: css('--purple'),
+    panel: css('--panel'),
+  };
+}
+
+export const SERIES_COLORS = [
+  '#e8a33d', '#60a5fa', '#4ade80', '#f87171', '#a78bfa',
+  '#22d3ee', '#fbbf24', '#f472b6', '#34d399', '#94a3b8', '#fb923c',
+];
+
+function baseOption(p) {
+  return {
+    animation: false,
+    backgroundColor: 'transparent',
+    textStyle: { fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 10 },
+    grid: { left: 52, right: 16, top: 16, bottom: 34 },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#000',
+      borderColor: p.border,
+      borderWidth: 1,
+      textStyle: { color: p.text, fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace' },
+      axisPointer: { type: 'line', lineStyle: { color: p.faint, type: 'dashed' } },
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      axisLine: { lineStyle: { color: p.border } },
+      axisTick: { show: false },
+      axisLabel: { color: p.dim, fontSize: 10, hideOverlap: true },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { color: p.dim, fontSize: 10 },
+      splitLine: { lineStyle: { color: p.border, opacity: 0.45 } },
+    },
+  };
+}
+
+export function render(node, build) {
+  if (!node || !window.echarts) return null;
+  let chart = registry.get(node);
+  if (chart) chart.dispose();
+  chart = window.echarts.init(node, null, { renderer: 'canvas' });
+  const p = palette();
+  chart.setOption(build(baseOption(p), p), true);
+  registry.set(node, chart);
+  return chart;
+}
+
+export function resizeAll() {
+  registry.forEach((chart, node) => {
+    if (document.body.contains(node)) chart.resize();
+  });
+}
+
+export function disposeAll() {
+  registry.forEach((chart) => chart.dispose());
+  registry.clear();
+}
+
+// --- Chart recipes -------------------------------------------------------
+
+export function areaLine(node, dates, values, color) {
+  return render(node, (option, p) => {
+    const tint = color || p.accent;
+    return {
+      ...option,
+      xAxis: { ...option.xAxis, data: dates },
+      series: [{
+        type: 'line',
+        data: values,
+        showSymbol: false,
+        lineStyle: { width: 1.3, color: tint },
+        areaStyle: {
+          color: {
+            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: `${tint}55` },
+              { offset: 1, color: `${tint}05` },
+            ],
+          },
+        },
+      }],
+    };
+  });
+}
+
+export function barsAroundZero(node, dates, values) {
+  return render(node, (option, p) => ({
+    ...option,
+    xAxis: { ...option.xAxis, data: dates, boundaryGap: true },
+    series: [{
+      type: 'bar',
+      data: values.map((v) => ({ value: v, itemStyle: { color: v >= 0 ? p.up : p.down } })),
+      barMaxWidth: 6,
+    }],
+    markLine: undefined,
+  }));
+}
+
+export function zeroLine(node, dates, values, color) {
+  return render(node, (option, p) => ({
+    ...option,
+    xAxis: { ...option.xAxis, data: dates },
+    series: [{
+      type: 'line',
+      data: values,
+      showSymbol: false,
+      lineStyle: { width: 1, color: color || p.blue },
+      markLine: {
+        silent: true,
+        symbol: 'none',
+        data: [{ yAxis: 0 }],
+        lineStyle: { color: p.faint, type: 'dashed', width: 1 },
+        label: { show: false },
+      },
+    }],
+  }));
+}
+
+export function multiLine(node, dates, seriesMap, options = {}) {
+  return render(node, (option, p) => {
+    const names = Object.keys(seriesMap);
+    return {
+      ...option,
+      grid: { ...option.grid, bottom: 52 },
+      legend: {
+        bottom: 0,
+        textStyle: { color: p.dim, fontSize: 10 },
+        icon: 'rect',
+        itemWidth: 9,
+        itemHeight: 9,
+        type: 'scroll',
+      },
+      xAxis: { ...option.xAxis, data: dates },
+      series: names.map((name, index) => ({
+        name,
+        type: 'line',
+        data: seriesMap[name],
+        showSymbol: options.symbols || false,
+        symbolSize: 5,
+        lineStyle: { width: options.width || 1.2, color: SERIES_COLORS[index % SERIES_COLORS.length] },
+        itemStyle: { color: SERIES_COLORS[index % SERIES_COLORS.length] },
+      })),
+    };
+  });
+}

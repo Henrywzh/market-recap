@@ -1,0 +1,139 @@
+# Dashboard contract. Everything a renderer needs to name a panel lives here,
+# never inline in a builder.
+
+[brand]
+# The published name of YOUR tool. Do not set this to the name of a firm you
+# are not, or the page becomes an impersonation rather than a dashboard.
+title = "MARKET RECAP"
+subtitle = "POST-MARKET RECAP DASHBOARD"
+disclaimer = "internal research tool. Not investment advice."
+
+[universe]
+# Broad-market quote strip on the MARKETS tab.
+quote_tickers = ["SPY", "QQQ", "IWM"]
+# Long-history index series used for drawdown and the price chart.
+spx_index = "^GSPC"
+ndx_index = "^NDX"
+history_years = 11
+
+[universe.sectors]
+# GICS sector -> Select Sector SPDR wrapper. Weight and contribution come from
+# the official SPY holdings file, not from the wrapper.
+"Information Technology" = "XLK"
+"Financials" = "XLF"
+"Communication Services" = "XLC"
+"Consumer Discretionary" = "XLY"
+"Health Care" = "XLV"
+"Industrials" = "XLI"
+"Consumer Staples" = "XLP"
+"Energy" = "XLE"
+"Utilities" = "XLU"
+"Materials" = "XLB"
+"Real Estate" = "XLRE"
+
+[etf_heatmap]
+# ticker = group. Sized by AUM, coloured by estimated net flow.
+SPY = "Broad Equity"
+IVV = "Broad Equity"
+VOO = "Broad Equity"
+QQQ = "Broad Equity"
+VTI = "Broad Equity"
+IWM = "Broad Equity"
+DIA = "Broad Equity"
+MDY = "Broad Equity"
+RSP = "Broad Equity"
+XLK = "Sector"
+XLF = "Sector"
+XLV = "Sector"
+XLI = "Sector"
+XLE = "Sector"
+XLP = "Sector"
+XLY = "Sector"
+XLU = "Sector"
+XLB = "Sector"
+XLRE = "Sector"
+XLC = "Sector"
+EFA = "International"
+EEM = "International"
+VEA = "International"
+VWO = "International"
+GLD = "Commodity"
+SLV = "Commodity"
+USO = "Commodity"
+AGG = "Fixed Income"
+LQD = "Fixed Income"
+HYG = "Fixed Income"
+IEF = "Fixed Income"
+SHY = "Fixed Income"
+TLT = "Fixed Income"
+
+[macro.commodities]
+# Yahoo front-month futures / ETF proxies. These are proxies, not spot prints,
+# and the footer says so.
+"Gold" = "GC=F"
+"Silver" = "SI=F"
+"Platinum" = "PL=F"
+"Palladium" = "PA=F"
+"WTI Crude Oil" = "CL=F"
+"Copper" = "HG=F"
+"Natural Gas" = "NG=F"
+"Uranium (URA)" = "URA"
+"US Dollar (DXY)" = "DX-Y.NYB"
+
+[[macro.inflation]]
+series_id = "PCEPI"
+label = "Headline PCE"
+unit = "YoY %"
+display = "yoy"
+
+[[macro.inflation]]
+series_id = "PCEPILFE"
+label = "Core PCE (ex food & energy)"
+unit = "YoY %"
+display = "yoy"
+
+[[macro.inflation]]
+series_id = "PCETRIM1M158SFRBDAL"
+label = "Trimmed Mean PCE - 1M annualized"
+unit = "Ann. %"
+display = "level"
+
+[[macro.inflation]]
+series_id = "PCETRIM6M680SFRBDAL"
+label = "Trimmed Mean PCE - 6M annualized"
+unit = "Ann. %"
+display = "level"
+
+[[macro.inflation]]
+series_id = "PCETRIM12M159SFRBDAL"
+label = "Trimmed Mean PCE - 12M (YoY)"
+unit = "YoY %"
+display = "level"
+
+[[macro.inflation]]
+series_id = "PI"
+label = "Personal Income"
+unit = "MoM %"
+display = "mom"
+
+[[macro.inflation]]
+series_id = "PCE"
+label = "Personal Spending"
+unit = "MoM %"
+display = "mom"
+
+[technicals]
+# Presets offered by the relative-strength control.
+presets = [
+  "XLK/SPY", "XLF/SPY", "XLE/SPY", "XLV/SPY", "XLY/XLP",
+  "IWM/SPY", "QQQ/SPY", "SOXX/SPY", "EFA/SPY", "GLD/SPY",
+]
+ma_periods = [20, 50, 200]
+zscore_window = 200
+forward_return_days = 40
+
+[dcf]
+# Fundamentals are baked at build time: data.sec.gov sends no CORS header, so
+# the browser cannot reach it. A ticker not baked here cannot be modelled.
+max_tickers = 120
+forecast_years = 5
