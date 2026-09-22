@@ -130,3 +130,67 @@ def test_vanguard_accepts_its_own_fund(monkeypatch):
     assert facts["multi_share_class"] is True
     assert facts["premium_pct"] == pytest.approx(0.02)
     assert facts["nav"] == pytest.approx(712.76)
+
+
+def _parse_holdings(payload: bytes):
+    """Run fetch_holdings' parsing over a payload without going to the network."""
+    import market_recap.sources.ssga as ssga_module
+
+    original = ssga_module._download
+    ssga_module._download = lambda *a, **k: payload
+    try:
+        return ssga_module.fetch_holdings("TEST")
+    finally:
+        ssga_module._download = original
+
+
+def _holdings_file(rows: list[list]) -> bytes:
+    import io
+
+    from openpyxl import Workbook
+
+    book = Workbook()
+    sheet = book.active
+    sheet.append(["Fund Name:", "Test Fund"])
+    sheet.append(["Ticker Symbol:", "TEST"])
+    sheet.append(["Holdings:", "As of 21-Sep-2026"])
+    sheet.append([])
+    sheet.append(["Name", "Ticker", "Identifier", "SEDOL", "Weight", "Sector", "Shares Held"])
+    for row in rows:
+        sheet.append(row)
+    buffer = io.BytesIO()
+    book.save(buffer)
+    return buffer.getvalue()
+
+
+def test_index_futures_are_not_index_members():
+    """QNDX holds Nasdaq-100 micro futures to equitise cash, under the ticker
+    HWBZ6 -- which matches an equity ticker pattern exactly. Left in the
+    basket it inflated the member count, sat in the breadth and
+    advance/decline denominators as a name that can never advance, and was
+    sent to the price feed every build as a permanently missing symbol.
+
+    The issuer's own file separates them: a listed security carries a SEDOL
+    and these positions do not.
+    """
+    payload = _holdings_file([
+        ["NVIDIA CORP", "NVDA", "67066G104", "2379504", 8.29, "-", 152905],
+        ["APPLE INC", "AAPL", "037833100", "2046251", 7.48, "-", 92596],
+        ["NASD100 MICRO EMINDEC26", "HWBZ6", "ADI393JG6", "-", 0.0032, "-", 10],
+        ["SSI US GOV MONEY MARKET CLASS", "-", "924QSGII3", "-", 0.185, "-", None],
+        ["US DOLLAR", "-", "999USDZ92", "-", 0.21, "-", None],
+        ["TPG INC", "2602335D", "436CVR021", "-", 0.000003, "-", 1],
+    ])
+    frame, as_of, _url = _parse_holdings(payload)
+
+    assert list(frame["ticker"]) == ["NVDA", "AAPL"]
+    assert "sedol" not in frame.columns, "the discriminator is internal, not a published column"
+    assert as_of == "2026-09-21", "the as-of date comes from the file, not from today"
+
+
+def test_the_as_of_date_is_read_from_the_file_not_assumed():
+    """SSGA publishes the prior session's basket during the morning. A
+    dashboard that relabels it as today is quietly wrong."""
+    payload = _holdings_file([["NVIDIA CORP", "NVDA", "67066G104", "2379504", 100.0, "-", 1]])
+    _frame, as_of, _url = _parse_holdings(payload)
+    assert as_of == "2026-09-21"

@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from market_recap.config import load_config
 from market_recap.compute import returns as R
 from market_recap.compute import technicals as T
 
@@ -111,7 +112,7 @@ def test_cross_listing_premium_uses_the_declared_ratio():
     ) * 100
     assert premium_frame["premium_pct"].iloc[-1] == pytest.approx(40.0)
 
-    diag = cross_listing._diagnostics(premium_frame)
+    diag = cross_listing._diagnostics(premium_frame, min_pairs=10)
     assert diag["sessions"] == 60
 
 
@@ -119,8 +120,11 @@ def test_cross_listing_verdict_flags_a_timing_dominated_series():
     """A premium whose daily swing exceeds its own level spread is noise."""
     from market_recap.panels import cross_listing
 
+    # The threshold is the contract's, so the test cannot drift from the page.
+    floor = float(load_config()["cross_listing_diagnostics"]["min_autocorrelation"])
+
     timing_noise = {"daily_change_sd_pp": 11.7, "level_sd_pp": 9.0, "autocorr_1d": 0.14}
-    assert cross_listing._verdict(timing_noise)["daily_change_usable"] is False
+    assert cross_listing._verdict(timing_noise, min_autocorrelation=floor)["daily_change_usable"] is False
 
     persistent = {"daily_change_sd_pp": 0.4, "level_sd_pp": 3.2, "autocorr_1d": 0.95}
-    assert cross_listing._verdict(persistent)["daily_change_usable"] is True
+    assert cross_listing._verdict(persistent, min_autocorrelation=floor)["daily_change_usable"] is True

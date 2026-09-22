@@ -10,17 +10,12 @@ from __future__ import annotations
 import pandas as pd
 
 from ..compute import technicals as T
-from ..config import TICKER_ARTIFACT_DIR
+from ..config import TICKER_ARTIFACT_DIR, period_sessions
 from ..util import clean_float, write_json
 
 
 def _series(values: pd.Series, digits: int = 4) -> list:
     return [clean_float(v, digits) for v in values.to_numpy()]
-
-
-# Enough history for a 20-day average and a MACD to mean anything. Below this
-# a ticker carries no technical reading at all and is left out.
-MIN_SESSIONS = 40
 
 
 def bake_ticker(symbol: str, closes: pd.Series, config: dict) -> dict | None:
@@ -34,20 +29,20 @@ def bake_ticker(symbol: str, closes: pd.Series, config: dict) -> dict | None:
     it can be, and what is missing is named with the reason, so the tab can say
     "needs 200 sessions, has 51" instead of rendering an empty chart.
     """
+    settings = config["technicals"]
     clean = closes.dropna()
     sessions = int(len(clean))
-    if sessions < MIN_SESSIONS:
+    if sessions < int(settings["min_sessions"]):
         return None
 
-    windows = list(config["technicals"]["ma_periods"])
-    zwindow = int(config["technicals"]["zscore_window"])
-    horizon = int(config["technicals"]["forward_return_days"])
+    windows = list(settings["ma_periods"])
+    zwindow = int(settings["zscore_window"])
+    horizon = int(settings["forward_return_days"])
+    sigma_multiple = float(settings["band_sigma"])
     unavailable: dict[str, str] = {}
 
-    def _series(values: pd.Series, digits: int = 4) -> list:
-        return [clean_float(v, digits) for v in values.to_numpy()]
-
-    tail = 504  # two years of chart, the longest window the tab offers
+    # The longest window the tab offers, from the same table the charts read.
+    tail = period_sessions(config["periods"]["chart_window"])
     view = clean.tail(tail)
 
     available_windows = [w for w in windows if sessions >= w]
@@ -62,8 +57,8 @@ def bake_ticker(symbol: str, closes: pd.Series, config: dict) -> dict | None:
         z = T.zscore_vs_ma(clean, zwindow)
         last_z = clean_float(z.dropna().iloc[-1], 2) if not z.dropna().empty else None
         band, verdict = T.band_for(last_z)
-        band_upper = _series((sma_long + 1.5 * sigma).tail(tail), 2)
-        band_lower = _series((sma_long - 1.5 * sigma).tail(tail), 2)
+        band_upper = _series((sma_long + sigma_multiple * sigma).tail(tail), 2)
+        band_lower = _series((sma_long - sigma_multiple * sigma).tail(tail), 2)
         zscore = _series(z.tail(tail), 3)
         distance = (
             clean_float((clean.iloc[-1] / sma_long.iloc[-1] - 1) * 100, 2)
@@ -71,7 +66,7 @@ def bake_ticker(symbol: str, closes: pd.Series, config: dict) -> dict | None:
             else None
         )
         sma_long_last = clean_float(sma_long.iloc[-1], 2)
-        slope_ann = clean_float(T.annualised_ma_slope(clean, zwindow), 1)
+        slope_ann = clean_float(T.annualised_ma_slope(clean, window=zwindow), 1)
     else:
         reason = f"needs {zwindow} sessions, has {sessions}"
         unavailable |= {
@@ -84,7 +79,12 @@ def bake_ticker(symbol: str, closes: pd.Series, config: dict) -> dict | None:
         band_upper = band_lower = zscore = []
 
     slopes = T.sma_slope_series(clean, available_windows) if available_windows else pd.DataFrame()
-    macd_frame = T.macd(clean)
+    macd_frame = T.macd(
+        clean,
+        fast=int(settings["macd_fast"]),
+        slow=int(settings["macd_slow"]),
+        signal=int(settings["macd_signal"]),
+    )
 
     if sessions >= zwindow + horizon:
         forward_rows = T.forward_return_by_band(clean, zscore_window=zwindow, horizon=horizon)
@@ -101,6 +101,7 @@ def bake_ticker(symbol: str, closes: pd.Series, config: dict) -> dict | None:
         "sessions": sessions,
         "first_session": clean.index[0].strftime("%Y-%m-%d"),
         "zscore_window": zwindow,
+        "band_sigma": sigma_multiple,
         "dates": [d.strftime("%Y-%m-%d") for d in view.index],
         "close": _series(view, 2),
         "moving_averages": {str(w): _series(mas[w].tail(tail), 2) for w in available_windows},
@@ -149,15 +150,21 @@ def build(ctx) -> dict:
         if entry:
             baked.append(entry)
 
-    partial = sorted(e["ticker"] for e in baked if e["sessions"] < int(config["technicals"]["zscore_window"]))
+    settings = config["technicals"]
+    partial = sorted(e["ticker"] for e in baked if e["sessions"] < int(settings["zscore_window"]))
     return {
         "as_of": ctx.as_of,
-        "min_sessions": MIN_SESSIONS,
+        "min_sessions": int(settings["min_sessions"]),
         "partial_history": partial,
-        "presets": list(config["technicals"]["presets"]),
-        "ma_periods": list(config["technicals"]["ma_periods"]),
-        "zscore_window": config["technicals"]["zscore_window"],
-        "forward_return_days": config["technicals"]["forward_return_days"],
+        "presets": list(settings["presets"]),
+        "ma_periods": list(settings["ma_periods"]),
+        "zscore_window": settings["zscore_window"],
+        "forward_return_days": settings["forward_return_days"],
+        "macd": {
+            "fast": settings["macd_fast"],
+            "slow": settings["macd_slow"],
+            "signal": settings["macd_signal"],
+        },
         "available": sorted(e["ticker"] for e in baked),
         "note": (
             "Forward-return rows describe what happened in this sample after price sat in a "

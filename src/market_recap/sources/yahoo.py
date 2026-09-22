@@ -17,7 +17,7 @@ from typing import Iterable, Sequence
 
 import pandas as pd
 
-from ..config import CACHE_DIR
+from .. import cache
 
 CHUNK_SIZE = 60
 # Yahoo rate-limits a client that pulls the whole index twice in a row: the
@@ -47,13 +47,19 @@ def _download_chunk(chunk: Sequence[str], period: str) -> pd.DataFrame | None:
     return closes
 
 
+# One file per history length, refreshed once a session. The whole point is
+# that a rebuild on the same day re-requests nothing: the provider drops a
+# random handful of symbols per sweep, so asking again is not free.
+NAMESPACE = "prices"
+
+
 def _cache_path(period: str) -> Path:
-    return CACHE_DIR / "prices" / f"closes-{period}-{date.today():%Y%m%d}.parquet"
+    return cache.path_for(NAMESPACE, f"closes-{period}", ".parquet")
 
 
 def _load_cache(period: str) -> pd.DataFrame:
     path = _cache_path(period)
-    if not path.exists():
+    if not cache.is_fresh(path, "daily_file"):
         return pd.DataFrame()
     try:
         return pd.read_parquet(path)

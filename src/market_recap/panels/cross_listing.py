@@ -24,14 +24,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from ..config import period_sessions
+from ..context import completed_sessions
 from ..sources import yahoo
 from ..util import SourceRecord, clean_float, to_iso_date
 
-HISTORY_PERIOD = "2y"
-CHART_SESSIONS = 504
 
-
-def _diagnostics(frame: pd.DataFrame) -> dict:
+def _diagnostics(frame: pd.DataFrame, *, min_pairs: int) -> dict:
     """Numbers that say whether the premium series is measuring anything.
 
     A real cross-listing premium is persistent: it drifts over weeks. A series
@@ -46,7 +45,7 @@ def _diagnostics(frame: pd.DataFrame) -> dict:
 
     def _corr(a: pd.Series, b: pd.Series) -> float | None:
         pair = pd.concat([a, b], axis=1).dropna()
-        if len(pair) < 10:
+        if len(pair) < min_pairs:
             return None
         value = pair.iloc[:, 0].corr(pair.iloc[:, 1])
         return clean_float(value, 3)
@@ -64,14 +63,14 @@ def _diagnostics(frame: pd.DataFrame) -> dict:
     }
 
 
-def _verdict(diag: dict) -> dict:
+def _verdict(diag: dict, *, min_autocorrelation: float) -> dict:
     """Turn the diagnostics into a plain statement about what is usable."""
     change_sd = diag.get("daily_change_sd_pp")
     level_sd = diag.get("level_sd_pp")
     autocorr = diag.get("autocorr_1d")
     timing_dominated = (
         change_sd is not None and level_sd is not None and change_sd > level_sd
-    ) or (autocorr is not None and autocorr < 0.3)
+    ) or (autocorr is not None and autocorr < min_autocorrelation)
     return {
         "level_usable": True,
         "daily_change_usable": not timing_dominated,
@@ -86,13 +85,20 @@ def _verdict(diag: dict) -> dict:
     }
 
 
-def _build_pair(spec: dict, log) -> dict | None:
+def _build_pair(spec: dict, log, settings: dict, chart_sessions: int) -> dict | None:
     us_ticker = str(spec["us_ticker"]).upper()
     home_ticker = str(spec["home_ticker"])
     fx_ticker = str(spec["fx_ticker"])
     ratio = float(spec["ratio"])
 
-    closes = yahoo.fetch_closes([us_ticker, home_ticker, fx_ticker], period=HISTORY_PERIOD)
+    # Same completed-session guard the rest of the page uses. Without it this
+    # tab could date itself to a session still in progress while every other
+    # tab showed the previous close -- one page, two "todays".
+    closes = completed_sessions(
+        yahoo.fetch_closes(
+            [us_ticker, home_ticker, fx_ticker], period=str(settings["history_period"])
+        )
+    )
     missing = [t for t in (us_ticker, home_ticker, fx_ticker) if t not in closes.columns]
     if missing:
         log.add(
@@ -109,7 +115,7 @@ def _build_pair(spec: dict, log) -> dict | None:
     frame = closes[[us_ticker, home_ticker, fx_ticker]].copy()
     frame.columns = ["us", "home", "fx"]
     frame = frame.dropna()
-    if len(frame) < 20:
+    if len(frame) < int(settings["min_sessions"]):
         return None
 
     # One US line represents `ratio` home shares, so the comparable price is
@@ -118,8 +124,8 @@ def _build_pair(spec: dict, log) -> dict | None:
     frame["home_usd_equivalent"] = frame["home"] / frame["fx"] * ratio
     frame["premium_pct"] = (frame["us"] / frame["home_usd_equivalent"] - 1.0) * 100.0
 
-    diag = _diagnostics(frame)
-    tail = frame.tail(CHART_SESSIONS)
+    diag = _diagnostics(frame, min_pairs=int(settings["min_correlation_pairs"]))
+    tail = frame.tail(chart_sessions)
     premium = frame["premium_pct"]
     latest = float(premium.iloc[-1])
 
@@ -163,16 +169,18 @@ def _build_pair(spec: dict, log) -> dict | None:
             "home_usd_equivalent": [clean_float(v, 2) for v in tail["home_usd_equivalent"].to_numpy()],
         },
         "diagnostics": diag,
-        "verdict": _verdict(diag),
+        "verdict": _verdict(diag, min_autocorrelation=float(settings["min_autocorrelation"])),
     }
 
 
 def build(ctx) -> dict:
     specs = list(ctx.config.get("cross_listing") or [])
+    settings = ctx.config["cross_listing_diagnostics"]
+    chart_sessions = period_sessions(ctx.config["periods"]["chart_window"])
     pairs = []
     for spec in specs:
         try:
-            pair = _build_pair(spec, ctx.log)
+            pair = _build_pair(spec, ctx.log, settings, chart_sessions)
         except Exception as exc:
             ctx.log.fail(f"cross_listing:{spec.get('us_ticker')}", exc)
             continue
@@ -182,6 +190,7 @@ def build(ctx) -> dict:
     return {
         "as_of": ctx.as_of,
         "pairs": pairs,
+        "thresholds": dict(settings),
         "note": (
             "The premium is the US line's price against its home-market line converted at spot and "
             "scaled by the depositary ratio from the issuer's own filing. Two cautions travel with "

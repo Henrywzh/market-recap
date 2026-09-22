@@ -7,10 +7,12 @@ a page that contradicts itself, which is worse than showing neither.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
 
-from ..config import PERIOD_TRADING_DAYS
+from ..config import CHART_SESSIONS, period_sessions
 
 
 def period_return(closes: pd.Series, trading_days: int) -> float | None:
@@ -43,15 +45,17 @@ def ytd_return(closes: pd.Series) -> float | None:
     return float((clean.iloc[-1] / start - 1.0) * 100.0)
 
 
-def all_period_returns(closes: pd.Series, periods: tuple[str, ...] = ("1D", "1W", "1M", "3M", "1Y")) -> dict:
+def period_returns(closes: pd.Series, periods: Sequence[str]) -> dict[str, float | None]:
+    """Returns over each named window, with YTD handled the same way everywhere.
+
+    One implementation. Three panels used to spell this loop out themselves and
+    each carried its own literal list of windows, so "1M" on the sector table
+    and "1M" on the heat map were two independent claims that happened to agree.
+    """
     out: dict[str, float | None] = {}
     for label in periods:
-        if label == "YTD":
-            out[label] = ytd_return(closes)
-        else:
-            out[label] = period_return(closes, PERIOD_TRADING_DAYS[label])
-    if "YTD" not in out:
-        out["YTD"] = ytd_return(closes)
+        sessions = period_sessions(label)
+        out[label] = ytd_return(closes) if sessions is None else period_return(closes, sessions)
     return out
 
 
@@ -95,7 +99,7 @@ def advance_decline(closes: pd.DataFrame) -> dict:
     }
 
 
-def net_breadth_series(closes: pd.DataFrame, lookback_sessions: int = 504) -> pd.Series:
+def net_breadth_series(closes: pd.DataFrame, lookback_sessions: int = CHART_SESSIONS) -> pd.Series:
     """Daily (% advancing - % declining) across the constituent panel."""
     change = closes.pct_change(fill_method=None)
     tail = change.tail(lookback_sessions)
@@ -118,11 +122,13 @@ def pct_above_moving_average(closes: pd.DataFrame, window: int) -> float | None:
     return float((pair["last"] > pair["sma"]).mean() * 100.0)
 
 
-def sma_slope_pct(closes: pd.Series, *, sma_window: int = 200, lookback: int = 20) -> float | None:
-    """Percent change in the SMA200 itself over ``lookback`` sessions.
+def sma_slope_pct(closes: pd.Series, *, sma_window: int, lookback: int) -> float | None:
+    """Percent change in the long average itself over ``lookback`` sessions.
 
     This measures whether the trend line is turning, which is a different
-    question from whether price is above it.
+    question from whether price is above it. Both windows are required: a
+    default here would be a second opinion about the trend window, competing
+    silently with the contract's.
     """
     clean = closes.dropna()
     if len(clean) < sma_window + lookback:

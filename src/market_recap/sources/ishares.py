@@ -15,14 +15,12 @@ different fund.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 import json
-from pathlib import Path
 import re
 
 import pandas as pd
 
-from ..config import CACHE_DIR
+from .. import cache
 from .http import FetchError, get_bytes, get_text
 
 SCREENER_URL = (
@@ -41,30 +39,26 @@ _ROW = re.compile(r"<ss:Row>(.*?)</ss:Row>", re.S)
 _CELL = re.compile(r"<ss:Cell[^>]*>(.*?)</ss:Cell>", re.S)
 _TAG = re.compile(r"<[^>]+>")
 
-_SCREENER_TTL = timedelta(days=7)
-_MISSING_TTL = timedelta(days=7)
-
-
-def _cache(name: str) -> Path:
-    return CACHE_DIR / "ishares" / name
+HOME_URL = "https://www.ishares.com"
+NAMESPACE = "ishares"
 
 
 def fetch_portfolio_map(*, use_cache: bool = True) -> dict[str, str]:
-    """Ticker -> BlackRock portfolio id, from the issuer's own screener."""
-    path = _cache("product_screener.json")
-    payload = None
-    if use_cache and path.exists():
-        age = datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)
-        if age < _SCREENER_TTL:
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                payload = None
-    if payload is None:
-        text = get_text(SCREENER_URL, timeout=90.0)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-        payload = json.loads(text)
+    """Ticker -> BlackRock portfolio id, from the issuer's own screener.
+
+    Resolved rather than hard-coded. A remembered id was wrong once already --
+    239466 returns the 0-1 Year Treasury fund, not SHY -- and a wrong id fails
+    silently by returning a real fund's real history under another name.
+    """
+    text = cache.fetch_text(
+        NAMESPACE,
+        "product_screener",
+        lambda: get_text(SCREENER_URL, timeout=90.0),
+        kind="reference_data",
+        suffix=".json",
+        use_cache=use_cache,
+    )
+    payload = json.loads(text)
 
     mapping: dict[str, str] = {}
     for portfolio_id, record in payload.items():
@@ -113,40 +107,33 @@ def _parse_historical(text: str) -> pd.DataFrame:
 def fetch_nav_history(ticker: str, *, use_cache: bool = True) -> tuple[pd.DataFrame, str]:
     """Published NAV and shares outstanding for one iShares fund."""
     ticker = ticker.upper()
-    parsed_path = _cache(f"navhist-{ticker.lower()}-{datetime.now():%Y%m%d}.parquet")
-    marker = _cache(f"navhist-{ticker.lower()}.missing")
-
     mapping = fetch_portfolio_map(use_cache=use_cache)
     portfolio_id = mapping.get(ticker)
     if portfolio_id is None:
         raise FetchError(f"{ticker}: not an iShares fund", not_found=True)
     url = DOCUMENT_URL.format(portfolio_id=portfolio_id)
 
-    if use_cache and parsed_path.exists():
+    def _parse() -> pd.DataFrame:
+        # The workbook is several megabytes per fund, so only the parsed frame
+        # is kept. A fund whose document carries no Historical sheet is
+        # negative-cached: that is a property of the fund, not of today.
+        raw = cache.fetch_bytes(
+            NAMESPACE,
+            f"document-{ticker.lower()}",
+            lambda: get_bytes(url, timeout=120.0),
+            kind="daily_file",
+            suffix=".xml",
+            use_cache=use_cache,
+            remember_missing=True,
+        )
         try:
-            return pd.read_parquet(parsed_path), url
-        except Exception:
-            pass
-    if use_cache and marker.exists():
-        age = datetime.now() - datetime.fromtimestamp(marker.stat().st_mtime)
-        if age < _MISSING_TTL:
-            raise FetchError(f"{ticker}: no Historical sheet (cached)", not_found=True)
+            return _parse_historical(raw.decode("utf-8", errors="replace"))
+        except FetchError:
+            raise
+        except Exception as exc:
+            raise FetchError(f"{ticker}: {exc}", not_found=True) from exc
 
-    # The workbook is several megabytes per fund, so it is fetched once a day
-    # and only the parsed frame is kept.
-    try:
-        text = get_bytes(url, timeout=120.0).decode("utf-8", errors="replace")
-        frame = _parse_historical(text)
-    except FetchError:
-        raise
-    except Exception as exc:
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(str(exc)[:200], encoding="utf-8")
-        raise FetchError(f"{ticker}: {exc}", not_found=True) from exc
-
-    try:
-        parsed_path.parent.mkdir(parents=True, exist_ok=True)
-        frame.to_parquet(parsed_path)
-    except Exception:
-        pass
+    frame = cache.frame(
+        NAMESPACE, f"navhist-{ticker.lower()}", _parse, kind="daily_file", use_cache=use_cache
+    )
     return frame, url

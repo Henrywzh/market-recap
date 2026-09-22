@@ -15,30 +15,27 @@ no measured flow series here. Two things it does publish are worth having:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 import json
-from pathlib import Path
 from typing import Any
 
-from ..config import CACHE_DIR
+from .. import cache
 from .http import FetchError, get_text
 
 PROFILE_URL = "https://investor.vanguard.com/vmf/api/{ticker}/profile"
 PRICE_URL = "https://investor.vanguard.com/vmf/api/{ticker}/price"
-_TTL = timedelta(hours=12)
+HOME_URL = "https://investor.vanguard.com"
+NAMESPACE = "vanguard"
 
 
-def _cached_json(url: str, path: Path, *, use_cache: bool) -> Any:
-    if use_cache and path.exists():
-        age = datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)
-        if age < _TTL:
-            try:
-                return json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-    text = get_text(url, timeout=45.0, headers={"Accept": "application/json"})
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+def _cached_json(url: str, name: str, *, use_cache: bool) -> Any:
+    text = cache.fetch_text(
+        NAMESPACE,
+        name,
+        lambda: get_text(url, timeout=45.0, headers={"Accept": "application/json"}),
+        kind="intraday_snapshot",
+        suffix=".json",
+        use_cache=use_cache,
+    )
     return json.loads(text)
 
 
@@ -49,9 +46,8 @@ def fetch_fund_facts(ticker: str, *, use_cache: bool = True) -> dict:
     a caller probing a mixed universe can skip it cheaply.
     """
     ticker = ticker.upper()
-    base = CACHE_DIR / "vanguard"
     profile = _cached_json(
-        PROFILE_URL.format(ticker=ticker), base / f"profile-{ticker}.json", use_cache=use_cache
+        PROFILE_URL.format(ticker=ticker), f"profile-{ticker}", use_cache=use_cache
     )
     fund = (profile or {}).get("fundProfile") or {}
     # Vanguard is a brokerage as well as an issuer, so this endpoint answers
@@ -62,7 +58,7 @@ def fetch_fund_facts(ticker: str, *, use_cache: bool = True) -> dict:
         raise FetchError(f"{ticker}: not a Vanguard-issued fund", not_found=True)
 
     price = _cached_json(
-        PRICE_URL.format(ticker=ticker), base / f"price-{ticker}.json", use_cache=use_cache
+        PRICE_URL.format(ticker=ticker), f"price-{ticker}", use_cache=use_cache
     )
     current = (price or {}).get("currentPrice") or {}
     nav = ((current.get("dailyPrice") or {}).get("regular") or {})

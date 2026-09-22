@@ -12,11 +12,11 @@ import pandas as pd
 
 from ..config import DCF_ARTIFACT_DIR
 from ..sources import sec
-from ..util import SourceRecord, clean_float, write_json
+from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, describe_error, write_json
 
 
-def _beta(stock: pd.Series, market: pd.Series, *, weeks: int = 104) -> float | None:
-    """Weekly-return beta against SPY.
+def _beta(stock: pd.Series, market: pd.Series, *, weeks: int, min_weeks: int) -> float | None:
+    """Weekly-return beta against the market proxy.
 
     Computed here rather than read off a data provider so the page can say
     exactly what it is: ordinary least squares on the last two years of
@@ -27,7 +27,7 @@ def _beta(stock: pd.Series, market: pd.Series, *, weeks: int = 104) -> float | N
     if pair.empty:
         return None
     weekly = pair.resample("W-FRI").last().pct_change(fill_method=None).dropna().tail(weeks)
-    if len(weekly) < 52:
+    if len(weekly) < min_weeks:
         return None
     variance = float(weekly["market"].var())
     if not variance:
@@ -39,18 +39,22 @@ def _beta(stock: pd.Series, market: pd.Series, *, weeks: int = 104) -> float | N
 
 def build(ctx, *, tickers: list[str] | None = None, use_cache: bool = True) -> dict:
     config = ctx.config
-    limit = int(config["dcf"]["max_tickers"])
-    market = ctx.etf_closes["SPY"] if "SPY" in ctx.etf_closes.columns else None
+    settings = config["dcf"]
+    limit = int(settings["max_tickers"])
+    proxy_ticker = str(config["universe"]["market_proxy"])
+    market = ctx.etf_closes[proxy_ticker] if proxy_ticker in ctx.etf_closes.columns else None
 
-    # The risk-free default is the published 10Y par yield, so the model opens
-    # with the same number the FIXED INCOME tab is showing.
+    # The risk-free default is the published par yield at the contract's own
+    # tenor, so the model opens with the number the FIXED INCOME tab is showing
+    # rather than a second one that happens to look similar.
+    tenor = str(config["universe"]["risk_free_tenor"])
     risk_free = None
     try:
         from ..sources import treasury
 
         curve, _ = treasury.fetch_par_yield_curve()
         latest = curve[curve["date"] == curve["date"].max()]
-        row = latest[latest["tenor"] == "10Y"]
+        row = latest[latest["tenor"] == tenor]
         if not row.empty:
             risk_free = clean_float(row.iloc[0]["yield_pct"], 2)
     except Exception as exc:
@@ -66,7 +70,7 @@ def build(ctx, *, tickers: list[str] | None = None, use_cache: bool = True) -> d
         ctx.log.add(SourceRecord("sec_tickers", "SEC ticker to CIK map", sec.TICKERS_URL, rows=len(cik_map)))
     except Exception as exc:
         ctx.log.fail("dcf:cik_map", exc)
-        return {"as_of": ctx.as_of, "available": [], "error": str(exc)[:200]}
+        return {"as_of": ctx.as_of, "available": [], "error": str(exc)[:ERROR_DETAIL_CHARS]}
 
     baked, skipped = [], {}
     for symbol in tickers:
@@ -76,9 +80,11 @@ def build(ctx, *, tickers: list[str] | None = None, use_cache: bool = True) -> d
             skipped[symbol] = "no CIK mapping"
             continue
         try:
-            payload = sec.extract_fundamentals(symbol, cik, years=5, use_cache=use_cache)
+            payload = sec.extract_fundamentals(
+                symbol, cik, years=int(settings["history_years"]), use_cache=use_cache
+            )
         except Exception as exc:
-            skipped[symbol] = f"{type(exc).__name__}: {exc}"[:120]
+            skipped[symbol] = describe_error(exc)
             continue
 
         meta = ctx.holdings.loc[ctx.holdings["yahoo_symbol"] == symbol]
@@ -89,7 +95,14 @@ def build(ctx, *, tickers: list[str] | None = None, use_cache: bool = True) -> d
             series = ctx.closes[symbol].dropna()
             payload["last_price"] = clean_float(series.iloc[-1], 2) if not series.empty else None
             if market is not None:
-                payload["beta"] = clean_float(_beta(ctx.closes[symbol], market), 2)
+                payload["beta"] = clean_float(
+                    _beta(
+                        ctx.closes[symbol], market,
+                        weeks=int(settings["beta_weeks"]),
+                        min_weeks=int(settings["beta_min_weeks"]),
+                    ),
+                    2,
+                )
 
         # Effective tax rate from the filer's own numbers, where both legs exist.
         latest_row = payload["rows"][-1] if payload["rows"] else {}
@@ -117,7 +130,10 @@ def build(ctx, *, tickers: list[str] | None = None, use_cache: bool = True) -> d
         "available": sorted(baked),
         "skipped": skipped,
         "risk_free_rate": risk_free,
-        "forecast_years": int(config["dcf"]["forecast_years"]),
+        "risk_free_tenor": tenor,
+        "market_proxy": proxy_ticker,
+        "beta_weeks": int(settings["beta_weeks"]),
+        "forecast_years": int(settings["forecast_years"]),
         "note": (
             "Historical columns are extracted from the company's own 10-K XBRL facts and carry "
             "the filing date they were published with. Forecast columns, discount rate and exit "

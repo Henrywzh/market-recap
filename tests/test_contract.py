@@ -1,0 +1,238 @@
+"""The contract itself, and the guards that keep a build from publishing a lie.
+
+Every test here corresponds to something that reached the page at least once:
+a period column nothing had defined, a session that had not closed, a row laid
+under the wrong month, a preset naming a ticker no panel priced.
+"""
+
+from __future__ import annotations
+
+from datetime import timedelta
+import json
+import sys
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from market_recap import cache, config, context, validate
+from market_recap.sources.http import FetchError
+
+
+# --- The contract ----------------------------------------------------------
+
+def test_every_window_a_table_offers_is_a_window_we_define():
+    """A table offering "6M" needs PERIOD_TRADING_DAYS to say what 6M means."""
+    settings = config.load_config()["periods"]
+    for table, labels in settings.items():
+        if isinstance(labels, list):
+            for label in labels:
+                assert label in config.PERIOD_TRADING_DAYS, f"{table} offers undefined {label}"
+
+
+def test_period_sessions_rejects_an_unknown_label():
+    """Returning None for a typo would silently be read as "YTD"."""
+    assert config.period_sessions("1M") == 21
+    assert config.period_sessions("YTD") is None
+    with pytest.raises(KeyError):
+        config.period_sessions("1Q")
+
+
+def test_year_windows_are_multiples_of_one_trading_year():
+    assert config.PERIOD_TRADING_DAYS["1Y"] == config.TRADING_DAYS_PER_YEAR
+    assert config.PERIOD_TRADING_DAYS["5Y"] == config.TRADING_DAYS_PER_YEAR * 5
+    assert config.CHART_SESSIONS == config.PERIOD_TRADING_DAYS["2Y"]
+
+
+def test_every_index_declares_what_it_needs_and_exactly_one_is_primary():
+    specs = [context.IndexSpec.from_config(s) for s in config.load_config()["universe"]["indices"]]
+    assert specs, "the page must cover at least one index"
+    assert sum(1 for s in specs if s.primary) == 1
+    assert len({s.key for s in specs}) == len(specs)
+
+
+def test_a_cross_listing_ratio_always_cites_its_filing():
+    """A ratio reverse-engineered from prices forces the premium to zero and
+    draws a flat line that looks exactly like data. The source is the check."""
+    for spec in config.load_config().get("cross_listing") or []:
+        assert spec.get("ratio_source"), f"{spec['us_ticker']} ratio has no cited filing"
+        assert str(spec.get("ratio_url", "")).startswith("http")
+
+
+# --- The completed-session guard ------------------------------------------
+
+def test_an_unfinished_session_is_dropped_from_the_panel():
+    """The provider serves an intraday bar for whatever it refreshed most
+    recently while hundreds of cached symbols still end on the prior close."""
+    index = pd.bdate_range("2024-01-01", periods=4)
+    frame = pd.DataFrame(
+        {f"S{i}": [1.0, 2.0, 3.0, (4.0 if i < 2 else None)] for i in range(20)}, index=index
+    )
+    trimmed = context.completed_sessions(frame)
+    assert trimmed.index[-1] == index[-2]
+
+
+def test_a_fully_priced_session_is_kept():
+    index = pd.bdate_range("2024-01-01", periods=3)
+    frame = pd.DataFrame({f"S{i}": [1.0, 2.0, 3.0] for i in range(20)}, index=index)
+    assert context.completed_sessions(frame).index[-1] == index[-1]
+
+
+# --- Cache ------------------------------------------------------------------
+
+def test_cache_kinds_are_named_not_guessed():
+    assert cache.ttl("filings") == config.CACHE_TTL["filings"]
+    with pytest.raises(KeyError):
+        cache.ttl("filing")  # a typo must not silently mean "one week"
+
+
+def test_a_404_is_remembered_and_a_500_is_not(tmp_path, monkeypatch):
+    """Whether an issuer publishes a file is a property of the fund. Whether
+    its server is up today is not, and caching that would drop a live feed."""
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+
+    calls = {"n": 0}
+
+    def missing():
+        calls["n"] += 1
+        raise FetchError("gone", not_found=True)
+
+    for _ in range(3):
+        with pytest.raises(FetchError):
+            cache.fetch_bytes("t", "a", missing, kind="daily_file", remember_missing=True)
+    assert calls["n"] == 1, "a 404 should be probed once, not once per build"
+
+    def flaky():
+        calls["n"] += 1
+        raise FetchError("server error")
+
+    for _ in range(2):
+        with pytest.raises(FetchError):
+            cache.fetch_bytes("t", "b", flaky, kind="daily_file", remember_missing=True)
+    assert calls["n"] == 3, "a transient failure must be retried on the next build"
+
+
+def test_prune_removes_expired_entries_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    fresh = tmp_path / "ns" / "fresh.bin"
+    stale = tmp_path / "ns" / "stale.bin"
+    fresh.parent.mkdir(parents=True)
+    fresh.write_bytes(b"x")
+    stale.write_bytes(b"y")
+    import os
+    old = (pd.Timestamp.now() - pd.Timedelta(days=400)).timestamp()
+    os.utime(stale, (old, old))
+
+    result = cache.prune(keep=timedelta(days=30))
+    assert result["files_removed"] == 1
+    assert fresh.exists() and not stale.exists()
+
+
+# --- Validation -------------------------------------------------------------
+
+def _manifest(**overrides) -> dict:
+    base = {
+        "as_of": "2026-09-21",
+        "indices": [{"key": "SPX", "label": "S&P 500", "members": 100, "priced": 100}],
+        "panels": [],
+        "sources": [],
+        "errors": {},
+    }
+    return base | overrides
+
+
+def test_validation_flags_a_tab_dated_to_a_different_session():
+    findings = validate._check_as_of(
+        _manifest(), {"markets": {"as_of": "2026-09-21"}, "cross_listing": {"as_of": "2026-09-22"}}
+    )
+    assert [f.check for f in findings] == ["as_of"]
+    assert "cross_listing" in findings[0].detail
+
+
+def test_validation_allows_a_publisher_that_legitimately_lags():
+    """The par curve and the monthly releases are dated by their publisher."""
+    findings = validate._check_as_of(
+        _manifest(), {"fixed_income": {"as_of": "2026-09-19"}, "macro": {"as_of": "2026-07-01"}}
+    )
+    assert findings == []
+
+
+def test_validation_flags_a_preset_whose_legs_were_never_baked():
+    """A preset naming an unfetched ticker renders as an empty chart."""
+    cfg = {"technicals": {"presets": ["XLK/SPY", "SOXX/SPY"]}}
+    findings = validate._check_presets(cfg, {"available": ["XLK", "SPY"]})
+    assert len(findings) == 1 and "SOXX" in findings[0].detail
+    assert validate._check_presets(cfg, {"available": ["XLK", "SPY", "SOXX"]}) == []
+
+
+def test_validation_flags_flow_attributed_to_no_provider():
+    findings = validate._check_flow_attribution(
+        {"flow_coverage": {"published": ["SPY", "SHY"]}, "flow_sources": {"ssga": ["SPY"]}}
+    )
+    assert len(findings) == 1 and "SHY" in findings[0].detail
+
+
+def test_validation_flags_thin_index_coverage():
+    assert validate._check_coverage(_manifest()) == []
+    thin = _manifest(indices=[{"key": "NDX", "label": "Nasdaq 100", "members": 100, "priced": 80}])
+    findings = validate._check_coverage(thin)
+    assert findings and findings[0].severity == "error"
+
+
+# --- Macro month alignment -------------------------------------------------
+
+class _Ctx:
+    """Minimal stand-in: the macro builder only needs config, a log and a date."""
+
+    def __init__(self, cfg):
+        self.config = cfg
+        self.as_of = "2026-09-21"
+        from market_recap.util import BuildLog
+
+        self.log = BuildLog()
+
+
+def test_a_lagging_series_leaves_a_blank_instead_of_shifting_a_month(monkeypatch):
+    """Each row used to be that series' own last twelve values, printed under
+    the *first* series' month headers. These publishers do not share a release
+    lag, so a row one month behind was rendered shifted a column -- every
+    number under the wrong month, and nothing on the page to show it."""
+    from market_recap.panels import macro
+    from market_recap.sources import fred, yahoo
+
+    current = pd.date_range("2025-01-01", periods=21, freq="MS")
+    lagging = current[:-1]  # this publisher has not printed the latest month
+
+    def fake_series(series_id, **_):
+        index = lagging if series_id == "LAGGY" else current
+        values = list(range(len(index)))
+        return pd.DataFrame({"date": index, "value": values}), f"http://example/{series_id}"
+
+    monkeypatch.setattr(fred, "fetch_series", fake_series)
+    monkeypatch.setattr(yahoo, "fetch_closes", lambda *a, **k: pd.DataFrame())
+
+    cfg = config.load_config()
+    cfg = dict(cfg)
+    cfg["macro"] = dict(cfg["macro"]) | {
+        "inflation": [
+            {"series_id": "CURRENT", "label": "Current", "unit": "level", "display": "level"},
+            {"series_id": "LAGGY", "label": "Lagging", "unit": "level", "display": "level"},
+        ]
+    }
+
+    payload = macro.build(_Ctx(cfg))
+    inflation = payload["inflation"]
+    rows = {row["label"]: row for row in inflation["rows"]}
+
+    assert len(inflation["months"]) == inflation["releases"]
+    assert inflation["months"][-1] == current[-1].strftime("%Y-%m")
+    # The lagging row is blank in the last column, not shifted into it.
+    assert rows["Lagging"]["values"][-1] is None
+    assert rows["Current"]["values"][-1] is not None
+    assert rows["Lagging"]["latest_month"] == lagging[-1].strftime("%Y-%m")
+    # Every row is the same length, so a column header describes every cell
+    # beneath it.
+    assert {len(row["values"]) for row in inflation["rows"]} == {inflation["releases"]}

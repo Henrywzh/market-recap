@@ -3,6 +3,11 @@ import { el, card, num, pct, sectionTitle, notice, DASH } from '../fmt.js';
 const DCF_BASE = '../artifacts/dcf';
 const M = 1e6;
 
+// Sensitivity grid: percentage points around the computed WACC, and turns
+// around the chosen exit multiple. Both are display choices, not model inputs.
+const WACC_STEPS = [-1, -0.5, 0, 0.5, 1];
+const EXIT_STEPS = [-2, -1, 0, 1, 2];
+
 const HISTORICAL_ROWS = [
   { key: 'revenue', label: 'Revenue', bold: true },
   { key: 'revenue_growth', label: '% growth', derived: 'growth', of: 'revenue' },
@@ -103,8 +108,8 @@ function buildModel(host, company, meta) {
   };
 
   assumptionInputs.append(
-    mkInput('rf', 'RISK-FREE RATE (10Y UST)', '%', company.risk_free_rate ? 'published par yield' : null),
-    mkInput('beta', 'BETA', '', 'weekly, 2y vs SPY'),
+    mkInput('rf', `RISK-FREE RATE (${meta.risk_free_tenor || '10Y'} UST)`, '%', company.risk_free_rate ? 'published par yield' : null),
+    mkInput('beta', 'BETA', '', `weekly, ${Math.round((meta.beta_weeks || 104) / 52)}y vs ${meta.market_proxy || 'SPY'}`),
     mkInput('erp', 'EQUITY RISK PREMIUM', '%', 'your assumption'),
     mkInput('kd', 'COST OF DEBT', '%', 'your assumption'),
     mkInput('tax', 'TAX RATE', '%', company.effective_tax_rate ? 'ref: SEC effective' : null),
@@ -365,8 +370,8 @@ function buildModel(host, company, meta) {
       sensitivityHost.append(el('div', { class: 'note-text', text: 'Complete the model — growth, margin, D&A, CapEx, ΔNWC, WACC inputs and an exit multiple — to see the sensitivity table.' }));
       return;
     }
-    const waccSteps = [-1, -0.5, 0, 0.5, 1].map((d) => w.wacc + d);
-    const exitSteps = [-2, -1, 0, 1, 2].map((d) => assumptions.exit + d).filter((m) => m > 0);
+    const waccSteps = WACC_STEPS.map((d) => w.wacc + d);
+    const exitSteps = EXIT_STEPS.map((d) => assumptions.exit + d).filter((m) => m > 0);
     const header = el('tr', {}, [el('th', { text: 'WACC \\ Exit' }), ...exitSteps.map((m) => el('th', { text: `${num(m, 1)}x` }))]);
     const rows = waccSteps.map((wv) => el('tr', {}, [
       el('td', { text: `${num(wv, 2)}%` }),

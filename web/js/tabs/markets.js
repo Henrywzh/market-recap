@@ -51,7 +51,9 @@ function moverTable(title, rows) {
 }
 
 function sectorTable(data) {
-  const cols = ['1D', '1W', '1M', '3M', 'YTD'];
+  // Columns come from the artifact, which got them from the contract. A list
+  // spelled out here would silently stop matching the day someone changed it.
+  const cols = data.periods;
   const makeRow = (row, emphasis) => el('tr', { class: emphasis ? 'emphasis' : '' }, [
     el('td', { text: row.sector }),
     el('td', { class: 'dim', text: row.etf || DASH }),
@@ -66,7 +68,7 @@ function sectorTable(data) {
     [
       table(['SECTOR', 'ETF', 'WEIGHT%', 'CONTRIB 1D', ...cols], rows),
       el('div', { class: 'note-text' }, [
-        'Contribution is the sector\'s published SPY weight multiplied by its cap-weighted 1D return, ',
+        `Contribution is the sector's ${data.source} multiplied by its cap-weighted 1D return, `,
         'so the sector rows sum to the index row. Returns are computed from constituents, not from the ETF wrapper.',
       ]),
     ],
@@ -86,23 +88,27 @@ function breadthTable(data) {
 
 function slopeTable(data) {
   const cols = data.windows.map((w) => `${w}D`);
+  const window = data.trend_window;
   const rows = data.rows.map((row) => el('tr', {}, [
     el('td', { text: row.sector }),
     el('td', { class: 'dim', text: row.etf }),
     ...cols.map((c) => el('td', { class: dirClass(row[c]), text: pct(row[c]) })),
   ]));
-  return card('200-DAY MOVING AVERAGE SLOPE BY SECTOR (% CHANGE IN SMA200 OVER WINDOW)', null,
+  return card(`${window}-DAY MOVING AVERAGE SLOPE BY SECTOR (% CHANGE IN SMA${window} OVER WINDOW)`, null,
     table(['SECTOR', 'ETF', ...cols], rows));
 }
 
 export default function renderMarkets(root, data) {
-  const strip = el('div', { class: 'stat-strip' }, [
+  // Indices are read in the order the contract declares them, so adding one is
+  // a config change here too -- nothing on this tab names an index.
+  const order = data.index_order || Object.keys(data.indices || {});
+  const blocks = order.map((key) => data.indices[key]).filter(Boolean);
+
+  root.append(el('div', { class: 'stat-strip' }, [
     ...data.quotes.map(quoteStat),
-    ...data.drawdowns.map(drawdownStat),
-    adStat('SPX', data.advance_decline.SPX),
-    adStat('NDX', data.advance_decline.NDX),
-  ]);
-  root.append(strip);
+    ...blocks.map((block) => drawdownStat({ label: block.key, ...block.drawdown })),
+    ...blocks.map((block) => adStat(block.key, block.advance_decline)),
+  ]));
 
   // One section per index, rendered by the same function so the two read
   // identically and a reader can compare them without re-learning the layout.
@@ -133,14 +139,14 @@ export default function renderMarkets(root, data) {
     ]));
 
     root.append(el('div', { class: 'grid two' }, [
-      moverTable(`TOP 10 GAINERS — ${key}`, block.gainers),
-      moverTable(`TOP 10 LOSERS — ${key}`, block.losers),
+      moverTable(`TOP ${block.gainers.length} GAINERS — ${key}`, block.gainers),
+      moverTable(`TOP ${block.losers.length} LOSERS — ${key}`, block.losers),
     ]));
 
     drawCallbacks.push(() => { drawPrice(priceDefault); drawBreadth(breadthDefault); });
   }
 
-  Object.entries(data.indices || {}).forEach(([key, block]) => indexSection(key, block));
+  blocks.forEach((block) => indexSection(block.key, block));
 
   // --- Watchlist ---------------------------------------------------------
   const watch = data.watchlist;
@@ -194,15 +200,18 @@ export default function renderMarkets(root, data) {
     slopeTable(data.sma_slope_by_sector),
   ]));
 
-  const mixed = data.ndx_classification || {};
-  if (mixed.yahoo_mapped_to_gics) {
+  // Any index whose members are labelled from two taxonomies says so, rather
+  // than only the one that happened to need it when this was written.
+  blocks.forEach((block) => {
+    const mixed = block.classification || {};
+    if (!mixed.yahoo_mapped_to_gics) return;
     root.append(el('div', { class: 'note-text' }, [
-      `${mixed.wikipedia_gics || 0} Nasdaq-100 members carry GICS labels from the S&P 500 list; `,
+      `${mixed.wikipedia_gics || 0} ${block.label} members carry GICS labels from the S&P 500 list; `,
       `${mixed.yahoo_mapped_to_gics} sit outside it (foreign issuers and recent listings) and are `,
       'labelled from Yahoo\'s taxonomy mapped onto the same GICS sector names. Sub-industry wording '
       + 'therefore differs between the two groups.',
     ]));
-  }
+  });
 
   drawCallbacks.forEach((fn) => fn());
   drawRebased(rebasedDefault);

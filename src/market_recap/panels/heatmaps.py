@@ -5,26 +5,16 @@ from __future__ import annotations
 import pandas as pd
 
 from ..compute import returns as R
-from ..config import ETF_ARTIFACT_DIR, PERIOD_TRADING_DAYS
+from ..config import ETF_ARTIFACT_DIR, period_sessions
 from ..sources import ishares, ssga, vanguard, yahoo
 from ..util import SourceRecord, clean_float, to_iso_date, write_json
 
-PERIODS = ("1D", "1W", "1M", "3M", "YTD", "1Y")
-FLOW_MA_WINDOWS = (20, 50, 200)
-FLOW_CHART_SESSIONS = 504
+
+def _returns_for(series: pd.Series, periods: list[str]) -> dict:
+    return {k: clean_float(v, 2) for k, v in R.period_returns(series, periods).items()}
 
 
-def _returns_for(series: pd.Series) -> dict:
-    return {
-        period: clean_float(
-            R.ytd_return(series) if period == "YTD" else R.period_return(series, PERIOD_TRADING_DAYS[period]),
-            2,
-        )
-        for period in PERIODS
-    }
-
-
-def _cumulative_flows(flows: pd.Series) -> dict:
+def _cumulative_flows(flows: pd.Series, periods: list[str]) -> dict:
     """Net flow summed over each window, in dollars.
 
     Summed, not averaged: "1M flow" is how much money moved in a month, and a
@@ -33,13 +23,13 @@ def _cumulative_flows(flows: pd.Series) -> dict:
     """
     out: dict[str, float | None] = {}
     clean = flows.dropna()
-    for period in PERIODS:
-        if period == "YTD":
+    for period in periods:
+        sessions = period_sessions(period)
+        if sessions is None:  # YTD
             start = pd.Timestamp(year=clean.index[-1].year, month=1, day=1) if not clean.empty else None
             window = clean[clean.index >= start] if start is not None else clean.iloc[0:0]
             out[period] = clean_float(window.sum()) if not window.empty else None
             continue
-        sessions = PERIOD_TRADING_DAYS[period]
         out[period] = clean_float(clean.tail(sessions).sum()) if len(clean) >= sessions else None
     return out
 
@@ -47,16 +37,22 @@ def _cumulative_flows(flows: pd.Series) -> dict:
 # Two issuers publish the daily NAV and share count this panel needs, in
 # different envelopes. They are tried in turn; a fund neither of them covers
 # gets no flow rather than an estimate dressed up as a measurement.
+# Each entry carries its own home URL. Deriving it from the provider id with a
+# string test -- which is what this did -- silently attributes a third
+# provider's funds to the second one.
 FLOW_PROVIDERS = (
-    ("ssga_nav_history", "State Street published NAV history", ssga.fetch_nav_history),
-    ("ishares_nav_history", "iShares published NAV history", ishares.fetch_nav_history),
+    ("ssga_nav_history", "State Street published NAV history", ssga.fetch_nav_history, ssga.HOME_URL),
+    ("ishares_nav_history", "iShares published NAV history", ishares.fetch_nav_history, ishares.HOME_URL),
 )
 
 
-def _build_published_flow(ticker: str, prices: pd.Series, use_cache: bool) -> dict | None:
+def _build_published_flow(
+    ticker: str, prices: pd.Series, *, periods: list[str], ma_windows: list[int],
+    chart_sessions: int, use_cache: bool,
+) -> dict | None:
     """Reconstruct the whole flow history from an issuer's published file."""
     nav = None
-    for provider_id, provider_label, fetch in FLOW_PROVIDERS:
+    for provider_id, provider_label, fetch, _home in FLOW_PROVIDERS:
         try:
             candidate, url = fetch(ticker, use_cache=use_cache)
         except Exception:
@@ -84,11 +80,11 @@ def _build_published_flow(ticker: str, prices: pd.Series, use_cache: bool) -> di
         except Exception:
             premium = None
 
-    tail = flow.dropna().tail(FLOW_CHART_SESSIONS)
+    tail = flow.dropna().tail(chart_sessions)
     price_tail = prices.reindex(tail.index).ffill() if not prices.empty else pd.Series(dtype=float)
     mas = {
         str(window): [clean_float(v, 2) for v in prices.rolling(window, min_periods=window).mean().reindex(tail.index)]
-        for window in FLOW_MA_WINDOWS
+        for window in ma_windows
     } if not prices.empty else {}
 
     payload = {
@@ -112,7 +108,7 @@ def _build_published_flow(ticker: str, prices: pd.Series, use_cache: bool) -> di
     write_json(ETF_ARTIFACT_DIR / f"{ticker}.json", payload)
 
     return {
-        "flows": _cumulative_flows(flow),
+        "flows": _cumulative_flows(flow, periods),
         # State Street publishes total net assets directly; BlackRock's sheet
         # does not, so it is NAV times units -- which is the same quantity, and
         # reconstructing it here keeps every published fund sizeable on the map.
@@ -132,8 +128,11 @@ def _build_published_flow(ticker: str, prices: pd.Series, use_cache: bool) -> di
 
 
 def build(ctx) -> dict:
-    holdings, closes = ctx.holdings, ctx.closes
-    priced = holdings[holdings["yahoo_symbol"].isin(closes.columns)].copy()
+    closes = ctx.closes
+    periods = list(ctx.config["periods"]["heatmap"])
+    ma_windows = list(ctx.config["technicals"]["ma_periods"])
+    chart_sessions = period_sessions(ctx.config["periods"]["chart_window"])
+    priced = ctx.priced(ctx.primary.key)
 
     # --- Constituent treemap: area = issuer-published weight ---------------
     nodes = []
@@ -147,7 +146,7 @@ def build(ctx) -> dict:
                 "sub_sector": row.sub_sector,
                 "weight": clean_float(row.weight, 4),
                 "price": clean_float(series.dropna().iloc[-1], 2) if not series.dropna().empty else None,
-                "returns": _returns_for(series),
+                "returns": _returns_for(series, periods),
             }
         )
     nodes.sort(key=lambda n: n["weight"] or 0, reverse=True)
@@ -159,12 +158,15 @@ def build(ctx) -> dict:
 
     for ticker, group in etf_groups.items():
         prices = ctx.etf_closes[ticker] if ticker in ctx.etf_closes.columns else pd.Series(dtype=float)
-        result = _build_published_flow(ticker, prices.dropna(), use_cache=True)
+        result = _build_published_flow(
+            ticker, prices.dropna(), periods=periods, ma_windows=ma_windows,
+            chart_sessions=chart_sessions, use_cache=True,
+        )
         node = {
             "ticker": ticker,
             "group": group,
             "price": clean_float(prices.dropna().iloc[-1], 2) if not prices.dropna().empty else None,
-            "returns": _returns_for(prices) if not prices.empty else {},
+            "returns": _returns_for(prices, periods) if not prices.empty else {},
         }
         if result is None:
             # The issuer publishes no NAV history for this fund. Say so rather
@@ -247,7 +249,7 @@ def build(ctx) -> dict:
     for node in etf_nodes:
         if node["flow_status"] == "published":
             by_source.setdefault(node["aum_source"], []).append(node["ticker"])
-    for provider_id, provider_label, _ in FLOW_PROVIDERS:
+    for provider_id, provider_label, _fetch, home_url in FLOW_PROVIDERS:
         covered = by_source.get(provider_id, [])
         if not covered:
             continue
@@ -255,7 +257,7 @@ def build(ctx) -> dict:
             SourceRecord(
                 provider_id,
                 f"{provider_label} (NAV + shares outstanding)",
-                "https://www.ssga.com" if provider_id.startswith("ssga") else "https://www.ishares.com",
+                home_url,
                 ctx.as_of,
                 rows=len(covered),
                 policy="fund_holdings",
@@ -278,14 +280,15 @@ def build(ctx) -> dict:
     return {
         "as_of": ctx.as_of,
         "holdings_as_of": ctx.holdings_as_of,
-        "periods": list(PERIODS),
+        "periods": periods,
         "constituents": nodes,
         "etfs": etf_nodes,
         "flow_coverage": {"published": sorted(published), "unpublished": sorted(unpublished)},
         "flow_sources": {k: sorted(v) for k, v in by_source.items()},
         "oversized_aum": sorted(n["ticker"] for n in etf_nodes if n.get("aum_basis") == "all_share_classes"),
         "note": (
-            "Constituent tiles are sized by the weight State Street publishes for SPY, not by an "
+            f"Constituent tiles are sized by the weight State Street publishes for "
+            f"{ctx.primary.holdings_etf}, not by an "
             "approximate market cap. ETF net flow is the change in the fund's published shares "
             "outstanding valued at that day's NAV, taken from State Street's or BlackRock's own "
             "published history -- a measured series back to the fund's inception, not an estimate "

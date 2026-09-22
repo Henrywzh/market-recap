@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from ..config import TRADING_DAYS_PER_YEAR
+
 # Bands are labels for a distance, not predictions. The wording stays
 # descriptive ("deeply extended") rather than directional ("sell").
 ZSCORE_BANDS = (
@@ -22,7 +24,7 @@ def moving_averages(closes: pd.Series, windows: list[int]) -> dict[int, pd.Serie
     return {w: closes.rolling(w, min_periods=w).mean() for w in windows}
 
 
-def zscore_vs_ma(closes: pd.Series, window: int = 200) -> pd.Series:
+def zscore_vs_ma(closes: pd.Series, window: int) -> pd.Series:
     """Distance from the long average measured in that average's own noise."""
     sma = closes.rolling(window, min_periods=window).mean()
     sigma = closes.rolling(window, min_periods=window).std()
@@ -38,7 +40,7 @@ def band_for(value: float | None) -> tuple[str | None, str | None]:
     return None, None
 
 
-def annualised_ma_slope(closes: pd.Series, window: int = 200, lookback: int = 5) -> float | None:
+def annualised_ma_slope(closes: pd.Series, window: int, lookback: int = 5) -> float | None:
     """Slope of the SMA over ``lookback`` sessions, annualised to a percent."""
     sma = closes.rolling(window, min_periods=window).mean().dropna()
     if len(sma) < lookback + 1:
@@ -47,7 +49,7 @@ def annualised_ma_slope(closes: pd.Series, window: int = 200, lookback: int = 5)
     if start <= 0:
         return None
     daily = (end / start) ** (1.0 / lookback) - 1.0
-    return float(((1.0 + daily) ** 252 - 1.0) * 100.0)
+    return float(((1.0 + daily) ** TRADING_DAYS_PER_YEAR - 1.0) * 100.0)
 
 
 def sma_slope_series(closes: pd.Series, windows: list[int], lookback: int = 5) -> pd.DataFrame:
@@ -59,7 +61,13 @@ def sma_slope_series(closes: pd.Series, windows: list[int], lookback: int = 5) -
     return pd.DataFrame(out)
 
 
-def macd(series: pd.Series, fast: int = 8, slow: int = 17, signal: int = 9) -> pd.DataFrame:
+def macd(series: pd.Series, *, fast: int, slow: int, signal: int) -> pd.DataFrame:
+    """MACD with explicit spans.
+
+    No defaults: 12/26/9 and 8/17/9 are different indicators that plot on the
+    same axis, and a caller that forgets to pass the dashboard's own tuning
+    should fail rather than quietly draw the other one.
+    """
     fast_ema = series.ewm(span=fast, adjust=False).mean()
     slow_ema = series.ewm(span=slow, adjust=False).mean()
     line = fast_ema - slow_ema
@@ -68,7 +76,7 @@ def macd(series: pd.Series, fast: int = 8, slow: int = 17, signal: int = 9) -> p
 
 
 def forward_return_by_band(
-    closes: pd.Series, *, zscore_window: int = 200, horizon: int = 40
+    closes: pd.Series, *, zscore_window: int, horizon: int
 ) -> list[dict]:
     """Historical forward return grouped by the z-score band it started in.
 

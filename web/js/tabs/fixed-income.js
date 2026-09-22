@@ -31,7 +31,11 @@ export default function renderFixedIncome(root, data) {
     })),
   }));
 
-  const cols = ['1D', '1W', '1M', 'YTD'];
+  // Change columns come from the artifact, which took them from the contract:
+  // "1W" on this tab is seven calendar days because the curve is published on
+  // a calendar schedule, and it says so in the note rather than silently
+  // meaning something different from "1W" on the equity tabs.
+  const cols = data.change_columns;
   const rows = data.rows.map((row) => el('tr', {}, [
     el('td', { text: row.tenor }),
     el('td', { text: row.yield_pct === null ? DASH : `${num(row.yield_pct)}%` }),
@@ -46,5 +50,5 @@ export default function renderFixedIncome(root, data) {
   });
 
   root.append(card('TREASURY YIELDS — LEVEL & CHANGE (BPS)', null,
-    table(['MATURITY', 'YIELD', '1D (BPS)', '1W (BPS)', '1M (BPS)', 'YTD (BPS)'], rows)));
+    table(['MATURITY', 'YIELD', ...cols.map((c) => `${c} (BPS)`)], rows)));
 }

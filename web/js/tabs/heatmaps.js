@@ -3,6 +3,15 @@ import { drawTreemap, returnColor } from '../treemap.js';
 import { render, multiLine } from '../charts.js';
 
 const ETF_BASE = '../artifacts/etfs';
+
+// Percent move that saturates a constituent tile's colour. A single day and a
+// multi-month window are not comparable on one scale: ±3% is a dramatic
+// session and an unremarkable quarter, so the scale follows the window.
+const RETURN_COLOUR_CAP = { day: 3, period: 12 };
+// Flow colour saturates at this quantile of the day's absolute flows rather
+// than at the maximum. SPY moves billions on a day when a sector fund moves
+// tens of millions, so scaling to the maximum leaves every other tile grey.
+const FLOW_COLOUR_QUANTILE = 0.8;
 const tooltip = () => document.getElementById('tooltip');
 
 function showTooltip(html, event) {
@@ -30,11 +39,13 @@ function rowsHtml(values, periods, fmt) {
 
 export default function renderHeatmaps(root, data) {
   const periods = data.periods;
+  // The shortest window the artifact carries, whatever it is called.
+  const [defaultPeriod] = periods;
 
   // ---------------- S&P 500 by official weight --------------------------
   root.append(sectionTitle('S&P 500 HEAT MAP', 'SIZED BY OFFICIAL SPY WEIGHT · COLOURED BY RETURN'));
   const stockNode = el('div', { class: 'treemap' });
-  let stockPeriod = '1D';
+  let stockPeriod = defaultPeriod;
 
   const drawStocks = (period) => {
     stockPeriod = period;
@@ -45,7 +56,7 @@ export default function renderHeatmaps(root, data) {
       bySector.get(row.sector).push({
         key: row.ticker,
         value: row.weight || 0,
-        color: returnColor(ret, period === '1D' ? 3 : 12),
+        color: returnColor(ret, period === defaultPeriod ? RETURN_COLOUR_CAP.day : RETURN_COLOUR_CAP.period),
         label: row.ticker,
         sublabel: ret === null || ret === undefined ? DASH : pct(ret),
         payload: row,
@@ -60,13 +71,13 @@ export default function renderHeatmaps(root, data) {
   };
 
   root.append(card(`S&P 500 CONSTITUENTS (${data.constituents.length} NAMES)`,
-    periodSwitch(periods, '1D', drawStocks), stockNode));
+    periodSwitch(periods, defaultPeriod, drawStocks), stockNode));
 
   // ---------------- US ETFs by published net flow -----------------------
   root.append(sectionTitle('US ETF HEAT MAP', 'SIZED BY AUM · COLOURED BY PUBLISHED NET FLOW'));
   const etfNode = el('div', { class: 'treemap', style: 'height:440px' });
   const withFlow = data.etfs.filter((e) => e.flow_status === 'published');
-  let etfPeriod = '1D';
+  let etfPeriod = defaultPeriod;
 
   const drawEtfs = (period) => {
     etfPeriod = period;
@@ -74,11 +85,9 @@ export default function renderHeatmaps(root, data) {
       .map((e) => Math.abs(e.flows[period] ?? 0))
       .filter(Boolean)
       .sort((a, b) => a - b);
-    // Scale colour to the 80th percentile rather than the maximum. SPY moves
-    // billions on a day when a sector fund moves tens of millions, so scaling
-    // to SPY would leave every other tile the same neutral grey.
     const cap = magnitudes.length
-      ? magnitudes[Math.floor(magnitudes.length * 0.8)] || magnitudes[magnitudes.length - 1]
+      ? magnitudes[Math.floor(magnitudes.length * FLOW_COLOUR_QUANTILE)]
+        || magnitudes[magnitudes.length - 1]
       : 1;
 
     const byGroup = new Map();
@@ -89,7 +98,9 @@ export default function renderHeatmaps(root, data) {
       byGroup.get(row.group).push({
         key: row.ticker,
         value: row.aum || 0,
-        color: flow === null || flow === undefined ? '#2b2b2b' : returnColor((flow / cap) * 3, 3),
+        color: flow === null || flow === undefined
+          ? 'var(--tile-empty, #2b2b2b)'
+          : returnColor((flow / cap) * RETURN_COLOUR_CAP.day, RETURN_COLOUR_CAP.day),
         // A tile sized by a figure that covers other share classes is marked
         // on the tile itself, not only in a tooltip nobody opens.
         label: oversized ? `${row.ticker} *` : row.ticker,
@@ -145,7 +156,7 @@ export default function renderHeatmaps(root, data) {
     ));
   }
   root.append(card('US ETFs — PUBLISHED NET FLOW',
-    periodSwitch(periods, '1D', drawEtfs), etfBody));
+    periodSwitch(periods, defaultPeriod, drawEtfs), etfBody));
 
   // ---------------- Single ETF: price, flow and premium -----------------
   root.append(sectionTitle('ETF PRICE & PUBLISHED FLOWS'));
@@ -240,8 +251,8 @@ export default function renderHeatmaps(root, data) {
     ]),
   ]));
 
-  drawStocks('1D');
-  drawEtfs('1D');
+  drawStocks(defaultPeriod);
+  drawEtfs(defaultPeriod);
   loadEtf();
 
   // Treemaps are laid out in pixels, so they need an explicit relayout when

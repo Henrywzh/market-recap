@@ -1,4 +1,9 @@
-"""Command line entry point."""
+"""Command line entry point.
+
+``refresh`` is the whole pipeline: fetch, build, validate, prune. It is what
+the scheduler runs, so it exits non-zero on anything that would put a wrong
+number on the page.
+"""
 
 from __future__ import annotations
 
@@ -7,13 +12,20 @@ import json
 import sys
 
 from . import build as build_module
+from . import cache, validate
+
+MANIFEST_PREVIEW_KEYS = ("as_of", "build_seconds", "indices", "panels", "skipped_panels", "errors")
+
+
+def _print(payload: dict) -> None:
+    print(json.dumps(payload, indent=2, default=str))
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="market-recap", description="Build the dashboard artifacts.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    refresh = sub.add_parser("refresh", help="Fetch sources and write artifacts.")
+    refresh = sub.add_parser("refresh", help="Fetch sources, write artifacts and validate them.")
     refresh.add_argument("--panels", nargs="*", help="Subset of panels to rebuild.")
     # The forward-return table on TECHNICALS is only as good as its sample:
     # three years leaves the extreme z-score bands with single-digit counts.
@@ -21,15 +33,47 @@ def main(argv: list[str] | None = None) -> int:
     # the day's closes are cached.
     refresh.add_argument("--history", default="10y", help="yfinance history period for constituents.")
     refresh.add_argument("--skip-dcf", action="store_true", help="Skip the SEC fundamentals bake.")
+    refresh.add_argument("--keep-cache", action="store_true", help="Do not prune expired cache entries.")
+    refresh.add_argument(
+        "--allow-warnings", action="store_true",
+        help="Exit 0 when validation reports warnings but no errors (the default).",
+    )
+    refresh.add_argument(
+        "--strict", action="store_true",
+        help="Treat validation warnings as failures. For the scheduled run.",
+    )
+
+    sub.add_parser("validate", help="Re-check the artifacts already on disk.")
+
+    prune = sub.add_parser("prune", help="Delete expired cache entries.")
+    prune.add_argument("--all", action="store_true", help="Delete every cache entry, not just expired ones.")
 
     args = parser.parse_args(argv)
+
     if args.command == "refresh":
         manifest = build_module.run(
-            panels=args.panels or None, history_period=args.history, skip_dcf=args.skip_dcf
+            panels=args.panels or None,
+            history_period=args.history,
+            skip_dcf=args.skip_dcf,
+            prune_cache=not args.keep_cache,
         )
-        print(json.dumps({k: v for k, v in manifest.items() if k != "sources"}, indent=2)[:2000])
-        failed = manifest.get("errors") or {}
-        return 1 if failed else 0
+        _print({k: manifest[k] for k in MANIFEST_PREVIEW_KEYS if k in manifest})
+        report = validate.run()
+        _print(report)
+        if report["errors"]:
+            return 1
+        return 1 if args.strict and report["warnings"] else 0
+
+    if args.command == "validate":
+        report = validate.run()
+        _print(report)
+        return 0 if report["ok"] else 1
+
+    if args.command == "prune":
+        from datetime import timedelta
+
+        _print(cache.prune(keep=timedelta(0) if args.all else None))
+        return 0
     return 0
 
 

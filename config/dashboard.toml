@@ -11,10 +11,55 @@ disclaimer = "internal research tool. Not investment advice."
 [universe]
 # Broad-market quote strip on the MARKETS tab.
 quote_tickers = ["SPY", "QQQ", "IWM"]
-# Long-history index series used for drawdown and the price chart.
-spx_index = "^GSPC"
-ndx_index = "^NDX"
+# Years of index history to pull for the long drawdown and price charts.
 history_years = 11
+# The ETF whose weekly returns the DCF tab regresses against for beta, and the
+# curve tenor its risk-free rate defaults to. Both are shown to the user as
+# what they are, so both have to be stateable rather than buried in the model.
+market_proxy = "SPY"
+risk_free_tenor = "10Y"
+
+# Every index the page covers, defined once. The builder loops over this list:
+# adding a third index is a config change, not a code change, and nothing can
+# drift between "which basket do we price" and "which basket do we label".
+#
+# ``holdings_etf`` is the fund whose published basket supplies the weights.
+# Weights come from the issuer's own file, never from an approximate market
+# cap, which is what makes the contribution column mean anything.
+[[universe.indices]]
+key = "SPX"
+label = "S&P 500"
+symbol = "^GSPC"
+holdings_etf = "SPY"
+holdings_label = "SPDR S&P 500 ETF daily holdings"
+primary = true            # the basket the sector tables and DCF universe use
+
+[[universe.indices]]
+key = "NDX"
+label = "Nasdaq 100"
+symbol = "^NDX"
+holdings_etf = "QNDX"
+holdings_label = "SPDR Portfolio Nasdaq-100 daily holdings"
+
+# Which windows each table offers. Labels must exist in PERIOD_TRADING_DAYS.
+[periods]
+sector_table = ["1D", "1W", "1M", "3M", "YTD"]
+watchlist = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
+commodities = ["1D", "1W", "1M", "3M", "YTD"]
+heatmap = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
+index_price_chart = ["1M", "3M", "6M", "YTD", "1Y", "3Y", "5Y", "10Y"]
+breadth_chart = ["1M", "3M", "6M", "YTD", "1Y", "2Y"]
+sector_rebased = ["1M", "3M", "6M", "1Y", "3Y"]
+# Sessions of chart history baked into each per-ticker artifact.
+chart_window = "2Y"
+# yfinance history length for the commodity table. It has to cover the longest
+# window the table offers or that column is silently always blank.
+commodity_history = "2y"
+
+# Rolling windows for the breadth and trend tables on MARKETS.
+[breadth]
+above_ma_windows = [5, 20, 50, 100, 200]
+slope_lookbacks = [5, 20, 50, 100, 200]
 
 # Names to follow that no tracked index carries. A watchlist entry gets the
 # same price treatment as an index member and is never mixed into an index's
@@ -174,9 +219,56 @@ presets = [
 ma_periods = [20, 50, 200]
 zscore_window = 200
 forward_return_days = 40
+# Sigma band drawn around the long average. 1.5 is the edge of the "above /
+# below trend" band in the z-score table, so the shaded band and the table
+# describe the same threshold instead of two unrelated ones.
+band_sigma = 1.5
+# Enough history for a short average and a MACD to mean anything. A ticker
+# below this carries no technical reading at all; between this and
+# ``zscore_window`` it carries the readings its history supports and names the
+# rest with what they would need.
+min_sessions = 40
+# MACD spans. Not the 12/26/9 default: these match the reference dashboard
+# this page reproduces, and a MACD read against a differently-tuned one is a
+# different indicator.
+macd_fast = 8
+macd_slow = 17
+macd_signal = 9
 
 [dcf]
 # Fundamentals are baked at build time: data.sec.gov sends no CORS header, so
 # the browser cannot reach it. A ticker not baked here cannot be modelled.
 max_tickers = 120
 forecast_years = 5
+history_years = 5
+# Beta is computed here rather than read off a vendor so the page can state
+# exactly what it is: OLS on weekly returns against the market proxy.
+beta_weeks = 104
+beta_min_weeks = 52
+
+[macro]
+# Monthly prints shown in the inflation table.
+releases = 12
+
+[fixed_income]
+# Calendar days back for each curve comparison. Calendar, not trading days:
+# Treasury publishes the curve on a calendar schedule, and "1 week ago" for a
+# published curve means the date a week earlier, not five sessions earlier.
+# ``label`` names the curve on the chart, ``column`` heads the change column.
+comparisons = [
+  { key = "week_ago", label = "1 Week Ago", column = "1W", days = 7 },
+  { key = "month_ago", label = "1 Month Ago", column = "1M", days = 30 },
+]
+spreads = [
+  { label = "10Y - 2Y", long = "10Y", short = "2Y" },
+  { label = "10Y - 3M", long = "10Y", short = "3M" },
+]
+
+[cross_listing_diagnostics]
+# A premium series whose day-to-day changes carry less memory than this is
+# reporting the gap between two trading sessions rather than a dislocation.
+min_autocorrelation = 0.3
+# Sample floors. Below these the diagnostics are noise about noise.
+min_sessions = 20
+min_correlation_pairs = 10
+history_period = "2y"

@@ -18,6 +18,25 @@ from ..config import USER_AGENT
 
 _CURL = shutil.which("curl")
 
+# Seconds between curl's own retries. Long enough that a short IP throttle has
+# cleared, short enough that four of them fit inside one build.
+RETRY_DELAY_SECONDS = 5
+# Statuses that mean "this will never exist", as opposed to "try again later".
+# 410 Gone is as final as 404; a 403 is not -- some publishers answer 403 while
+# rate-limiting, and caching that as permanent would drop a live feed.
+NOT_FOUND_STATUSES = frozenset({404, 410})
+_STATUS_PREFIX = "market-recap-status:"
+
+
+def _status_from(stderr: str) -> int | None:
+    for line in reversed(stderr.splitlines()):
+        if line.startswith(_STATUS_PREFIX):
+            try:
+                return int(line[len(_STATUS_PREFIX):].strip())
+            except ValueError:
+                return None
+    return None
+
 
 class FetchError(RuntimeError):
     """A fetch that failed. ``not_found`` separates 'never will exist' from
@@ -51,9 +70,15 @@ def get_bytes(
         # never useful -- it is the server stating the file does not exist --
         # and probing a list of funds for an optional file turned into minutes
         # of dead waiting when every miss was retried four times.
+        # %{stderr} sends what follows to stderr, so the status code arrives
+        # out of band and the body on stdout stays exactly what the server
+        # sent. Reading the code this way rather than looking for "404" in an
+        # error message is the difference between a fact and a coincidence: a
+        # URL containing "404" would otherwise be permanently negative-cached.
         args = [
             _CURL, "-sSL", "--http1.1", "--max-time", str(int(timeout)), "--fail",
-            "--retry", str(retries), "--retry-delay", "5",
+            "--retry", str(retries), "--retry-delay", str(RETRY_DELAY_SECONDS),
+            "--write-out", "%{stderr}\n" + _STATUS_PREFIX + "%{http_code}",
         ]
         for key, value in merged.items():
             args += ["-H", f"{key}: {value}"]
@@ -61,10 +86,13 @@ def get_bytes(
         result = subprocess.run(args, capture_output=True)
         if result.returncode == 0 and result.stdout:
             return result.stdout
-        curl_error = result.stderr.decode(errors="replace").strip()
-        # curl exit 22 is --fail on an HTTP >= 400.
-        if result.returncode == 22 and "404" in curl_error:
-            raise FetchError(f"{url}: not found (404)", not_found=True)
+        stderr = result.stderr.decode(errors="replace").strip()
+        status = _status_from(stderr)
+        curl_error = "\n".join(
+            line for line in stderr.splitlines() if not line.startswith(_STATUS_PREFIX)
+        ).strip()
+        if status in NOT_FOUND_STATUSES:
+            raise FetchError(f"{url}: not found ({status})", not_found=True)
     else:
         curl_error = "curl not available"
 

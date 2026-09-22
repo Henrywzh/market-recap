@@ -1,12 +1,18 @@
-"""Paths and the parsed dashboard contract.
+"""Paths, cache policy and the parsed dashboard contract.
 
 Every panel reads its universe and labels from ``config/dashboard.toml``. A
 builder that hard-codes a ticker or a series id is a bug: the contract is the
 single place that says what this dashboard claims to cover.
+
+Numbers that are *definitions* live here as named constants -- a trading year
+is 252 sessions whatever the user wants the page to show. Numbers that are
+*choices* live in the TOML, because someone should be able to change what the
+page covers without editing Python.
 """
 
 from __future__ import annotations
 
+from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
 import tomllib
@@ -29,6 +35,46 @@ ETF_ARTIFACT_DIR = ARTIFACT_DIR / "etfs"
 USER_AGENT = "market-recap/0.1 (research; henrywzh88@gmail.com)"
 SEC_USER_AGENT = USER_AGENT
 
+# --- Calendar definitions ---------------------------------------------------
+# A US trading year, used wherever a per-session figure is annualised. It is a
+# convention, not a preference, so it is not in the TOML.
+TRADING_DAYS_PER_YEAR = 252
+MONTHS_PER_YEAR = 12
+
+# Period windows shared by every multi-period table and heat map in the site.
+# Trading-day counts, not calendar days: a return labelled 1M must be measured
+# the same way on every panel or the tabs disagree with each other. ``YTD`` is
+# deliberately ``None`` -- it is a calendar rule, not a fixed window, and every
+# helper that walks this table has to branch on it anyway.
+PERIOD_TRADING_DAYS: dict[str, int | None] = {
+    "1D": 1,
+    "1W": 5,
+    "1M": 21,
+    "3M": 63,
+    "6M": 126,
+    "YTD": None,
+    "1Y": TRADING_DAYS_PER_YEAR,
+    "2Y": TRADING_DAYS_PER_YEAR * 2,
+    "3Y": TRADING_DAYS_PER_YEAR * 3,
+    "5Y": TRADING_DAYS_PER_YEAR * 5,
+    "10Y": TRADING_DAYS_PER_YEAR * 10,
+}
+
+# The longest window any chart offers, and therefore how much history a baked
+# per-ticker artifact needs to carry. One number, so the technicals chart, the
+# flow chart and the cross-listing chart cannot drift apart.
+CHART_SESSIONS = PERIOD_TRADING_DAYS["2Y"]
+
+
+def period_sessions(label: str) -> int | None:
+    """Sessions in a named window. Raises on an unknown label rather than
+    silently returning ``None``, which a caller would read as "YTD"."""
+    if label not in PERIOD_TRADING_DAYS:
+        raise KeyError(f"unknown period {label!r}; known: {', '.join(PERIOD_TRADING_DAYS)}")
+    return PERIOD_TRADING_DAYS[label]
+
+
+# --- Freshness --------------------------------------------------------------
 # A quote older than one session is not a "latest" value; a daily history may
 # legitimately span a weekend or an exchange holiday.
 #
@@ -43,20 +89,29 @@ FRESHNESS = {
     "monthly_release": {"stale_after_calendar_days": 100},
     "fund_holdings": {"stale_after_calendar_days": 10},
 }
+DEFAULT_FRESHNESS_POLICY = "daily_close"
 
-# Period windows shared by every multi-period table and heat map in the site.
-# Trading-day counts, not calendar days: a return labelled 1M must be measured
-# the same way on every panel or the tabs disagree with each other.
-PERIOD_TRADING_DAYS = {
-    "1D": 1,
-    "1W": 5,
-    "1M": 21,
-    "3M": 63,
-    "6M": 126,
-    "1Y": 252,
-    "3Y": 756,
-    "5Y": 1260,
-    "10Y": 2520,
+# How old the *build itself* may be before the page stops calling itself
+# current. Published into the manifest so the browser reads one set of
+# thresholds rather than a second copy hard-coded in JavaScript.
+BUILD_AGE_HOURS = {"current": 24, "recent": 72}
+
+# --- Cache policy -----------------------------------------------------------
+# One table instead of a TTL invented separately inside each source module.
+# The key names the *kind* of thing being cached, because the right lifetime
+# follows from how often the publisher changes it, not from which vendor it is.
+#
+# ``missing`` is the negative cache: how long to believe a 404. An issuer that
+# does not publish a file for a fund today will not start within the week, and
+# re-probing thirty-four funds on every build cost more than the fetches that
+# succeeded.
+CACHE_TTL = {
+    "intraday_snapshot": timedelta(hours=12),   # quotes / fund facts
+    "daily_file": timedelta(days=1),            # issuer files republished each session
+    "macro_series": timedelta(hours=12),        # FRED, revised on a publication schedule
+    "reference_data": timedelta(days=7),        # ticker maps, screeners, GICS labels
+    "filings": timedelta(days=3),               # SEC company facts
+    "missing": timedelta(days=7),               # negative cache for a 404
 }
 
 

@@ -20,6 +20,16 @@ import pandas as pd
 from .config import FRESHNESS
 
 
+# How much of an exception message is carried into an artifact. Long enough to
+# name the cause, short enough that a stack-trace-shaped string cannot push a
+# panel's real content off the page.
+ERROR_DETAIL_CHARS = 200
+
+
+def describe_error(exc: BaseException) -> str:
+    return f"{type(exc).__name__}: {exc}"[:ERROR_DETAIL_CHARS]
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -102,7 +112,7 @@ class BuildLog:
         return record
 
     def fail(self, panel: str, exc: BaseException) -> None:
-        self.errors[panel] = f"{type(exc).__name__}: {exc}"
+        self.errors[panel] = describe_error(exc)
 
     def to_dict(self) -> dict[str, Any]:
         return {

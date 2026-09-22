@@ -52,15 +52,14 @@ gap, never back-filled.
 ## Install and run
 
 ```bash
-pip install -e .
-python -m market_recap.cli refresh
+make install
+make refresh
+make serve
 ```
 
-Then serve the repository root and open `web/index.html`:
-
-```bash
-python3 -m http.server 8000
-```
+`make refresh` is the whole pipeline: fetch, build, **validate**, prune. It
+exits non-zero if anything would put a wrong number on the page, so it is also
+what the scheduler runs. `make help` lists the rest.
 
 Rebuild a single tab while iterating:
 
@@ -68,19 +67,55 @@ Rebuild a single tab while iterating:
 python -m market_recap.cli refresh --panels markets --skip-dcf
 ```
 
+### Running it on a schedule
+
+```bash
+make schedule      # weekdays 18:30 local, via launchd
+make unschedule
+```
+
+18:30 rather than the closing bell, because the publishers this reads post
+after it: State Street's holdings and NAV files land in the evening, and
+Treasury sometimes does not post the par curve until early evening ET. A job
+firing at 16:00 builds a page entirely from the previous session and reports
+itself perfectly healthy.
+
+The scheduled run uses `--strict`, so a warning fails it. Nobody reads the
+output of an unattended job, and a job that exits 0 on a degraded build is how
+a stale page stays up for a week.
+
+### Validation
+
+`make validate` re-checks the artifacts on disk without refetching:
+
+| Check | What it catches |
+|---|---|
+| `period_label` | a table offering a window nothing defines |
+| `as_of` | one tab dated to a different session than the rest of the page |
+| `coverage` | index members that never got a price |
+| `preset` | a relative-strength preset naming a ticker no panel baked |
+| `ratio_provenance` | a cross-listing ratio with no cited filing |
+| `flow_attribution` | a fund with flow but no named provider |
+| `freshness` | a source past its own staleness window |
+
+These are not hypothetical. Every one of them has fired on this repository.
+
 ## Layout
 
 ```
-config/dashboard.toml      the contract: universe, labels, series ids
+config/dashboard.toml      the contract: indices, universe, windows, thresholds
 src/market_recap/
+  config.py                paths, definitions (a trading year), cache policy
+  cache.py                 one on-disk cache for every feed, with pruning
   sources/                 one module per publisher
   compute/                 returns, breadth, technicals — one definition each
   panels/                  one module per tab -> one JSON artifact
   context.py               constituents + prices, fetched once per build
   build.py                 orchestrator, writes manifest.json
+  validate.py              checks the artifacts against the contract
 web/                       static site (ES modules, ECharts from CDN)
 artifacts/                 generated JSON the site reads
-data/cache/                raw snapshots and the day's price cache
+data/cache/                raw snapshots and parsed frames, pruned each build
 ```
 
 ## Design rules this repo follows
@@ -100,6 +135,16 @@ data/cache/                raw snapshots and the day's price cache
   ("needs 200 sessions, has 51") rather than vanishing from the tab.
 - **Area and colour stay independent on the heat map.** Tile size is the
   published index weight; colour is return.
+- **A number that is a choice lives in `config/dashboard.toml`; a number that
+  is a definition lives in `config.py` with a name.** A trading year is 252
+  sessions whatever anyone wants; which windows a table offers is a preference.
+  Nothing analytic is written as a literal in a builder — adding a third index
+  is a config change, not a code change.
+- **Identity is resolved from the publisher, never remembered.** A hard-coded
+  BlackRock portfolio id for SHY returned the 0–1 Year Treasury fund, and
+  nothing downstream would have shown that the flow series belonged to a
+  different fund. Ticker→id now comes from BlackRock's own screener.
+- **The build validates itself.** See the table above.
 
 ## Known limits
 

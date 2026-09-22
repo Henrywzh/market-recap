@@ -1,6 +1,6 @@
 // Shell: artifact loading, tab routing, theme, clock and the provenance footer.
 
-import { el, DASH as DASH_ } from './fmt.js';
+import { el } from './fmt.js';
 import { resizeAll, disposeAll } from './charts.js';
 
 // Tab modules load on demand, stamped with the build they belong to. A
@@ -45,7 +45,7 @@ export async function loadArtifact(name) {
 // build, so what it shows instead is how old that build is -- the one number
 // that tells a reader whether they are looking at today's close or at
 // something from last week.
-function startBuildAge(generatedAt) {
+function startBuildAge(generatedAt, thresholds) {
   const label = document.getElementById('build-age');
   const dot = document.getElementById('build-dot');
   if (!label) return;
@@ -55,19 +55,22 @@ function startBuildAge(generatedAt) {
     dot.style.background = 'var(--down)';
     return;
   }
+  // Thresholds come from the build, which owns the freshness policy. A second
+  // copy here would drift the first time the policy changed.
+  const { current = 24, recent = 72 } = thresholds || {};
+  const MINUTES_PER_HOUR = 60;
   const tick = () => {
     const minutes = Math.max(0, Math.floor((Date.now() - built.getTime()) / 60000));
-    const age = minutes < 60
+    const hours = minutes / MINUTES_PER_HOUR;
+    const age = hours < 1
       ? `${minutes}m`
-      : minutes < 60 * 48
-        ? `${Math.floor(minutes / 60)}h`
-        : `${Math.floor(minutes / 1440)}d`;
+      : hours < 48
+        ? `${Math.floor(hours)}h`
+        : `${Math.floor(hours / 24)}d`;
     label.textContent = `BUILT ${age} AGO`;
-    // Green while the build is plausibly the latest close, amber past a day,
-    // red past three.
-    dot.style.background = minutes < 60 * 24
+    dot.style.background = hours < current
       ? 'var(--up)'
-      : minutes < 60 * 72 ? 'var(--accent)' : 'var(--down)';
+      : hours < recent ? 'var(--accent)' : 'var(--down)';
   };
   tick();
   setInterval(tick, 30000);
@@ -136,8 +139,10 @@ function renderFooter(manifest) {
   ]));
   footer.append(el('div', {}, [
     `Generated ${manifest.generated_at} in ${manifest.build_seconds}s · `,
-    `S&P 500 constituents: ${manifest.constituents} (${manifest.constituents_priced} priced) · `,
-    `Nasdaq-100 constituents: ${manifest.ndx_constituents} (${manifest.ndx_constituents_priced ?? DASH_} priced) · `,
+    // One line per index the build actually covered, named by the build.
+    ...(manifest.indices || []).map((index) => (
+      `${index.label}: ${index.members} members (${index.priced} priced) · `
+    )),
     `Session: ${manifest.as_of} · Holdings file: ${manifest.holdings_as_of}`,
   ]));
 
@@ -193,7 +198,7 @@ export async function boot(manifest, version) {
   document.getElementById('brand-sub').textContent = brand.subtitle || '';
   document.getElementById('asof').textContent = `AS OF ${manifest.as_of || '—'}`;
   document.getElementById('updated').textContent = `Built ${manifest.generated_at} · session ${manifest.as_of}`;
-  startBuildAge(manifest.generated_at);
+  startBuildAge(manifest.generated_at, manifest.build_age_hours);
   document.title = `${brand.title || 'Market Recap'} · ${manifest.as_of || ''}`;
   renderFooter(manifest);
 

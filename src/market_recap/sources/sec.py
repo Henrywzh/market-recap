@@ -18,7 +18,8 @@ import time
 import httpx
 import pandas as pd
 
-from ..config import CACHE_DIR, SEC_USER_AGENT
+from .. import cache
+from ..config import SEC_USER_AGENT
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
@@ -79,6 +80,8 @@ LINE_ITEMS: dict[str, tuple[str, ...]] = {
 NWC_ASSETS_TAG = "AssetsCurrent"
 NWC_LIABILITIES_TAG = "LiabilitiesCurrent"
 
+NAMESPACE = "sec"
+
 
 def _throttle() -> None:
     global _last_call
@@ -88,34 +91,37 @@ def _throttle() -> None:
     _last_call = time.monotonic()
 
 
-def fetch_ticker_cik_map(*, use_cache: bool = True) -> dict[str, int]:
-    path = CACHE_DIR / "sec" / "company_tickers.json"
-    if use_cache and path.exists():
-        age = datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)
-        if age < timedelta(days=7):
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            return {v["ticker"].upper(): int(v["cik_str"]) for v in payload.values()}
+def _get(url: str, timeout: float) -> str:
+    """SEC asks automated clients to identify themselves and to stay under ten
+    requests a second; the throttle is shared across every call in the build."""
     _throttle()
-    response = httpx.get(TICKERS_URL, headers={"User-Agent": SEC_USER_AGENT}, timeout=45.0)
+    response = httpx.get(url, headers={"User-Agent": SEC_USER_AGENT}, timeout=timeout)
     response.raise_for_status()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(response.text, encoding="utf-8")
-    payload = response.json()
-    return {v["ticker"].upper(): int(v["cik_str"]) for v in payload.values()}
+    return response.text
+
+
+def fetch_ticker_cik_map(*, use_cache: bool = True) -> dict[str, int]:
+    text = cache.fetch_text(
+        NAMESPACE,
+        "company_tickers",
+        lambda: _get(TICKERS_URL, 45.0),
+        kind="reference_data",
+        suffix=".json",
+        use_cache=use_cache,
+    )
+    return {v["ticker"].upper(): int(v["cik_str"]) for v in json.loads(text).values()}
 
 
 def fetch_company_facts(cik: int, *, use_cache: bool = True) -> dict:
-    path = CACHE_DIR / "sec" / "facts" / f"CIK{cik:010d}.json"
-    if use_cache and path.exists():
-        age = datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)
-        if age < timedelta(days=3):
-            return json.loads(path.read_text(encoding="utf-8"))
-    _throttle()
-    response = httpx.get(FACTS_URL.format(cik=cik), headers={"User-Agent": SEC_USER_AGENT}, timeout=60.0)
-    response.raise_for_status()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(response.text, encoding="utf-8")
-    return response.json()
+    text = cache.fetch_text(
+        f"{NAMESPACE}/facts",
+        f"CIK{cik:010d}",
+        lambda: _get(FACTS_URL.format(cik=cik), 60.0),
+        kind="filings",
+        suffix=".json",
+        use_cache=use_cache,
+    )
+    return json.loads(text)
 
 
 def _annual_values(facts: dict, tags: tuple[str, ...]) -> dict[int, dict]:
