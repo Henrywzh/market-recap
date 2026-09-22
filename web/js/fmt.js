@@ -95,7 +95,12 @@ export function periodSwitch(periods, active, onPick) {
 export function table(headers, rows, options = {}) {
   const thead = el('thead', {}, [el('tr', {}, headers.map((h) => el('th', { text: h })))]);
   const tbody = el('tbody', {}, rows);
-  return el('table', { class: `data ${options.class || ''}` }, [thead, tbody]);
+  const node = el('table', { class: `data ${options.class || ''}` }, [thead, tbody]);
+  // Wrapped so a table that cannot fit scrolls within its own card. A table
+  // that overflows the page instead pushes every other panel's right-hand
+  // column off screen, which is how a 70px-too-wide movers table made the
+  // whole dashboard scroll sideways.
+  return el('div', { class: 'table-scroll' }, [node]);
 }
 
 export function gap(message) {

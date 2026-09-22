@@ -272,3 +272,61 @@ def test_a_truncated_compressed_entry_is_refetched_not_fatal(tmp_path, monkeypat
     assert cache.fetch_bytes(
         "sec", "broken", lambda: b"fresh", kind="filings", suffix=".json", compress=True
     ) == b"fresh"
+
+
+# --- Deployed site ----------------------------------------------------------
+
+def _headers_rules(text: str) -> dict[str, list[str]]:
+    rules: dict[str, list[str]] = {}
+    current = None
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        if not line.startswith(" "):
+            current = line.strip()
+            rules[current] = []
+        elif current:
+            rules[current].append(line.strip())
+    return rules
+
+
+def test_header_paths_do_not_overlap(tmp_path):
+    """Cloudflare Pages applies *every* matching rule and concatenates them.
+
+    A "/*" catch-all beside a "/js/*" rule produced
+    "no-cache, public, max-age=31536000, immutable" on one response -- a header
+    that contradicts itself and leaves the outcome to whichever directive a
+    given browser honours.
+    """
+    from market_recap import site
+
+    site.build(dist=tmp_path)
+    rules = _headers_rules((tmp_path / "_headers").read_text())
+    assert rules, "the deployed site must set cache headers"
+
+    def matches(pattern: str, path: str) -> bool:
+        return path.startswith(pattern[:-1]) if pattern.endswith("*") else pattern == path
+
+    for sample in ("/", "/index.html", "/css/terminal.css", "/js/app.js", "/artifacts/manifest.json"):
+        hit = [p for p in rules if matches(p, sample)]
+        assert len(hit) <= 1, f"{sample} matches more than one rule: {hit}"
+
+
+def test_only_build_stamped_assets_are_cached_hard(tmp_path):
+    """The JS may be cached forever because its URL carries the build stamp
+    (`app.js?v=<generated_at>`), so a new build is a new URL. Nothing else has
+    a versioned URL, and a cache lifetime longer than the deploy interval on a
+    file whose URL never changes is a way to ship a fix that does not arrive --
+    which is exactly what `max-age=3600` on the unversioned stylesheet did."""
+    from market_recap import site
+
+    site.build(dist=tmp_path)
+    rules = _headers_rules((tmp_path / "_headers").read_text())
+    for pattern, directives in rules.items():
+        joined = " ".join(directives).lower()
+        if "immutable" in joined or "max-age=31536000" in joined:
+            assert pattern.startswith("/js/"), (
+                f"{pattern} is cached hard but its URL carries no build stamp"
+            )
+        else:
+            assert "no-cache" in joined, f"{pattern} sets neither no-cache nor a versioned cache"

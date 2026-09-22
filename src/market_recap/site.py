@@ -55,21 +55,37 @@ def build(*, dist: Path | None = None) -> dict:
         _link_or_copy(source, dist / "artifacts" / source.relative_to(ARTIFACT_DIR))
         assets += 1
 
-    # Cloudflare Pages serves _headers from the site root. The artifacts are
-    # rebuilt every session and the module URLs are already build-stamped, so
-    # the page itself must never be cached: a stale index.html would load the
-    # previous build's code against the current build's data.
+    # Cloudflare Pages serves _headers from the site root.
+    #
+    # Only the JS may be cached hard, and only because its URLs carry the
+    # build stamp (`app.js?v=<generated_at>`): a new build is a new URL, so an
+    # immutable copy of the old one is never consulted again.
+    #
+    # Everything else is `no-cache`, which still revalidates against the ETag
+    # and answers 304 when nothing changed -- it costs a round trip, not a
+    # download. The stylesheet had `max-age=3600` and is *not* build-stamped,
+    # which meant a deployed CSS fix was invisible to anyone who had loaded
+    # the page in the previous hour. A cache lifetime longer than the deploy
+    # interval, on a file whose URL never changes, is a way to ship a fix that
+    # does not arrive.
+    # The paths must not overlap. Pages applies *every* matching rule and
+    # concatenates the results, so a "/*" catch-all alongside a "/js/*" rule
+    # produced "no-cache, public, max-age=31536000, immutable" on the same
+    # response -- a header that contradicts itself and leaves the behaviour up
+    # to whichever directive a given browser decides to honour.
     (dist / "_headers").write_text(
         "/\n"
         "  Cache-Control: no-cache\n"
         "/index.html\n"
         "  Cache-Control: no-cache\n"
+        "/_headers\n"
+        "  Cache-Control: no-cache\n"
+        "/css/*\n"
+        "  Cache-Control: no-cache\n"
         "/artifacts/*\n"
         "  Cache-Control: no-cache\n"
         "/js/*\n"
-        "  Cache-Control: public, max-age=31536000, immutable\n"
-        "/css/*\n"
-        "  Cache-Control: public, max-age=3600\n",
+        "  Cache-Control: public, max-age=31536000, immutable\n",
         encoding="utf-8",
     )
 

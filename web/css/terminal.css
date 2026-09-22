@@ -226,7 +226,23 @@ table.data td { padding: 3px 6px; text-align: right; border-bottom: 1px solid rg
 table.data tbody tr:hover { background: var(--panel-alt); }
 table.data tr.emphasis td { border-top: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); font-weight: 700; }
 .sub { display: block; font-size: 10.5px; color: var(--text-dim); }
-.wrap-cell { white-space: normal; }
+
+/* Specificity matters here. `table.data td` is 0-0-1-2 and a bare `.wrap-cell`
+   is 0-0-1-0, so the plain class lost to the nowrap default and silently did
+   nothing: every sub-sector name ("Technology Hardware, Storage & Peripherals")
+   stayed on one line, the movers table grew 70px wider than its half-width
+   card, and the page scrolled sideways. The selector has to out-rank the
+   default it is meant to override. */
+table.data td.wrap-cell { white-space: normal; }
+/* A sector name is one long unbroken token often enough to matter. */
+table.data td.wrap-cell { overflow-wrap: anywhere; }
+
+/* Last line of defence: a table whose content genuinely cannot fit scrolls
+   inside its own card instead of pushing the whole page sideways. Sideways
+   scroll on a dashboard hides the right-hand column of every other panel. */
+.table-scroll { width: 100%; overflow-x: auto; }
+.table-scroll::-webkit-scrollbar { height: 6px; }
+.table-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
 
 .up { color: var(--up); }
 .down { color: var(--down); }
