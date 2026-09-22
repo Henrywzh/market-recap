@@ -1,5 +1,9 @@
 """Development server for the static site.
 
+Serves ``dist`` -- the same tree that gets deployed -- so local and production
+cannot disagree about where anything lives. It reassembles ``dist`` on startup,
+which is cheap because the artifacts are hard-linked rather than copied.
+
 Python's stock ``http.server`` lets the browser cache ES modules, so an edit to
 a tab module keeps rendering the previous build until the cache is cleared by
 hand -- which looks exactly like the edit not having been written. This server
@@ -12,8 +16,12 @@ import argparse
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import sys
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from market_recap import site  # noqa: E402
 
 
 class NoCacheHandler(SimpleHTTPRequestHandler):
@@ -33,9 +41,11 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8777)
     args = parser.parse_args()
 
-    handler = partial(NoCacheHandler, directory=str(REPO_ROOT))
+    summary = site.build()
+    handler = partial(NoCacheHandler, directory=summary["dir"])
     server = ThreadingHTTPServer(("127.0.0.1", args.port), handler)
-    print(f"market-recap dev server: http://localhost:{args.port}/web/index.html")
+    print(f"serving {summary['pages']} page files + {summary['artifacts']} artifacts")
+    print(f"market-recap dev server: http://localhost:{args.port}/")
     server.serve_forever()
 
 

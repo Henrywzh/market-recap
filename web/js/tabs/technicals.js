@@ -2,7 +2,7 @@ import { el, card, table, num, pct, dirClass, sectionTitle, DASH } from '../fmt.
 import { render, multiLine, SERIES_COLORS } from '../charts.js';
 import { loadArtifact } from '../app.js';
 
-const TICKER_BASE = '../artifacts/tickers';
+const TICKER_BASE = 'artifacts/tickers';
 
 async function loadTicker(symbol) {
   const response = await fetch(`${TICKER_BASE}/${symbol.toUpperCase()}.json`, { cache: 'no-cache' });

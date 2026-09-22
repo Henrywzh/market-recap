@@ -120,6 +120,8 @@ def fetch_company_facts(cik: int, *, use_cache: bool = True) -> dict:
         kind="filings",
         suffix=".json",
         use_cache=use_cache,
+        # 3-4 MB of JSON per filer, of which this reads a handful of tags.
+        compress=True,
     )
     return json.loads(text)
 

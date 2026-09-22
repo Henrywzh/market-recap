@@ -20,6 +20,7 @@ human is expected to remember.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import gzip
 from pathlib import Path
 from typing import Callable
 
@@ -29,6 +30,7 @@ from .config import CACHE_DIR, CACHE_TTL
 from .sources.http import FetchError
 
 MISSING_SUFFIX = ".missing"
+GZIP_SUFFIX = ".gz"
 
 
 def ttl(kind: str) -> timedelta:
@@ -54,13 +56,26 @@ def is_fresh(path: Path, kind: str) -> bool:
     return current is not None and current < ttl(kind)
 
 
-def _write(path: Path, payload: bytes) -> None:
+def _write(path: Path, payload: bytes, *, compress: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # Write-then-rename: a build interrupted mid-download must not leave a
     # truncated file that the next build reads as a complete one.
     temporary = path.with_suffix(path.suffix + ".part")
-    temporary.write_bytes(payload)
+    if compress:
+        # mtime=0 so the same bytes produce the same file: the gzip header
+        # otherwise embeds a timestamp and every cache entry looks changed.
+        with gzip.GzipFile(temporary, "wb", compresslevel=6, mtime=0) as handle:
+            handle.write(payload)
+    else:
+        temporary.write_bytes(payload)
     temporary.replace(path)
+
+
+def _read(path: Path, *, compress: bool) -> bytes:
+    if compress:
+        with gzip.open(path, "rb") as handle:
+            return handle.read()
+    return path.read_bytes()
 
 
 def fetch_bytes(
@@ -72,6 +87,7 @@ def fetch_bytes(
     suffix: str = ".bin",
     use_cache: bool = True,
     remember_missing: bool = False,
+    compress: bool = False,
 ) -> bytes:
     """Return cached bytes if they are within their lifetime, else fetch.
 
@@ -79,12 +95,21 @@ def fetch_bytes(
     ``CACHE_TTL["missing"]``. Whether an issuer publishes an optional file is a
     property of the fund rather than of today, and re-probing every miss on
     every build cost more than every successful fetch put together.
-    """
-    path = path_for(namespace, name, suffix)
-    if use_cache and is_fresh(path, kind):
-        return path.read_bytes()
 
-    marker = path.with_suffix(suffix + MISSING_SUFFIX)
+    ``compress`` stores the response gzipped. Use it for large text documents
+    kept only so the parse can be redone: SEC company facts are 3-4 MB of JSON
+    each and 121 of them filled 472 MB, which compresses to roughly 30 MB. The
+    raw document is still what is stored, so nothing about reproducibility
+    changes -- only how much disk a scheduled job quietly consumes.
+    """
+    path = path_for(namespace, name, suffix + (GZIP_SUFFIX if compress else ""))
+    if use_cache and is_fresh(path, kind):
+        try:
+            return _read(path, compress=compress)
+        except (OSError, EOFError):
+            pass  # A truncated entry is a reason to refetch, not to fail.
+
+    marker = path_for(namespace, name, suffix + MISSING_SUFFIX)
     if use_cache and remember_missing and is_fresh(marker, "missing"):
         raise FetchError(f"{namespace}/{name}: not published (cached)", not_found=True)
 
@@ -98,9 +123,12 @@ def fetch_bytes(
         # but the caller is told how old it is by the source record's own
         # observation date, which comes out of the file's contents.
         if path.exists() and not exc.not_found:
-            return path.read_bytes()
+            try:
+                return _read(path, compress=compress)
+            except (OSError, EOFError):
+                pass
         raise
-    _write(path, payload)
+    _write(path, payload, compress=compress)
     return payload
 
 

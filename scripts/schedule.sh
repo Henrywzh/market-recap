@@ -61,6 +61,14 @@ PLIST_EOF
     # a failure. An unattended job that exits 0 on a degraded build is how a
     # stale page stays up for a week.
     PYTHONPATH=src python3 -m market_recap.cli refresh --history 10y --strict
+    # Only a build that passed --strict is published. Deploying first and
+    # validating afterwards would put the bad page in front of people and then
+    # tell a log file about it.
+    if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
+      npx --yes wrangler pages deploy dist --commit-dirty=true
+    else
+      echo "CLOUDFLARE_API_TOKEN not set; built and validated but not deployed"
+    fi
     ;;
   *) usage ;;
 esac

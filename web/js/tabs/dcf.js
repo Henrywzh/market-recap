@@ -1,6 +1,6 @@
 import { el, card, num, pct, sectionTitle, notice, DASH } from '../fmt.js';
 
-const DCF_BASE = '../artifacts/dcf';
+const DCF_BASE = 'artifacts/dcf';
 const M = 1e6;
 
 // Sensitivity grid: percentage points around the computed WACC, and turns

@@ -12,7 +12,7 @@ import json
 import sys
 
 from . import build as build_module
-from . import cache, validate
+from . import cache, site, validate
 
 MANIFEST_PREVIEW_KEYS = ("as_of", "build_seconds", "indices", "panels", "skipped_panels", "errors")
 
@@ -44,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     sub.add_parser("validate", help="Re-check the artifacts already on disk.")
+    sub.add_parser("site", help="Assemble dist/ from the artifacts already on disk.")
 
     prune = sub.add_parser("prune", help="Delete expired cache entries.")
     prune.add_argument("--all", action="store_true", help="Delete every cache entry, not just expired ones.")
@@ -63,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
         if report["errors"]:
             return 1
         return 1 if args.strict and report["warnings"] else 0
+
+    if args.command == "site":
+        _print(site.build())
+        return 0
 
     if args.command == "validate":
         report = validate.run()

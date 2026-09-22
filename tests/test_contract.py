@@ -236,3 +236,39 @@ def test_a_lagging_series_leaves_a_blank_instead_of_shifting_a_month(monkeypatch
     # Every row is the same length, so a column header describes every cell
     # beneath it.
     assert {len(row["values"]) for row in inflation["rows"]} == {inflation["releases"]}
+
+
+def test_a_compressed_entry_round_trips_and_is_actually_smaller(tmp_path, monkeypatch):
+    """SEC company facts are 3-4 MB of JSON each and 121 of them filled 472 MB
+    of a cache that a scheduled job refills every three days."""
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    payload = json.dumps({"facts": {f"tag{i}": list(range(200)) for i in range(200)}}).encode()
+
+    stored = cache.fetch_bytes(
+        "sec", "CIK0000320193", lambda: payload, kind="filings", suffix=".json", compress=True
+    )
+    assert stored == payload
+
+    path = cache.path_for("sec", "CIK0000320193", ".json.gz")
+    assert path.exists(), "a compressed entry is stored under .gz"
+    assert path.stat().st_size < len(payload) / 4
+
+    # The second call must come from disk, not the network.
+    def explode() -> bytes:
+        raise AssertionError("a fresh compressed entry should not be refetched")
+
+    assert cache.fetch_bytes(
+        "sec", "CIK0000320193", explode, kind="filings", suffix=".json", compress=True
+    ) == payload
+
+
+def test_a_truncated_compressed_entry_is_refetched_not_fatal(tmp_path, monkeypatch):
+    """A build killed mid-write must not poison the cache permanently."""
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    path = cache.path_for("sec", "broken", ".json.gz")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x1f\x8b not really gzip")
+
+    assert cache.fetch_bytes(
+        "sec", "broken", lambda: b"fresh", kind="filings", suffix=".json", compress=True
+    ) == b"fresh"

@@ -125,6 +125,8 @@ def fetch_nav_history(ticker: str, *, use_cache: bool = True) -> tuple[pd.DataFr
             suffix=".xml",
             use_cache=use_cache,
             remember_missing=True,
+            # SpreadsheetML: several megabytes of markup per fund.
+            compress=True,
         )
         try:
             return _parse_historical(raw.decode("utf-8", errors="replace"))

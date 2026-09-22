@@ -27,7 +27,7 @@ async function rendererFor(tab) {
   return module.default;
 }
 
-const ARTIFACT_BASE = '../artifacts';
+const ARTIFACT_BASE = 'artifacts';
 const cache = new Map();
 const state = { manifest: null, active: null, version: 'dev' };
 

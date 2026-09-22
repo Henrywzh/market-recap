@@ -7,3 +7,7 @@ artifacts/*.json
 artifacts/tickers/
 artifacts/dcf/
 .DS_Store
+dist/
+data/logs/
+node_modules/
+.wrangler/

@@ -41,7 +41,7 @@
   // module in memory under its URL, so an unversioned entry point survives a
   // reload and a new tab alike -- and then renders the previous build's code
   // against this build's data, which looks like the edit never landed.
-  const response = await fetch('../artifacts/manifest.json', { cache: 'no-store' });
+  const response = await fetch('artifacts/manifest.json', { cache: 'no-store' });
   const manifest = response.ok ? await response.json() : null;
   const version = encodeURIComponent(manifest?.generated_at || Date.now());
   const app = await import(`./js/app.js?v=${version}`);

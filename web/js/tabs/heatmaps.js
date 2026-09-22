@@ -2,7 +2,7 @@ import { el, card, num, pct, money, aum, dirClass, periodSwitch, sectionTitle, n
 import { drawTreemap, returnColor } from '../treemap.js';
 import { render, multiLine } from '../charts.js';
 
-const ETF_BASE = '../artifacts/etfs';
+const ETF_BASE = 'artifacts/etfs';
 
 // Percent move that saturates a constituent tile's colour. A single day and a
 // multi-month window are not comparable on one scale: ±3% is a dramatic

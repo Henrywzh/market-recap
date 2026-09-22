@@ -2,7 +2,7 @@
 PYTHON ?= python3
 export PYTHONPATH := src
 
-.PHONY: help install refresh refresh-fast validate serve test prune clean schedule unschedule
+.PHONY: help install refresh refresh-fast validate site serve deploy deploy-only test prune clean schedule unschedule
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -22,8 +22,17 @@ validate: ## Re-check the artifacts already on disk
 test: ## Run the test suite
 	$(PYTHON) -m pytest tests/ -q
 
-serve: ## Serve the site for local development
+site: ## Assemble dist/ from the artifacts already on disk
+	$(PYTHON) -m market_recap.cli site
+
+serve: ## Serve dist/ for local development (the same tree that deploys)
 	$(PYTHON) scripts/serve.py
+
+deploy: refresh ## Refresh, then publish dist/ to Cloudflare Pages
+	npx wrangler pages deploy dist
+
+deploy-only: site ## Publish what is already built, without refetching
+	npx wrangler pages deploy dist
 
 prune: ## Delete expired cache entries
 	$(PYTHON) -m market_recap.cli prune

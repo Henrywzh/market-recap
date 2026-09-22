@@ -1,0 +1,10 @@
+# Cloudflare Pages project.
+#
+# The artifacts are rebuilt every session and are not in git, so this deploys
+# by direct upload rather than through Pages' git integration: a git-triggered
+# build would check out a repository whose artifacts/ is ignored and publish an
+# empty dashboard. `make deploy` runs the refresh first, so what is uploaded is
+# always a tree that just passed validation.
+name = "market-recap"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-09-22"

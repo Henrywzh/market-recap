@@ -84,6 +84,29 @@ The scheduled run uses `--strict`, so a warning fails it. Nobody reads the
 output of an unattended job, and a job that exits 0 on a degraded build is how
 a stale page stays up for a week.
 
+### Deploying
+
+```bash
+make deploy        # refresh, validate, then publish to Cloudflare Pages
+make deploy-only   # publish what is already built
+```
+
+`make serve` and `make deploy` look at the same directory. The site is
+assembled into `dist/` — `index.html` at the root with `artifacts/` beside it
+— and that is the tree both serve and deploy read. Serving `/web/index.html`
+locally while production served `/` would mean the deploy step rewrote asset
+paths, and a path rewrite is the kind of build-time magic that works until the
+day it silently does not, on the copy nobody runs locally.
+
+Deployment is by direct upload rather than Pages' git integration. The
+artifacts are rebuilt every session and are not in git, so a git-triggered
+build would check out a repository whose `artifacts/` is ignored and publish
+an empty dashboard. Authentication is `wrangler login` once, or
+`CLOUDFLARE_API_TOKEN` in the environment for the scheduled job — which
+deploys only after `--strict` validation passes, because putting the bad page
+in front of people and then telling a log file about it is not a deploy
+strategy.
+
 ### Validation
 
 `make validate` re-checks the artifacts on disk without refetching:
@@ -148,6 +171,10 @@ data/cache/                raw snapshots and parsed frames, pruned each build
 
 ## Known limits
 
+- **The cache is compressed where it pays.** SEC company facts are 3–4 MB of
+  JSON per filer, of which the DCF reads six line items; 121 of them filled
+  472 MB. They are stored gzipped now — the raw document, so nothing about
+  reproducibility changes — which takes the whole cache from 557 MB to 55 MB.
 - **ETF net flow covers 27 of 34 funds.** It is the daily change in the
   issuer's published shares outstanding valued at that day's NAV, taken from
   State Street's or BlackRock's own history, so it is measured and reaches back

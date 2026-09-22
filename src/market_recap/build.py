@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 
-from . import cache
+from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
 from .panels import cross_listing, dcf, fixed_income, heatmaps, macro, markets
@@ -87,4 +87,7 @@ def run(
     if prune_cache:
         manifest["cache_pruned"] = cache.prune()
     write_json(ARTIFACT_DIR / "manifest.json", manifest)
+    # Assemble the deployable tree last, so it contains the manifest that was
+    # just written rather than the previous build's.
+    manifest["site"] = site.build()
     return manifest
