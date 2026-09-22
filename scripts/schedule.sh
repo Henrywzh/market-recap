@@ -29,11 +29,33 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LABEL="com.market-recap.refresh"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$REPO/data/logs"
+STATUS_FILE="$LOG_DIR/last-run.json"
+# The log is append-only across every run. Capped so a nightly job cannot
+# quietly fill a disk over a year.
+LOG_MAX_BYTES=$((2 * 1024 * 1024))
 # Credentials live outside the repository, so no clone or backup of this
 # project can carry them and no `git add -A` can stage them.
 ENV_FILE="${MARKET_RECAP_ENV:-$HOME/.config/market-recap/env}"
 
 usage() { echo "usage: $0 {install|uninstall|status|run|check}" >&2; exit 2; }
+
+rotate_log() {
+  local log="$LOG_DIR/refresh.log"
+  [ -f "$log" ] || return 0
+  local size
+  size="$(stat -f '%z' "$log" 2>/dev/null || stat -c '%s' "$log")"
+  [ "$size" -gt "$LOG_MAX_BYTES" ] && mv -f "$log" "$log.1"
+  return 0
+}
+
+# Record how the run ended, so "did it work last night?" is one command rather
+# than a scroll through an append-only log.
+record() {
+  local outcome="$1" detail="$2" started="$3"
+  printf '{"finished_at":"%s","outcome":"%s","detail":"%s","seconds":%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$outcome" "$detail" "$(( $(date +%s) - started ))" \
+    > "$STATUS_FILE"
+}
 
 load_env() {
   [ -f "$ENV_FILE" ] || return 0
@@ -123,7 +145,17 @@ PLIST_EOF
     ;;
 
   status)
-    launchctl list | grep -F "$LABEL" || echo "$LABEL is not loaded"
+    if launchctl list | grep -qF "$LABEL"; then
+      echo "launchd:  loaded ($(launchctl list | grep -F "$LABEL" | awk '{print "last exit " $2}'))"
+    else
+      echo "launchd:  NOT LOADED -- run 'make schedule'"
+    fi
+    if [ -f "$STATUS_FILE" ]; then
+      echo "last run: $(cat "$STATUS_FILE")"
+    else
+      echo "last run: none recorded yet"
+    fi
+    echo "next:     weekdays $SCHEDULE_HOUR:$SCHEDULE_MINUTE $(date +%Z)"
     ;;
 
   check)
@@ -150,6 +182,11 @@ PLIST_EOF
     cd "$REPO"
     setup_path
     mkdir -p "$LOG_DIR"
+    rotate_log
+    started=$(date +%s)
+    # Any unexpected exit is recorded too, so a crash is distinguishable from
+    # a run that never started.
+    trap 'record failed "job exited unexpectedly" "$started"' ERR
     echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) refresh starting ==="
     load_env || true
 
@@ -162,16 +199,19 @@ PLIST_EOF
     if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
       echo "CLOUDFLARE_API_TOKEN not set; built and validated but not deployed"
       echo "  put it in $ENV_FILE (chmod 600) as CLOUDFLARE_API_TOKEN=..."
+      record built-not-deployed "no CLOUDFLARE_API_TOKEN" "$started"
       exit 0
     fi
     if [ -z "$bin" ]; then
       echo "wrangler not installed; run 'npm install' in $REPO" >&2
+      record failed "wrangler missing" "$started"
       exit 1
     fi
     # Only a build that passed --strict is published. Deploying first and
     # validating afterwards would put the bad page in front of people and then
     # tell a log file about it.
     "$bin" pages deploy dist --project-name market-recap --branch main --commit-dirty=true
+    record deployed "$(PYTHONPATH=src python3 -c 'import json;print(json.load(open("artifacts/manifest.json"))["as_of"])' 2>/dev/null || echo unknown)" "$started"
     echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) done ==="
     ;;
 

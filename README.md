@@ -73,6 +73,7 @@ python -m market_recap.cli refresh --panels markets --skip-dcf
 
 ```bash
 make schedule        # weekdays 18:30 local, via launchd
+make schedule-status # did last night's run work?
 make schedule-check  # what will the next run actually be able to do?
 make schedule-run    # run it now, exactly as launchd would
 make logs            # tail data/logs/refresh.log
