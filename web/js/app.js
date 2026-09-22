@@ -40,14 +40,36 @@ export async function loadArtifact(name) {
   return promise;
 }
 
-function startClock() {
-  const node = document.getElementById('clock');
+// A ticking clock beside a red dot claims a live feed. This page is a static
+// build, so what it shows instead is how old that build is -- the one number
+// that tells a reader whether they are looking at today's close or at
+// something from last week.
+function startBuildAge(generatedAt) {
+  const label = document.getElementById('build-age');
+  const dot = document.getElementById('build-dot');
+  if (!label) return;
+  const built = generatedAt ? new Date(generatedAt) : null;
+  if (!built || Number.isNaN(built.getTime())) {
+    label.textContent = 'BUILD TIME UNKNOWN';
+    dot.style.background = 'var(--down)';
+    return;
+  }
   const tick = () => {
-    const now = new Date();
-    node.textContent = now.toLocaleTimeString('en-GB', { hour12: false });
+    const minutes = Math.max(0, Math.floor((Date.now() - built.getTime()) / 60000));
+    const age = minutes < 60
+      ? `${minutes}m`
+      : minutes < 60 * 48
+        ? `${Math.floor(minutes / 60)}h`
+        : `${Math.floor(minutes / 1440)}d`;
+    label.textContent = `BUILT ${age} AGO`;
+    // Green while the build is plausibly the latest close, amber past a day,
+    // red past three.
+    dot.style.background = minutes < 60 * 24
+      ? 'var(--up)'
+      : minutes < 60 * 72 ? 'var(--accent)' : 'var(--down)';
   };
   tick();
-  setInterval(tick, 1000);
+  setInterval(tick, 30000);
 }
 
 function applyTheme(theme) {
@@ -147,7 +169,6 @@ function renderFooter(manifest) {
 
 export async function boot(manifest, version) {
   state.version = version || 'dev';
-  startClock();
 
   const themeSelect = document.getElementById('theme-select');
   let saved = 'dark';
@@ -170,7 +191,8 @@ export async function boot(manifest, version) {
   document.getElementById('brand').textContent = brand.title || 'MARKET RECAP';
   document.getElementById('brand-sub').textContent = brand.subtitle || '';
   document.getElementById('asof').textContent = `AS OF ${manifest.as_of || '—'}`;
-  document.getElementById('updated').textContent = `Last updated ${manifest.generated_at}`;
+  document.getElementById('updated').textContent = `Built ${manifest.generated_at} · session ${manifest.as_of}`;
+  startBuildAge(manifest.generated_at);
   document.title = `${brand.title || 'Market Recap'} · ${manifest.as_of || ''}`;
   renderFooter(manifest);
 

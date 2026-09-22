@@ -142,6 +142,39 @@ export default function renderMarkets(root, data) {
 
   Object.entries(data.indices || {}).forEach(([key, block]) => indexSection(key, block));
 
+  // --- Watchlist ---------------------------------------------------------
+  const watch = data.watchlist;
+  if (watch && watch.rows.length) {
+    root.append(sectionTitle('WATCHLIST', 'NAMES NO TRACKED INDEX HOLDS'));
+    const rows = watch.rows.map((row) => {
+      if (row.status !== 'ok') {
+        return el('tr', {}, [
+          el('td', {}, [el('span', { text: row.ticker }), el('span', { class: 'sub', text: row.label })]),
+          el('td', { class: 'dim', text: DASH }),
+          el('td', { class: 'dim', text: 'no price data' }),
+          ...watch.periods.map(() => el('td', { class: 'dim', text: DASH })),
+          el('td', { class: 'dim', text: DASH }),
+        ]);
+      }
+      return el('tr', {}, [
+        el('td', { class: 'wrap-cell' }, [
+          el('span', { text: row.ticker }),
+          el('span', { class: 'sub', text: row.label }),
+        ]),
+        el('td', { class: 'wrap-cell dim', text: row.sub_sector || DASH }),
+        el('td', { text: num(row.price) }),
+        ...watch.periods.map((p) => el('td', { class: dirClass(row[p]), text: pct(row[p]) })),
+        el('td', { class: 'dim', text: row.sessions }),
+      ]);
+    });
+    const notes = watch.rows.filter((r) => r.note).map((r) => `${r.ticker}: ${r.note}`);
+    root.append(card('WATCHLIST — PRICE & RETURN', null, [
+      table(['TICKER', 'SUB-SECTOR', 'PRICE', ...watch.periods, 'SESSIONS'], rows),
+      el('div', { class: 'note-text', text: watch.note }),
+      ...notes.map((n) => el('div', { class: 'note-text', text: n })),
+    ]));
+  }
+
   // --- Sector table beside the rebased chart -------------------------------
   const rebasedNode = el('div', { class: 'chart tall' });
   const rebasedPeriods = Object.keys(data.sector_rebased);

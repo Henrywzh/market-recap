@@ -51,6 +51,7 @@ class MarketContext:
     holdings: pd.DataFrame = field(default_factory=pd.DataFrame)
     ndx_holdings: pd.DataFrame = field(default_factory=pd.DataFrame)
     closes: pd.DataFrame = field(default_factory=pd.DataFrame)
+    watchlist: pd.DataFrame = field(default_factory=pd.DataFrame)
     etf_closes: pd.DataFrame = field(default_factory=pd.DataFrame)
     index_closes: pd.DataFrame = field(default_factory=pd.DataFrame)
     holdings_as_of: str | None = None
@@ -127,9 +128,17 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
     except Exception as exc:
         log.fail("ndx_holdings", exc)
 
-    # 4. Constituent price history, over both baskets at once so the two index
-    #    sections of the page describe the same session.
-    symbols = sorted(set(holdings["yahoo_symbol"]) | set(ctx.ndx_holdings.get("yahoo_symbol", [])))
+    # 4. Price history, over both baskets and the watchlist at once so every
+    #    section of the page describes the same session. Watchlist names are
+    #    carried as extra columns only; no index figure reads them, because a
+    #    name the index does not hold is not part of its breadth.
+    watchlist_specs = list(config.get("watchlist") or [])
+    watchlist_symbols = [str(spec["ticker"]).upper() for spec in watchlist_specs]
+    symbols = sorted(
+        set(holdings["yahoo_symbol"])
+        | set(ctx.ndx_holdings.get("yahoo_symbol", []))
+        | set(watchlist_symbols)
+    )
     ctx.closes = _completed_sessions(yahoo.fetch_closes(symbols, period=history_period))
     missing = sorted(set(symbols) - set(ctx.closes.columns))
     log.add(
@@ -157,6 +166,42 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
             rows=int(ctx.etf_closes.shape[1]),
         )
     )
+
+    if watchlist_specs:
+        # Sector labels for watchlist names come from the same mapped-Yahoo
+        # path the out-of-index Nasdaq members use, and carry the same marker.
+        extra = yahoo.fetch_sectors([s for s in watchlist_symbols if s in ctx.closes.columns])
+        rows = []
+        for spec in watchlist_specs:
+            ticker = str(spec["ticker"]).upper()
+            record = {
+                "ticker": ticker,
+                "label": spec.get("label") or ticker,
+                "note": spec.get("note"),
+                "priced": ticker in ctx.closes.columns,
+            }
+            if not extra.empty and ticker in set(extra["ticker"]):
+                match = extra.loc[extra["ticker"] == ticker].iloc[0]
+                record |= {
+                    "name": match["name"],
+                    "sector": match["sector"],
+                    "sub_sector": match["sub_sector"],
+                    "classification_source": match["classification_source"],
+                }
+            rows.append(record)
+        ctx.watchlist = pd.DataFrame(rows)
+        missing_watch = [r["ticker"] for r in rows if not r["priced"]]
+        log.add(
+            SourceRecord(
+                "yahoo_watchlist",
+                "Watchlist daily closes",
+                "https://finance.yahoo.com",
+                ctx.as_of,
+                rows=int(sum(r["priced"] for r in rows)),
+                status="ok" if not missing_watch else "partial",
+                error=None if not missing_watch else "no data for: " + ", ".join(missing_watch),
+            )
+        )
 
     index_symbols = [config["universe"]["spx_index"], config["universe"]["ndx_index"]]
     ctx.index_closes = yahoo.fetch_closes(index_symbols, period=f"{config['universe']['history_years']}y")

@@ -88,7 +88,7 @@ select.control {
   font-size: 12px;
   padding: 3px 6px;
 }
-.live-pill {
+.build-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -98,8 +98,9 @@ select.control {
   font-size: 11px;
   letter-spacing: 0.08em;
   color: var(--text-dim);
+  white-space: nowrap;
 }
-.live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--down); }
+.build-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); }
 .updated { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
 
 /* ---------- Tabs ---------- */

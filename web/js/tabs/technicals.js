@@ -20,12 +20,15 @@ function priceChart(node, payload) {
       xAxis: { ...option.xAxis, data: payload.dates },
       series: [
         // The band is drawn as a stacked invisible base plus a filled span, so
-        // it reads as an envelope rather than two unrelated lines.
-        { name: 'band base', type: 'line', data: payload.band_lower, stack: 'band', showSymbol: false,
-          lineStyle: { opacity: 0 }, areaStyle: { opacity: 0 }, silent: true, tooltip: { show: false } },
-        { name: '±1.5σ band', type: 'line', stack: 'band', showSymbol: false, silent: true,
-          data: payload.band_upper.map((v, i) => (v === null || payload.band_lower[i] === null ? null : v - payload.band_lower[i])),
-          lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(232,163,61,0.13)' }, tooltip: { show: false } },
+        // it reads as an envelope rather than two unrelated lines. A ticker
+        // without enough history simply has no band.
+        ...(payload.band_upper.length ? [
+          { name: 'band base', type: 'line', data: payload.band_lower, stack: 'band', showSymbol: false,
+            lineStyle: { opacity: 0 }, areaStyle: { opacity: 0 }, silent: true, tooltip: { show: false } },
+          { name: '±1.5σ band', type: 'line', stack: 'band', showSymbol: false, silent: true,
+            data: payload.band_upper.map((v, i) => (v === null || payload.band_lower[i] === null ? null : v - payload.band_lower[i])),
+            lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(232,163,61,0.13)' }, tooltip: { show: false } },
+        ] : []),
         { name: `${payload.ticker} Close`, type: 'line', data: payload.close, showSymbol: false,
           lineStyle: { width: 1.4, color: p.text }, z: 5 },
         ...windows.map((w, i) => ({
@@ -38,11 +41,16 @@ function priceChart(node, payload) {
 }
 
 function summaryTable(summary, payload) {
+  const gap = payload.unavailable || {};
+  const w = payload_zwindow(payload);
   const rows = [
-    ['PRICE', `${num(summary.price)} AS OF ${payload.as_of}`, ''],
-    [`${payload_zwindow(payload)} DMA / DISTANCE`, num(summary.sma_long), pct(summary.distance_pct)],
-    ['Z-SCORE', num(summary.zscore), summary.verdict || ''],
-    [`${payload_zwindow(payload)} DMA SLOPE (ANN.)`, pct(summary.slope_annualised, 1), slopeVerdict(summary.slope_annualised)],
+    ['PRICE', `${num(summary.price)} AS OF ${payload.as_of}`, `${payload.sessions} sessions since ${payload.first_session}`],
+    [`${w} DMA / DISTANCE`, summary.sma_long === null ? DASH : num(summary.sma_long),
+      summary.sma_long === null ? (gap.long_average || '') : pct(summary.distance_pct)],
+    ['Z-SCORE', summary.zscore === null ? DASH : num(summary.zscore),
+      summary.zscore === null ? (gap.zscore || '') : (summary.verdict || '')],
+    [`${w} DMA SLOPE (ANN.)`, summary.slope_annualised === null ? DASH : pct(summary.slope_annualised, 1),
+      summary.slope_annualised === null ? (gap.slope_annualised || '') : slopeVerdict(summary.slope_annualised)],
     ['Z-SCORE BAND', summary.zscore_band || DASH, ''],
   ];
   return table(['METRIC', 'VALUE', ''], rows.map(([label, value, note]) => el('tr', {}, [
@@ -53,7 +61,7 @@ function summaryTable(summary, payload) {
 }
 
 function payload_zwindow(payload) {
-  return payload.moving_averages['200'] ? '200' : Object.keys(payload.moving_averages).slice(-1)[0];
+  return payload.zscore_window || 200;
 }
 
 function slopeVerdict(value) {
@@ -63,6 +71,21 @@ function slopeVerdict(value) {
   if (value < -20) return 'STRONG DOWNTREND';
   if (value < -2) return 'DOWNTREND';
   return 'FLAT';
+}
+
+function loadedMessage(symbol, payload) {
+  const missing = Object.keys(payload.unavailable || {});
+  return missing.length
+    ? `Loaded ${symbol} · ${payload.sessions} sessions since ${payload.first_session} · `
+      + `${missing.length} reading(s) need more history`
+    : `Loaded ${symbol} as of ${payload.as_of}.`;
+}
+
+function gapText(payload, key) {
+  const reason = (payload.unavailable || {})[key];
+  return reason
+    ? `Not available for ${payload.ticker}: ${reason}.`
+    : `Not available for ${payload.ticker}.`;
 }
 
 function noteClass(note) {
@@ -175,7 +198,10 @@ export default async function renderTechnicals(root, data) {
       multiLine(slopeNode, payload.dates,
         Object.fromEntries(Object.entries(payload.sma_slope).map(([w, v]) => [`${w}-day SMA slope`, v])));
 
-      render(zNode, (option, p) => ({
+      if (!payload.zscore.length) {
+        zNode.innerHTML = '';
+        zNode.append(el('div', { class: 'note-text', text: gapText(payload, 'zscore') }));
+      } else render(zNode, (option, p) => ({
         ...option,
         grid: { ...option.grid, top: 10, bottom: 24 },
         xAxis: { ...option.xAxis, data: payload.dates, boundaryGap: true },
@@ -188,6 +214,13 @@ export default async function renderTechnicals(root, data) {
       }));
 
       const fwd = payload.forward_returns;
+      if (!fwd.rows.length) {
+        fwdHost.innerHTML = '';
+        fwdHost.append(card(`${fwd.horizon}-DAY FORWARD RETURN BY Z-SCORE BAND`, null,
+          el('div', { class: 'notice', text: gapText(payload, 'forward_returns') })));
+        stStatus.textContent = loadedMessage(symbol, payload);
+        return;
+      }
       const rows = fwd.rows.map((row) => el('tr', {}, [
         el('td', { text: row.band }),
         el('td', { class: 'dim', text: row.count }),
@@ -204,7 +237,7 @@ export default async function renderTechnicals(root, data) {
           el('div', { class: 'note-text', text: data.note }),
         ],
       ));
-      stStatus.textContent = `Loaded ${symbol} as of ${payload.as_of}.`;
+      stStatus.textContent = loadedMessage(symbol, payload);
     } catch (error) {
       stStatus.textContent = error.message;
     }

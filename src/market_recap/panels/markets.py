@@ -208,9 +208,49 @@ def build(ctx) -> dict:
     breadth_rows.sort(key=lambda r: r["n"], reverse=True)
     slope_rows.sort(key=lambda r: r["sector"])
 
+    # --- Watchlist ---------------------------------------------------------
+    # Names no tracked index holds. They get the same period definitions as
+    # everything else, and a window their history cannot cover stays empty
+    # rather than being measured from the first bar available.
+    watchlist_rows = []
+    for row in ctx.watchlist.itertuples() if not ctx.watchlist.empty else []:
+        entry = {
+            "ticker": row.ticker,
+            "label": row.label,
+            "note": getattr(row, "note", None),
+            "name": getattr(row, "name", None),
+            "sector": getattr(row, "sector", None),
+            "sub_sector": getattr(row, "sub_sector", None),
+            "classification_source": getattr(row, "classification_source", None),
+        }
+        if not row.priced or row.ticker not in closes.columns:
+            entry |= {"price": None, "sessions": 0, "status": "unavailable"}
+            watchlist_rows.append(entry)
+            continue
+        series = closes[row.ticker].dropna()
+        entry |= {
+            "price": clean_float(series.iloc[-1], 2),
+            "sessions": int(len(series)),
+            "first_session": to_iso_date(series.index[0]),
+            "status": "ok",
+        }
+        for label in ("1D", "1W", "1M", "3M", "1Y"):
+            entry[label] = clean_float(R.period_return(series, PERIOD_TRADING_DAYS[label]), 2)
+        entry["YTD"] = clean_float(R.ytd_return(series), 2)
+        watchlist_rows.append(entry)
+
     return {
         "as_of": ctx.as_of,
         "quotes": quotes,
+        "watchlist": {
+            "rows": watchlist_rows,
+            "periods": ["1D", "1W", "1M", "3M", "YTD", "1Y"],
+            "note": (
+                "Watchlist names are not held by the S&P 500 or the Nasdaq-100, so they never enter "
+                "either index's breadth, weight or advance/decline figures. A blank return means the "
+                "history is shorter than that window, not that the return was zero."
+            ),
+        },
         "drawdowns": drawdowns,
         "advance_decline": {"SPX": spx_ad, "NDX": ndx_ad},
         "indices": indices,

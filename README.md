@@ -11,7 +11,7 @@ them.
 
 | Tab | Contents |
 |---|---|
-| **MARKETS** | SPY/QQQ/IWM quote strip, SPX/NDX drawdown with sessions since the high, advance/decline, SPX price and net-breadth charts, top 10 gainers/losers, sector performance / weight / **contribution**, sectors rebased to 100, % of each sector above its moving averages, SMA200 slope by sector |
+| **MARKETS** | SPY/QQQ/IWM quote strip, SPX/NDX drawdown with sessions since the high, advance/decline, a price + net-breadth + movers block for **each index**, a **watchlist** of names no index holds, sector performance / weight / **contribution**, sectors rebased to 100, % of each sector above its moving averages, SMA200 slope by sector |
 | **HEAT MAPS** | S&P 500 treemap sized by the **issuer-published SPY weight** and coloured by return; US ETF treemap sized by AUM and coloured by estimated net flow |
 | **FIXED INCOME** | Published par yield curve vs. 1 week / 1 month / start of year, level and bps change by tenor, 10Y−2Y and 10Y−3M spreads |
 | **MACRO** | Commodity futures/ETF proxies with multi-period returns, last 12 monthly inflation releases as a heat table |
@@ -91,7 +91,12 @@ data/cache/                raw snapshots and the day's price cache
 - **One definition per concept.** A "1M return" is 21 trading days on every
   tab, or the tabs contradict each other.
 - **Every number carries a source and an observation date**, shown in the
-  footer with a freshness label.
+  footer with a freshness label. The header shows how old the build is, not a
+  ticking clock: this is a static build, and a live-looking clock beside stale
+  data is a lie the page tells for free.
+- **Short history degrades per reading, not per ticker.** A recent listing
+  keeps the readings its history supports and names what the rest would need
+  ("needs 200 sessions, has 51") rather than vanishing from the tab.
 - **Area and colour stay independent on the heat map.** Tile size is the
   published index weight; colour is return.
 
@@ -114,7 +119,10 @@ data/cache/                raw snapshots and the day's price cache
   cash shows a working-capital build. The DCF tab says so beside the row.
 - FRED values are the current vintage and reflect later revisions. They are a
   release table, not a record of what was known on the day.
-- Sector and sub-industry labels are current, not point-in-time.
+- Sector and sub-industry labels are current, not point-in-time. Members of
+  the S&P 500 carry GICS labels; Nasdaq-100 members and watchlist names outside
+  it are labelled from Yahoo's taxonomy mapped onto the same GICS sector names,
+  so sub-industry wording differs between the two groups.
 - Line items a filer did not tag are left blank and are editable in the model.
 
 ## Not investment advice

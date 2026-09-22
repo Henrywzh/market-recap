@@ -16,6 +16,30 @@ spx_index = "^GSPC"
 ndx_index = "^NDX"
 history_years = 11
 
+# Names to follow that no tracked index carries. A watchlist entry gets the
+# same price treatment as an index member and is never mixed into an index's
+# breadth, weight or advance/decline figures -- it is not a constituent.
+[[watchlist]]
+ticker = "SKHY"
+label = "SK hynix"
+note = "Nasdaq-listed line; first session 2026-07-10, so long-window figures are short."
+
+[[watchlist]]
+ticker = "TSM"
+label = "TSMC (ADR)"
+
+[[watchlist]]
+ticker = "BESIY"
+label = "BE Semiconductor (ADR)"
+
+[[watchlist]]
+ticker = "ASML"
+label = "ASML (ADR)"
+
+[[watchlist]]
+ticker = "ARM"
+label = "Arm Holdings (ADR)"
+
 [universe.sectors]
 # GICS sector -> Select Sector SPDR wrapper. Weight and contribution come from
 # the official SPY holdings file, not from the wrapper.
