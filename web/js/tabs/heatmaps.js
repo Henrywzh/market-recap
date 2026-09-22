@@ -116,10 +116,13 @@ export default function renderHeatmaps(root, data) {
   const coverage = data.flow_coverage;
   const etfBody = [etfNode, el('div', { class: 'note-text', text: data.note })];
   if (coverage.unpublished.length) {
+    const bySource = Object.entries(data.flow_sources || {})
+      .map(([id, list]) => `${list.length} from ${id.replace('_nav_history', '')}`)
+      .join(', ');
     etfBody.unshift(notice(
-      `${coverage.published.length} funds carry a published net-flow series. `
-      + `${coverage.unpublished.length} are not State Street products and their issuers publish no equivalent `
-      + 'NAV history here, so they are sized by AUM and left uncoloured rather than filled with an estimate: '
+      `${coverage.published.length} funds carry a published net-flow series (${bySource}). `
+      + `${coverage.unpublished.length} have no issuer NAV history located, so they are sized by reported `
+      + 'total assets and left uncoloured rather than filled with an estimate: '
       + `${coverage.unpublished.join(', ')}.`,
     ));
   }
@@ -185,7 +188,12 @@ export default function renderHeatmaps(root, data) {
           }],
         }));
       } else {
+        // An empty chart frame reads as "premium is zero". Say why it is absent.
         premiumNode.innerHTML = '';
+        premiumNode.append(el('div', { class: 'note-text' }, [
+          `${payload.source} does not publish a premium/discount series for this fund, `,
+          'so there is nothing to plot here. State Street funds carry one.',
+        ]));
       }
 
       status.textContent = `${ticker}: ${payload.sessions} published sessions since ${payload.history_start}.`;

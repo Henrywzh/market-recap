@@ -6,7 +6,7 @@ import pandas as pd
 
 from ..compute import returns as R
 from ..config import ETF_ARTIFACT_DIR, PERIOD_TRADING_DAYS
-from ..sources import ssga, yahoo
+from ..sources import ishares, ssga, yahoo
 from ..util import SourceRecord, clean_float, to_iso_date, write_json
 
 PERIODS = ("1D", "1W", "1M", "3M", "YTD", "1Y")
@@ -44,17 +44,27 @@ def _cumulative_flows(flows: pd.Series) -> dict:
     return out
 
 
-def _build_published_flow(ticker: str, prices: pd.Series, use_cache: bool) -> dict | None:
-    """Reconstruct the whole flow history from the issuer's published file.
+# Two issuers publish the daily NAV and share count this panel needs, in
+# different envelopes. They are tried in turn; a fund neither of them covers
+# gets no flow rather than an estimate dressed up as a measurement.
+FLOW_PROVIDERS = (
+    ("ssga_nav_history", "State Street published NAV history", ssga.fetch_nav_history),
+    ("ishares_nav_history", "iShares published NAV history", ishares.fetch_nav_history),
+)
 
-    Returns None when the issuer does not publish one for this fund, which is
-    the case for every non-State-Street ETF in the universe.
-    """
-    try:
-        nav, url = ssga.fetch_nav_history(ticker, use_cache=use_cache)
-    except Exception:
-        return None
-    if nav.empty or "shares_outstanding" not in nav:
+
+def _build_published_flow(ticker: str, prices: pd.Series, use_cache: bool) -> dict | None:
+    """Reconstruct the whole flow history from an issuer's published file."""
+    nav = None
+    for provider_id, provider_label, fetch in FLOW_PROVIDERS:
+        try:
+            candidate, url = fetch(ticker, use_cache=use_cache)
+        except Exception:
+            continue
+        if candidate is not None and not candidate.empty and "shares_outstanding" in candidate:
+            nav, source_id, source_label = candidate, provider_id, provider_label
+            break
+    if nav is None:
         return None
 
     frame = nav.set_index("date")
@@ -63,13 +73,16 @@ def _build_published_flow(ticker: str, prices: pd.Series, use_cache: bool) -> di
     # market close instead would mix a creation with the day's premium.
     flow = shares.diff() * frame["nav"]
 
+    # Only State Street publishes a premium/discount series here; an iShares
+    # fund simply has no premium line rather than a computed stand-in.
     premium = None
-    try:
-        pd_frame, _ = ssga.fetch_premium_discount(ticker, use_cache=use_cache)
-        if not pd_frame.empty:
-            premium = pd_frame.set_index("date")["premium_pct"]
-    except Exception:
-        premium = None
+    if source_id == "ssga_nav_history":
+        try:
+            pd_frame, _ = ssga.fetch_premium_discount(ticker, use_cache=use_cache)
+            if not pd_frame.empty:
+                premium = pd_frame.set_index("date")["premium_pct"]
+        except Exception:
+            premium = None
 
     tail = flow.dropna().tail(FLOW_CHART_SESSIONS)
     price_tail = prices.reindex(tail.index).ffill() if not prices.empty else pd.Series(dtype=float)
@@ -83,7 +96,8 @@ def _build_published_flow(ticker: str, prices: pd.Series, use_cache: bool) -> di
         "as_of": to_iso_date(frame.index[-1]),
         "history_start": to_iso_date(frame.index[0]),
         "sessions": int(len(frame)),
-        "source": "SSGA published NAV history",
+        "source": source_label,
+        "source_id": source_id,
         "source_url": url,
         "dates": [d.strftime("%Y-%m-%d") for d in tail.index],
         "flow": [clean_float(v, 0) for v in tail.to_numpy()],
@@ -99,12 +113,21 @@ def _build_published_flow(ticker: str, prices: pd.Series, use_cache: bool) -> di
 
     return {
         "flows": _cumulative_flows(flow),
-        "aum": clean_float(frame["total_net_assets"].iloc[-1]) if "total_net_assets" in frame else None,
+        # State Street publishes total net assets directly; BlackRock's sheet
+        # does not, so it is NAV times units -- which is the same quantity, and
+        # reconstructing it here keeps every published fund sizeable on the map.
+        "aum": clean_float(
+            frame["total_net_assets"].iloc[-1]
+            if "total_net_assets" in frame and pd.notna(frame["total_net_assets"].iloc[-1])
+            else frame["nav"].iloc[-1] * shares.iloc[-1]
+        ),
         "nav": clean_float(frame["nav"].iloc[-1], 4),
         "shares_outstanding": clean_float(shares.iloc[-1]),
         "premium_pct": payload["latest_premium_pct"],
         "history_start": payload["history_start"],
         "sessions": payload["sessions"],
+        "source_id": source_id,
+        "source_label": source_label,
     }
 
 
@@ -160,7 +183,8 @@ def build(ctx) -> dict:
             published.append(ticker)
             node |= {
                 "aum": result["aum"],
-                "aum_source": "ssga_nav_history",
+                "aum_source": result["source_id"],
+                "flow_source": result["source_label"],
                 "nav": result["nav"],
                 "shares_outstanding": result["shares_outstanding"],
                 "flows": result["flows"],
@@ -194,20 +218,37 @@ def build(ctx) -> dict:
             )
         )
 
-    ctx.log.add(
-        SourceRecord(
-            "ssga_nav_history",
-            "SSGA published NAV / shares outstanding history",
-            ssga.NAV_HISTORY_URL.format(ticker="<fund>"),
-            ctx.as_of,
-            rows=len(published),
-            policy="fund_holdings",
-            status="ok" if not unpublished else "partial",
-            error=None if not unpublished
-            else f"{len(unpublished)} funds are not State Street products and publish no NAV file here: "
-            + ", ".join(sorted(unpublished)),
+    by_source: dict[str, list[str]] = {}
+    for node in etf_nodes:
+        if node["flow_status"] == "published":
+            by_source.setdefault(node["aum_source"], []).append(node["ticker"])
+    for provider_id, provider_label, _ in FLOW_PROVIDERS:
+        covered = by_source.get(provider_id, [])
+        if not covered:
+            continue
+        ctx.log.add(
+            SourceRecord(
+                provider_id,
+                f"{provider_label} (NAV + shares outstanding)",
+                "https://www.ssga.com" if provider_id.startswith("ssga") else "https://www.ishares.com",
+                ctx.as_of,
+                rows=len(covered),
+                policy="fund_holdings",
+            )
         )
-    )
+    if unpublished:
+        ctx.log.add(
+            SourceRecord(
+                "etf_flow_gap",
+                "Funds with no published NAV history",
+                "",
+                ctx.as_of,
+                rows=len(unpublished),
+                policy="fund_holdings",
+                status="partial",
+                error="no issuer NAV file located for: " + ", ".join(sorted(unpublished)),
+            )
+        )
 
     return {
         "as_of": ctx.as_of,
@@ -216,12 +257,14 @@ def build(ctx) -> dict:
         "constituents": nodes,
         "etfs": etf_nodes,
         "flow_coverage": {"published": sorted(published), "unpublished": sorted(unpublished)},
+        "flow_sources": {k: sorted(v) for k, v in by_source.items()},
         "note": (
             "Constituent tiles are sized by the weight State Street publishes for SPY, not by an "
             "approximate market cap. ETF net flow is the change in the fund's published shares "
-            "outstanding valued at that day's NAV, taken from the issuer's own NAV history -- so it "
-            "is a measured series going back to the fund's inception, not an estimate accrued since "
-            "this dashboard was first run. Funds whose issuer does not publish that file are shown "
-            "without flow rather than with a market-cap guess."
+            "outstanding valued at that day's NAV, taken from State Street's or BlackRock's own "
+            "published history -- a measured series back to the fund's inception, not an estimate "
+            "accrued since this dashboard was first run. Funds whose issuer publishes no such file "
+            "are sized by reported total assets and shown without flow rather than with a "
+            "market-cap guess. Premium/discount is published by State Street only."
         ),
     }
