@@ -6,7 +6,7 @@ import pandas as pd
 
 from ..compute import returns as R
 from ..config import ETF_ARTIFACT_DIR, PERIOD_TRADING_DAYS
-from ..sources import ishares, ssga, yahoo
+from ..sources import ishares, ssga, vanguard, yahoo
 from ..util import SourceRecord, clean_float, to_iso_date, write_json
 
 PERIODS = ("1D", "1W", "1M", "3M", "YTD", "1Y")
@@ -174,11 +174,28 @@ def build(ctx) -> dict:
             node |= {
                 "aum": None,
                 "aum_source": None,
+                "aum_basis": None,
                 "flows": {},
                 "flow_status": "issuer_does_not_publish",
                 "premium_pct": None,
                 "has_detail": False,
             }
+            # Vanguard publishes no share history, but it does publish a
+            # premium and -- crucially -- whether this ETF is one share class
+            # of a larger fund, which is what makes a vendor's "total assets"
+            # figure for it unusable as a tile size.
+            try:
+                facts = vanguard.fetch_fund_facts(ticker)
+            except Exception:
+                facts = None
+            if facts:
+                node |= {
+                    "premium_pct": facts["premium_pct"],
+                    "premium_source": "vanguard_published",
+                    "nav": facts["nav"],
+                    "multi_share_class": facts["multi_share_class"],
+                    "share_classes": len(facts["associated_fund_ids"]),
+                }
         else:
             published.append(ticker)
             node |= {
@@ -207,6 +224,14 @@ def build(ctx) -> dict:
             if node["flow_status"] != "published":
                 node["aum"] = clean_float(sizes.get(node["ticker"]))
                 node["aum_source"] = "yahoo_total_assets" if node["aum"] else None
+                # An ETF that is one share class of a multi-class fund reports
+                # assets for the whole fund. VTI comes back at $2.3tn that way,
+                # which would make it the largest tile on the map. The tile is
+                # kept -- dropping it hides a real fund -- but it is marked
+                # oversized so the size is not read as the ETF's own.
+                node["aum_basis"] = (
+                    "all_share_classes" if node.get("multi_share_class") else "reported_total_assets"
+                )
         ctx.log.add(
             SourceRecord(
                 "yahoo_etf_assets",
@@ -258,6 +283,7 @@ def build(ctx) -> dict:
         "etfs": etf_nodes,
         "flow_coverage": {"published": sorted(published), "unpublished": sorted(unpublished)},
         "flow_sources": {k: sorted(v) for k, v in by_source.items()},
+        "oversized_aum": sorted(n["ticker"] for n in etf_nodes if n.get("aum_basis") == "all_share_classes"),
         "note": (
             "Constituent tiles are sized by the weight State Street publishes for SPY, not by an "
             "approximate market cap. ETF net flow is the change in the fund's published shares "
@@ -265,6 +291,9 @@ def build(ctx) -> dict:
             "published history -- a measured series back to the fund's inception, not an estimate "
             "accrued since this dashboard was first run. Funds whose issuer publishes no such file "
             "are sized by reported total assets and shown without flow rather than with a "
-            "market-cap guess. Premium/discount is published by State Street only."
+            "market-cap guess -- a vendor's shares-outstanding field for those funds disagrees "
+            "with its own assets-over-price by more than half, so a sampled flow built on it "
+            "would be fiction. Premium/discount comes from State Street and Vanguard, each for "
+            "its own funds."
         ),
     }

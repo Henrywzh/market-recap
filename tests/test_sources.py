@@ -10,7 +10,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from market_recap.sources import sec, ssga
+from market_recap.sources import ishares, sec, ssga, vanguard
+from market_recap.sources.http import FetchError
 from market_recap.util import clean_float, freshness_status
 
 
@@ -77,3 +78,55 @@ def test_clean_float_treats_non_finite_as_absent():
 def test_missing_observation_date_is_unknown_not_current():
     assert freshness_status(None, "daily_close") == "unknown"
     assert freshness_status(pd.Timestamp.today(), "daily_close") == "current"
+
+
+def test_ishares_historical_sheet_parses_nav_and_units():
+    """The flow series depends entirely on this sheet being read correctly."""
+    workbook = """<?xml version="1.0"?>
+<ss:Workbook xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+<ss:Worksheet ss:Name="Holdings"><ss:Table><ss:Row><ss:Cell><ss:Data>x</ss:Data></ss:Cell></ss:Row></ss:Table></ss:Worksheet>
+<ss:Worksheet ss:Name="Historical"><ss:Table>
+<ss:Row><ss:Cell><ss:Data>As Of</ss:Data></ss:Cell><ss:Cell><ss:Data>NAV per Share</ss:Data></ss:Cell><ss:Cell><ss:Data>Ex-Dividends</ss:Data></ss:Cell><ss:Cell><ss:Data>Shares Outstanding</ss:Data></ss:Cell></ss:Row>
+<ss:Row><ss:Cell><ss:Data>Sep 21, 2026</ss:Data></ss:Cell><ss:Cell><ss:Data>776.844051</ss:Data></ss:Cell><ss:Cell><ss:Data>--</ss:Data></ss:Cell><ss:Cell><ss:Data>1103450000</ss:Data></ss:Cell></ss:Row>
+<ss:Row><ss:Cell><ss:Data>Sep 18, 2026</ss:Data></ss:Cell><ss:Cell><ss:Data>765.357123</ss:Data></ss:Cell><ss:Cell><ss:Data>2.20</ss:Data></ss:Cell><ss:Cell><ss:Data>1,106,100,000</ss:Data></ss:Cell></ss:Row>
+</ss:Table></ss:Worksheet>
+</ss:Workbook>"""
+    frame = ishares._parse_historical(workbook)
+    assert list(frame.columns) == ["date", "nav", "shares_outstanding"]
+    assert len(frame) == 2
+    # Oldest first, so a diff() is a forward-in-time change.
+    assert frame.iloc[0]["date"] < frame.iloc[1]["date"]
+    # Thousands separators must survive; a dropped comma is a 1000x flow error.
+    assert frame.iloc[0]["shares_outstanding"] == 1_106_100_000
+    assert frame.iloc[1]["nav"] == pytest.approx(776.844051)
+
+
+def test_vanguard_rejects_a_fund_it_only_brokers(monkeypatch):
+    """Vanguard's endpoint answers for funds it carries but does not issue.
+
+    QQQ comes back as 'Invesco QQQ Trust' with isExternalFund set. Treating
+    that as a Vanguard fund would attach Vanguard's share-class semantics to
+    someone else's product.
+    """
+    external = {"fundProfile": {"ticker": "QQQ", "isETF": True, "isExternalFund": True,
+                                "longName": "Invesco QQQ Trust"}}
+    monkeypatch.setattr(vanguard, "_cached_json", lambda *a, **k: external)
+    with pytest.raises(FetchError) as caught:
+        vanguard.fetch_fund_facts("QQQ")
+    assert caught.value.not_found
+
+
+def test_vanguard_accepts_its_own_fund(monkeypatch):
+    internal = {
+        "fundProfile": {"ticker": "VOO", "fundId": "0968", "isETF": True, "isInternalFund": True,
+                        "hasMoreThan1ShareClass": True,
+                        "associatedFundIds": {"investorFundId": "0040", "admiralFundId": "0540"},
+                        "inceptionDate": "2010-09-07T00:00:00-04:00"},
+        "currentPrice": {"premiumOrDiscount": "0.0200000000",
+                         "dailyPrice": {"regular": {"price": "712.76", "asOfDate": "2026-09-21T00:00:00-04:00"}}},
+    }
+    monkeypatch.setattr(vanguard, "_cached_json", lambda *a, **k: internal)
+    facts = vanguard.fetch_fund_facts("VOO")
+    assert facts["multi_share_class"] is True
+    assert facts["premium_pct"] == pytest.approx(0.02)
+    assert facts["nav"] == pytest.approx(712.76)

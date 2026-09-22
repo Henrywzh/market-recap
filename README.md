@@ -25,6 +25,9 @@ Every one of these is free and requires no account.
 | Source | Used for | Notes |
 |---|---|---|
 | **SSGA daily holdings** (`holdings-daily-us-en-<fund>.xlsx`) | S&P 500 and Nasdaq-100 constituents, official index weights, share counts | The issuer's own published basket with an explicit as-of date |
+| **SSGA NAV / premium history** (`navhist-...`, `pdhist-...`) | Net flow and premium for State Street funds | Daily NAV, shares outstanding and premium back to 2003 |
+| **BlackRock fund download** | Net flow for iShares funds | The workbook's `Historical` sheet carries NAV and shares outstanding back to inception; fund ids resolve through the iShares product screener |
+| **Vanguard fund API** (`/vmf/api/<ticker>/{profile,price}`) | Premium to NAV, and whether an ETF is one share class of a larger fund | No shares-outstanding history, so no flow series |
 | **Wikipedia** — List of S&P 500 companies | GICS sector and sub-industry | Current descriptive labels, cached weekly |
 | **Yahoo Finance** via `yfinance` | Daily closes for constituents, ETFs and indices; ETF AUM and shares outstanding; commodity futures | Unofficial wrapper around a mutable service |
 | **US Treasury** daily par yield curve XML | The yield curve | Official publication; "latest published" is not always today |
@@ -94,8 +97,18 @@ data/cache/                raw snapshots and the day's price cache
 
 ## Known limits
 
-- ETF net flow is the daily change in shares outstanding priced at the close.
-  It accrues from the first build and is not a backfilled history.
+- **ETF net flow covers 27 of 34 funds.** It is the daily change in the
+  issuer's published shares outstanding valued at that day's NAV, taken from
+  State Street's or BlackRock's own history, so it is measured and reaches back
+  to each fund's inception. Vanguard, Invesco and USCF publish no equivalent
+  daily share history, and a sampled substitute is not offered: a vendor's
+  `sharesOutstanding` for QQQ disagrees with its own assets-over-price by 67%,
+  and day-over-day changes in a field that inconsistent would be fiction.
+- **Four tiles are drawn too large.** VOO, VTI, VEA and VWO are single share
+  classes of funds that also have investor, admiral and institutional classes,
+  and the reported total assets cover all of them — $2.3tn for VTI. Vanguard's
+  own `hasMoreThan1ShareClass` flag is what detects this; the tiles are marked
+  `*` and the caption says so.
 - Change in NWC is the year-over-year move in current assets less current
   liabilities as filed. It does not strip out cash, so a company that banked
   cash shows a working-capital build. The DCF tab says so beside the row.

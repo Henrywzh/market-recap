@@ -85,11 +85,14 @@ export default function renderHeatmaps(root, data) {
     data.etfs.forEach((row) => {
       if (!byGroup.has(row.group)) byGroup.set(row.group, []);
       const flow = row.flow_status === 'published' ? row.flows[period] : null;
+      const oversized = row.aum_basis === 'all_share_classes';
       byGroup.get(row.group).push({
         key: row.ticker,
         value: row.aum || 0,
         color: flow === null || flow === undefined ? '#2b2b2b' : returnColor((flow / cap) * 3, 3),
-        label: row.ticker,
+        // A tile sized by a figure that covers other share classes is marked
+        // on the tile itself, not only in a tooltip nobody opens.
+        label: oversized ? `${row.ticker} *` : row.ticker,
         sublabel: flow === null || flow === undefined ? DASH : money(flow),
         payload: row,
       });
@@ -101,9 +104,20 @@ export default function renderHeatmaps(root, data) {
         const head = flow === null || flow === undefined
           ? `<div class="t-head">${row.ticker}</div>`
           : `<div class="t-head">${row.ticker} <span class="${dirClass(flow)}">${money(flow)}</span></div>`;
-        const meta = row.flow_status === 'published'
-          ? `AUM ${aum(row.aum)} · NAV ${num(row.nav)} · premium ${num(row.premium_pct, 4)}%<br>published since ${row.history_start}`
-          : 'issuer publishes no NAV history for this fund';
+        let meta;
+        if (row.flow_status === 'published') {
+          meta = `AUM ${aum(row.aum)} · NAV ${num(row.nav)}`
+            + (row.premium_pct === null || row.premium_pct === undefined ? '' : ` · premium ${num(row.premium_pct, 4)}%`)
+            + `<br>flow published since ${row.history_start}`;
+        } else {
+          const size = row.aum_basis === 'all_share_classes'
+            ? `size ${aum(row.aum)} covers all ${row.share_classes ?? ''} share classes of this fund, not the ETF alone`
+            : `size ${aum(row.aum)} (reported total assets)`;
+          const prem = row.premium_pct === null || row.premium_pct === undefined
+            ? ''
+            : `<br>premium ${num(row.premium_pct, 2)}% (${row.premium_source || 'issuer'})`;
+          meta = `no published shares-outstanding history, so no flow<br>${size}${prem}`;
+        }
         showTooltip(
           `${head}<div class="t-meta">${row.group}<br>${meta}</div>`
           + (row.flow_status === 'published'
@@ -123,7 +137,11 @@ export default function renderHeatmaps(root, data) {
       `${coverage.published.length} funds carry a published net-flow series (${bySource}). `
       + `${coverage.unpublished.length} have no issuer NAV history located, so they are sized by reported `
       + 'total assets and left uncoloured rather than filled with an estimate: '
-      + `${coverage.unpublished.join(', ')}.`,
+      + `${coverage.unpublished.join(', ')}.`
+      + ((data.oversized_aum || []).length
+        ? ` Tiles marked * (${data.oversized_aum.join(', ')}) are one share class of a fund whose `
+          + 'reported assets cover the other classes too, so those tiles are drawn larger than the ETF is.'
+        : ''),
     ));
   }
   root.append(card('US ETFs — PUBLISHED NET FLOW',
