@@ -1,12 +1,29 @@
 #!/usr/bin/env bash
 # Install, remove or run the daily refresh-and-publish job.
 #
-# 18:30 ET on weekdays. Not at the closing bell: the issuers this dashboard
-# reads publish after it. State Street's holdings and NAV files land in the
+# The job has to run after the US close *and* after the publishers post. Not
+# at the closing bell: State Street's holdings and NAV files land in the
 # evening, and Treasury sometimes does not post the par curve until early
-# evening ET, so a job that fires at 16:00 produces a page built entirely from
-# the previous session and reports itself perfectly healthy while doing it.
+# evening ET. A job that fires at 16:00 ET builds a page entirely from the
+# previous session and reports itself perfectly healthy while doing it.
+#
+# launchd's StartCalendarInterval fires in LOCAL time, not ET. This machine is
+# in London, so a naive "18:30" fired at 13:30 New York -- the middle of the
+# session -- and the completed-session guard correctly served the previous
+# day's close, leaving the page permanently a day behind.
+#
+# 23:30 local is the hour that works all year from London, because it is never
+# earlier than 18:30 ET at any point in either country's DST cycle:
+#
+#   BST + EDT (now)          offset 5h   23:30 local = 18:30 ET
+#   GMT + EDT (late Oct)     offset 4h   23:30 local = 19:30 ET
+#   GMT + EST (from Nov)     offset 5h   23:30 local = 18:30 ET
+#
+# Override for another timezone with SCHEDULE_HOUR / SCHEDULE_MINUTE.
 set -euo pipefail
+
+SCHEDULE_HOUR="${SCHEDULE_HOUR:-23}"
+SCHEDULE_MINUTE="${SCHEDULE_MINUTE:-30}"
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LABEL="com.market-recap.refresh"
@@ -70,7 +87,8 @@ case "${1:-}" in
   <key>StartCalendarInterval</key>
   <array>
 $(for day in 1 2 3 4 5; do
-  printf '    <dict><key>Weekday</key><integer>%s</integer><key>Hour</key><integer>18</integer><key>Minute</key><integer>30</integer></dict>\n' "$day"
+  printf '    <dict><key>Weekday</key><integer>%s</integer><key>Hour</key><integer>%s</integer><key>Minute</key><integer>%s</integer></dict>\n' \
+    "$day" "$SCHEDULE_HOUR" "$SCHEDULE_MINUTE"
 done)
   </array>
   <key>StandardOutPath</key><string>$LOG_DIR/refresh.log</string>
@@ -82,7 +100,17 @@ done)
 PLIST_EOF
     launchctl unload "$PLIST" 2>/dev/null || true
     launchctl load "$PLIST"
-    echo "installed $LABEL (weekdays 18:30 local)"
+    # Report the New York equivalent, since "after the publishers post" is an
+    # ET constraint and the local clock is what launchd actually fires on.
+    # Converting means resolving the local time to an instant first; simply
+    # reformatting "23:30" under TZ=America/New_York prints 23:30 back.
+    stamp="$(date -j -f '%Y-%m-%d %H:%M' "$(date +%Y-%m-%d) $SCHEDULE_HOUR:$SCHEDULE_MINUTE" +%s 2>/dev/null || echo "")"
+    if [ -n "$stamp" ]; then
+      echo "installed $LABEL (weekdays $SCHEDULE_HOUR:$SCHEDULE_MINUTE $(date +%Z)" \
+           "= $(TZ=America/New_York date -r "$stamp" '+%H:%M %Z') New York)"
+    else
+      echo "installed $LABEL (weekdays $SCHEDULE_HOUR:$SCHEDULE_MINUTE local)"
+    fi
     echo "log:   $LOG_DIR/refresh.log"
     echo "creds: $ENV_FILE"
     "$0" check

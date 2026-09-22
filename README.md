@@ -79,11 +79,25 @@ make logs            # tail data/logs/refresh.log
 make unschedule
 ```
 
-18:30 rather than the closing bell, because the publishers this reads post
-after it: State Street's holdings and NAV files land in the evening, and
-Treasury sometimes does not post the par curve until early evening ET. A job
-firing at 16:00 builds a page entirely from the previous session and reports
-itself perfectly healthy.
+Not the closing bell, because the publishers this reads post after it: State
+Street's holdings and NAV files land in the evening, and Treasury sometimes
+does not post the par curve until early evening ET. A job firing at 16:00 ET
+builds a page entirely from the previous session and reports itself perfectly
+healthy.
+
+launchd fires on the **local** clock, not ET. From London the job runs at
+23:30, which is never earlier than 18:30 New York at any point in either
+country's DST cycle:
+
+| Local | New York | When |
+|---|---|---|
+| 23:30 BST | 18:30 EDT | now |
+| 23:30 GMT | 19:30 EDT | late Oct – 1 Nov |
+| 23:30 GMT | 18:30 EST | from Nov |
+
+In another timezone, set `SCHEDULE_HOUR` / `SCHEDULE_MINUTE` before
+`make schedule`. The installer prints the New York equivalent so the ET
+constraint stays checkable.
 
 The scheduled run uses `--strict`, so a warning fails it. Nobody reads the
 output of an unattended job, and a job that exits 0 on a degraded build is how
