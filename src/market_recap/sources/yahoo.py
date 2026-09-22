@@ -185,3 +185,48 @@ def fetch_fund_snapshot(symbols: Iterable[str]) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+# Yahoo's own sector taxonomy is not GICS. Mapping it explicitly keeps one
+# vocabulary on the page: a table that shows both "Technology" and
+# "Information Technology" as separate sectors is simply wrong.
+YAHOO_TO_GICS = {
+    "Technology": "Information Technology",
+    "Communication Services": "Communication Services",
+    "Consumer Cyclical": "Consumer Discretionary",
+    "Consumer Defensive": "Consumer Staples",
+    "Healthcare": "Health Care",
+    "Financial Services": "Financials",
+    "Industrials": "Industrials",
+    "Energy": "Energy",
+    "Basic Materials": "Materials",
+    "Real Estate": "Real Estate",
+    "Utilities": "Utilities",
+}
+
+
+def fetch_sectors(symbols: Iterable[str]) -> pd.DataFrame:
+    """Sector and industry for names the GICS list does not cover.
+
+    Used only as a fallback for index members outside the S&P 500, and the
+    artifact records that these labels came from a different taxonomy.
+    """
+    import yfinance as yf
+
+    rows: list[dict] = []
+    for symbol in sorted({s for s in symbols if s}):
+        try:
+            info = yf.Ticker(symbol).get_info()
+        except Exception:
+            continue
+        sector = info.get("sector")
+        rows.append(
+            {
+                "ticker": symbol,
+                "name": info.get("shortName") or info.get("longName") or symbol,
+                "sector": YAHOO_TO_GICS.get(sector, sector or "Unclassified"),
+                "sub_sector": info.get("industry") or "-",
+                "classification_source": "yahoo_mapped_to_gics",
+            }
+        )
+    return pd.DataFrame(rows)

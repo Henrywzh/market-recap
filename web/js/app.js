@@ -1,27 +1,34 @@
 // Shell: artifact loading, tab routing, theme, clock and the provenance footer.
 
-import { el } from './fmt.js';
+import { el, DASH as DASH_ } from './fmt.js';
 import { resizeAll, disposeAll } from './charts.js';
 
-import renderMarkets from './tabs/markets.js';
-import renderHeatmaps from './tabs/heatmaps.js';
-import renderFixedIncome from './tabs/fixed-income.js';
-import renderMacro from './tabs/macro.js';
-import renderTechnicals from './tabs/technicals.js';
-import renderDcf from './tabs/dcf.js';
-
+// Tab modules load on demand, stamped with the build they belong to. A
+// browser keeps an ES module in memory under its URL, so an unversioned
+// module survives a reload, a new tab and a no-store response alike: the page
+// then renders last build's code against this build's data, which is far
+// harder to spot than a plain failure.
 const TABS = [
-  { id: 'markets', label: 'MARKETS', artifact: 'markets', render: renderMarkets },
-  { id: 'heatmaps', label: 'HEAT MAPS', artifact: 'heatmaps', render: renderHeatmaps },
-  { id: 'fixed-income', label: 'FIXED INCOME', artifact: 'fixed_income', render: renderFixedIncome },
-  { id: 'macro', label: 'MACRO', artifact: 'macro', render: renderMacro },
-  { id: 'technicals', label: 'TECHNICALS', artifact: 'technicals', render: renderTechnicals },
-  { id: 'dcf', label: 'DCF', artifact: 'dcf', render: renderDcf },
+  { id: 'markets', label: 'MARKETS', artifact: 'markets', module: 'markets' },
+  { id: 'heatmaps', label: 'HEAT MAPS', artifact: 'heatmaps', module: 'heatmaps' },
+  { id: 'fixed-income', label: 'FIXED INCOME', artifact: 'fixed_income', module: 'fixed-income' },
+  { id: 'macro', label: 'MACRO', artifact: 'macro', module: 'macro' },
+  { id: 'technicals', label: 'TECHNICALS', artifact: 'technicals', module: 'technicals' },
+  { id: 'dcf', label: 'DCF', artifact: 'dcf', module: 'dcf' },
 ];
+
+const renderers = new Map();
+
+async function rendererFor(tab) {
+  if (renderers.has(tab.id)) return renderers.get(tab.id);
+  const module = await import(`./tabs/${tab.module}.js?v=${encodeURIComponent(state.version)}`);
+  renderers.set(tab.id, module.default);
+  return module.default;
+}
 
 const ARTIFACT_BASE = '../artifacts';
 const cache = new Map();
-const state = { manifest: null, active: null };
+const state = { manifest: null, active: null, version: 'dev' };
 
 export async function loadArtifact(name) {
   if (cache.has(name)) return cache.get(name);
@@ -80,9 +87,12 @@ async function select(id, silent = false) {
   main.append(el('div', { class: 'loading', text: `Loading ${tab.label}…` }));
 
   try {
-    const payload = await loadArtifact(tab.artifact);
+    const [payload, render] = await Promise.all([
+      loadArtifact(tab.artifact),
+      rendererFor(tab),
+    ]);
     main.innerHTML = '';
-    await tab.render(main, payload, state.manifest);
+    await render(main, payload, state.manifest);
   } catch (error) {
     main.innerHTML = '';
     main.append(el('div', { class: 'gap' }, [
@@ -104,7 +114,7 @@ function renderFooter(manifest) {
   footer.append(el('div', {}, [
     `Generated ${manifest.generated_at} in ${manifest.build_seconds}s · `,
     `S&P 500 constituents: ${manifest.constituents} (${manifest.constituents_priced} priced) · `,
-    `Nasdaq-100 constituents: ${manifest.ndx_constituents} · `,
+    `Nasdaq-100 constituents: ${manifest.ndx_constituents} (${manifest.ndx_constituents_priced ?? DASH_} priced) · `,
     `Session: ${manifest.as_of} · Holdings file: ${manifest.holdings_as_of}`,
   ]));
 
@@ -135,7 +145,8 @@ function renderFooter(manifest) {
   }
 }
 
-async function boot() {
+export async function boot(manifest, version) {
+  state.version = version || 'dev';
   startClock();
 
   const themeSelect = document.getElementById('theme-select');
@@ -147,17 +158,14 @@ async function boot() {
 
   buildTabs();
 
-  try {
-    state.manifest = await loadArtifact('manifest');
-  } catch (error) {
+  if (!manifest) {
     document.getElementById('main').innerHTML = '';
     document.getElementById('main').append(el('div', { class: 'gap' }, [
-      `No build manifest found (${error.message}). Run: python -m market_recap.cli refresh`,
+      'No build manifest found. Run: python -m market_recap.cli refresh',
     ]));
     return;
   }
-
-  const manifest = state.manifest;
+  state.manifest = manifest;
   const brand = manifest.brand || {};
   document.getElementById('brand').textContent = brand.title || 'MARKET RECAP';
   document.getElementById('brand-sub').textContent = brand.subtitle || '';
@@ -176,4 +184,3 @@ async function boot() {
   window.addEventListener('resize', () => requestAnimationFrame(resizeAll));
 }
 
-boot();

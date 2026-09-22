@@ -54,9 +54,16 @@ def run(*, panels: list[str] | None = None, history_period: str = "10y", skip_dc
         "holdings_as_of": ctx.holdings_as_of,
         "generated_at": utc_now_iso(),
         "build_seconds": round(time.monotonic() - started, 1),
+        # Counted per index, not as a union: ``closes`` spans both baskets, so
+        # one "priced" number would overstate S&P 500 coverage by the
+        # Nasdaq-only names.
         "constituents": int(len(ctx.holdings)),
-        "constituents_priced": int(ctx.closes.shape[1]),
+        "constituents_priced": int(ctx.holdings["yahoo_symbol"].isin(ctx.closes.columns).sum())
+        if not ctx.holdings.empty else 0,
         "ndx_constituents": int(len(ctx.ndx_holdings)),
+        "ndx_constituents_priced": int(ctx.ndx_holdings["yahoo_symbol"].isin(ctx.closes.columns).sum())
+        if not ctx.ndx_holdings.empty else 0,
+        "series_priced": int(ctx.closes.shape[1]),
         "panels": written,
         **ctx.log.to_dict(),
     }

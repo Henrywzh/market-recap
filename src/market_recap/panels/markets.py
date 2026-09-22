@@ -67,48 +67,74 @@ def build(ctx) -> dict:
             }
         )
 
-    # --- Advance / decline, on the constituent panel not on a proxy --------
-    spx_ad = R.advance_decline(closes)
+    # --- Advance / decline, on each index's own members --------------------
+    # ``closes`` now spans both baskets, so counting every column would credit
+    # the S&P 500 with Nasdaq-only names.
+    spx_symbols = [s for s in priced["yahoo_symbol"] if s in closes.columns]
+    spx_ad = R.advance_decline(closes[spx_symbols])
     ndx_symbols = [s for s in ctx.ndx_holdings.get("yahoo_symbol", pd.Series(dtype=str)) if s in closes.columns]
     ndx_ad = R.advance_decline(closes[ndx_symbols]) if ndx_symbols else None
 
-    # --- Index price chart, one payload per selectable window --------------
-    spx_symbol = ctx.config["universe"]["spx_index"]
-    price_chart = {}
-    if spx_symbol in ctx.index_closes.columns:
-        full = ctx.index_closes[spx_symbol]
-        for label, sessions in CHART_PERIODS.items():
+    # --- One block per index, built the same way so the two sections are
+    #     genuinely comparable rather than two different calculations.
+    def index_block(label: str, symbol: str, members: pd.DataFrame) -> dict | None:
+        symbols = [s for s in members["yahoo_symbol"] if s in closes.columns]
+        if symbol not in ctx.index_closes.columns or not symbols:
+            return None
+        full = ctx.index_closes[symbol]
+
+        price_chart = {}
+        for window_label, sessions in CHART_PERIODS.items():
             window = _windowed(full, sessions)
             if len(window) > 2:
-                price_chart[label] = _series_payload(window)
+                price_chart[window_label] = _series_payload(window)
 
-    breadth_series = R.net_breadth_series(closes)
-    breadth_chart = {}
-    for label, sessions in (("1M", 21), ("3M", 63), ("6M", 126), ("YTD", None), ("1Y", 252), ("2Y", 504)):
-        window = _windowed(breadth_series, sessions)
-        if len(window) > 2:
-            breadth_chart[label] = _series_payload(window)
+        panel = closes[symbols]
+        breadth = R.net_breadth_series(panel)
+        breadth_chart = {}
+        for window_label, sessions in (("1M", 21), ("3M", 63), ("6M", 126), ("YTD", None), ("1Y", 252), ("2Y", 504)):
+            window = _windowed(breadth, sessions)
+            if len(window) > 2:
+                breadth_chart[window_label] = _series_payload(window)
 
-    # --- Movers ------------------------------------------------------------
-    movers = []
-    if closes.shape[0] >= 2:
-        change = (closes.iloc[-1] / closes.iloc[-2] - 1.0) * 100.0
-        meta = priced.set_index("yahoo_symbol")
-        for symbol, pct in change.dropna().items():
-            if symbol not in meta.index:
-                continue
-            row = meta.loc[symbol]
-            movers.append(
-                {
-                    "ticker": symbol,
-                    "name": str(row["name"]).title(),
-                    "sector": row["sector"],
-                    "sub_sector": row["sub_sector"],
-                    "price": clean_float(closes[symbol].iloc[-1], 2),
-                    "change_pct": clean_float(pct, 2),
-                }
-            )
-        movers.sort(key=lambda r: r["change_pct"], reverse=True)
+        movers = []
+        if panel.shape[0] >= 2:
+            change = (panel.iloc[-1] / panel.iloc[-2] - 1.0) * 100.0
+            meta = members.drop_duplicates("yahoo_symbol").set_index("yahoo_symbol")
+            for sym, value in change.dropna().items():
+                if sym not in meta.index:
+                    continue
+                row = meta.loc[sym]
+                movers.append(
+                    {
+                        "ticker": sym,
+                        "name": str(row["name"]).title(),
+                        "sector": row["sector"],
+                        "sub_sector": row["sub_sector"],
+                        "price": clean_float(panel[sym].iloc[-1], 2),
+                        "change_pct": clean_float(value, 2),
+                    }
+                )
+            movers.sort(key=lambda r: r["change_pct"], reverse=True)
+
+        return {
+            "label": label,
+            "symbol": symbol,
+            "members": len(symbols),
+            "price_chart": price_chart,
+            "breadth_chart": breadth_chart,
+            "gainers": movers[:10],
+            "losers": movers[-10:][::-1],
+        }
+
+    indices = {}
+    spx_block = index_block("S&P 500", ctx.config["universe"]["spx_index"], priced)
+    if spx_block:
+        indices["SPX"] = spx_block
+    if not ctx.ndx_holdings.empty:
+        ndx_block = index_block("Nasdaq 100", ctx.config["universe"]["ndx_index"], ctx.ndx_holdings)
+        if ndx_block:
+            indices["NDX"] = ndx_block
 
     # --- Sector performance / weight / contribution ------------------------
     # Contribution is weight x return, using the issuer's published weight.
@@ -187,10 +213,11 @@ def build(ctx) -> dict:
         "quotes": quotes,
         "drawdowns": drawdowns,
         "advance_decline": {"SPX": spx_ad, "NDX": ndx_ad},
-        "price_chart": price_chart,
-        "breadth_chart": breadth_chart,
-        "gainers": movers[:10],
-        "losers": movers[-10:][::-1],
+        "indices": indices,
+        "ndx_classification": (
+            ctx.ndx_holdings["classification_source"].value_counts().to_dict()
+            if "classification_source" in ctx.ndx_holdings else {}
+        ),
         "sector_table": {"index": index_row, "rows": sector_rows},
         "sector_rebased": rebased,
         "breadth_by_sector": {"windows": BREADTH_WINDOWS, "rows": breadth_rows},

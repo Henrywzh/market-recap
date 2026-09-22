@@ -4,7 +4,7 @@
     {
       "name": "market-recap",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8777"],
+      "runtimeArgs": ["scripts/serve.py", "--port", "8777"],
       "port": 8777
     }
   ]

@@ -104,34 +104,43 @@ export default function renderMarkets(root, data) {
   ]);
   root.append(strip);
 
-  root.append(sectionTitle('S&P 500', '(SPX)'));
+  // One section per index, rendered by the same function so the two read
+  // identically and a reader can compare them without re-learning the layout.
+  const drawCallbacks = [];
 
-  // --- Price + breadth, each with its own independent window --------------
-  const priceNode = el('div', { class: 'chart' });
-  const pricePeriods = Object.keys(data.price_chart);
-  const priceDefault = pricePeriods.includes('1Y') ? '1Y' : pricePeriods[pricePeriods.length - 1];
-  const drawPrice = (period) => {
-    const series = data.price_chart[period];
-    if (series) areaLine(priceNode, series.dates, series.values);
-  };
+  function indexSection(key, block) {
+    root.append(sectionTitle(block.label, `(${key}) · ${block.members} MEMBERS`));
 
-  const breadthNode = el('div', { class: 'chart' });
-  const breadthPeriods = Object.keys(data.breadth_chart);
-  const breadthDefault = breadthPeriods.includes('6M') ? '6M' : breadthPeriods[0];
-  const drawBreadth = (period) => {
-    const series = data.breadth_chart[period];
-    if (series) zeroLine(breadthNode, series.dates, series.values);
-  };
+    const priceNode = el('div', { class: 'chart' });
+    const pricePeriods = Object.keys(block.price_chart);
+    const priceDefault = pricePeriods.includes('1Y') ? '1Y' : pricePeriods[pricePeriods.length - 1];
+    const drawPrice = (period) => {
+      const series = block.price_chart[period];
+      if (series) areaLine(priceNode, series.dates, series.values);
+    };
 
-  root.append(el('div', { class: 'grid two' }, [
-    card('SPX — PRICE', periodSwitch(pricePeriods, priceDefault, drawPrice), priceNode),
-    card('SPX — NET BREADTH %', periodSwitch(breadthPeriods, breadthDefault, drawBreadth), breadthNode),
-  ]));
+    const breadthNode = el('div', { class: 'chart' });
+    const breadthPeriods = Object.keys(block.breadth_chart);
+    const breadthDefault = breadthPeriods.includes('6M') ? '6M' : breadthPeriods[0];
+    const drawBreadth = (period) => {
+      const series = block.breadth_chart[period];
+      if (series) zeroLine(breadthNode, series.dates, series.values);
+    };
 
-  root.append(el('div', { class: 'grid two' }, [
-    moverTable('TOP 10 GAINERS — SPX', data.gainers),
-    moverTable('TOP 10 LOSERS — SPX', data.losers),
-  ]));
+    root.append(el('div', { class: 'grid two' }, [
+      card(`${key} — PRICE`, periodSwitch(pricePeriods, priceDefault, drawPrice), priceNode),
+      card(`${key} — NET BREADTH %`, periodSwitch(breadthPeriods, breadthDefault, drawBreadth), breadthNode),
+    ]));
+
+    root.append(el('div', { class: 'grid two' }, [
+      moverTable(`TOP 10 GAINERS — ${key}`, block.gainers),
+      moverTable(`TOP 10 LOSERS — ${key}`, block.losers),
+    ]));
+
+    drawCallbacks.push(() => { drawPrice(priceDefault); drawBreadth(breadthDefault); });
+  }
+
+  Object.entries(data.indices || {}).forEach(([key, block]) => indexSection(key, block));
 
   // --- Sector table beside the rebased chart -------------------------------
   const rebasedNode = el('div', { class: 'chart tall' });
@@ -152,7 +161,16 @@ export default function renderMarkets(root, data) {
     slopeTable(data.sma_slope_by_sector),
   ]));
 
-  drawPrice(priceDefault);
-  drawBreadth(breadthDefault);
+  const mixed = data.ndx_classification || {};
+  if (mixed.yahoo_mapped_to_gics) {
+    root.append(el('div', { class: 'note-text' }, [
+      `${mixed.wikipedia_gics || 0} Nasdaq-100 members carry GICS labels from the S&P 500 list; `,
+      `${mixed.yahoo_mapped_to_gics} sit outside it (foreign issuers and recent listings) and are `,
+      'labelled from Yahoo\'s taxonomy mapped onto the same GICS sector names. Sub-industry wording '
+      + 'therefore differs between the two groups.',
+    ]));
+  }
+
+  drawCallbacks.forEach((fn) => fn());
   drawRebased(rebasedDefault);
 }

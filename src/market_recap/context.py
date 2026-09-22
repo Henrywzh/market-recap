@@ -17,6 +17,33 @@ from .sources import ssga, wikipedia, yahoo
 from .util import BuildLog, SourceRecord, to_iso_date
 
 
+# A session is "complete" when nearly the whole panel has printed a close.
+# Anything less is a session in progress: the provider serves an intraday bar
+# for whatever it refreshed most recently, and a few hundred cached symbols
+# still end on the prior close.
+SESSION_COVERAGE_THRESHOLD = 0.90
+
+
+def _completed_sessions(closes: pd.DataFrame) -> pd.DataFrame:
+    """Drop trailing rows that are not a finished session for the whole panel.
+
+    This is not cosmetic. A frame whose last row holds fifteen of five hundred
+    columns makes every cross-sectional figure on the page wrong at once:
+    today's return is NaN for everything that was not refreshed, advancers and
+    decliners count a handful of names, and the page dates itself to a session
+    that has not closed. A post-market recap describes the last completed
+    session, so that is what the context hands the panels.
+    """
+    if closes.empty:
+        return closes
+    coverage = closes.notna().sum(axis=1) / closes.shape[1]
+    complete = coverage >= SESSION_COVERAGE_THRESHOLD
+    if not complete.any():
+        return closes
+    last_complete = complete[complete].index[-1]
+    return closes.loc[:last_complete]
+
+
 @dataclass
 class MarketContext:
     config: dict
@@ -70,23 +97,45 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
     holdings["sub_sector"] = holdings["sub_sector"].fillna("-")
     ctx.holdings = holdings
 
-    # 3. Nasdaq-100 basket, for the NDX drawdown and breadth figures.
+    # 3. Nasdaq-100 basket. Most of it overlaps the S&P 500 and inherits the
+    #    GICS labels above; the rest are foreign issuers and recent listings
+    #    that the S&P list does not cover, so their sector comes from a
+    #    different taxonomy and is marked as such.
     try:
         ndx, ndx_as_of, ndx_url = ssga.fetch_holdings("QNDX", use_cache=use_cache)
         ndx["yahoo_symbol"] = ndx["ticker"].map(ssga.to_yahoo_symbol)
+        labelled = holdings[["yahoo_symbol", "sector", "sub_sector"]].copy()
+        labelled["classification_source"] = "wikipedia_gics"
+        ndx = ndx.merge(labelled, on="yahoo_symbol", how="left")
+
+        outside = ndx.loc[ndx["sector"].isna(), "yahoo_symbol"].tolist()
+        if outside:
+            extra = yahoo.fetch_sectors(outside)
+            if not extra.empty:
+                extra = extra.set_index("ticker")
+                for column in ("sector", "sub_sector", "classification_source"):
+                    ndx[column] = ndx.apply(
+                        lambda row, c=column: extra.loc[row["yahoo_symbol"], c]
+                        if pd.isna(row.get(c)) and row["yahoo_symbol"] in extra.index
+                        else row.get(c),
+                        axis=1,
+                    )
+        ndx["sector"] = ndx["sector"].fillna("Unclassified")
+        ndx["sub_sector"] = ndx["sub_sector"].fillna("-")
         ctx.ndx_holdings = ndx
         log.add(SourceRecord("ssga_qndx", "SPDR Portfolio Nasdaq-100 daily holdings", ndx_url, ndx_as_of, rows=len(ndx), policy="fund_holdings"))
     except Exception as exc:
         log.fail("ndx_holdings", exc)
 
-    # 4. Constituent price history.
-    symbols = holdings["yahoo_symbol"].tolist()
-    ctx.closes = yahoo.fetch_closes(symbols, period=history_period)
+    # 4. Constituent price history, over both baskets at once so the two index
+    #    sections of the page describe the same session.
+    symbols = sorted(set(holdings["yahoo_symbol"]) | set(ctx.ndx_holdings.get("yahoo_symbol", [])))
+    ctx.closes = _completed_sessions(yahoo.fetch_closes(symbols, period=history_period))
     missing = sorted(set(symbols) - set(ctx.closes.columns))
     log.add(
         SourceRecord(
             "yahoo_constituents",
-            "S&P 500 constituent daily closes",
+            "S&P 500 / Nasdaq-100 constituent daily closes",
             "https://finance.yahoo.com",
             to_iso_date(ctx.closes.index[-1]) if not ctx.closes.empty else None,
             rows=int(ctx.closes.shape[1]),
