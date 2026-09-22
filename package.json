@@ -1,0 +1,8 @@
+{
+  "name": "market-recap",
+  "private": true,
+  "description": "Deploy tooling for the market-recap dashboard. Pinned so the nightly job does not resolve a version over the network.",
+  "devDependencies": {
+    "wrangler": "4.136.3"
+  }
+}

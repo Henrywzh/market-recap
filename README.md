@@ -72,7 +72,10 @@ python -m market_recap.cli refresh --panels markets --skip-dcf
 ### Running it on a schedule
 
 ```bash
-make schedule      # weekdays 18:30 local, via launchd
+make schedule        # weekdays 18:30 local, via launchd
+make schedule-check  # what will the next run actually be able to do?
+make schedule-run    # run it now, exactly as launchd would
+make logs            # tail data/logs/refresh.log
 make unschedule
 ```
 
@@ -105,6 +108,22 @@ The Pages project is `market-recap`. Creating it needed
 because current wrangler delegates Pages commands to Workers and reads this
 `wrangler.toml` as a Workers config with no entry point. `--force` is needed
 only once, for the create; deploys run against Pages directly.
+
+Credentials for the unattended job live in `~/.config/market-recap/env`, not
+in the repository — no clone, no backup and no `git add -A` can carry them.
+`scripts/schedule.sh` refuses to read that file unless it is mode 600, because
+an unattended job is exactly where a world-readable token sits unnoticed for
+months. The token needs one permission: **Account → Cloudflare Pages → Edit**.
+
+`make schedule-check` reports what the next run will be able to do — whether
+python, node and wrangler resolve under launchd's minimal PATH, and whether a
+token is present — rather than letting the job discover the answer at 18:30
+into a log file. Without a token the job still refreshes and validates nightly
+and says it did not deploy; it does not fail silently and it does not publish.
+
+wrangler is pinned in `package.json` rather than invoked through `npx
+wrangler@latest`: a nightly job should not resolve a new major version over
+the network at 18:30 and find out what changed.
 
 Deployment is by direct upload rather than Pages' git integration. The
 artifacts are rebuilt every session and are not in git, so a git-triggered
