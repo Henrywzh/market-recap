@@ -16,6 +16,7 @@ them.
 | **FIXED INCOME** | Published par yield curve vs. 1 week / 1 month / start of year, level and bps change by tenor, 10Y−2Y and 10Y−3M spreads |
 | **MACRO** | Commodity futures/ETF proxies with multi-period returns, last 12 monthly inflation releases as a heat table |
 | **TECHNICALS** | Any A/B relative-strength ratio with 60/200MA and MACD; single-ticker price with 20/50/200 SMA and a ±1.5σ band, z-score regime, SMA slope, and forward return by z-score band |
+| **CROSS-LISTING** | A US line against its home-market line at the depositary ratio, with the diagnostics that say whether the series measures a dislocation or a session gap |
 | **DCF** | SEC-filled 5-year history, your 5-year forecast, WACC, terminal value, equity bridge and a WACC × exit-multiple sensitivity grid |
 
 ## Data sources
@@ -124,6 +125,30 @@ data/cache/                raw snapshots and the day's price cache
   it are labelled from Yahoo's taxonomy mapped onto the same GICS sector names,
   so sub-industry wording differs between the two groups.
 - Line items a filer did not tag are left blank and are editable in the model.
+
+## The cross-listing premium, and why it ships with diagnostics
+
+Comparing two listings of one company looks like subtraction and is not. Two
+inputs decide whether the number means anything, and both fail quietly.
+
+**The depositary ratio must come from the filing.** SK hynix's Nasdaq line
+prices at roughly 7.2 Korean shares per ADS if you back it out of today's
+quotes — and using that figure forces the premium to zero and draws a flat
+line forever. The 424B4 says one ADS is one-tenth of a common share, and at
+that ratio the premium is about +40%. The panel cites the filing on the page.
+
+**The home market closes first.** Seoul shuts roughly fourteen hours before
+New York, so a same-date comparison sets a fresh US close against a stale one.
+On this pair the daily change in the premium correlates +0.55 with the US
+leg's own return and −0.63 with the home leg's, its day-to-day swing (11.7pp)
+exceeds the spread of the level itself (9.0pp), and its autocorrelation is
+0.14. Those are the fingerprints of a timing artifact, not a moving
+dislocation, so the tab says to read the level and not the change.
+
+What the gap does make usable is the lead: the US return today correlates
++0.59 with the home market's *next* session against +0.30 with the same date.
+That is an overnight indicator, and it is what a desk actually uses an ADR
+premium for.
 
 ## Not investment advice
 

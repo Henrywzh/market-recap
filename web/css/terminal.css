@@ -346,6 +346,11 @@ footer {
 }
 footer .brandline { color: var(--text-dim); }
 footer a { color: var(--text-dim); }
+
+/* Links inside content inherit the terminal palette; the browser default is
+   unreadable on a near-black ground. */
+a { color: var(--accent); text-decoration: none; word-break: break-all; }
+a:hover { text-decoration: underline; }
 .src-ok { color: var(--up); }
 .src-partial { color: var(--accent); }
 .src-error { color: var(--down); }

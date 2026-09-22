@@ -6,7 +6,7 @@ import time
 
 from .config import ARTIFACT_DIR, ensure_dirs, load_config
 from .context import build_context
-from .panels import dcf, fixed_income, heatmaps, macro, markets
+from .panels import cross_listing, dcf, fixed_income, heatmaps, macro, markets
 from .panels import technicals as technicals_panel
 from .util import utc_now_iso, write_json
 
@@ -16,6 +16,7 @@ PANELS = {
     "fixed_income": fixed_income.build,
     "macro": macro.build,
     "technicals": technicals_panel.build,
+    "cross_listing": cross_listing.build,
 }
 
 

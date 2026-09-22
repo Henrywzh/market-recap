@@ -40,6 +40,24 @@ label = "ASML (ADR)"
 ticker = "ARM"
 label = "Arm Holdings (ADR)"
 
+# Two listings of the same company, priced against each other.
+#
+# ``ratio`` is how many home-market shares one US line represents. It must come
+# from the depositary's own filing, never from today's prices: reverse-engineer
+# it and the premium is zero by construction and the panel plots a flat line
+# forever. ``ratio_source`` is where it was read, so the number can be checked.
+[[cross_listing]]
+us_ticker = "SKHY"
+home_ticker = "000660.KS"
+home_market = "Korea (KRX)"
+fx_ticker = "KRW=X"
+fx_note = "KRW per USD"
+label = "SK hynix"
+ratio = 0.1
+ratio_source = "SEC 424B4 filed 2026-07-10 (accession 0001193125-26-299963): 'Each ADS represents one-tenth of a common share.'"
+ratio_url = "https://www.sec.gov/Archives/edgar/data/2120882/000119312526299963/d32785d424b4.htm"
+home_close_lead_hours = 14
+
 [universe.sectors]
 # GICS sector -> Select Sector SPDR wrapper. Weight and contribution come from
 # the official SPY holdings file, not from the wrapper.

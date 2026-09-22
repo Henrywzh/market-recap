@@ -84,3 +84,43 @@ def test_ytd_return_uses_the_last_print_of_the_prior_year():
     index = pd.to_datetime(["2025-12-30", "2025-12-31", "2026-01-02", "2026-03-02"])
     series = pd.Series([90.0, 100.0, 105.0, 110.0], index=index)
     assert R.ytd_return(series) == pytest.approx(10.0)
+
+
+def test_cross_listing_premium_uses_the_declared_ratio():
+    """A premium computed with a fitted ratio is zero by construction.
+
+    The panel must use the depositary's published ratio, so a pair whose US
+    line is priced exactly at parity shows zero and one at a genuine premium
+    shows it.
+    """
+    from market_recap.panels import cross_listing
+
+    index = pd.bdate_range("2026-07-10", periods=60)
+    home = pd.Series(1_800_000.0, index=index)
+    fx = pd.Series(1_350.0, index=index)
+    parity = home / fx * 0.1  # 1 ADS = 1/10 share
+
+    frame = pd.DataFrame({"us": parity, "home": home, "fx": fx})
+    frame["premium_pct"] = (frame["us"] / (frame["home"] / frame["fx"] * 0.1) - 1) * 100
+    assert frame["premium_pct"].abs().max() == pytest.approx(0.0, abs=1e-9)
+
+    premium_frame = frame.copy()
+    premium_frame["us"] = parity * 1.4
+    premium_frame["premium_pct"] = (
+        premium_frame["us"] / (premium_frame["home"] / premium_frame["fx"] * 0.1) - 1
+    ) * 100
+    assert premium_frame["premium_pct"].iloc[-1] == pytest.approx(40.0)
+
+    diag = cross_listing._diagnostics(premium_frame)
+    assert diag["sessions"] == 60
+
+
+def test_cross_listing_verdict_flags_a_timing_dominated_series():
+    """A premium whose daily swing exceeds its own level spread is noise."""
+    from market_recap.panels import cross_listing
+
+    timing_noise = {"daily_change_sd_pp": 11.7, "level_sd_pp": 9.0, "autocorr_1d": 0.14}
+    assert cross_listing._verdict(timing_noise)["daily_change_usable"] is False
+
+    persistent = {"daily_change_sd_pp": 0.4, "level_sd_pp": 3.2, "autocorr_1d": 0.95}
+    assert cross_listing._verdict(persistent)["daily_change_usable"] is True

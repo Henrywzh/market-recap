@@ -14,6 +14,7 @@ const TABS = [
   { id: 'fixed-income', label: 'FIXED INCOME', artifact: 'fixed_income', module: 'fixed-income' },
   { id: 'macro', label: 'MACRO', artifact: 'macro', module: 'macro' },
   { id: 'technicals', label: 'TECHNICALS', artifact: 'technicals', module: 'technicals' },
+  { id: 'cross-listing', label: 'CROSS-LISTING', artifact: 'cross_listing', module: 'cross-listing' },
   { id: 'dcf', label: 'DCF', artifact: 'dcf', module: 'dcf' },
 ];
 
