@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 
-from .config import ARTIFACT_DIR, PERIOD_TRADING_DAYS, load_config
+from .config import ARTIFACT_DIR, PERIOD_TRADING_DAYS, SESSION_COVERAGE_THRESHOLD, load_config
 
 SEVERITIES = ("error", "warning")
 
@@ -92,6 +92,33 @@ def _check_coverage(manifest: dict) -> list[Finding]:
                 "warning", "coverage",
                 f"{index['key']}: {members - priced} of {members} members unpriced",
             ))
+    return out
+
+
+def _check_latest_session(markets: dict | None) -> list[Finding]:
+    """The page's session must have a measurable change, not just a price.
+
+    Coverage counts members with *a* price; a session whose previous day is
+    missing at the source (Yahoo once served a whole session as NaN) prices
+    every member and measures none of them. Without this check that page
+    deploys with blank 1D columns, zero advancers and zero decliners.
+    """
+    if not markets:
+        return []
+    out = []
+    for key, block in (markets.get("indices") or {}).items():
+        ad = block.get("advance_decline") or {}
+        measured = sum(ad.get(k) or 0 for k in ("advancers", "decliners", "unchanged"))
+        members = block.get("members") or 0
+        if members and measured < SESSION_COVERAGE_THRESHOLD * members:
+            out.append(Finding(
+                "error", "latest_session",
+                f"{key}: only {measured} of {members} members have a 1D change on "
+                f"{markets.get('as_of')}; the prior session is missing at the source",
+            ))
+    index_row = (markets.get("sector_table") or {}).get("index") or {}
+    if index_row and index_row.get("1D") is None:
+        out.append(Finding("error", "latest_session", "the index row of the sector table has no 1D return"))
     return out
 
 
@@ -179,6 +206,7 @@ def run() -> dict:
         _check_period_labels(config)
         + _check_as_of(manifest, panels)
         + _check_coverage(manifest)
+        + _check_latest_session(panels.get("markets"))
         + _check_presets(config, panels.get("technicals"))
         + _check_cross_listing(config, panels.get("cross_listing"))
         + _check_flow_attribution(panels.get("heatmaps"))

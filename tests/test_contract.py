@@ -371,3 +371,20 @@ def test_a_daily_file_from_before_the_rollover_is_stale_even_if_under_a_day_old(
     assert cache.is_fresh(path, "reference_data", now=tonight)
     # And the same file is reused by a rerun on the evening it was written.
     assert cache.is_fresh(path, "daily_file", now=_ny("2026-09-21 21:00"))
+
+
+def test_validation_flags_a_session_whose_prior_day_is_missing():
+    """Every member priced, none measured: the page Yahoo's all-NaN session produces."""
+    healthy = {
+        "as_of": "2026-09-23",
+        "indices": {"SPX": {"members": 503, "advance_decline": {"advancers": 300, "decliners": 200, "unchanged": 3}}},
+        "sector_table": {"index": {"1D": 0.4}},
+    }
+    assert validate._check_latest_session(healthy) == []
+    hole = {
+        "as_of": "2026-09-23",
+        "indices": {"SPX": {"members": 503, "advance_decline": {"advancers": 0, "decliners": 0, "unchanged": 0}}},
+        "sector_table": {"index": {"1D": None}},
+    }
+    findings = validate._check_latest_session(hole)
+    assert len(findings) == 2 and all(f.severity == "error" for f in findings)
