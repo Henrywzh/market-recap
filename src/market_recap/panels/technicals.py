@@ -17,7 +17,7 @@ from __future__ import annotations
 import pandas as pd
 
 from ..config import PERIOD_TRADING_DAYS, TICKER_ARTIFACT_DIR
-from ..util import clean_float, write_json
+from ..util import clean_float, prune_stale, write_json
 
 # Decimal places kept on a baked close: enough for a sub-dollar ETF, and every
 # extra digit is paid for once per session per ticker.
@@ -66,6 +66,7 @@ def build(ctx) -> dict:
         if entry:
             baked.append(entry)
 
+    prune_stale(TICKER_ARTIFACT_DIR, (e["ticker"] for e in baked))
     zwindow = int(settings["zscore_window"])
     return {
         "as_of": ctx.as_of,

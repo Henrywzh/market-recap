@@ -12,6 +12,7 @@ import contextlib
 from datetime import date
 import io
 from pathlib import Path
+import threading
 import time
 from typing import Iterable, Sequence
 
@@ -27,33 +28,79 @@ CHUNK_SIZE = 60
 CHUNK_PAUSE_SECONDS = 0.4
 
 
+# A batch that has not answered in this long is abandoned and retried like any
+# other failed batch. yfinance's own timeout does not cover every stall: a
+# build once sat for ten minutes on an open connection, and in the nightly
+# job one such stall spends the whole job's time limit.
+DOWNLOAD_DEADLINE_SECONDS = 120
+
+
+def _within(seconds: float, call):
+    """Run ``call`` with a wall-clock deadline. The worker is a daemon thread,
+    so a request that never returns cannot keep the process alive either."""
+    outcome: dict = {}
+
+    def run():
+        try:
+            outcome["value"] = call()
+        except BaseException as exc:  # handed to the caller below
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive():
+        raise TimeoutError(f"no response from the price feed in {seconds:.0f}s")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome.get("value")
+
+
 def _silent_download(symbols: Sequence[str], **kwargs) -> pd.DataFrame:
-    """yfinance prints delisting chatter to stderr; a partial batch is normal."""
+    """yfinance prints delisting chatter to stderr; a partial batch is normal.
+
+    The redirect wraps the deadline rather than sitting inside the worker, so
+    an abandoned request cannot leave the process's stderr pointing at a
+    buffer.
+    """
     import yfinance as yf
 
+    kwargs.setdefault("auto_adjust", True)
     buffer = io.StringIO()
     with contextlib.redirect_stderr(buffer), contextlib.redirect_stdout(buffer):
-        return yf.download(list(symbols), progress=False, auto_adjust=True, threads=True, **kwargs)
+        return _within(
+            DOWNLOAD_DEADLINE_SECONDS,
+            lambda: yf.download(list(symbols), progress=False, threads=True, **kwargs),
+        )
 
 
-def _download_chunk(chunk: Sequence[str], period: str) -> tuple[pd.DataFrame, pd.DataFrame] | None:
-    """(closes, split ratios) for a batch. Splits come in the same response
-    (``actions=True``), so knowing them costs no extra request."""
-    raw = _silent_download(chunk, period=period, actions=True)
+# One response carries every price series the build needs. ``Adj Close`` is
+# adjusted for splits and dividends -- the total-return series every return on
+# the page is measured on. ``Close`` is adjusted for splits only: the price a
+# multiple is quoted on. A P/E on dividend-adjusted prices understates every
+# past multiple by the dividends paid since (Coca-Cola's 2016 price is 42.74,
+# its adjusted close 31.35).
+ADJUSTED_FIELD = "Adj Close"
+PRICE_FIELD = "Close"
+SPLITS_FIELD = "Stock Splits"
+FIELDS = {"closes": ADJUSTED_FIELD, "prices": PRICE_FIELD, "splits": SPLITS_FIELD}
+
+
+def _download_chunk(chunk: Sequence[str], period: str) -> dict[str, pd.DataFrame] | None:
+    """{kind: frame} for a batch: adjusted closes, split-only prices, split ratios."""
+    raw = _silent_download(chunk, period=period, actions=True, auto_adjust=False)
     if raw is None or raw.empty:
         return None
-    if isinstance(raw.columns, pd.MultiIndex):
-        closes = raw["Close"]
-        splits = raw[SPLITS_FIELD] if SPLITS_FIELD in raw.columns.get_level_values(0) else pd.DataFrame(index=raw.index)
-        return closes, splits
-    closes = raw[["Close"]].copy()
-    closes.columns = list(chunk[:1])
-    splits = raw[[SPLITS_FIELD]].copy() if SPLITS_FIELD in raw.columns else pd.DataFrame(index=raw.index)
-    splits.columns = list(chunk[:1])[: splits.shape[1]]
-    return closes, splits
-
-
-SPLITS_FIELD = "Stock Splits"
+    out = {}
+    for kind, field in FIELDS.items():
+        if isinstance(raw.columns, pd.MultiIndex):
+            present = field in raw.columns.get_level_values(0)
+            out[kind] = raw[field] if present else pd.DataFrame(index=raw.index)
+        else:
+            frame = raw[[field]].copy() if field in raw.columns else pd.DataFrame(index=raw.index)
+            frame.columns = list(chunk[:1])[: frame.shape[1]]
+            out[kind] = frame
+    return out
 
 
 # One file per history length, refreshed once a session. The whole point is
@@ -76,9 +123,10 @@ def _read(path: Path) -> pd.DataFrame:
 
 
 def _load_cache(period: str) -> pd.DataFrame:
-    # Closes cached without their splits file predate split tracking; reusing
-    # them would leave the day's splits unknown, so they count as stale.
-    if not _cache_path(period, "splits").exists():
+    # Closes cached without their companion files predate them; reusing them
+    # would leave the day's splits and split-only prices unknown, so they
+    # count as stale.
+    if not all(_cache_path(period, kind).exists() for kind in FIELDS):
         return pd.DataFrame()
     return _read(_cache_path(period))
 
@@ -97,6 +145,15 @@ def fetch_splits(period: str) -> pd.DataFrame:
     ``fetch_closes`` calls for ``period``. Read from the same download, so a
     symbol whose closes are known has its splits known too."""
     return _read(_cache_path(period, "splits"))
+
+
+def fetch_prices(period: str) -> pd.DataFrame:
+    """Split-adjusted, not dividend-adjusted closes, from the same download as
+    ``fetch_closes``: what a valuation multiple is quoted on."""
+    frame = _read(_cache_path(period, "prices"))
+    if not frame.empty:
+        frame.index = pd.to_datetime(frame.index).tz_localize(None)
+    return frame
 
 
 def fetch_closes(
@@ -118,7 +175,7 @@ def fetch_closes(
     """
     wanted = sorted({s for s in symbols if s})
     collected: dict[str, pd.Series] = {}
-    splits: dict[str, pd.Series] = {}
+    companions: dict[str, dict[str, pd.Series]] = {"prices": {}, "splits": {}}
 
     if use_cache:
         cached = _load_cache(period)
@@ -140,13 +197,16 @@ def fetch_closes(
                 continue
             if result is None:
                 continue
-            closes, chunk_splits = result
+            closes = result["closes"]
             for column in closes.columns:
                 series = closes[column].dropna()
                 if not series.empty:
                     collected[str(column)] = closes[column]
-                    if column in chunk_splits.columns:
-                        splits[str(column)] = chunk_splits[column].where(chunk_splits[column] > 0)
+                    prices, splits = result["prices"], result["splits"]
+                    if column in prices.columns:
+                        companions["prices"][str(column)] = prices[column]
+                    if column in splits.columns:
+                        companions["splits"][str(column)] = splits[column].where(splits[column] > 0)
             time.sleep(CHUNK_PAUSE_SECONDS)
         pending = [s for s in wanted if s not in collected]
 
@@ -159,10 +219,13 @@ def fetch_closes(
     if use_cache:
         # combine_first unions both the index and the columns, so a run that
         # only recovered part of the universe still adds to the day's cache.
-        split_frame = pd.DataFrame(splits)
-        if not split_frame.empty:
-            split_frame.index = pd.to_datetime(split_frame.index).tz_localize(None)
-        for kind, frame in (("closes", out), ("splits", split_frame)):
+        frames = {"closes": out}
+        for kind, series in companions.items():
+            frame = pd.DataFrame(series)
+            if not frame.empty:
+                frame.index = pd.to_datetime(frame.index).tz_localize(None)
+            frames[kind] = frame
+        for kind, frame in frames.items():
             path = _cache_path(period, kind)
             cached = _read(path) if path.exists() else pd.DataFrame()
             frame = frame.sort_index()

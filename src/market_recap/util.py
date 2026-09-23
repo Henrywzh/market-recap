@@ -12,7 +12,7 @@ from datetime import date, datetime, timezone
 import json
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import numpy as np
 import pandas as pd
@@ -135,6 +135,22 @@ def _default(obj: Any) -> Any:
     if pd.isna(obj):
         return None
     raise TypeError(f"Not JSON serialisable: {type(obj)!r}")
+
+
+def prune_stale(directory: Path, written: Iterable[str]) -> list[str]:
+    """Delete per-ticker artifacts this build did not write.
+
+    A panel rewrites its directory every build, but only for the tickers that
+    still qualify. Without this, a company that dropped out of the index -- or
+    lost its P/E history -- kept serving last month's file, and the page drew
+    it as if it were current. Run after the panel finishes, so a panel that
+    fails half-way leaves the previous build's files rather than none.
+    """
+    keep = {f"{name}.json" for name in written}
+    removed = sorted(p.name for p in directory.glob("*.json") if p.name not in keep)
+    for name in removed:
+        (directory / name).unlink()
+    return removed
 
 
 def write_json(path: Path, payload: Any) -> Path:

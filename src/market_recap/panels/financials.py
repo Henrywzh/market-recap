@@ -11,7 +11,7 @@ from __future__ import annotations
 from ..compute import fundamentals as F
 from ..config import FINANCIALS_ARTIFACT_DIR
 from ..sources import sec
-from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, write_json
+from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, prune_stale, write_json
 
 STATEMENT_LABELS = {"income": "INCOME STATEMENT", "balance": "BALANCE SHEET", "cash_flow": "CASH FLOW"}
 
@@ -90,6 +90,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         write_json(FINANCIALS_ARTIFACT_DIR / f"{symbol}.json", _payload(symbol, extracted, meta.get(symbol, {})))
         available.append({"ticker": symbol, "name": meta.get(symbol, {}).get("name")})
 
+    prune_stale(FINANCIALS_ARTIFACT_DIR, (c["ticker"] for c in available))
     ctx.log.add(SourceRecord(
         "sec_financials", "SEC XBRL company facts (statements)",
         "https://data.sec.gov/api/xbrl/companyfacts/",

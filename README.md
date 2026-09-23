@@ -19,7 +19,7 @@ them.
 | **MACRO** | Commodity futures/ETF proxies with multi-period returns, last 12 monthly inflation releases as a heat table |
 | **TECHNICALS** | Any A/B relative-strength ratio with its moving averages and MACD over a chosen period; single-ticker price with **your own MA periods, slope window and period**, a ±1.5σ band, z-score regime, SMA slope, and forward return by z-score band. Every indicator is computed in the browser from the baked close history, by one module tested against pandas |
 | **CROSS-LISTING** | A US line against its home-market line at the depositary ratio, with the diagnostics that say whether the series measures a dislocation or a session gap |
-| **VALUATION & QUALITY** | Every S&P 500 / Nasdaq-100 member on one sortable table: P/E, EV/EBITDA, EV/Sales, P/B, FCF / dividend / shareholder yield, ROE, ROIC, gross profitability, margins, growth, accruals, leverage, interest cover, Piotroski F-score and margin stability — trailing twelve months from each company's own 10-Qs, market cap from the close. Valuation × quality scatter, sector medians, and colour by rank within sector |
+| **VALUATION & QUALITY** | Every S&P 500 / Nasdaq-100 member on one sortable table: P/E, EV/EBITDA, EV/Sales, P/B, FCF / dividend / shareholder yield, ROE, ROIC, gross profitability, margins, growth, accruals, leverage, interest cover, Piotroski F-score and margin stability — trailing twelve months from each company's own 10-Qs, market cap from the close. Valuation × quality scatter, sector medians, and colour by rank within sector. **P/E against each company's own ten years**: price ÷ TTM EPS as it was filed at the time, with its median, percentile band and where today sits |
 | **FINANCIALS** | Ten fiscal years of income statement, balance sheet and cash flow for every S&P 500 and Nasdaq-100 member, with key ratios, each column's period end and last filing date, restatements applied and pre-split years put on today's share basis |
 | **DCF** | SEC-filled 5-year history, your 5-year forecast, WACC, terminal value, equity bridge and a WACC × exit-multiple sensitivity grid |
 
@@ -279,6 +279,18 @@ data/cache/                raw snapshots and parsed frames, pruned each build
   company's SPY weight, by company rather than listing; a count more than 2.5x
   off is listed on the tab. Berkshire, Visa and a few other multi-class filers
   tag no complete count at all and have no market cap rather than a guessed one.
+- The P/E history is point in time. Each quarter's TTM EPS is built only from
+  filings made by the day that quarter was first reported, and applies from
+  the next session; every part is put on today's share basis by the splits
+  after its own filing date. Prices are split-adjusted but not
+  dividend-adjusted (`Close`, not `Adj Close`): a multiple on dividend-adjusted
+  prices understates every past P/E by the dividends paid since. An EPS with
+  no successor for two quarters expires rather than being carried forward
+  (Monster stopped tagging `EarningsPerShareDiluted` in 2011). The table's P/E
+  (market cap / net income) and the history's (price / EPS) are computed
+  independently and compared; the ~2% that disagree by more than 25% are
+  listed on the tab — mergers and spin-offs that move the share count,
+  preferred dividends, large minority interests.
 - TTM is last fiscal year + year to date − the same span a year earlier. A
   line the latest 10-Q did not tag (Alphabet's Q2 2026 dividends) is taken
   from the quarter before, at most one quarter stale, and starred on the row.

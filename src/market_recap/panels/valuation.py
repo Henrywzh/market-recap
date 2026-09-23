@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import math
 
+import pandas as pd
+
 from ..compute import valuation as V
+from ..config import VALUATION_ARTIFACT_DIR
 from ..sources import sec
-from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float
+from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, prune_stale, write_json
 from .financials import cik_for, universe
 
 # How far a company's share of index market cap may sit from its share of SPY
@@ -27,6 +30,46 @@ from .financials import cik_for, universe
 # held companies (Walmart, Berkshire); a class missed or a split unrecorded is
 # 3x and up.
 WEIGHT_CHECK_FACTOR = 2.5
+
+# The table's P/E is market cap over TTM net income; the history's is price
+# over TTM diluted EPS, as filed. They reach the same number by different
+# roads, so the latest point of one checks the other; a gap wider than this
+# means a share count or a split went wrong on one of them.
+PE_AGREEMENT_TOLERANCE = 0.25
+
+# Columns the history adds to the table, beside the snapshot metrics.
+HISTORY_METRICS = (
+    V.Metric("pe_percentile", "P/E percentile, own 10Y", "pct", "valuation", "low"),
+    V.Metric("pe_vs_median", "P/E vs own 10Y median", "pct", "valuation", "low"),
+)
+
+
+def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits: pd.Series | None) -> dict | None:
+    """P/E against its own ten years; writes the ticker's chart artifact."""
+    if prices is None or not data.eps_history:
+        return None
+    steps = V.eps_steps(data.eps_history, splits)
+    pe = V.pe_series(prices, steps)
+    stats = V.pe_stats(pe) if not pe.empty else None
+    if stats is None:
+        return None
+    window = pe.iloc[-V.HISTORY_SESSIONS:]
+    # Weekly for the chart (a decade of daily points is 2,500 per ticker); the
+    # statistics above are on every session. Each point keeps the date of the
+    # session it is -- resampling labels a week by its Friday, which dated the
+    # latest point to a Friday that had not happened yet.
+    weekly = window.groupby(window.index.to_period("W-FRI")).tail(1)
+    write_json(VALUATION_ARTIFACT_DIR / f"{symbol}.json", {
+        "ticker": symbol,
+        "dates": [d.strftime("%Y-%m-%d") for d in weekly.index],
+        "pe": [clean_float(v, 2) for v in weekly.to_numpy()],
+        "stats": {k: clean_float(v, 2) if isinstance(v, float) else v for k, v in stats.items()},
+        "eps": [
+            {"filed": filed, "period_end": end, "eps": clean_float(eps, 4)}
+            for filed, end, eps in steps if filed >= stats["first"]
+        ],
+    })
+    return stats
 
 
 def _split_factor(splits, symbol: str, after: str | None) -> float:
@@ -42,7 +85,8 @@ def _split_factor(splits, symbol: str, after: str | None) -> float:
     return float(ratios[ratios.index > after].prod()) if not ratios.empty else 1.0
 
 
-def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices: list[str], splits) -> dict:
+def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices: list[str], splits,
+         history: dict | None) -> dict:
     snapshot = data.trailing
     factor = _split_factor(splits, symbol, snapshot["shares_as_of"])
     shares = snapshot["shares"] * factor if snapshot["shares"] else None
@@ -68,6 +112,10 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         "lagged": snapshot.get("lagged") or [],
         "piotroski_tested": tested,
         **{key: clean_float(value, 4) for key, value in metrics.items()},
+        "pe_history": history is not None,
+        "pe_history_current": clean_float((history or {}).get("current"), 2),
+        "pe_percentile": clean_float((history or {}).get("percentile"), 1),
+        "pe_vs_median": clean_float((history or {}).get("vs_median"), 1),
     }
 
 
@@ -129,11 +177,19 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             continue
         closes = ctx.closes[symbol].dropna() if symbol in ctx.closes.columns else None
         price = float(closes.iloc[-1]) if closes is not None and not closes.empty else None
-        rows.append(_row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits))
+        symbol_splits = ctx.splits[symbol] if symbol in ctx.splits.columns else None
+        history = _history(symbol, data, ctx.prices.get(symbol), symbol_splits)
+        rows.append(_row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history))
 
     primary = ctx.members[ctx.primary.key].drop_duplicates("yahoo_symbol").set_index("yahoo_symbol")["weight"]
     check = _weight_check([r for r in rows if ctx.primary.key in r["indices"]], primary.to_dict())
+    prune_stale(VALUATION_ARTIFACT_DIR, (r["ticker"] for r in rows if r["pe_history"]))
     without_cap = sorted(r["ticker"] for r in rows if r["market_cap"] is None)
+    disagree = sorted(
+        r["ticker"] for r in rows
+        if r["pe"] and r["pe_history_current"]
+        and abs(r["pe_history_current"] / r["pe"] - 1) > PE_AGREEMENT_TOLERANCE
+    )
 
     ctx.log.add(SourceRecord(
         "sec_trailing", "SEC XBRL company facts (trailing twelve months)",
@@ -148,11 +204,18 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         "universe": len(symbols),
         "metrics": [
             {"key": m.key, "label": m.label, "unit": m.unit, "group": m.group, "better": m.better, "banks": m.banks}
-            for m, _ in V.METRICS
+            for m in [m for m, _ in V.METRICS] + list(HISTORY_METRICS)
         ],
         "rows": rows,
         "skipped": skipped,
         "without_market_cap": without_cap,
+        "pe_history": {
+            "companies": sum(1 for r in rows if r["pe_history"]),
+            "window_sessions": V.HISTORY_SESSIONS,
+            "min_sessions": V.MIN_HISTORY_SESSIONS,
+            "agreement_tolerance": PE_AGREEMENT_TOLERANCE,
+            "disagree": disagree,
+        },
         "weight_check": check,
         "financials_sector": V.FINANCIALS_SECTOR,
         "note": (

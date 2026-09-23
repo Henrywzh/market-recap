@@ -13,7 +13,7 @@ import pandas as pd
 from ..config import DCF_ARTIFACT_DIR
 from ..sources import sec
 from .financials import cik_for
-from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, describe_error, write_json
+from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, describe_error, prune_stale, write_json
 
 
 def _beta(stock: pd.Series, market: pd.Series, *, weeks: int, min_weeks: int) -> float | None:
@@ -116,6 +116,7 @@ def build(ctx, *, tickers: list[str] | None = None, use_cache: bool = True) -> d
         write_json(DCF_ARTIFACT_DIR / f"{symbol}.json", payload)
         baked.append(symbol)
 
+    prune_stale(DCF_ARTIFACT_DIR, baked)
     ctx.log.add(
         SourceRecord(
             "sec_companyfacts",

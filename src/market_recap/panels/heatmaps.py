@@ -7,7 +7,7 @@ import pandas as pd
 from ..compute import returns as R
 from ..config import ETF_ARTIFACT_DIR, period_sessions
 from ..sources import ishares, ssga, vanguard, yahoo
-from ..util import SourceRecord, clean_float, to_iso_date, write_json
+from ..util import SourceRecord, clean_float, prune_stale, to_iso_date, write_json
 
 
 def _returns_for(series: pd.Series, periods: list[str]) -> dict:
@@ -277,6 +277,7 @@ def build(ctx) -> dict:
             )
         )
 
+    prune_stale(ETF_ARTIFACT_DIR, published)
     return {
         "as_of": ctx.as_of,
         "holdings_as_of": ctx.holdings_as_of,

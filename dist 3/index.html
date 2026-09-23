@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Market Recap</title>
+<link rel="stylesheet" href="css/terminal.css">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js" defer></script>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="brand-block">
+    <div>
+      <span class="brand" id="brand">MARKET RECAP</span>
+      <span class="brand-sub" id="brand-sub">POST-MARKET RECAP DASHBOARD</span>
+    </div>
+    <span class="asof" id="asof">AS OF —</span>
+  </div>
+  <div class="masthead-right">
+    <select class="control" id="theme-select" aria-label="Theme">
+      <option value="dark">Dark</option>
+      <option value="light">Light</option>
+    </select>
+    <span class="build-pill" id="build-pill" title="When this page's data was built">
+      <span class="build-dot" id="build-dot"></span><span id="build-age">—</span>
+    </span>
+    <span class="updated" id="updated">Built —</span>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs" role="tablist"></nav>
+
+<main id="main"><div class="loading">Loading artifacts…</div></main>
+
+<footer id="footer"></footer>
+<div class="tooltip" id="tooltip"></div>
+
+<script type="module">
+  // Load the app stamped with the build it belongs to. A browser keeps an ES
+  // module in memory under its URL, so an unversioned entry point survives a
+  // reload and a new tab alike -- and then renders the previous build's code
+  // against this build's data, which looks like the edit never landed.
+  const response = await fetch('artifacts/manifest.json', { cache: 'no-store' });
+  const manifest = response.ok ? await response.json() : null;
+  const version = encodeURIComponent(manifest?.generated_at || Date.now());
+  const app = await import(`./js/app.js?v=${version}`);
+  app.boot(manifest, version);
+</script>
+</body>
+</html>

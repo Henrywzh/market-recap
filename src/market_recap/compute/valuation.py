@@ -18,8 +18,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from statistics import pstdev
 
+import numpy as np
 import pandas as pd
 
+from ..config import TRADING_DAYS_PER_YEAR
 from ..sources.sec import ANNUAL_SPAN_DAYS
 
 FINANCIALS_SECTOR = "Financials"
@@ -259,3 +261,81 @@ METRICS: tuple[tuple[Metric, Callable[[Inputs], float | None]], ...] = (
 def compute(inputs: Inputs, *, sector: str | None) -> dict[str, float | None]:
     bank = sector == FINANCIALS_SECTOR
     return {metric.key: (None if bank and not metric.banks else fn(inputs)) for metric, fn in METRICS}
+
+
+# --- P/E against its own history ---------------------------------------------
+# The window a current multiple is compared with, and the least history that
+# makes a percentile describe a range rather than one market regime.
+HISTORY_SESSIONS = 10 * TRADING_DAYS_PER_YEAR
+MIN_HISTORY_SESSIONS = 2 * TRADING_DAYS_PER_YEAR
+HISTORY_QUANTILES = {"p10": 0.10, "p25": 0.25, "median": 0.50, "p75": 0.75, "p90": 0.90}
+# An EPS figure stands until the next one is filed -- but not forever. A filer
+# that stopped tagging EPS (Monster, in 2011) would otherwise have its 2011
+# earnings divided into every price since; two quarters without a successor
+# and the multiple goes blank instead.
+EPS_STALE_AFTER_DAYS = 190
+
+
+def split_factor_after(splits: pd.Series | None, date: str) -> float:
+    """Product of the splits after ``date``: what a figure filed that day must be
+    scaled by to be on today's share basis."""
+    if splits is None:
+        return 1.0
+    ratios = splits.dropna()
+    return float(ratios[ratios.index > pd.Timestamp(date)].prod()) if not ratios.empty else 1.0
+
+
+def eps_steps(history: Sequence[dict], splits: pd.Series | None) -> list[tuple[str, str, float]]:
+    """(filed, period end, TTM EPS on today's share basis) for each quarter.
+
+    Every part is scaled by the splits after *its own* filing date: a filing
+    reports every figure on the share basis of the day it was issued, so a
+    part filed before a split and one filed after it are on different bases
+    until each is scaled separately.
+    """
+    steps = []
+    for quarter in history:
+        eps = sum(sign * value / split_factor_after(splits, filed) for value, filed, sign in quarter["parts"])
+        steps.append((quarter["filed"], quarter["period_end"], eps))
+    return steps
+
+
+def pe_series(prices: pd.Series, steps: Sequence[tuple[str, str, float]]) -> pd.Series:
+    """Daily P/E: the split-adjusted close over the TTM EPS already public.
+
+    A quarter's EPS applies from the session after its filing date -- a filing
+    can land after the close -- and a loss leaves the multiple blank.
+    """
+    prices = prices.dropna()
+    if prices.empty or not steps:
+        return pd.Series(dtype=float)
+    known = pd.Series(
+        {pd.Timestamp(filed) + pd.Timedelta(days=1): eps for filed, _, eps in sorted(steps)}
+    ).groupby(level=0).last()
+    # The figure in force each session, and how long it has been in force.
+    position = known.index.searchsorted(prices.index, side="right") - 1
+    in_force = position >= 0
+    eps = pd.Series(np.where(in_force, known.to_numpy()[position.clip(0)], np.nan), index=prices.index)
+    age = (prices.index - known.index[position.clip(0)]).days
+    eps[~in_force | (age > EPS_STALE_AFTER_DAYS)] = np.nan
+    return (prices / eps.where(eps > 0)).rename("pe")
+
+
+def pe_stats(pe: pd.Series) -> dict | None:
+    """Where the latest P/E sits in its own last ten years."""
+    window = pe.iloc[-HISTORY_SESSIONS:]
+    valid = window.dropna()
+    if len(valid) < MIN_HISTORY_SESSIONS:
+        return None
+    current = pe.iloc[-1]
+    stats = {name: float(valid.quantile(q)) for name, q in HISTORY_QUANTILES.items()}
+    stats |= {
+        "current": None if pd.isna(current) else float(current),
+        "min": float(valid.min()),
+        "max": float(valid.max()),
+        "sessions": int(len(valid)),
+        "first": valid.index[0].strftime("%Y-%m-%d"),
+    }
+    stats["percentile"] = None if pd.isna(current) else float((valid <= current).mean() * 100)
+    stats["vs_median"] = None if pd.isna(current) else (float(current) / stats["median"] - 1) * 100
+    return stats

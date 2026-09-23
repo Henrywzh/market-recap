@@ -150,3 +150,58 @@ def test_piotroski_scores_only_when_all_nine_signals_are_testable():
                    revenue=90.0, gross_profit=48.0, operating_cash_flow=15.0)
     assert V.piotroski([before, better]) == (9, 9)
     assert V.piotroski([before, {**better, "current_assets": None}]) == (None, 8)
+
+
+def _prices(start="2020-01-01", periods=600, value=100.0):
+    return pd.Series(value, index=pd.bdate_range(start, periods=periods))
+
+
+def test_eps_applies_from_the_session_after_it_was_filed():
+    prices = _prices(periods=10)
+    pe = V.pe_series(prices, [("2020-01-03", "2019-12-31", 5.0)])
+    assert pe.loc[:"2020-01-03"].isna().all()          # not known on the filing day itself
+    assert pe.loc["2020-01-06"] == 20.0
+
+
+def test_an_eps_with_no_successor_expires_instead_of_standing_forever():
+    """Monster stopped tagging EPS in 2011; its 2011 figure priced 2026 at 193x."""
+    prices = _prices(periods=400)
+    pe = V.pe_series(prices, [("2020-01-01", "2019-12-31", 5.0)])
+    assert pe.loc["2020-03-02"] == 20.0
+    assert pe.iloc[-1] != pe.iloc[-1]  # NaN once it has gone unreplaced too long
+
+
+def test_a_loss_leaves_a_gap():
+    pe = V.pe_series(_prices(periods=5), [("2019-12-01", "2019-11-30", -1.0)])
+    assert pe.isna().all()
+
+
+def test_each_eps_part_is_put_on_todays_basis_by_its_own_filing_date():
+    """A 2:1 split between the 10-K and the 10-Q: the 10-K's year is on the
+    old basis, the 10-Q's year-to-date parts on the new."""
+    splits = pd.Series([2.0], index=pd.to_datetime(["2026-03-01"]))
+    history = [{"period_end": "2026-06-30", "filed": "2026-08-01",
+                "parts": [(3.0, "2026-08-01", 1), (8.0, "2026-02-01", 1), (2.5, "2026-08-01", -1)]}]
+    assert V.eps_steps(history, splits)[0][2] == pytest.approx(3.0 + 4.0 - 2.5)
+
+
+def test_history_stats_need_two_years_and_place_the_latest_point():
+    pe = pd.Series(range(1, V.MIN_HISTORY_SESSIONS + 1), index=pd.bdate_range("2020-01-01", periods=V.MIN_HISTORY_SESSIONS), dtype=float)
+    stats = V.pe_stats(pe)
+    assert stats["percentile"] == 100.0 and stats["current"] == V.MIN_HISTORY_SESSIONS
+    assert V.pe_stats(pe.iloc[:-1]) is None
+
+
+def test_eps_history_uses_only_what_had_been_filed_at_the_time():
+    """A later restatement of last year must not leak into an earlier quarter."""
+    rows = [
+        {"form": "10-K", "fp": "FY", "start": "2025-01-01", "end": "2025-12-31", "val": 10.0, "filed": "2026-02-10"},
+        {"form": "10-Q", "fp": "Q1", "start": "2026-01-01", "end": "2026-03-31", "val": 3.0, "filed": "2026-05-01"},
+        {"form": "10-Q", "fp": "Q1", "start": "2025-01-01", "end": "2025-03-31", "val": 2.0, "filed": "2026-05-01"},
+        # A 10-K/A two years later restates 2025 to 6.0.
+        {"form": "10-K", "fp": "FY", "start": "2025-01-01", "end": "2025-12-31", "val": 6.0, "filed": "2028-02-10"},
+    ]
+    facts = {"facts": {"us-gaap": {"EarningsPerShareDiluted": {"units": {"USD/shares": rows}}}}}
+    history = {h["period_end"]: h for h in sec.eps_history(facts)}
+    q1 = history["2026-03-31"]
+    assert sum(v * sign for v, _, sign in q1["parts"]) == 10.0 + 3.0 - 2.0

@@ -81,7 +81,13 @@ LINE_ITEMS: tuple[LineItem, ...] = (
     ), "income"),
     LineItem("taxes", "Income tax", ("IncomeTaxExpenseBenefit",), "income"),
     LineItem("net_income", "Net income", ("NetIncomeLoss", "ProfitLoss"), "income"),
-    LineItem("eps_diluted", "Diluted EPS", ("EarningsPerShareDiluted",), "income", unit="USD/shares"),
+    # Monster has tagged only the continuing-operations EPS since 2011; some
+    # filers report one figure for basic and diluted.
+    LineItem("eps_diluted", "Diluted EPS", (
+        "EarningsPerShareDiluted",
+        "IncomeLossFromContinuingOperationsPerDilutedShare",
+        "EarningsPerShareBasicAndDiluted",
+    ), "income", unit="USD/shares"),
     LineItem("shares", "Diluted shares", (
         "WeightedAverageNumberOfDilutedSharesOutstanding",
         "WeightedAverageNumberOfSharesOutstandingBasic",
@@ -467,9 +473,12 @@ def _days(earlier: str, later: str) -> int:
     return (pd.Timestamp(later) - pd.Timestamp(earlier)).days
 
 
-def _period_values(facts: dict, item: LineItem, splits) -> dict[tuple[str | None, str], dict]:
+def _period_values(
+    facts: dict, item: LineItem, splits, *, filed_by: str | None = None
+) -> dict[tuple[str | None, str], dict]:
     """Latest-filed value for every (start, end) an item was reported for, in
-    10-Ks and 10-Qs; the highest-priority tag wins a period."""
+    10-Ks and 10-Qs; the highest-priority tag wins a period. With ``filed_by``,
+    only what had been filed by that date -- the figures as they were known."""
     gaap = facts.get("facts", {}).get("us-gaap", {})
     picked: dict[tuple[str | None, str], dict] = {}
     for priority, tag in enumerate(item.tags):
@@ -480,6 +489,8 @@ def _period_values(facts: dict, item: LineItem, splits) -> dict[tuple[str | None
             if item.instant != (start is None):
                 continue
             key, filed = (start, row["end"]), row.get("filed") or ""
+            if filed_by is not None and filed > filed_by:
+                continue
             current = picked.get(key)
             if current is None or priority < current["priority"] or (
                 priority == current["priority"] and filed >= current["filed"]
@@ -499,7 +510,18 @@ def _near(target: str, candidates, tolerance: int = PERIOD_MATCH_DAYS):
 
 
 def trailing_value(periods: dict, end: str) -> tuple[float | None, str | None]:
-    """(TTM value ending at ``end``, filing date of its newest part).
+    """(TTM value ending at ``end``, filing date of its year-to-date part)."""
+    parts = trailing_parts(periods, end)
+    if parts is None:
+        return None, None
+    return sum(entry["value"] * sign for entry, sign in parts), parts[0][0]["filed"]
+
+
+def trailing_parts(periods: dict, end: str) -> list[tuple[dict, int]] | None:
+    """The filed figures a TTM value ending at ``end`` is made of, with signs:
+    year to date first, then the last fiscal year (+) and the same span a year
+    earlier (-). Kept apart so each can be put on today's share basis by its
+    own filing date.
 
     The longest reported span ending at ``end`` is the year-to-date figure. If
     it is already a year, that is the answer; otherwise the prior fiscal year
@@ -509,12 +531,12 @@ def trailing_value(periods: dict, end: str) -> tuple[float | None, str | None]:
     low, high = ANNUAL_SPAN_DAYS
     spans = [(start, e) for (start, e) in periods if start is not None and e == end and _days(start, e) <= high]
     if not spans:
-        return None, None
+        return None
     start, _ = max(spans, key=lambda k: _days(k[0], k[1]))
     ytd = periods[(start, end)]
     length = _days(start, end)
     if length >= low:
-        return ytd["value"], ytd["filed"]
+        return [(ytd, 1)]
 
     one_year_back = (pd.Timestamp(end) - pd.Timedelta(days=DAYS_PER_YEAR)).strftime("%Y-%m-%d")
     prior = [k for k in periods if k[0] is not None and abs(_days(k[0], k[1]) - length) <= PERIOD_MATCH_DAYS]
@@ -522,10 +544,38 @@ def trailing_value(periods: dict, end: str) -> tuple[float | None, str | None]:
     fiscal_years = [k for k in periods if k[0] is not None and low <= _days(k[0], k[1]) <= high]
     year_end = _near(start, [k[1] for k in fiscal_years])
     if prior_end is None or year_end is None:
-        return None, None
+        return None
     prior_ytd = next(periods[k] for k in prior if k[1] == prior_end)
     last_year = next(periods[k] for k in fiscal_years if k[1] == year_end)
-    return last_year["value"] + ytd["value"] - prior_ytd["value"], ytd["filed"]
+    return [(ytd, 1), (last_year, 1), (prior_ytd, -1)]
+
+
+def eps_history(facts: dict) -> list[dict]:
+    """TTM diluted EPS for every reported quarter, as it was known when first filed.
+
+    Each quarter's figure is built only from what had been filed by the day
+    that quarter was first reported, so a valuation history read from it never
+    sees a number before it was public. Its parts are returned with their own
+    filing dates and on the share basis of that date; the caller puts them on
+    today's basis with the split record.
+    """
+    item = ITEMS_BY_KEY["eps_diluted"]
+    first_filed: dict[str, str] = {}
+    for tag in item.tags:
+        for row in facts.get("facts", {}).get("us-gaap", {}).get(tag, {}).get("units", {}).get(item.unit, []):
+            if row.get("form") in QUARTERLY_FORMS and row.get("start") and row.get("end") and row.get("filed"):
+                first_filed[row["end"]] = min(first_filed.get(row["end"], row["filed"]), row["filed"])
+    history = []
+    for end in sorted(first_filed):
+        periods = _period_values(facts, item, (), filed_by=first_filed[end])
+        parts = trailing_parts(periods, end)
+        if parts:
+            history.append({
+                "period_end": end,
+                "filed": first_filed[end],
+                "parts": [(entry["value"], entry["filed"], sign) for entry, sign in parts],
+            })
+    return history
 
 
 def _instant_near(periods: dict, end: str) -> float | None:
@@ -617,6 +667,7 @@ class Filer:
     taxonomies: tuple[str, ...]
     rows: tuple
     trailing: dict | None
+    eps_history: tuple = ()
 
 
 @lru_cache(maxsize=None)
@@ -635,6 +686,7 @@ def filer(cik: int, use_cache: bool = True) -> Filer:
         taxonomies=tuple(sorted(facts.get("facts", {}))),
         rows=tuple(rows),
         trailing=trailing_snapshot(facts) if rows else None,
+        eps_history=tuple(eps_history(facts)) if rows else (),
     )
 
 

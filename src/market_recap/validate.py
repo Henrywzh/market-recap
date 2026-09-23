@@ -153,6 +153,11 @@ def _check_valuation(payload: dict | None) -> list[Finding]:
     flagged, checked = len(check.get("flagged") or []), check.get("checked") or 0
     if checked and flagged > VALUATION_TOLERATED_SHARE * checked:
         out.append(Finding("warning", "valuation", f"{flagged} of {checked} share counts disagree with SPY weights"))
+    history = payload.get("pe_history") or {}
+    disagree, with_history = len(history.get("disagree") or []), history.get("companies") or 0
+    if with_history and disagree > VALUATION_TOLERATED_SHARE * with_history:
+        out.append(Finding("warning", "valuation",
+                           f"the two P/E calculations disagree for {disagree} of {with_history} companies"))
     missing = len(payload.get("without_market_cap") or [])
     if missing > VALUATION_TOLERATED_SHARE * len(rows):
         out.append(Finding("warning", "valuation", f"{missing} of {len(rows)} companies have no market cap"))

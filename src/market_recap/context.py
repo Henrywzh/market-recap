@@ -87,6 +87,8 @@ class MarketContext:
     index_closes: pd.DataFrame = field(default_factory=pd.DataFrame)
     # Split ratios (date x symbol) for the constituent panel, from the same download.
     splits: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Split-adjusted, not dividend-adjusted closes: what a multiple is quoted on.
+    prices: pd.DataFrame = field(default_factory=pd.DataFrame)
 
     @property
     def as_of(self) -> str | None:
@@ -214,6 +216,7 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
     if ctx.closes.empty:
         raise RuntimeError("no constituent prices were fetched; the page has no session to describe")
     ctx.splits = _through(yahoo.fetch_splits(history_period), ctx.closes.index[-1])
+    ctx.prices = _through(yahoo.fetch_prices(history_period), ctx.closes.index[-1])
     missing = sorted(set(symbols) - set(ctx.closes.columns))
     log.add(SourceRecord(
         "yahoo_constituents",

@@ -402,3 +402,12 @@ def test_validation_flags_share_counts_that_broke_wholesale():
     broken = {**ok, "weight_check": {"checked": 490, "flagged": [{}] * 60}}
     assert validate._check_valuation(broken)[0].severity == "warning"
     assert validate._check_valuation({"rows": []})[0].severity == "error"
+
+
+def test_a_ticker_the_build_no_longer_writes_is_not_left_behind(tmp_path):
+    from market_recap.util import prune_stale
+
+    for name in ("AAPL", "MNST", "GONE"):
+        (tmp_path / f"{name}.json").write_text("{}")
+    assert prune_stale(tmp_path, ["AAPL", "MNST"]) == ["GONE.json"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["AAPL.json", "MNST.json"]

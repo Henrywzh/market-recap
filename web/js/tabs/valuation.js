@@ -8,6 +8,7 @@ import { el, card, table, num, sectionTitle, notice, DASH } from '../fmt.js';
 import { render, SERIES_COLORS } from '../charts.js';
 
 const BILLION = 1e9;
+const HISTORY_BASE = 'artifacts/valuation';
 // Share of a sector, from each end, that is coloured.
 const TAIL_SHARE = 0.2;
 // Scatter axes stop at these percentiles so a handful of extreme multiples
@@ -127,6 +128,62 @@ function scatter(node, rows, xMetric, yMetric) {
   return { shown: points.length - outside, outside, total: points.length };
 }
 
+// ------------------------------------------------------------ P/E history
+
+async function loadHistory(symbol) {
+  const response = await fetch(`${HISTORY_BASE}/${symbol}.json`, { cache: 'no-cache' });
+  if (!response.ok) throw new Error(`${symbol} has no P/E history in this build (a loss, too little history, or no EPS filed)`);
+  return response.json();
+}
+
+function historyChart(node, history) {
+  const s = history.stats;
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, right: 60, bottom: 30 },
+    xAxis: { ...option.xAxis, data: history.dates },
+    yAxis: { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 10, formatter: (v) => `${v}x` } },
+    series: [{
+      name: 'P/E', type: 'line', data: history.pe, showSymbol: false, connectNulls: false,
+      lineStyle: { width: 1.4, color: p.text },
+      markArea: { silent: true, itemStyle: { color: 'rgba(232,163,61,0.12)' },
+        data: [[{ yAxis: s.p25 }, { yAxis: s.p75 }]] },
+      markLine: {
+        silent: true, symbol: 'none',
+        label: { color: p.dim, fontSize: 10, position: 'end', formatter: (d) => d.name },
+        data: [
+          { name: `median ${num(s.median, 1)}x`, yAxis: s.median, lineStyle: { color: p.accent, type: 'dashed' } },
+          { name: `p10 ${num(s.p10, 1)}x`, yAxis: s.p10, lineStyle: { color: p.faint, type: 'dotted' } },
+          { name: `p90 ${num(s.p90, 1)}x`, yAxis: s.p90, lineStyle: { color: p.faint, type: 'dotted' } },
+        ],
+      },
+    }],
+  }));
+}
+
+function epsChart(node, history) {
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, top: 10, bottom: 24 },
+    xAxis: { ...option.xAxis, data: history.eps.map((e) => e.filed) },
+    series: [{ name: 'TTM EPS', type: 'line', step: 'end', data: history.eps.map((e) => e.eps),
+      showSymbol: false, lineStyle: { width: 1.2, color: p.blue } }],
+  }));
+}
+
+function historyTable(history) {
+  const s = history.stats;
+  const rows = [
+    ['Current P/E', s.current === null ? 'n/m (loss)' : `${num(s.current, 1)}x`],
+    ['Percentile in own 10 years', s.percentile === null ? DASH : `${num(s.percentile, 0)}th`],
+    ['vs 10-year median', s.vs_median === null ? DASH : `${s.vs_median > 0 ? '+' : ''}${num(s.vs_median, 0)}%`],
+    ['Median · 25th–75th', `${num(s.median, 1)}x · ${num(s.p25, 1)}–${num(s.p75, 1)}x`],
+    ['10th–90th · min–max', `${num(s.p10, 1)}–${num(s.p90, 1)}x · ${num(s.min, 1)}–${num(s.max, 1)}x`],
+    ['Sessions with positive earnings', `${s.sessions} since ${s.first}`],
+  ];
+  return table(['', ''], rows.map(([a, b]) => el('tr', {}, [el('td', { class: 'dim', text: a }), el('td', { text: b })])));
+}
+
 function sectorTable(rows, metrics) {
   const sectors = [...groupBy(rows, (r) => r.sector).entries()].sort((a, b) => b[1].length - a[1].length);
   const body = sectors.map(([sector, members]) => el('tr', {}, [
@@ -140,7 +197,7 @@ function sectorTable(rows, metrics) {
   return table(['SECTOR (MEDIAN)', 'N', ...metrics.map((m) => m.label.toUpperCase())], body);
 }
 
-function mainTable(rows, metrics, data, sort, onSort) {
+function mainTable(rows, metrics, data, sort, onSort, onPick) {
   const ranks = sectorRanks(rows, metrics);
   const columns = [
     { key: 'ticker', label: 'TICKER' },
@@ -164,7 +221,9 @@ function mainTable(rows, metrics, data, sort, onSort) {
     onclick: () => onSort(c.key),
   })));
   const body = sorted.map((row) => el('tr', {}, columns.map((c) => {
-    if (c.key === 'ticker') return el('td', { text: row.ticker, title: rowNote(row, data) });
+    if (c.key === 'ticker') {
+      return el('td', { text: row.ticker, title: rowNote(row, data), style: 'cursor:pointer;text-decoration:underline dotted', onclick: () => onPick(row.ticker) });
+    }
     if (c.key === 'sector') return el('td', { class: 'dim', text: row.sector || DASH });
     if (c.key === 'market_cap') return el('td', { text: present(row.market_cap) ? num(row.market_cap / BILLION, 1) : DASH });
     if (c.key === 'period_end') return el('td', { class: 'dim', text: row.period_end + (row.lagged.length ? '*' : '') });
@@ -225,6 +284,10 @@ export default async function renderValuation(root, data) {
       sort.descending = sort.key === key ? !sort.descending : typeof data.rows[0][key] !== 'string';
       sort.key = key;
       draw();
+    }, (ticker) => {
+      historyInput.value = ticker;
+      loadPeHistory();
+      historyCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }));
     status.textContent = `${rows.length} companies`;
   }
@@ -241,6 +304,53 @@ export default async function renderValuation(root, data) {
     status,
   ])));
   root.append(card('VALUATION × QUALITY', null, [scatterNode, scatterNote]));
+
+  // ---------------- P/E against its own history ---------------------------
+  const historyInput = el('input', { value: 'AAPL', size: '8' });
+  const historyStatus = el('span', { class: 'field-note', text: '' });
+  const historyNode = el('div', { class: 'chart tall' });
+  const epsNode = el('div', { class: 'chart short' });
+  const historyStats = el('div', {});
+  async function loadPeHistory() {
+    const symbol = historyInput.value.trim().toUpperCase();
+    historyStatus.textContent = `Loading ${symbol}…`;
+    try {
+      const history = await loadHistory(symbol);
+      historyChart(historyNode, history);
+      epsChart(epsNode, history);
+      historyStats.replaceChildren(historyTable(history));
+      const row = data.rows.find((r) => r.ticker === symbol);
+      historyStatus.textContent = `${row?.name || symbol} · weekly, ${history.dates[0]} → ${history.dates[history.dates.length - 1]}`;
+    } catch (error) {
+      historyNode.innerHTML = '';
+      epsNode.innerHTML = '';
+      historyStats.replaceChildren();
+      historyStatus.textContent = error.message;
+    }
+  }
+  historyInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') loadPeHistory(); });
+  const historyCard = card('P/E AGAINST ITS OWN 10 YEARS — PRICE ÷ TTM EPS AS FILED AT THE TIME', null, [
+    el('div', { class: 'field-row' }, [
+      el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), historyInput]),
+      el('button', { class: 'action', text: 'LOAD', onclick: loadPeHistory }),
+      historyStatus,
+    ]),
+    el('div', { class: 'grid two' }, [
+      el('div', {}, [historyNode]),
+      el('div', {}, [historyStats, el('div', { class: 'card-title', text: 'TTM DILUTED EPS, TODAY\'S SHARE BASIS, BY FILING DATE' }), epsNode]),
+    ]),
+    el('div', { class: 'note-text', text:
+      `Each session's P/E is the split-adjusted close (not dividend-adjusted) over the TTM diluted EPS `
+      + `public by then: every quarter is built only from filings made by the day it was first reported, `
+      + `so the history never uses a number before it was published. A loss leaves a gap; an EPS with no `
+      + `successor for two quarters expires rather than being carried forward. Band: 25th–75th percentile. `
+      + `The table's P/E (market cap / net income) and this one (price / EPS) disagree by more than `
+      + `${Math.round(data.pe_history.agreement_tolerance * 100)}% for ${data.pe_history.disagree.length} companies`
+      + (data.pe_history.disagree.length ? ` (${data.pe_history.disagree.join(', ')}) — usually a merger or spin-off `
+        + 'moving the share count, preferred dividends, or a large minority interest' : '')
+      + '.' }),
+  ]);
+  root.append(historyCard);
   root.append(card('SECTOR MEDIANS', null, sectorHost));
   root.append(card('ALL COMPANIES — COLOURED BY RANK WITHIN SECTOR (TOP / BOTTOM FIFTH)', null, tableHost));
 
@@ -253,4 +363,5 @@ export default async function renderValuation(root, data) {
     + `Not valued: ${Object.keys(data.skipped).join(', ') || 'none'}. * = a line taken from the prior quarter; hover a ticker for its sources.`,
   ));
   draw();
+  await loadPeHistory();
 }

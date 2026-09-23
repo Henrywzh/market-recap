@@ -291,3 +291,15 @@ def test_a_split_is_read_from_eps_when_no_plain_share_count_exists():
         _row("2020-01-01", "2020-12-31", 2.93, "2023-02-03", 2022),
     ])
     assert sec.share_splits(facts) == [("2021-02-03", 20)]
+
+
+def test_a_price_request_that_never_answers_is_abandoned():
+    import time as _time
+
+    from market_recap.sources import yahoo
+
+    started = _time.monotonic()
+    with pytest.raises(TimeoutError):
+        yahoo._within(0.2, lambda: _time.sleep(30))
+    assert _time.monotonic() - started < 5
+    assert yahoo._within(1, lambda: 42) == 42

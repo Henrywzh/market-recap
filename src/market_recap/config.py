@@ -26,6 +26,7 @@ ARTIFACT_DIR = REPO_ROOT / "artifacts"
 TICKER_ARTIFACT_DIR = ARTIFACT_DIR / "tickers"
 DCF_ARTIFACT_DIR = ARTIFACT_DIR / "dcf"
 FINANCIALS_ARTIFACT_DIR = ARTIFACT_DIR / "financials"
+VALUATION_ARTIFACT_DIR = ARTIFACT_DIR / "valuation"
 ETF_ARTIFACT_DIR = ARTIFACT_DIR / "etfs"
 
 # Identify this client honestly. Sending a Chrome User-Agent from a Python
@@ -142,5 +143,5 @@ def load_config() -> dict[str, Any]:
 
 
 def ensure_dirs() -> None:
-    for path in (CACHE_DIR, ARTIFACT_DIR, TICKER_ARTIFACT_DIR, DCF_ARTIFACT_DIR, FINANCIALS_ARTIFACT_DIR, ETF_ARTIFACT_DIR):
+    for path in (CACHE_DIR, ARTIFACT_DIR, TICKER_ARTIFACT_DIR, DCF_ARTIFACT_DIR, FINANCIALS_ARTIFACT_DIR, VALUATION_ARTIFACT_DIR, ETF_ARTIFACT_DIR):
         path.mkdir(parents=True, exist_ok=True)
