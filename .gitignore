@@ -6,6 +6,8 @@ data/cache/
 artifacts/
 .DS_Store
 dist/
+# iCloud/Finder conflict copies of the build output ("dist 2", "dist 3", ...)
+dist */
 data/logs/
 node_modules/
 .wrangler/
