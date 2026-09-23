@@ -146,7 +146,12 @@ PLIST_EOF
 
   status)
     if launchctl list | grep -qF "$LABEL"; then
-      echo "launchd:  loaded ($(launchctl list | grep -F "$LABEL" | awk '{print "last exit " $2}'))"
+      # 'launchctl list' prints exit 0 for a job that has never run, which reads
+      # as success. 'print' separates "never ran" from "ran and exited 0".
+      info="$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null)"
+      runs="$(awk -F' = ' '/^\truns = /{print $2}' <<<"$info")"
+      last="$(awk -F' = ' '/^\tlast exit code = /{print $2}' <<<"$info")"
+      echo "launchd:  loaded (runs ${runs:-?}, last exit ${last:-?})"
     else
       echo "launchd:  NOT LOADED -- run 'make schedule'"
     fi
@@ -160,7 +165,7 @@ PLIST_EOF
 
   check)
     # Say what the next scheduled run will actually be able to do, now,
-    # rather than letting it discover the answer at 18:30 into a log file.
+    # rather than letting it discover the answer overnight into a log file.
     setup_path
     load_env || exit 1
     ok=0
