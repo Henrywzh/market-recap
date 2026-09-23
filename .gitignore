@@ -3,9 +3,7 @@ __pycache__/
 .venv/
 .env
 data/cache/
-artifacts/*.json
-artifacts/tickers/
-artifacts/dcf/
+artifacts/
 .DS_Store
 dist/
 data/logs/

@@ -11,7 +11,11 @@ dependencies = [
     "openpyxl>=3.1",
     "lxml>=5.0",
     "beautifulsoup4>=4.12",
+    "pyarrow>=15",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
 
 [project.scripts]
 market-recap = "market_recap.cli:main"

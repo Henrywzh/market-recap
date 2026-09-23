@@ -61,7 +61,7 @@ make serve
 
 `make refresh` is the whole pipeline: fetch, build, **validate**, prune. It
 exits non-zero if anything would put a wrong number on the page, so it is also
-what the scheduler runs. `make help` lists the rest.
+what the nightly job runs. `make help` lists the rest.
 
 Rebuild a single tab while iterating:
 
@@ -71,38 +71,42 @@ python -m market_recap.cli refresh --panels markets --skip-dcf
 
 ### Running it on a schedule
 
+The nightly job is a GitHub Actions workflow,
+[`.github/workflows/refresh.yml`](.github/workflows/refresh.yml): weekdays at
+23:37 UTC it tests, refreshes with `--strict`, and deploys only if that passed.
+It runs on GitHub's machines, so it does not depend on a laptop being awake —
+the launchd job this replaced missed its first night because the lid was shut.
+
 ```bash
-make schedule        # weekdays 18:30 local, via launchd
-make schedule-status # did last night's run work?
-make schedule-check  # what will the next run actually be able to do?
-make schedule-run    # run it now, exactly as launchd would
-make logs            # tail data/logs/refresh.log
-make unschedule
+make status    # last five runs, and the as_of the live site is showing
+make run-now   # trigger it now (gh workflow run refresh.yml)
 ```
+
+A failed scheduled run emails the repo owner. `workflow_dispatch` takes a
+`deploy` input, so a run can build and validate without publishing.
 
 Not the closing bell, because the publishers this reads post after it: State
 Street's holdings and NAV files land in the evening, and Treasury sometimes
 does not post the par curve until early evening ET. A job firing at 16:00 ET
 builds a page entirely from the previous session and reports itself perfectly
-healthy.
+healthy. GitHub cron is UTC, and 23:37 UTC is after 18:30 New York in both
+halves of the year:
 
-launchd fires on the **local** clock, not ET. From London the job runs at
-23:30, which is never earlier than 18:30 New York at any point in either
-country's DST cycle:
+| UTC | New York |
+|---|---|
+| 23:37 | 19:37 EDT (Mar – Nov) |
+| 23:37 | 18:37 EST (Nov – Mar) |
 
-| Local | New York | When |
-|---|---|---|
-| 23:30 BST | 18:30 EDT | now |
-| 23:30 GMT | 19:30 EDT | late Oct – 1 Nov |
-| 23:30 GMT | 18:30 EST | from Nov |
+GitHub can start a scheduled run late under load; minute 37 avoids the
+on-the-hour and half-hour slots that are delayed most.
 
-In another timezone, set `SCHEDULE_HOUR` / `SCHEDULE_MINUTE` before
-`make schedule`. The installer prints the New York equivalent so the ET
-constraint stays checkable.
+The run uses `--strict`, so a warning fails it. Nobody reads the output of an
+unattended job, and a job that exits 0 on a degraded build is how a stale page
+stays up for a week.
 
-The scheduled run uses `--strict`, so a warning fails it. Nobody reads the
-output of an unattended job, and a job that exits 0 on a degraded build is how
-a stale page stays up for a week.
+`data/cache` is carried between runs with `actions/cache`. It is not state:
+every artifact rebuilds from the publishers, so an evicted cache costs one
+slow run and more requests to them, never a wrong number.
 
 ### Deploying
 
@@ -124,28 +128,20 @@ because current wrangler delegates Pages commands to Workers and reads this
 `wrangler.toml` as a Workers config with no entry point. `--force` is needed
 only once, for the create; deploys run against Pages directly.
 
-Credentials for the unattended job live in `~/.config/market-recap/env`, not
-in the repository — no clone, no backup and no `git add -A` can carry them.
-`scripts/schedule.sh` refuses to read that file unless it is mode 600, because
-an unattended job is exactly where a world-readable token sits unnoticed for
-months. The token needs one permission: **Account → Cloudflare Pages → Edit**.
-
-`make schedule-check` reports what the next run will be able to do — whether
-python, node and wrangler resolve under launchd's minimal PATH, and whether a
-token is present — rather than letting the job discover the answer at 18:30
-into a log file. Without a token the job still refreshes and validates nightly
-and says it did not deploy; it does not fail silently and it does not publish.
+Credentials for the nightly job are two repository secrets,
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. The token needs one
+permission: **Account → Cloudflare Pages → Edit**. The account ID is required
+because a Pages-only token cannot list accounts for wrangler to pick from.
 
 wrangler is pinned in `package.json` rather than invoked through `npx
 wrangler@latest`: a nightly job should not resolve a new major version over
-the network at 18:30 and find out what changed.
+the network overnight and find out what changed.
 
 Deployment is by direct upload rather than Pages' git integration. The
 artifacts are rebuilt every session and are not in git, so a git-triggered
 build would check out a repository whose `artifacts/` is ignored and publish
-an empty dashboard. Authentication is `wrangler login` once, or
-`CLOUDFLARE_API_TOKEN` in the environment for the scheduled job — which
-deploys only after `--strict` validation passes, because putting the bad page
+an empty dashboard. Locally, authentication is `wrangler login` once; the nightly job uses the
+secrets above and deploys only after `--strict` validation passes, because putting the bad page
 in front of people and then telling a log file about it is not a deploy
 strategy.
 
