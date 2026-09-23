@@ -159,6 +159,49 @@ IEF = "Fixed Income"
 SHY = "Fixed Income"
 TLT = "Fixed Income"
 
+[etf_xray]
+# Holdings detail shown per fund; every line still counts in the summaries.
+top_holdings = 25
+
+[etf_xray.holdings]
+# Where each fund on the heat map gets its holdings: the issuer's own file, or
+# why there is none. A fund without one is never stood in for by a look-alike
+# (QQQ is not QNDX's basket, however close): it is listed with the reason.
+SPY = "ssga"
+IVV = "ishares"
+VOO = "vanguard"
+QQQ = "none: Invesco serves no holdings file to scripted clients"
+QNDX = "ssga"
+VTI = "vanguard"
+IWM = "ishares"
+DIA = "ssga"
+MDY = "ssga"
+RSP = "none: Invesco serves no holdings file to scripted clients"
+XLK = "ssga"
+XLF = "ssga"
+XLV = "ssga"
+XLI = "ssga"
+XLE = "ssga"
+XLP = "ssga"
+XLY = "ssga"
+XLU = "ssga"
+XLB = "ssga"
+XLRE = "ssga"
+XLC = "ssga"
+EFA = "ishares"
+EEM = "ishares"
+VEA = "vanguard"
+VWO = "vanguard"
+GLD = "none: holds gold bullion"
+SLV = "none: holds silver bullion"
+USO = "none: holds oil futures"
+AGG = "ishares"
+LQD = "ishares"
+HYG = "ishares"
+IEF = "ishares"
+SHY = "ishares"
+TLT = "ishares"
+
 [macro.commodities]
 # Yahoo front-month futures / ETF proxies. These are proxies, not spot prints,
 # and the footer says so.

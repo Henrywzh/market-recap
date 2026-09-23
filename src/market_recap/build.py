@@ -11,7 +11,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import cross_listing, dcf, financials, fixed_income, heatmaps, macro, markets, valuation
+from .panels import cross_listing, dcf, financials, fixed_income, heatmaps, macro, markets, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .util import SourceRecord, utc_now_iso, write_json
@@ -24,6 +24,7 @@ PANELS = {
     "macro": macro.build,
     "technicals": technicals_panel.build,
     "cross_listing": cross_listing.build,
+    "xray": xray.build,
     # The SEC panels come last: they are the slowest, and the ones a quick
     # local rebuild skips. They share one parse of each filer (sec.filer).
     "financials": financials.build,

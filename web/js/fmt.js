@@ -5,7 +5,9 @@ export const DASH = '—';
 
 export function num(value, digits = 2) {
   if (value === null || value === undefined || Number.isNaN(value)) return DASH;
-  return Number(value).toLocaleString('en-US', {
+  // A value that rounds to zero prints as zero: "-0.00%" reads as a fall.
+  const rounded = Math.abs(value) < 0.5 * 10 ** -digits ? 0 : Number(value);
+  return rounded.toLocaleString('en-US', {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
@@ -13,7 +15,7 @@ export function num(value, digits = 2) {
 
 export function pct(value, digits = 2) {
   if (value === null || value === undefined || Number.isNaN(value)) return DASH;
-  const sign = value > 0 ? '+' : '';
+  const sign = value >= 0.5 * 10 ** -digits ? '+' : '';
   return `${sign}${num(value, digits)}%`;
 }
 

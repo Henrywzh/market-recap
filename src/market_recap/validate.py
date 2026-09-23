@@ -164,6 +164,29 @@ def _check_valuation(payload: dict | None) -> list[Finding]:
     return out
 
 
+# An equity fund's listed-equity lines should be nearly the whole fund; much
+# less means the parser dropped lines, more means a percent read as a fraction.
+XRAY_EQUITY_WEIGHT_RANGE = (0.85, 1.02)
+
+
+def _check_xray(config: dict, payload: dict | None) -> list[Finding]:
+    if payload is None:
+        return []
+    out = []
+    listed = {f["ticker"]: f for f in payload.get("funds") or []}
+    for ticker, spec in (config.get("etf_xray", {}).get("holdings") or {}).items():
+        fund = listed.get(ticker)
+        if fund is None:
+            out.append(Finding("error", "xray", f"{ticker} is configured but not listed"))
+        elif not spec.startswith("none") and fund.get("status") != "ok":
+            out.append(Finding("warning", "xray", f"{ticker}: holdings not fetched ({fund.get('reason')})"))
+        elif fund.get("kind") == "equity":
+            low, high = XRAY_EQUITY_WEIGHT_RANGE
+            if not low <= (fund.get("equity_weight") or 0) <= high:
+                out.append(Finding("error", "xray", f"{ticker}: equity lines sum to {fund.get('equity_weight')} of the fund"))
+    return out
+
+
 def _check_presets(config: dict, technicals: dict | None) -> list[Finding]:
     """A relative-strength preset whose legs were never baked renders empty."""
     if not technicals:
@@ -252,6 +275,7 @@ def run() -> dict:
         + _check_presets(config, panels.get("technicals"))
         + _check_financials(panels.get("financials"))
         + _check_valuation(panels.get("valuation"))
+        + _check_xray(config, panels.get("xray"))
         + _check_cross_listing(config, panels.get("cross_listing"))
         + _check_flow_attribution(panels.get("heatmaps"))
         + _check_sources(manifest)

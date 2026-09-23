@@ -18,6 +18,7 @@ them.
 | **FIXED INCOME** | Published par yield curve vs. 1 week / 1 month / start of year, level and bps change by tenor, 10Y−2Y and 10Y−3M spreads |
 | **MACRO** | Commodity futures/ETF proxies with multi-period returns, last 12 monthly inflation releases as a heat table |
 | **TECHNICALS** | Any A/B relative-strength ratio with its moving averages and MACD over a chosen period; single-ticker price with **your own MA periods, slope window and period**, a ±1.5σ band, z-score regime, SMA slope, and forward return by z-score band. Every indicator is computed in the browser from the baked close history, by one module tested against pandas |
+| **ETF X-RAY** | Every fund on the ETF heat map looked through to its holdings, from the **issuer's own file** (State Street and iShares daily, Vanguard monthly): concentration (top-10 weight, effective N), sector and country weights against SPY, the top 25 holdings with each one's contribution to the day, overlap with every other fund, and a **valuation look-through** (P/E, P/B, ROE, FCF and dividend yield, growth, margin) aggregated like an index and joined to the VALUATION rows, with the share of the fund it covers. Bond funds show duration, yield to maturity, coupon and maturity buckets. Funds with no usable holdings file (QQQ, RSP, the commodity funds) are listed with the reason, never proxied |
 | **CROSS-LISTING** | A US line against its home-market line at the depositary ratio, with the diagnostics that say whether the series measures a dislocation or a session gap |
 | **VALUATION & QUALITY** | Every S&P 500 / Nasdaq-100 member on one sortable table: P/E, EV/EBITDA, EV/Sales, P/B, FCF / dividend / shareholder yield, ROE, ROIC, gross profitability, margins, growth, accruals, leverage, interest cover, Piotroski F-score and margin stability — trailing twelve months from each company's own 10-Qs, market cap from the close. Valuation × quality scatter, sector medians, and colour by rank within sector. **P/E against each company's own ten years**: price ÷ TTM EPS as it was filed at the time, with its median, percentile band and where today sits |
 | **FINANCIALS** | Ten fiscal years of income statement, balance sheet and cash flow for every S&P 500 and Nasdaq-100 member, with key ratios, each column's period end and last filing date, restatements applied and pre-split years put on today's share basis |
@@ -31,8 +32,8 @@ Every one of these is free and requires no account.
 |---|---|---|
 | **SSGA daily holdings** (`holdings-daily-us-en-<fund>.xlsx`) | S&P 500 and Nasdaq-100 constituents, official index weights, share counts | The issuer's own published basket with an explicit as-of date |
 | **SSGA NAV / premium history** (`navhist-...`, `pdhist-...`) | Net flow and premium for State Street funds | Daily NAV, shares outstanding and premium back to 2003 |
-| **BlackRock fund download** | Net flow for iShares funds | The workbook's `Historical` sheet carries NAV and shares outstanding back to inception; fund ids resolve through the iShares product screener |
-| **Vanguard fund API** (`/vmf/api/<ticker>/{profile,price}`) | Premium to NAV, and whether an ETF is one share class of a larger fund | No shares-outstanding history, so no flow series |
+| **BlackRock fund download** | Net flow and ETF X-RAY holdings for iShares funds | The workbook's `Historical` sheet carries NAV and shares outstanding back to inception; fund ids resolve through the iShares product screener |
+| **Vanguard fund API** (`/vmf/api/<ticker>/{profile,price,portfolio-holding}`) | Premium to NAV, whether an ETF is one share class of a larger fund, and monthly stock holdings for ETF X-RAY | No shares-outstanding history, so no flow series; holdings published weeks after month end, with no sector or country |
 | **Wikipedia** — List of S&P 500 companies | GICS sector and sub-industry | Current descriptive labels, cached weekly |
 | **Yahoo Finance** via `yfinance` | Daily closes for constituents, ETFs and indices; ETF AUM and shares outstanding; commodity futures | Unofficial wrapper around a mutable service |
 | **US Treasury** daily par yield curve XML | The yield curve | Official publication; "latest published" is not always today |
@@ -243,6 +244,18 @@ data/cache/                raw snapshots and parsed frames, pruned each build
   checked and refetched, and the SEC sources carry the latest filing date.
 
 ## Known limits
+
+- **ETF X-RAY matches holdings within a market.** A ticker only names the same
+  company on one exchange: EFA's `DG` is Vinci in Paris and its `EL` is
+  EssilorLuxottica, and matching by ticker alone priced them as Dollar General
+  and Estée Lauder. Lines are keyed by ticker *and* market (an iShares line by
+  its exchange, a Vanguard line in an international fund by a US ISIN), so
+  only US listings are priced or joined to VALUATION. That leaves the
+  international funds' look-through valuation blank: under 50% of a fund
+  matched, a fund multiple describes the matched names, not the fund. Sectors
+  for SSGA and Vanguard funds, which publish none, come from this build's GICS
+  labels or another fund's file in the same market; what stays unclassified
+  (mostly Canada in VEA, and Indian and Thai names in VWO) is shown as such.
 
 - **The cache is compressed where it pays.** SEC company facts are 3–4 MB of
   JSON per filer, of which the DCF reads six line items; 121 of them filled

@@ -104,6 +104,78 @@ def _parse_historical(text: str) -> pd.DataFrame:
     return frame.drop_duplicates("date", keep="last").reset_index(drop=True)
 
 
+def _document(ticker: str, url: str, *, use_cache: bool) -> str:
+    """The fund's download workbook: holdings, NAV history and more, one file.
+
+    Several megabytes of SpreadsheetML per fund, so it is stored compressed and
+    read once per session by both the NAV history and the holdings.
+    """
+    raw = cache.fetch_bytes(
+        NAMESPACE,
+        f"document-{ticker.lower()}",
+        lambda: get_bytes(url, timeout=120.0),
+        kind="daily_file",
+        suffix=".xml",
+        use_cache=use_cache,
+        remember_missing=True,
+        compress=True,
+    )
+    return raw.decode("utf-8", errors="replace")
+
+
+def _sheet_rows(text: str, name: str) -> list[list[str]]:
+    sheet = re.search(rf'<ss:Worksheet ss:Name="{re.escape(name)}">(.*?)</ss:Worksheet>', text, re.S)
+    if not sheet:
+        return []
+    return [[_TAG.sub("", cell).strip() for cell in _CELL.findall(row)] for row in _ROW.findall(sheet.group(1))]
+
+
+# The workbook's column names, as this repository calls them. Equity and bond
+# funds share one sheet layout with different columns; whichever exist are kept.
+HOLDINGS_COLUMNS = {
+    "Ticker": "ticker", "Name": "name", "Sector": "sector", "Asset Class": "asset_class",
+    "Market Value": "market_value", "Weight (%)": "weight", "Location": "country",
+    "Exchange": "exchange", "Currency": "currency", "Duration": "duration", "YTM (%)": "ytm",
+    "Maturity": "maturity", "Coupon (%)": "coupon", "Par Value": "par_value",
+}
+_NUMERIC = ("market_value", "weight", "duration", "ytm", "coupon", "par_value")
+
+
+def _parse_holdings(text: str) -> tuple[pd.DataFrame, str | None]:
+    rows = _sheet_rows(text, "Holdings")
+    header = next((i for i, row in enumerate(rows) if "Weight (%)" in row), None)
+    if header is None:
+        raise ValueError("no Holdings sheet with a weight column")
+    as_of = None
+    for row in rows[:header]:
+        if len(row) >= 2 and row[0] == "Fund Holdings as of":
+            as_of = pd.to_datetime(row[1], format="%b %d, %Y", errors="coerce")
+            as_of = None if pd.isna(as_of) else as_of.strftime("%Y-%m-%d")
+    names = rows[header]
+    frame = pd.DataFrame([r for r in rows[header + 1:] if len(r) == len(names)], columns=names)
+    frame = frame.rename(columns=HOLDINGS_COLUMNS)
+    frame = frame[[c for c in HOLDINGS_COLUMNS.values() if c in frame]]
+    for column in _NUMERIC:
+        if column in frame:
+            frame[column] = pd.to_numeric(frame[column].str.replace(",", "", regex=False), errors="coerce")
+    if "maturity" in frame:
+        frame["maturity"] = pd.to_datetime(frame["maturity"], format="%b %d, %Y", errors="coerce")
+    frame["weight"] = frame["weight"] / 100.0
+    return frame.dropna(subset=["weight"]).reset_index(drop=True), as_of
+
+
+def fetch_holdings(ticker: str, *, use_cache: bool = True) -> tuple[pd.DataFrame, str | None, str]:
+    """(holdings, as-of date, url) from the fund's own workbook. Weights are
+    fractions of the fund, cash and derivatives lines included."""
+    ticker = ticker.upper()
+    portfolio_id = fetch_portfolio_map(use_cache=use_cache).get(ticker)
+    if portfolio_id is None:
+        raise FetchError(f"{ticker}: not an iShares fund", not_found=True)
+    url = DOCUMENT_URL.format(portfolio_id=portfolio_id)
+    frame, as_of = _parse_holdings(_document(ticker, url, use_cache=use_cache))
+    return frame, as_of, url
+
+
 def fetch_nav_history(ticker: str, *, use_cache: bool = True) -> tuple[pd.DataFrame, str]:
     """Published NAV and shares outstanding for one iShares fund."""
     ticker = ticker.upper()
@@ -114,22 +186,11 @@ def fetch_nav_history(ticker: str, *, use_cache: bool = True) -> tuple[pd.DataFr
     url = DOCUMENT_URL.format(portfolio_id=portfolio_id)
 
     def _parse() -> pd.DataFrame:
-        # The workbook is several megabytes per fund, so only the parsed frame
-        # is kept. A fund whose document carries no Historical sheet is
-        # negative-cached: that is a property of the fund, not of today.
-        raw = cache.fetch_bytes(
-            NAMESPACE,
-            f"document-{ticker.lower()}",
-            lambda: get_bytes(url, timeout=120.0),
-            kind="daily_file",
-            suffix=".xml",
-            use_cache=use_cache,
-            remember_missing=True,
-            # SpreadsheetML: several megabytes of markup per fund.
-            compress=True,
-        )
+        # A fund whose document carries no Historical sheet is negative-cached:
+        # that is a property of the fund, not of today.
+        raw = _document(ticker, url, use_cache=use_cache)
         try:
-            return _parse_historical(raw.decode("utf-8", errors="replace"))
+            return _parse_historical(raw)
         except FetchError:
             raise
         except Exception as exc:

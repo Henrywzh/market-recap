@@ -18,21 +18,26 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pandas as pd
+
 from .. import cache
 from .http import FetchError, get_text
 
 PROFILE_URL = "https://investor.vanguard.com/vmf/api/{ticker}/profile"
 PRICE_URL = "https://investor.vanguard.com/vmf/api/{ticker}/price"
+HOLDINGS_URL = "https://investor.vanguard.com/vmf/api/{ticker}/portfolio-holding/stock?start={start}&count={count}"
+# Vanguard answers up to this many holdings per request; VTI has ~3,500.
+HOLDINGS_PAGE = 1000
 HOME_URL = "https://investor.vanguard.com"
 NAMESPACE = "vanguard"
 
 
-def _cached_json(url: str, name: str, *, use_cache: bool) -> Any:
+def _cached_json(url: str, name: str, *, use_cache: bool, kind: str = "intraday_snapshot") -> Any:
     text = cache.fetch_text(
         NAMESPACE,
         name,
         lambda: get_text(url, timeout=45.0, headers={"Accept": "application/json"}),
-        kind="intraday_snapshot",
+        kind=kind,
         suffix=".json",
         use_cache=use_cache,
     )
@@ -82,3 +87,39 @@ def fetch_fund_facts(ticker: str, *, use_cache: bool = True) -> dict:
         "premium_pct": _float(current.get("premiumOrDiscount")),
         "source_url": PRICE_URL.format(ticker=ticker),
     }
+
+
+def fetch_holdings(ticker: str, *, use_cache: bool = True) -> tuple[pd.DataFrame, str | None, str]:
+    """(stock holdings, as-of date, url) for one Vanguard ETF.
+
+    Vanguard publishes holdings monthly, a few weeks after month end, so the
+    as-of date is shown beside every figure built on them. ``percentWeight``
+    comes rounded to two decimals -- thousands of VWO's lines read 0.00, and
+    summing them undercounts the stock sleeve by 9% -- so weights are market
+    value over the total: shares of the fund's *stock holdings*, with its cash
+    unseen. No sector or country is published.
+    """
+    ticker = ticker.upper()
+    entities: list[dict] = []
+    start, size = 1, None
+    while size is None or start <= size:
+        url = HOLDINGS_URL.format(ticker=ticker, start=start, count=HOLDINGS_PAGE)
+        page = _cached_json(url, f"holdings-{ticker}-{start}", use_cache=use_cache, kind="reference_data")
+        size = int(page.get("size") or 0)
+        batch = ((page.get("fund") or {}).get("entity")) or []
+        if not batch:
+            break
+        entities.extend(batch)
+        start += HOLDINGS_PAGE
+    if not entities:
+        raise FetchError(f"{ticker}: no Vanguard holdings", not_found=True)
+    frame = pd.DataFrame({
+        "ticker": [str(e.get("ticker") or "").strip().upper() for e in entities],
+        "name": [e.get("longName") for e in entities],
+        "isin": [e.get("isin") for e in entities],
+        "market_value": pd.to_numeric([e.get("marketValue") for e in entities], errors="coerce"),
+    })
+    frame["weight"] = frame["market_value"] / frame["market_value"].sum()
+    frame["asset_class"] = "Equity"
+    as_of = str(entities[0].get("asOfDate") or "")[:10] or None
+    return frame, as_of, HOLDINGS_URL.format(ticker=ticker, start=1, count=HOLDINGS_PAGE)

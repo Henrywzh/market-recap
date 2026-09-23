@@ -28,6 +28,7 @@ DCF_ARTIFACT_DIR = ARTIFACT_DIR / "dcf"
 FINANCIALS_ARTIFACT_DIR = ARTIFACT_DIR / "financials"
 VALUATION_ARTIFACT_DIR = ARTIFACT_DIR / "valuation"
 ETF_ARTIFACT_DIR = ARTIFACT_DIR / "etfs"
+XRAY_ARTIFACT_DIR = ARTIFACT_DIR / "xray"
 
 # Identify this client honestly. Sending a Chrome User-Agent from a Python
 # process is actively counter-productive: FRED's edge accepts curl's own
@@ -93,6 +94,8 @@ FRESHNESS = {
     # The newest 10-K/10-Q across the whole universe. Some member files one in
     # almost every week of the year; three without any means the check broke.
     "filings": {"stale_after_calendar_days": 21},
+    # Vanguard publishes holdings monthly, a few weeks after month end.
+    "monthly_holdings": {"stale_after_calendar_days": 60},
 }
 DEFAULT_FRESHNESS_POLICY = "daily_close"
 
@@ -149,5 +152,6 @@ def load_config() -> dict[str, Any]:
 
 
 def ensure_dirs() -> None:
-    for path in (CACHE_DIR, ARTIFACT_DIR, TICKER_ARTIFACT_DIR, DCF_ARTIFACT_DIR, FINANCIALS_ARTIFACT_DIR, VALUATION_ARTIFACT_DIR, ETF_ARTIFACT_DIR):
+    for path in (CACHE_DIR, ARTIFACT_DIR, TICKER_ARTIFACT_DIR, DCF_ARTIFACT_DIR, FINANCIALS_ARTIFACT_DIR, VALUATION_ARTIFACT_DIR, ETF_ARTIFACT_DIR,
+                 XRAY_ARTIFACT_DIR):
         path.mkdir(parents=True, exist_ok=True)
