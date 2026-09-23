@@ -12,6 +12,7 @@ import pandas as pd
 
 from ..config import DCF_ARTIFACT_DIR
 from ..sources import sec
+from .financials import cik_for
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, describe_error, write_json
 
 
@@ -75,7 +76,7 @@ def build(ctx, *, tickers: list[str] | None = None, use_cache: bool = True) -> d
     baked, skipped = [], {}
     for symbol in tickers:
         # SEC lists class shares with a dot; the price feed uses a dash.
-        cik = cik_map.get(symbol.replace("-", ".")) or cik_map.get(symbol)
+        cik = cik_for(symbol, cik_map)
         if cik is None:
             skipped[symbol] = "no CIK mapping"
             continue

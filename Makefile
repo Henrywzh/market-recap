@@ -17,14 +17,15 @@ install: ## Install the package and its dependencies (Python + pinned wrangler)
 refresh: ## Full pipeline: fetch, build, validate, prune (the nightly job adds --strict)
 	$(PYTHON) -m market_recap.cli refresh --history 10y $(REFRESH_FLAGS)
 
-refresh-fast: ## Same, without the SEC fundamentals bake
-	$(PYTHON) -m market_recap.cli refresh --history 10y --skip-dcf $(REFRESH_FLAGS)
+refresh-fast: ## Same, without the SEC panels (FINANCIALS, DCF)
+	$(PYTHON) -m market_recap.cli refresh --history 10y --skip-sec $(REFRESH_FLAGS)
 
 validate: ## Re-check the artifacts already on disk
 	$(PYTHON) -m market_recap.cli validate
 
-test: ## Run the test suite
+test: ## Run the test suite (Python, and the browser-side maths under node)
 	$(PYTHON) -m pytest tests/ -q
+	node --test 'tests/js/*.test.mjs'
 
 site: ## Assemble dist/ from the artifacts already on disk
 	$(PYTHON) -m market_recap.cli site

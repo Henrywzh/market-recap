@@ -38,7 +38,7 @@ export default async function renderDcf(root, data) {
   ));
 
   if (!data.available || !data.available.length) {
-    root.append(el('div', { class: 'gap', text: 'No companies were baked in this build. Run the refresh command without --skip-dcf.' }));
+    root.append(el('div', { class: 'gap', text: 'No companies were baked in this build. Run the refresh command without --skip-sec.' }));
     return;
   }
 

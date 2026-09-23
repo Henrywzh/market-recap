@@ -122,6 +122,20 @@ def _check_latest_session(markets: dict | None) -> list[Finding]:
     return out
 
 
+def _check_financials(payload: dict | None) -> list[Finding]:
+    """Most members must have statements. A handful of IFRS filers and
+    brand-new registrants are expected and listed on the page; losing a
+    large share at once means the extraction broke, not the filers."""
+    if payload is None:
+        return []
+    universe, extracted = payload.get("universe") or 0, len(payload.get("available") or [])
+    if not extracted:
+        return [Finding("error", "financials", "no company's statements were extracted")]
+    if extracted < SESSION_COVERAGE_THRESHOLD * universe:
+        return [Finding("warning", "financials", f"statements for only {extracted} of {universe} members")]
+    return []
+
+
 def _check_presets(config: dict, technicals: dict | None) -> list[Finding]:
     """A relative-strength preset whose legs were never baked renders empty."""
     if not technicals:
@@ -208,6 +222,7 @@ def run() -> dict:
         + _check_coverage(manifest)
         + _check_latest_session(panels.get("markets"))
         + _check_presets(config, panels.get("technicals"))
+        + _check_financials(panels.get("financials"))
         + _check_cross_listing(config, panels.get("cross_listing"))
         + _check_flow_attribution(panels.get("heatmaps"))
         + _check_sources(manifest)

@@ -53,7 +53,7 @@ jobs:
           npm ci
 
       - name: Test
-        run: python -m pytest tests/ -q
+        run: make test PYTHON=python
 
       # The cache is politeness and speed, not state: every artifact rebuilds
       # from the publishers, so an evicted cache costs one slow run, never a

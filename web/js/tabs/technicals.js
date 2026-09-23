@@ -1,92 +1,171 @@
+// TECHNICALS: relative strength and single-ticker regime, with the windows in
+// the reader's hands. The build bakes each ticker's close history; every
+// indicator is computed here by technicals-math.js on the full history and
+// then cut to the chosen period.
+
 import { el, card, table, num, pct, dirClass, sectionTitle, DASH } from '../fmt.js';
 import { render, multiLine, SERIES_COLORS } from '../charts.js';
-import { loadArtifact } from '../app.js';
+import * as T from '../technicals-math.js';
 
 const TICKER_BASE = 'artifacts/tickers';
+// A sanity bound on typed windows, not a data limit: ten years of history
+// would support more, but nobody means a 2,000-day "moving average".
+const MAX_MA_WINDOW = 400;
+const MAX_SLOPE_WINDOW = 60;
+
+const payloads = new Map();
 
 async function loadTicker(symbol) {
-  const response = await fetch(`${TICKER_BASE}/${symbol.toUpperCase()}.json`, { cache: 'no-cache' });
-  if (!response.ok) throw new Error(`${symbol.toUpperCase()} is not in this build`);
-  return response.json();
+  const key = symbol.toUpperCase();
+  if (!payloads.has(key)) {
+    payloads.set(key, fetch(`${TICKER_BASE}/${key}.json`, { cache: 'no-cache' }).then((response) => {
+      if (!response.ok) throw new Error(`${key} is not in this build`);
+      return response.json();
+    }));
+  }
+  try {
+    return await payloads.get(key);
+  } catch (error) {
+    payloads.delete(key);
+    throw error;
+  }
 }
 
-function priceChart(node, payload) {
-  render(node, (option, p) => {
-    const windows = Object.keys(payload.moving_averages);
-    return {
-      ...option,
-      grid: { ...option.grid, bottom: 52 },
-      legend: { bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9 },
-      xAxis: { ...option.xAxis, data: payload.dates },
-      series: [
-        // The band is drawn as a stacked invisible base plus a filled span, so
-        // it reads as an envelope rather than two unrelated lines. A ticker
-        // without enough history simply has no band.
-        ...(payload.band_upper.length ? [
-          { name: 'band base', type: 'line', data: payload.band_lower, stack: 'band', showSymbol: false,
-            lineStyle: { opacity: 0 }, areaStyle: { opacity: 0 }, silent: true, tooltip: { show: false } },
-          { name: '±1.5σ band', type: 'line', stack: 'band', showSymbol: false, silent: true,
-            data: payload.band_upper.map((v, i) => (v === null || payload.band_lower[i] === null ? null : v - payload.band_lower[i])),
-            lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(232,163,61,0.13)' }, tooltip: { show: false } },
-        ] : []),
-        { name: `${payload.ticker} Close`, type: 'line', data: payload.close, showSymbol: false,
-          lineStyle: { width: 1.4, color: p.text }, z: 5 },
-        ...windows.map((w, i) => ({
-          name: `${w}-day SMA`, type: 'line', data: payload.moving_averages[w], showSymbol: false,
-          lineStyle: { width: 1, color: SERIES_COLORS[i % SERIES_COLORS.length] },
-        })),
-      ],
+const cut = (values, start) => values.slice(start);
+
+function periodSelect(periods, selected) {
+  return el('select', {}, Object.keys(periods).map((label) => {
+    const option = el('option', { value: label, text: label });
+    if (label === selected) option.selected = true;
+    return option;
+  }));
+}
+
+function needs(window, sessions) {
+  return `needs ${window} sessions, has ${sessions}`;
+}
+
+// ---------------------------------------------------------------- readings
+
+function computeSingle(payload, { windows, slopeWindow, defaults }) {
+  const close = payload.close;
+  const n = close.length;
+  const zWindow = defaults.zscore_window;
+  const horizon = defaults.forward_return_days;
+  const unavailable = {};
+
+  const formed = windows.filter((w) => n >= w);
+  windows.filter((w) => n < w).forEach((w) => { unavailable[`sma_${w}`] = needs(w, n); });
+  const averages = Object.fromEntries(formed.map((w) => [w, T.sma(close, w)]));
+  const slopes = Object.fromEntries(formed.map((w) => [w, T.smaSlope(close, w, slopeWindow)]));
+
+  let summary = { price: close[n - 1] };
+  let z = [];
+  let bandLines = null;
+  if (n >= zWindow) {
+    const long = T.sma(close, zWindow);
+    z = T.zscore(close, zWindow);
+    bandLines = T.band(close, zWindow, defaults.band_sigma);
+    const lastZ = z[n - 1];
+    const b = T.bandFor(lastZ);
+    const slope = T.annualisedSlope(close, zWindow, slopeWindow);
+    summary = {
+      ...summary,
+      smaLong: long[n - 1],
+      distance: (close[n - 1] / long[n - 1] - 1) * 100,
+      zscore: lastZ,
+      band: b?.label ?? null,
+      verdict: b?.verdict ?? null,
+      slope,
+      slopeVerdict: T.slopeVerdict(slope),
     };
-  });
+  } else {
+    ['zscore', 'sigma_band', 'long_average', 'slope_annualised'].forEach((k) => { unavailable[k] = needs(zWindow, n); });
+  }
+
+  const forward = n >= zWindow + horizon ? T.forwardReturnByBand(close, zWindow, horizon) : null;
+  if (!forward) {
+    unavailable.forward_returns = `needs ${zWindow + horizon} sessions (${zWindow} to form the z-score plus `
+      + `${horizon} for the forward window), has ${n}`;
+  }
+  return { averages, slopes, z, bandLines, summary, forward, unavailable };
 }
 
-function summaryTable(summary, payload) {
-  const gap = payload.unavailable || {};
-  const w = payload_zwindow(payload);
-  const rows = [
-    ['PRICE', `${num(summary.price)} AS OF ${payload.as_of}`, `${payload.sessions} sessions since ${payload.first_session}`],
-    [`${w} DMA / DISTANCE`, summary.sma_long === null ? DASH : num(summary.sma_long),
-      summary.sma_long === null ? (gap.long_average || '') : pct(summary.distance_pct)],
-    ['Z-SCORE', summary.zscore === null ? DASH : num(summary.zscore),
-      summary.zscore === null ? (gap.zscore || '') : (summary.verdict || '')],
-    [`${w} DMA SLOPE (ANN.)`, summary.slope_annualised === null ? DASH : pct(summary.slope_annualised, 1),
-      summary.slope_annualised === null ? (gap.slope_annualised || '') : slopeVerdict(summary.slope_annualised)],
-    ['Z-SCORE BAND', summary.zscore_band || DASH, ''],
-  ];
-  return table(['METRIC', 'VALUE', ''], rows.map(([label, value, note]) => el('tr', {}, [
-    el('td', { class: 'dim', text: label }),
-    el('td', { text: value }),
-    el('td', { class: noteClass(note), text: note }),
-  ])));
+// ------------------------------------------------------------------ charts
+
+const BAND_BASE = 'band base';
+
+function priceChart(node, payload, readings, start, defaults) {
+  const dates = cut(payload.dates, start);
+  const { bandLines } = readings;
+  render(node, (option, p) => withLegend(option, p, {
+    ...option,
+    grid: { ...option.grid, bottom: 52 },
+    xAxis: { ...option.xAxis, data: dates },
+    series: [
+      // The band is a stacked invisible base plus a filled span, so it reads
+      // as an envelope rather than two unrelated lines.
+      ...(bandLines ? [
+        { name: BAND_BASE, type: 'line', data: cut(bandLines.lower, start), stack: 'band', showSymbol: false,
+          lineStyle: { opacity: 0 }, areaStyle: { opacity: 0 }, silent: true, tooltip: { show: false } },
+        { name: `±${defaults.band_sigma}σ band`, type: 'line', stack: 'band', showSymbol: false, silent: true,
+          data: cut(bandLines.upper, start).map((v, i) => {
+            const low = bandLines.lower[start + i];
+            return v === null || low === null ? null : v - low;
+          }),
+          lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(232,163,61,0.13)' }, tooltip: { show: false } },
+      ] : []),
+      { name: `${payload.ticker} Close`, type: 'line', data: cut(payload.close, start), showSymbol: false,
+        lineStyle: { width: 1.4, color: p.text }, z: 5 },
+      ...Object.entries(readings.averages).map(([w, values], i) => ({
+        name: `${w}-day SMA`, type: 'line', data: cut(values, start), showSymbol: false,
+        lineStyle: { width: 1, color: SERIES_COLORS[i % SERIES_COLORS.length] },
+      })),
+    ],
+  }));
 }
 
-function payload_zwindow(payload) {
-  return payload.zscore_window || 200;
+// The band's invisible base series exists only to lift the fill; it has no
+// place in the legend.
+function withLegend(option, p, built) {
+  return {
+    ...built,
+    legend: {
+      bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9,
+      data: built.series.map((s) => s.name).filter((name) => name !== BAND_BASE),
+    },
+  };
 }
 
-function slopeVerdict(value) {
-  if (value === null || value === undefined) return '';
-  if (value > 20) return 'STRONG UPTREND';
-  if (value > 2) return 'UPTREND';
-  if (value < -20) return 'STRONG DOWNTREND';
-  if (value < -2) return 'DOWNTREND';
-  return 'FLAT';
+function zChart(node, dates, z) {
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, top: 10, bottom: 24 },
+    xAxis: { ...option.xAxis, data: dates, boundaryGap: true },
+    series: [{
+      type: 'bar', barMaxWidth: 3,
+      data: z.map((v) => ({ value: v, itemStyle: { color: v >= 0 ? '#2dd4bf' : p.down } })),
+      markLine: { silent: true, symbol: 'none', data: [{ yAxis: 0 }],
+        lineStyle: { color: p.faint, type: 'dashed' }, label: { show: false } },
+    }],
+  }));
 }
 
-function loadedMessage(symbol, payload) {
-  const missing = Object.keys(payload.unavailable || {});
-  return missing.length
-    ? `Loaded ${symbol} · ${payload.sessions} sessions since ${payload.first_session} · `
-      + `${missing.length} reading(s) need more history`
-    : `Loaded ${symbol} as of ${payload.as_of}.`;
+function macdChart(node, dates, series) {
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, top: 10, bottom: 24 },
+    xAxis: { ...option.xAxis, data: dates },
+    series: [
+      { name: 'Histogram', type: 'bar', barMaxWidth: 3,
+        data: series.histogram.map((v) => ({ value: v, itemStyle: { color: v >= 0 ? p.up : p.down } })) },
+      { name: 'MACD', type: 'line', data: series.macd, showSymbol: false, lineStyle: { width: 1, color: p.blue } },
+      { name: 'Signal', type: 'line', data: series.signal, showSymbol: false, lineStyle: { width: 1, color: p.accent } },
+    ],
+  }));
 }
 
-function gapText(payload, key) {
-  const reason = (payload.unavailable || {})[key];
-  return reason
-    ? `Not available for ${payload.ticker}: ${reason}.`
-    : `Not available for ${payload.ticker}.`;
-}
+// ------------------------------------------------------------------ tables
 
 function noteClass(note) {
   if (!note) return 'dim';
@@ -95,66 +174,97 @@ function noteClass(note) {
   return 'dim';
 }
 
-export default async function renderTechnicals(root, data) {
-  root.append(sectionTitle('TECHNICALS', 'RELATIVE STRENGTH · MA SLOPE · Z-SCORE & REGIME'));
+function summaryTable(payload, readings, { zWindow, slopeWindow }) {
+  const s = readings.summary;
+  const gap = readings.unavailable;
+  const missing = s.zscore === undefined;
+  const rows = [
+    ['PRICE', `${num(s.price)} AS OF ${payload.as_of}`, `${payload.sessions} sessions since ${payload.first_session}`],
+    [`${zWindow} DMA / DISTANCE`, missing ? DASH : num(s.smaLong), missing ? gap.long_average : pct(s.distance)],
+    ['Z-SCORE', missing || s.zscore === null ? DASH : num(s.zscore), missing ? gap.zscore : (s.verdict || '')],
+    [`${zWindow} DMA SLOPE (ANN., ${slopeWindow}D)`, missing || s.slope === null ? DASH : pct(s.slope, 1),
+      missing ? gap.slope_annualised : (s.slopeVerdict || '')],
+    ['Z-SCORE BAND', s.band || DASH, ''],
+  ];
+  return table(['METRIC', 'VALUE', ''], rows.map(([label, value, note]) => el('tr', {}, [
+    el('td', { class: 'dim', text: label }),
+    el('td', { text: value }),
+    el('td', { class: noteClass(note), text: note || '' }),
+  ])));
+}
 
+function forwardCard(payload, readings, data) {
+  const horizon = data.defaults.forward_return_days;
+  if (!readings.forward) {
+    return card(`${horizon}-DAY FORWARD RETURN BY Z-SCORE BAND`, null,
+      el('div', { class: 'notice', text: `Not available for ${payload.ticker}: ${readings.unavailable.forward_returns}.` }));
+  }
+  const rows = readings.forward.map((row) => el('tr', {}, [
+    el('td', { text: row.band }),
+    el('td', { class: 'dim', text: row.count }),
+    el('td', { class: dirClass(row.mean), text: row.mean === null ? DASH : pct(row.mean) }),
+    el('td', { class: dirClass(row.median), text: row.median === null ? DASH : pct(row.median) }),
+    el('td', { text: row.hitRate === null ? DASH : `${num(row.hitRate, 1)}%` }),
+  ]));
+  return card(
+    `${horizon}-DAY FORWARD RETURN BY Z-SCORE BAND (${payload.first_session} → ${payload.as_of}, ${payload.sessions} SESSIONS)`,
+    null,
+    [
+      table(['Z-SCORE BAND', 'COUNT', 'MEAN RETURN %', 'MEDIAN RETURN %', '% POSITIVE'], rows),
+      el('div', { class: 'note-text', text: data.note }),
+    ],
+  );
+}
+
+// -------------------------------------------------------------------- tab
+
+export default async function renderTechnicals(root, data) {
+  const defaults = data.defaults;
   const available = new Set(data.available);
+  root.append(sectionTitle('TECHNICALS', 'RELATIVE STRENGTH · MA SLOPE · Z-SCORE & REGIME'));
 
   // ---------------- Relative strength ------------------------------------
   const rsStatus = el('span', { class: 'field-note', text: '' });
   const ratioNode = el('div', { class: 'chart' });
   const macdNode = el('div', { class: 'chart short' });
-
-  const presetSelect = el('select', { id: 'rs-preset' }, data.presets.map((p) => el('option', { value: p, text: p })));
-  const numInput = el('input', { id: 'rs-num', value: 'XLK', size: '8' });
-  const denInput = el('input', { id: 'rs-den', value: 'SPY', size: '8' });
+  const [firstNum, firstDen] = defaults.presets[0].split('/');
+  const presetSelect = el('select', {}, [
+    ...defaults.presets.map((p) => el('option', { value: p, text: p })),
+    el('option', { value: '', text: 'Custom…' }),
+  ]);
+  const numInput = el('input', { value: firstNum, size: '8' });
+  const denInput = el('input', { value: firstDen, size: '8' });
+  const rsPeriod = periodSelect(data.periods, defaults.ratio_period);
   presetSelect.addEventListener('change', () => {
-    const [a, b] = presetSelect.value.split('/');
-    numInput.value = a;
-    denInput.value = b;
+    if (!presetSelect.value) return;
+    [numInput.value, denInput.value] = presetSelect.value.split('/');
+    loadRatio();
   });
+  const markCustom = () => { presetSelect.value = ''; };
+  numInput.addEventListener('input', markCustom);
+  denInput.addEventListener('input', markCustom);
+  rsPeriod.addEventListener('change', () => loadRatio());
+
+  const [maShort, maLong] = defaults.ratio_ma_periods;
+  const { fast, slow, signal } = defaults.macd;
 
   async function loadRatio() {
     const a = numInput.value.trim().toUpperCase();
     const b = denInput.value.trim().toUpperCase();
     rsStatus.textContent = `Loading ${a}/${b}…`;
     try {
-      if (!available.has(a)) throw new Error(`${a} is not in this build`);
-      if (!available.has(b)) throw new Error(`${b} is not in this build`);
+      for (const symbol of [a, b]) if (!available.has(symbol)) throw new Error(`${symbol} is not in this build`);
       const [left, right] = await Promise.all([loadTicker(a), loadTicker(b)]);
-
-      // Align on shared dates: the two series can start on different days.
-      const rightMap = new Map(right.dates.map((d, i) => [d, right.close[i]]));
-      const dates = [];
-      const ratio = [];
-      left.dates.forEach((d, i) => {
-        const denominator = rightMap.get(d);
-        if (denominator) { dates.push(d); ratio.push(left.close[i] / denominator); }
+      const { dates, ratio } = T.ratioSeries(left, right);
+      const start = T.viewStart(dates, data.periods[rsPeriod.value]);
+      const lines = { Ratio: cut(ratio, start) };
+      defaults.ratio_ma_periods.forEach((w) => { lines[`${w}MA`] = cut(T.sma(ratio, w), start); });
+      multiLine(ratioNode, cut(dates, start), lines);
+      const m = T.macd(ratio, defaults.macd);
+      macdChart(macdNode, cut(dates, start), {
+        macd: cut(m.macd, start), signal: cut(m.signal, start), histogram: cut(m.histogram, start),
       });
-      const sma = (values, window) => values.map((_, i) =>
-        (i + 1 < window ? null : values.slice(i + 1 - window, i + 1).reduce((s, v) => s + v, 0) / window));
-
-      multiLine(ratioNode, dates, { Ratio: ratio, '60MA': sma(ratio, 60), '200MA': sma(ratio, 200) });
-
-      const ema = (values, span) => {
-        const k = 2 / (span + 1);
-        let prev = values[0];
-        return values.map((v, i) => (i === 0 ? (prev = v) : (prev = v * k + prev * (1 - k))));
-      };
-      const line = ema(ratio, 8).map((v, i) => v - ema(ratio, 17)[i]);
-      const signal = ema(line, 9);
-      render(macdNode, (option, p) => ({
-        ...option,
-        grid: { ...option.grid, top: 10, bottom: 24 },
-        xAxis: { ...option.xAxis, data: dates },
-        series: [
-          { name: 'Histogram', type: 'bar', barMaxWidth: 3,
-            data: line.map((v, i) => ({ value: v - signal[i], itemStyle: { color: v - signal[i] >= 0 ? p.up : p.down } })) },
-          { name: 'MACD', type: 'line', data: line, showSymbol: false, lineStyle: { width: 1, color: p.blue } },
-          { name: 'Signal', type: 'line', data: signal, showSymbol: false, lineStyle: { width: 1, color: p.accent } },
-        ],
-      }));
-      rsStatus.textContent = `Loaded ${a}/${b} as of ${left.as_of}. ${dates.length} shared sessions.`;
+      rsStatus.textContent = `Loaded ${a}/${b} as of ${dates[dates.length - 1]} · ${dates.length} shared sessions`;
     } catch (error) {
       rsStatus.textContent = error.message;
       ratioNode.innerHTML = '';
@@ -167,97 +277,88 @@ export default async function renderTechnicals(root, data) {
       el('div', { class: 'field' }, [el('label', { text: 'PRESET' }), presetSelect]),
       el('div', { class: 'field' }, [el('label', { text: 'NUMERATOR' }), numInput]),
       el('div', { class: 'field' }, [el('label', { text: 'DENOMINATOR' }), denInput]),
+      el('div', { class: 'field' }, [el('label', { text: 'PERIOD' }), rsPeriod]),
       el('button', { class: 'action', text: 'LOAD', onclick: loadRatio }),
       rsStatus,
     ]),
-    el('div', { class: 'card-title', text: 'RATIO + 60/200-DAY MOVING AVERAGE' }),
+    el('div', { class: 'card-title', text: `RATIO + ${maShort}/${maLong}-DAY MOVING AVERAGE` }),
     ratioNode,
-    el('div', { class: 'card-title', text: 'MACD (8/17/9)' }),
+    el('div', { class: 'card-title', text: `MACD (${fast}/${slow}/${signal})` }),
     macdNode,
   ]));
 
   // ---------------- Single ticker ----------------------------------------
   const stStatus = el('span', { class: 'field-note', text: '' });
-  const tickerInput = el('input', { id: 'st-ticker', value: 'NVDA', size: '8' });
+  const tickerInput = el('input', { value: available.has('NVDA') ? 'NVDA' : data.available[0], size: '8' });
+  const maInput = el('input', { value: defaults.ma_periods.join(','), size: '12' });
+  const slopeInput = el('input', { value: String(defaults.slope_window), size: '4', type: 'number', min: '1', max: String(MAX_SLOPE_WINDOW) });
+  const stPeriod = periodSelect(data.periods, defaults.single_ticker_period);
   const summaryHost = el('div', {});
+  const priceTitle = el('div', { class: 'card-title', text: '' });
   const stPriceNode = el('div', { class: 'chart tall' });
+  const slopeTitle = el('span', { class: 'card-title', text: '' });
   const slopeNode = el('div', { class: 'chart short' });
   const zNode = el('div', { class: 'chart short' });
   const fwdHost = el('div', {});
+  const zWindow = defaults.zscore_window;
 
   async function loadSingle() {
     const symbol = tickerInput.value.trim().toUpperCase();
     stStatus.textContent = `Loading ${symbol}…`;
     try {
-      const payload = await loadTicker(symbol);
-      priceChart(stPriceNode, payload);
-
-      summaryHost.innerHTML = '';
-      summaryHost.append(summaryTable(payload.summary, payload));
-
-      multiLine(slopeNode, payload.dates,
-        Object.fromEntries(Object.entries(payload.sma_slope).map(([w, v]) => [`${w}-day SMA slope`, v])));
-
-      if (!payload.zscore.length) {
-        zNode.innerHTML = '';
-        zNode.append(el('div', { class: 'note-text', text: gapText(payload, 'zscore') }));
-      } else render(zNode, (option, p) => ({
-        ...option,
-        grid: { ...option.grid, top: 10, bottom: 24 },
-        xAxis: { ...option.xAxis, data: payload.dates, boundaryGap: true },
-        series: [{
-          type: 'bar', barMaxWidth: 3,
-          data: payload.zscore.map((v) => ({ value: v, itemStyle: { color: v >= 0 ? '#2dd4bf' : p.down } })),
-          markLine: { silent: true, symbol: 'none', data: [{ yAxis: 0 }],
-            lineStyle: { color: p.faint, type: 'dashed' }, label: { show: false } },
-        }],
-      }));
-
-      const fwd = payload.forward_returns;
-      if (!fwd.rows.length) {
-        fwdHost.innerHTML = '';
-        fwdHost.append(card(`${fwd.horizon}-DAY FORWARD RETURN BY Z-SCORE BAND`, null,
-          el('div', { class: 'notice', text: gapText(payload, 'forward_returns') })));
-        stStatus.textContent = loadedMessage(symbol, payload);
-        return;
+      const windows = T.parseWindows(maInput.value, { max: MAX_MA_WINDOW });
+      const slopeWindow = Number(slopeInput.value);
+      if (!Number.isInteger(slopeWindow) || slopeWindow < 1 || slopeWindow > MAX_SLOPE_WINDOW) {
+        throw new Error(`Slope window must be a whole number from 1 to ${MAX_SLOPE_WINDOW}`);
       }
-      const rows = fwd.rows.map((row) => el('tr', {}, [
-        el('td', { text: row.band }),
-        el('td', { class: 'dim', text: row.count }),
-        el('td', { class: dirClass(row.mean), text: row.mean === null ? DASH : pct(row.mean) }),
-        el('td', { class: dirClass(row.median), text: row.median === null ? DASH : pct(row.median) }),
-        el('td', { text: row.hit_rate === null ? DASH : `${num(row.hit_rate, 1)}%` }),
-      ]));
-      fwdHost.innerHTML = '';
-      fwdHost.append(card(
-        `${fwd.horizon}-DAY FORWARD RETURN BY Z-SCORE BAND (${fwd.start} → ${payload.as_of}, ${fwd.sessions} SESSIONS)`,
-        null,
-        [
-          table(['Z-SCORE BAND', 'COUNT', 'MEAN RETURN %', 'MEDIAN RETURN %', '% POSITIVE'], rows),
-          el('div', { class: 'note-text', text: data.note }),
-        ],
+      const payload = await loadTicker(symbol);
+      const readings = computeSingle(payload, { windows, slopeWindow, defaults });
+      const start = T.viewStart(payload.dates, data.periods[stPeriod.value]);
+      const dates = cut(payload.dates, start);
+
+      summaryHost.replaceChildren(summaryTable(payload, readings, { zWindow, slopeWindow }));
+      priceTitle.textContent = `PRICE, ${windows.join('/')}-DAY SMA & ${defaults.band_sigma}σ BAND (${zWindow} DMA)`;
+      priceChart(stPriceNode, payload, readings, start, defaults);
+
+      slopeTitle.textContent = `SMA SLOPE (% PER DAY, OVER ${slopeWindow} SESSIONS)`;
+      multiLine(slopeNode, dates, Object.fromEntries(
+        Object.entries(readings.slopes).map(([w, v]) => [`${w}-day SMA slope`, cut(v, start)]),
       ));
-      stStatus.textContent = loadedMessage(symbol, payload);
+      if (readings.z.length) zChart(zNode, dates, cut(readings.z, start));
+      else zNode.replaceChildren(el('div', { class: 'note-text', text: `Not available for ${symbol}: ${readings.unavailable.zscore}.` }));
+
+      fwdHost.replaceChildren(forwardCard(payload, readings, data));
+      const gaps = Object.keys(readings.unavailable).length;
+      stStatus.textContent = gaps
+        ? `Loaded ${symbol} · ${payload.sessions} sessions since ${payload.first_session} · ${gaps} reading(s) need more history`
+        : `Loaded ${symbol} as of ${payload.as_of}.`;
     } catch (error) {
       stStatus.textContent = error.message;
     }
   }
 
+  for (const input of [tickerInput, maInput, slopeInput]) {
+    input.addEventListener('keydown', (event) => { if (event.key === 'Enter') loadSingle(); });
+  }
+  stPeriod.addEventListener('change', () => loadSingle());
+
   root.append(card('SINGLE-TICKER TECHNICALS', null, [
     el('div', { class: 'field-row' }, [
       el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), tickerInput]),
+      el('div', { class: 'field' }, [el('label', { text: 'MA PERIODS' }), maInput]),
+      el('div', { class: 'field' }, [el('label', { text: 'SLOPE WINDOW (D)' }), slopeInput]),
+      el('div', { class: 'field' }, [el('label', { text: 'PERIOD' }), stPeriod]),
       el('button', { class: 'action', text: 'LOAD', onclick: loadSingle }),
       stStatus,
     ]),
     summaryHost,
-    el('div', { class: 'card-title', text: `PRICE, MOVING AVERAGES & 1.5σ BAND (${data.zscore_window} DMA)` }),
+    priceTitle,
     stPriceNode,
   ]));
 
-  root.append(el('div', { class: 'grid two' }, [
-    card('SMA SLOPE (% PER DAY)', null, slopeNode),
-    card(`Z-SCORE VS ${data.zscore_window} DMA`, null, zNode),
-  ]));
+  const slopeCard = card('', null, slopeNode);
+  slopeCard.querySelector('.card-title').replaceWith(slopeTitle);
+  root.append(el('div', { class: 'grid two' }, [slopeCard, card(`Z-SCORE VS ${zWindow} DMA`, null, zNode)]));
   root.append(fwdHost);
 
   await loadRatio();

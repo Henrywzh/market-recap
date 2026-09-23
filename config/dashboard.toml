@@ -50,6 +50,10 @@ heatmap = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
 index_price_chart = ["1M", "3M", "6M", "YTD", "1Y", "3Y", "5Y", "10Y"]
 breadth_chart = ["1M", "3M", "6M", "YTD", "1Y", "2Y"]
 sector_rebased = ["1M", "3M", "6M", "1Y", "3Y"]
+# Display periods on the TECHNICALS charts. Indicators are computed on the full
+# history first and then cut to the period, so a 200-day average is already
+# formed on the first day shown.
+technicals_chart = ["6M", "1Y", "2Y", "3Y", "5Y", "10Y"]
 # Sessions of chart history baked into each per-ticker artifact.
 chart_window = "2Y"
 # yfinance history length for the commodity table. It has to cover the longest
@@ -234,6 +238,21 @@ min_sessions = 40
 macd_fast = 8
 macd_slow = 17
 macd_signal = 9
+# Per-day slope of each average is measured over this many sessions, and so is
+# the annualised slope of the long average. Editable on the page.
+slope_window = 5
+# Moving averages drawn on a relative-strength ratio.
+ratio_ma_periods = [60, 200]
+# The period each chart opens on (one of periods.technicals_chart).
+single_ticker_period = "1Y"
+ratio_period = "5Y"
+
+[financials]
+# Every member of these indices gets ten fiscal years of filed statements.
+# Baked at build time for the same reason as the DCF: data.sec.gov sends no
+# CORS header. IFRS filers (ASML, ARM) are listed as skipped, with the reason.
+indices = ["SPX", "NDX"]
+history_years = 10
 
 [dcf]
 # Fundamentals are baked at build time: data.sec.gov sends no CORS header, so

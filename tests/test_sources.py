@@ -20,52 +20,95 @@ def test_class_shares_are_translated_for_the_price_feed():
     assert ssga.to_yahoo_symbol("AAPL") == "AAPL"
 
 
-def test_annual_values_falls_back_per_year_not_per_company():
+REVENUE = sec.ITEMS_BY_KEY["revenue"]
+
+
+def _row(start, end, val, filed, fy, form="10-K", fp="FY"):
+    return {"form": form, "fp": fp, "fy": fy, "start": start, "end": end, "val": val, "filed": filed}
+
+
+def _facts(**tags):
+    return {"entityName": "Example Corp", "facts": {"us-gaap": {
+        tag: {"units": {unit: rows for unit, rows in units.items()}} for tag, units in tags.items()
+    }}}
+
+
+def test_annual_values_fall_back_per_year_not_per_company():
     """A filer that switches revenue tags mid-history must keep both years."""
-    facts = {
-        "facts": {
-            "us-gaap": {
-                "Revenues": {"units": {"USD": [
-                    {"form": "10-K", "fp": "FY", "fy": 2023, "start": "2023-01-01",
-                     "end": "2023-12-31", "val": 100, "filed": "2024-02-01"},
-                ]}},
-                "RevenueFromContractWithCustomerExcludingAssessedTax": {"units": {"USD": [
-                    {"form": "10-K", "fp": "FY", "fy": 2024, "start": "2024-01-01",
-                     "end": "2024-12-31", "val": 120, "filed": "2025-02-01"},
-                ]}},
-            }
-        }
-    }
-    picked = sec._annual_values(facts, sec.LINE_ITEMS["revenue"])
-    assert picked[2023]["value"] == 100
-    assert picked[2024]["value"] == 120
+    facts = _facts(
+        Revenues={"USD": [_row("2023-01-01", "2023-12-31", 100, "2024-02-01", 2023)]},
+        RevenueFromContractWithCustomerExcludingAssessedTax={"USD": [
+            _row("2024-01-01", "2024-12-31", 120, "2025-02-01", 2024)]},
+    )
+    picked = sec._annual_series(facts, REVENUE)
+    assert picked["2023-12-31"]["value"] == 100
+    assert picked["2024-12-31"]["value"] == 120
 
 
 def test_quarterly_durations_are_rejected():
-    facts = {
-        "facts": {
-            "us-gaap": {
-                "Revenues": {"units": {"USD": [
-                    {"form": "10-K", "fp": "FY", "fy": 2024, "start": "2024-10-01",
-                     "end": "2024-12-31", "val": 30, "filed": "2025-02-01"},
-                ]}}
-            }
-        }
-    }
-    assert sec._annual_values(facts, ("Revenues",)) == {}
+    facts = _facts(Revenues={"USD": [_row("2024-10-01", "2024-12-31", 30, "2025-02-01", 2024)]})
+    assert sec._annual_series(facts, REVENUE) == {}
 
 
 def test_a_restatement_wins_over_the_original_filing():
-    rows = [
-        {"form": "10-K", "fp": "FY", "fy": 2024, "start": "2024-01-01",
-         "end": "2024-12-31", "val": 100, "filed": "2025-02-01"},
-        {"form": "10-K", "fp": "FY", "fy": 2024, "start": "2024-01-01",
-         "end": "2024-12-31", "val": 97, "filed": "2026-02-01"},
-    ]
-    facts = {"facts": {"us-gaap": {"Revenues": {"units": {"USD": rows}}}}}
-    picked = sec._annual_values(facts, ("Revenues",))
-    assert picked[2024]["value"] == 97
-    assert picked[2024]["filed"] == "2026-02-01"
+    facts = _facts(Revenues={"USD": [
+        _row("2024-01-01", "2024-12-31", 100, "2025-02-01", 2024),
+        _row("2024-01-01", "2024-12-31", 97, "2026-02-01", 2025),
+    ]})
+    picked = sec._annual_series(facts, REVENUE)
+    assert picked["2024-12-31"]["value"] == 97
+    assert picked["2024-12-31"]["filed"] == "2026-02-01"
+
+
+def test_comparatives_are_filed_under_their_own_period_not_the_filings_fy():
+    """A FY2025 10-K reports FY2024 as a comparative with fy=2025. Keying on
+    fy put CrowdStrike's revenue in the wrong years and dropped one."""
+    facts = _facts(Revenues={"USD": [
+        # Listed newest-comparative-last, the order that used to decide the winner.
+        _row("2024-02-01", "2025-01-31", 3954, "2026-03-01", 2026),
+        _row("2025-02-01", "2026-01-31", 4812, "2026-03-01", 2026),
+        _row("2024-02-01", "2025-01-31", 3954, "2025-03-10", 2025),
+    ]})
+    rows = sec.annual_statements(facts)
+    assert [(r["fiscal_year"], r["revenue"]) for r in rows] == [(2025, 3954), (2026, 4812)]
+
+
+@pytest.mark.parametrize("end, year", [
+    ("2025-12-31", 2025), ("2026-01-03", 2025),   # 52/53-week year ending early January
+    ("2026-01-25", 2026), ("2025-06-30", 2025),   # NVIDIA-style January, Microsoft June
+])
+def test_fiscal_years_are_named_from_the_period_end(end, year):
+    assert sec.fiscal_year(end) == year
+
+
+def test_a_balance_sheet_figure_is_an_instant_not_a_flow():
+    equity = sec.ITEMS_BY_KEY["equity"]
+    facts = _facts(StockholdersEquity={"USD": [
+        {"form": "10-K", "fp": "FY", "fy": 2025, "end": "2025-12-31", "val": 50, "filed": "2026-02-01"},
+        _row("2025-01-01", "2025-12-31", 999, "2026-02-01", 2025),  # a duration under a balance tag
+    ]})
+    assert {end: v["value"] for end, v in sec._annual_series(facts, equity).items()} == {"2025-12-31": 50}
+
+
+def test_a_reorganised_filer_is_followed_to_its_predecessor(monkeypatch):
+    """Exxon's 2026 holding-company CIK holds one 10-Q; the history is under the
+    CIK that submitted it, named in the accession number."""
+    new = _facts(Revenues={"USD": [{**_row("2026-01-01", "2026-06-30", 201, "2026-08-03", 2026, "10-Q", "Q2"),
+                                    "accn": "0000034088-26-000093"}]})
+    old = _facts(Revenues={"USD": [{**_row("2025-01-01", "2025-12-31", 332, "2026-02-18", 2025),
+                                    "accn": "0000034088-26-000010"}]})
+    monkeypatch.setattr(sec, "fetch_company_facts", lambda cik, use_cache=True: {2115436: new, 34088: old}[cik])
+    facts, ciks = sec.fetch_filer_facts(2115436)
+    assert ciks == [2115436, 34088]
+    assert [r["revenue"] for r in sec.annual_statements(facts)] == [332]
+
+
+def test_a_filing_agent_is_not_mistaken_for_a_predecessor(monkeypatch):
+    new = _facts(Revenues={"USD": [{**_row("2026-01-01", "2026-06-30", 1, "2026-08-03", 2026, "10-Q", "Q2"),
+                                    "accn": "0001193125-26-000001"}]})
+    agent = {"entityName": "Donnelley Financial", "facts": {}}
+    monkeypatch.setattr(sec, "fetch_company_facts", lambda cik, use_cache=True: {7: new, 1193125: agent}[cik])
+    assert sec.fetch_filer_facts(7)[1] == [7]
 
 
 def test_clean_float_treats_non_finite_as_absent():
@@ -194,3 +237,57 @@ def test_the_as_of_date_is_read_from_the_file_not_assumed():
     payload = _holdings_file([["NVIDIA CORP", "NVDA", "67066G104", "2379504", 100.0, "-", 1]])
     _frame, as_of, _url = _parse_holdings(payload)
     assert as_of == "2026-09-21"
+
+
+def _shares(end, val, filed, tag="WeightedAverageNumberOfDilutedSharesOutstanding"):
+    return tag, {"form": "10-K", "fp": "FY", "fy": 0, "start": f"{int(end[:4]) - 1}{end[4:]}", "end": end,
+                 "val": val, "filed": filed}
+
+
+def _split_facts(share_rows, eps_rows=()):
+    gaap = {}
+    for tag, row in share_rows:
+        gaap.setdefault(tag, {"units": {"shares": []}})["units"]["shares"].append(row)
+    if eps_rows:
+        gaap["EarningsPerShareDiluted"] = {"units": {"USD/shares": list(eps_rows)}}
+    gaap["Revenues"] = {"units": {"USD": [_row("2018-10-01", "2019-09-30", 1, "2019-11-01", 2019)]}}
+    return {"entityName": "Example Corp", "facts": {"us-gaap": gaap}}
+
+
+def test_a_split_puts_older_years_on_todays_share_basis():
+    """Apple's FY2016 was last filed before its 2020 4:1 split; left alone its
+    EPS reads 8.31 beside 2.98 and the chart shows a 70% collapse."""
+    facts = _split_facts(
+        [_shares("2017-09-30", 5_251, "2019-10-31"),   # old basis, never restated
+         _shares("2018-09-30", 5_000, "2019-10-31"),   # old basis ...
+         _shares("2018-09-30", 20_000, "2020-10-30")],  # ... restated after the split
+        [_row("2016-10-01", "2017-09-30", 9.21, "2019-10-31", 2019),
+         _row("2017-10-01", "2018-09-30", 11.91, "2019-10-31", 2019),
+         _row("2017-10-01", "2018-09-30", 2.98, "2020-10-30", 2020)],
+    )
+    splits = sec.share_splits(facts)
+    assert splits == [("2019-10-31", 4)]
+    shares = sec._annual_series(facts, sec.ITEMS_BY_KEY["shares"], splits)
+    eps = sec._annual_series(facts, sec.ITEMS_BY_KEY["eps_diluted"], splits)
+    assert shares["2017-09-30"]["value"] == 21_004
+    assert eps["2017-09-30"]["value"] == pytest.approx(9.21 / 4)
+    assert eps["2018-09-30"]["value"] == 2.98  # already restated: not adjusted twice
+
+
+def test_basic_and_diluted_counts_are_not_read_as_splits_of_each_other():
+    facts = _split_facts([
+        _shares("2018-09-30", 5_000, "2019-10-31"),
+        _shares("2018-09-30", 4_950, "2019-11-01", tag="WeightedAverageNumberOfSharesOutstandingBasic"),
+        _shares("2018-09-30", 5_000, "2020-10-30"),
+    ])
+    assert sec.share_splits(facts) == []
+
+
+def test_a_split_is_read_from_eps_when_no_plain_share_count_exists():
+    """Alphabet tags its counts per share class; its 20:1 split is visible only
+    in EPS, which is rounded to cents."""
+    facts = _split_facts([], [
+        _row("2020-01-01", "2020-12-31", 58.61, "2021-02-03", 2020),
+        _row("2020-01-01", "2020-12-31", 2.93, "2023-02-03", 2022),
+    ])
+    assert sec.share_splits(facts) == [("2021-02-03", 20)]

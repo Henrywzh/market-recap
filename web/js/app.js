@@ -15,6 +15,7 @@ const TABS = [
   { id: 'macro', label: 'MACRO', artifact: 'macro', module: 'macro' },
   { id: 'technicals', label: 'TECHNICALS', artifact: 'technicals', module: 'technicals' },
   { id: 'cross-listing', label: 'CROSS-LISTING', artifact: 'cross_listing', module: 'cross-listing' },
+  { id: 'financials', label: 'FINANCIALS', artifact: 'financials', module: 'financials' },
   { id: 'dcf', label: 'DCF', artifact: 'dcf', module: 'dcf' },
 ];
 

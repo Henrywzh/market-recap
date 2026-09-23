@@ -388,3 +388,9 @@ def test_validation_flags_a_session_whose_prior_day_is_missing():
     }
     findings = validate._check_latest_session(hole)
     assert len(findings) == 2 and all(f.severity == "error" for f in findings)
+
+
+def test_validation_flags_financials_that_mostly_failed():
+    assert validate._check_financials({"universe": 518, "available": [{}] * 512}) == []
+    assert validate._check_financials({"universe": 518, "available": [{}] * 300})[0].severity == "warning"
+    assert validate._check_financials({"universe": 518, "available": []})[0].severity == "error"

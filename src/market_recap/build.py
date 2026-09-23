@@ -11,7 +11,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import cross_listing, dcf, fixed_income, heatmaps, macro, markets
+from .panels import cross_listing, dcf, financials, fixed_income, heatmaps, macro, markets
 from .panels import technicals as technicals_panel
 from .util import utc_now_iso, write_json
 
@@ -23,17 +23,19 @@ PANELS = {
     "macro": macro.build,
     "technicals": technicals_panel.build,
     "cross_listing": cross_listing.build,
-    # DCF is last because it is the slowest and the only one that is optional.
+    # The SEC panels come last: they are the slowest, and the ones a quick
+    # local rebuild skips. FINANCIALS runs first so the DCF reuses its parse.
+    "financials": financials.build,
     "dcf": dcf.build,
 }
-OPTIONAL_PANELS = {"dcf"}
+SEC_PANELS = {"financials", "dcf"}
 
 
 def run(
     *,
     panels: list[str] | None = None,
     history_period: str = "10y",
-    skip_dcf: bool = False,
+    skip_sec: bool = False,
     prune_cache: bool = True,
 ) -> dict:
     started = time.monotonic()
@@ -42,8 +44,8 @@ def run(
     ctx = build_context(history_period=history_period)
 
     selected = [name for name in (panels or list(PANELS)) if name in PANELS]
-    if skip_dcf:
-        selected = [name for name in selected if name != "dcf"]
+    if skip_sec:
+        selected = [name for name in selected if name not in SEC_PANELS]
 
     written: list[str] = []
     for name in selected:

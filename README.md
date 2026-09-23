@@ -17,8 +17,9 @@ them.
 | **HEAT MAPS** | S&P 500 treemap sized by the **issuer-published SPY weight** and coloured by return; US ETF treemap sized by AUM and coloured by estimated net flow |
 | **FIXED INCOME** | Published par yield curve vs. 1 week / 1 month / start of year, level and bps change by tenor, 10Y−2Y and 10Y−3M spreads |
 | **MACRO** | Commodity futures/ETF proxies with multi-period returns, last 12 monthly inflation releases as a heat table |
-| **TECHNICALS** | Any A/B relative-strength ratio with 60/200MA and MACD; single-ticker price with 20/50/200 SMA and a ±1.5σ band, z-score regime, SMA slope, and forward return by z-score band |
+| **TECHNICALS** | Any A/B relative-strength ratio with its moving averages and MACD over a chosen period; single-ticker price with **your own MA periods, slope window and period**, a ±1.5σ band, z-score regime, SMA slope, and forward return by z-score band. Every indicator is computed in the browser from the baked close history, by one module tested against pandas |
 | **CROSS-LISTING** | A US line against its home-market line at the depositary ratio, with the diagnostics that say whether the series measures a dislocation or a session gap |
+| **FINANCIALS** | Ten fiscal years of income statement, balance sheet and cash flow for every S&P 500 and Nasdaq-100 member, with key ratios, each column's period end and last filing date, restatements applied and pre-split years put on today's share basis |
 | **DCF** | SEC-filled 5-year history, your 5-year forecast, WACC, terminal value, equity bridge and a WACC × exit-multiple sensitivity grid |
 
 ## Data sources
@@ -35,7 +36,7 @@ Every one of these is free and requires no account.
 | **Yahoo Finance** via `yfinance` | Daily closes for constituents, ETFs and indices; ETF AUM and shares outstanding; commodity futures | Unofficial wrapper around a mutable service |
 | **US Treasury** daily par yield curve XML | The yield curve | Official publication; "latest published" is not always today |
 | **FRED** `fredgraph.csv` | PCE, core PCE, trimmed-mean PCE, personal income and spending | Keyless CSV export; current vintage, not point-in-time |
-| **SEC** XBRL company facts | DCF historical line items | Annual 10-K/20-F/40-F figures with their filing dates |
+| **SEC** XBRL company facts | FINANCIALS statements and the DCF's historical column | Annual 10-K/20-F/40-F figures with their filing dates; one extraction feeds both tabs |
 
 ### Two things worth knowing about the feeds
 
@@ -66,7 +67,7 @@ what the nightly job runs. `make help` lists the rest.
 Rebuild a single tab while iterating:
 
 ```bash
-python -m market_recap.cli refresh --panels markets --skip-dcf
+python -m market_recap.cli refresh --panels markets --skip-sec
 ```
 
 ### Running it on a schedule
@@ -190,12 +191,13 @@ src/market_recap/
   config.py                paths, definitions (a trading year), cache policy
   cache.py                 one on-disk cache for every feed, with pruning
   sources/                 one module per publisher
-  compute/                 returns, breadth, technicals — one definition each
+  compute/                 returns, breadth, filed-statement ratios — one definition each
   panels/                  one module per tab -> one JSON artifact
   context.py               constituents + prices, fetched once per build
   build.py                 orchestrator, writes manifest.json
   validate.py              checks the artifacts against the contract
 web/                       static site (ES modules, ECharts from CDN)
+  js/technicals-math.js    every technical indicator; tested against pandas from tests/
 artifacts/                 generated JSON the site reads
 data/cache/                raw snapshots and parsed frames, pruned each build
 ```
@@ -261,6 +263,16 @@ data/cache/                raw snapshots and parsed frames, pruned each build
   it are labelled from Yahoo's taxonomy mapped onto the same GICS sector names,
   so sub-industry wording differs between the two groups.
 - Line items a filer did not tag are left blank and are editable in the model.
+- FINANCIALS reads US-GAAP only. IFRS filers (ASML, CCEP, FER, TRI) and
+  registrants with no annual report yet are listed on the tab as not
+  extracted, with the reason. Fiscal years are named by their period end,
+  which matches NVIDIA, Microsoft and Apple; retailers whose year ends in late
+  January call it the year before, so the period end is printed beside every
+  label.
+- SEC's ticker map points at a company's *current* registrant. After a
+  holding-company reorganisation (Exxon, 2026) that CIK has no history, so the
+  extraction follows the accession-number prefix to the predecessor CIK, and
+  only when the entity name matches.
 
 ## The cross-listing premium, and why it ships with diagnostics
 

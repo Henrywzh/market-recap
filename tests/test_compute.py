@@ -13,7 +13,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from market_recap.config import load_config
 from market_recap.compute import returns as R
-from market_recap.compute import technicals as T
 
 
 @pytest.fixture
@@ -64,21 +63,8 @@ def test_pct_above_moving_average_is_none_when_history_is_short(prices):
     assert 0.0 <= value <= 100.0
 
 
-def test_forward_return_excludes_the_unfinished_tail(prices):
-    """The last `horizon` sessions have no completed forward window."""
-    rows = T.forward_return_by_band(prices["A"], zscore_window=200, horizon=40)
-    total = sum(row["count"] for row in rows)
-    completed = len(prices["A"].dropna()) - 199 - 40
-    assert total == completed
-
-
-def test_zscore_bands_cover_the_line_without_overlapping():
-    edges = [-3.0, -2.0, -1.75, -1.5, -0.5, 0.0, 0.5, 1.5, 1.75, 2.0, 3.0]
-    for value in edges:
-        label, verdict = T.band_for(value)
-        assert label is not None and verdict is not None
-    assert T.band_for(None) == (None, None)
-    assert T.band_for(float("nan")) == (None, None)
+# Technical indicators are computed in the browser; see tests/js/ and
+# tests/test_technicals_parity.py.
 
 
 def test_ytd_return_uses_the_last_print_of_the_prior_year():
