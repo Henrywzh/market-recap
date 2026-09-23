@@ -14,7 +14,12 @@ import sys
 from . import build as build_module
 from . import cache, site, validate
 
-MANIFEST_PREVIEW_KEYS = ("as_of", "build_seconds", "indices", "panels", "skipped_panels", "errors")
+MANIFEST_PREVIEW_KEYS = (
+    "as_of", "build_seconds", "indices", "panels", "skipped_panels", "errors",
+    # What the build had to repair, and whether the night's session was cross-checked:
+    # the first things to read in a scheduled run's log.
+    "filled_sessions", "session_check", "sec_filings",
+)
 
 
 def _print(payload: dict) -> None:
