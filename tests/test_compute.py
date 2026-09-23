@@ -151,3 +151,13 @@ def test_a_basket_missing_too_much_weight_is_not_reported(prices):
     small_gap.loc[small_gap.index[-1], "D"] = np.nan
     without_d = R.basket_return(prices[["A", "B", "C"]], weights[["A", "B", "C"]], 1, min_weight_share=0.9)
     assert R.basket_return(small_gap, weights, 1, min_weight_share=0.9) == pytest.approx(without_d)
+
+
+def test_period_changes_match_by_date_across_a_month_never_published():
+    """FRED has no October 2025 CPI; counting rows compared Aug 2026 with Jul 2025."""
+    from market_recap.compute import periods
+    months = pd.date_range("2025-01-01", "2026-08-01", freq="MS").drop(pd.Timestamp("2025-10-01"))
+    series = pd.Series(range(100, 100 + len(months)), index=months, dtype=float)
+    yoy = periods.transform(series, "yoy")
+    assert yoy["2026-08-01"] == pytest.approx((series["2026-08-01"] / series["2025-08-01"] - 1) * 100)
+    assert pd.isna(periods.transform(series, "mom")["2025-11-01"])   # its prior month was never published

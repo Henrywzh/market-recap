@@ -15,6 +15,8 @@ from datetime import date, timedelta
 from dateutil.easter import easter
 import pandas as pd
 
+from . import periods
+
 MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY = range(7)
 QUARTER_END_MONTHS = (3, 6, 9, 12)
 VIX_EXPIRY_DAYS_BEFORE = 30
@@ -192,21 +194,14 @@ TRANSFORMS = {
 }
 
 
-def latest_print(frame: pd.DataFrame, transform: str, *, periods_per_year: int = 12) -> dict | None:
+def latest_print(frame: pd.DataFrame, transform: str) -> dict | None:
     """The latest observation after ``transform``, with the period it covers.
 
     The period is shown beside the value because FRED updates after the
     agency does: until it has, the "latest" print is the one before, and the
     date says so.
     """
-    series = frame.set_index("date")["value"].sort_index()
-    if transform == "yoy":
-        series = (series / series.shift(periods_per_year) - 1) * 100
-    elif transform == "mom":
-        series = (series / series.shift(1) - 1) * 100
-    elif transform == "change":
-        series = series.diff()
-    series = series.dropna()
+    series = periods.transform(frame.set_index("date")["value"], transform).dropna()
     if series.empty:
         return None
     return {"value": float(series.iloc[-1]), "period": series.index[-1].strftime("%Y-%m-%d")}

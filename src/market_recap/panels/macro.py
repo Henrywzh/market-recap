@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from ..compute import periods as P
 from ..compute import returns as R
-from ..config import MONTHS_PER_YEAR
 from ..sources import fred, yahoo
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, to_iso_date
 
@@ -71,12 +71,9 @@ def build(ctx) -> dict:
 
         series = frame.set_index("date")["value"].sort_index()
         display = spec["display"]
-        if display == "yoy":
-            transformed = (series / series.shift(MONTHS_PER_YEAR) - 1.0) * 100.0
-        elif display == "mom":
-            transformed = (series / series.shift(1) - 1.0) * 100.0
-        else:
-            transformed = series
+        # By date: a month the agency never published leaves the changes that
+        # span it blank instead of comparing across two periods.
+        transformed = P.transform(series, display if display in ("yoy", "mom") else "level")
         collected[spec["series_id"]] = transformed.dropna()
 
         ctx.log.add(

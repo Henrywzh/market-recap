@@ -423,3 +423,11 @@ def test_an_optional_feed_failing_is_a_notice_and_a_core_one_a_warning():
     severities = {f.detail.split(":")[0]: f.severity for f in validate._check_sources(manifest)}
     assert severities == {"catalysts_nasdaq_earnings": "notice", "vanguard_xray_holdings": "notice",
                           "yahoo_constituents": "warning"}
+
+
+def test_building_the_site_never_shares_a_file_with_the_source(tmp_path):
+    from market_recap import site
+    site.build(dist=tmp_path / "dist")
+    for source in site.WEB_DIR.rglob("*"):
+        if source.is_file():
+            assert source.stat().st_nlink == 1, f"{source} is hard-linked"

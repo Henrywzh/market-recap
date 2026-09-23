@@ -1,0 +1,56 @@
+# Research: how reliable are the free sources of macro expectations, measured
+# from the same kind of machine the nightly build runs on? Every three hours
+# for a week, scripts/probe_expectations.py asks each source the same
+# questions and the result is kept as an artifact; `--summarize` over the
+# downloaded artifacts gives success rates and latency percentiles.
+#
+# It touches no build, cache or deploy. Remove the schedule once the window
+# below has passed (the job already does nothing after it).
+name: probe-sources
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROBE_UNTIL: "2026-10-01"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Window
+        id: window
+        run: |
+          if [ "$(date -u +%F)" \> "$PROBE_UNTIL" ]; then echo "open=false" >> "$GITHUB_OUTPUT"; else echo "open=true" >> "$GITHUB_OUTPUT"; fi
+
+      - if: steps.window.outputs.open == 'true'
+        uses: actions/checkout@v7
+
+      - if: steps.window.outputs.open == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      # Not the build's lock: the probe needs yfinance >= 1.7 for Yahoo's
+      # economic calendar, and it measures sources, not the pinned stack.
+      - if: steps.window.outputs.open == 'true'
+        name: Install
+        run: python -m pip install "yfinance>=1.7" httpx pandas openpyxl
+
+      # Finnhub needs a key that lives only on the owner's machine.
+      - if: steps.window.outputs.open == 'true'
+        name: Probe
+        run: python scripts/probe_expectations.py --rounds 2 --out probes --skip finnhub
+
+      - if: steps.window.outputs.open == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-${{ github.run_id }}
+          path: probes/
+          retention-days: 30

@@ -12,3 +12,5 @@ data/logs/
 node_modules/
 .wrangler/
 .lockvenv/
+# Source-evaluation runs (scripts/probe_expectations.py): research output, not state
+data/probes/

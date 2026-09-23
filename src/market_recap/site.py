@@ -46,9 +46,16 @@ def build(*, dist: Path | None = None) -> dict:
     dist.mkdir(parents=True)
 
     pages = assets = 0
+    # Source files are copied, never hard-linked: a link makes the page's
+    # source and a disposable build output one file on disk, and on
+    # 2026-09-23 every hard-linked web/ file vanished together with its dist/
+    # twin (a sync client resolving what it took for duplicates, most likely).
+    # The source is small; only the regenerable artifacts are linked.
     for source in WEB_DIR.rglob("*"):
         if source.is_file():
-            _link_or_copy(source, dist / source.relative_to(WEB_DIR))
+            target = dist / source.relative_to(WEB_DIR)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
             pages += 1
 
     for source in ARTIFACT_DIR.rglob("*.json"):
