@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import math
 from functools import lru_cache
 import json
@@ -277,6 +277,19 @@ def predates(fetched: datetime | None, latest: LatestFiling | None) -> bool:
     return fetched is not None and latest is not None and latest.accepted > fetched - PROCESSING_MARGIN
 
 
+# A change the submissions index does not announce (SEC reprocessing a filing)
+# is picked up by age. The age is staggered by filer so the ~500 documents
+# fetched on one night do not all fall due again on one night.
+BACKSTOP_DAYS = 30
+BACKSTOP_STAGGER_DAYS = 7
+
+
+def backstop_due(cik: int, fetched: datetime | None, now: datetime) -> bool:
+    if fetched is None:
+        return False
+    return now - fetched > timedelta(days=BACKSTOP_DAYS + cik % BACKSTOP_STAGGER_DAYS)
+
+
 def _needs_refetch(cik: int) -> bool:
     """Whether the cached company facts predate the filer's latest statements.
 
@@ -290,7 +303,8 @@ def _needs_refetch(cik: int) -> bool:
     except Exception as exc:
         _checked[cik] = {"error": str(exc)}
         return False
-    refetch = predates(cache.modified(path), latest)
+    fetched = cache.modified(path)
+    refetch = predates(fetched, latest) or backstop_due(cik, fetched, datetime.now(timezone.utc))
     _checked[cik] = {"latest": latest, "refetched": refetch}
     return refetch
 

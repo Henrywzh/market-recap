@@ -411,3 +411,15 @@ def test_a_ticker_the_build_no_longer_writes_is_not_left_behind(tmp_path):
         (tmp_path / f"{name}.json").write_text("{}")
     assert prune_stale(tmp_path, ["AAPL", "MNST"]) == ["GONE.json"]
     assert sorted(p.name for p in tmp_path.iterdir()) == ["AAPL.json", "MNST.json"]
+
+
+def test_an_optional_feed_failing_is_a_notice_and_a_core_one_a_warning():
+    from market_recap import validate
+    manifest = {"sources": [
+        {"source_id": "catalysts_nasdaq_earnings", "status": "error", "error": "refused"},
+        {"source_id": "vanguard_xray_holdings", "status": "error", "error": "timeout"},
+        {"source_id": "yahoo_constituents", "status": "error", "error": "timeout"},
+    ]}
+    severities = {f.detail.split(":")[0]: f.severity for f in validate._check_sources(manifest)}
+    assert severities == {"catalysts_nasdaq_earnings": "notice", "vanguard_xray_holdings": "notice",
+                          "yahoo_constituents": "warning"}

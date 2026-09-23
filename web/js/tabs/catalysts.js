@@ -235,6 +235,10 @@ export default async function renderCatalysts(root, data) {
     root.append(notice(`Not fetched this build, so missing below: ${failed.map(([s, why]) => `${s} (${why})`).join('; ')}`));
   }
 
+  const expected = data.expected_missing || [];
+  if (expected.length) {
+    root.append(notice(`Not found in its agency's calendar, so likely renamed and missing below: ${expected.join('; ')}`));
+  }
   root.append(lastSession(data.recent, data.certainty_labels));
 
   const filter = loadFilter();

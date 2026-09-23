@@ -331,3 +331,12 @@ def test_company_facts_are_refetched_only_when_they_can_predate_the_latest_filin
     assert sec.predates(datetime(2026, 9, 22, 23, 40, tzinfo=timezone.utc), latest)      # same evening: maybe unprocessed
     assert not sec.predates(datetime(2026, 9, 23, 23, 40, tzinfo=timezone.utc), latest)  # the night after: settled
     assert not sec.predates(None, latest) and not sec.predates(datetime(2026, 9, 21, tzinfo=timezone.utc), None)
+
+
+def test_the_facts_backstop_is_staggered_by_filer():
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    fetched = now - timedelta(days=33)
+    due = {cik for cik in range(7) if sec.backstop_due(cik, fetched, now)}
+    assert due == {0, 1, 2}                      # 30 + cik % 7 days: not all on one night
+    assert not sec.backstop_due(0, None, now)

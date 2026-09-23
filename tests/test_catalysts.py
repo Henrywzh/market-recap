@@ -111,3 +111,18 @@ def test_a_session_the_source_dropped_becomes_an_empty_row():
     # A holiday is not a gap: Labor Day 2026.
     holiday = pd.DataFrame({"X": [1.0, 2.0]}, index=pd.to_datetime(["2026-09-04", "2026-09-08"]))
     assert mark_missing_sessions(holiday).equals(holiday)
+
+
+def test_a_recurring_release_missing_from_its_calendar_is_reported():
+    from market_recap.panels import catalysts as panel
+    releases = [
+        {"source": "bls", "match": "^Consumer Price Index$", "label": "CPI", "expect_within_days": 40},
+        {"source": "bls", "match": "^Employment Situation$", "label": "Jobs", "expect_within_days": 40},
+        {"source": "census", "match": "^Retail", "label": "Retail", "expect_within_days": 40},
+    ]
+    everything = [
+        {"source_id": "bls", "title": "Consumer Price Index", "date": "2026-10-14"},
+        {"source_id": "bls", "title": "The Employment Situation", "date": "2026-10-02"},   # renamed
+    ]
+    missing = panel._expected_missing(everything, releases, date(2026, 9, 23))
+    assert missing == ["Jobs (bls, none within 40 days)"]      # census not fetched: already reported as failed

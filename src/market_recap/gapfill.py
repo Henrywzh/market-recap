@@ -13,6 +13,10 @@ comparing against a second publisher:
   in the frame, Yahoo's closes for it are compared name by name; a median
   disagreement beyond ``VERIFY_TOLERANCE`` marks the whole session suspect,
   and it is rebuilt like a missing one.
+* IVV's file is published the morning after, so the night's own session is
+  checked the same way against Nasdaq's closes for the largest members. A
+  wrong session is then caught the night it would be published, not a day
+  later.
 
 Rebuilding uses the same file for S&P 500 members, Nasdaq's historical
 quotes for any other stock or ETF, and FRED's S&P 500 and Nasdaq-100 series
@@ -23,6 +27,8 @@ filled stays empty, and the session checks still see it.
 """
 
 from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -39,9 +45,18 @@ LOOKBACK = 5
 # an ex-dividend basis difference moves one name, not the median.
 VERIFY_TOLERANCE = 0.1
 MIN_VERIFY_NAMES = 100
-# Per frame: a gap needing more lookups than this is a source outage, and
-# five hundred single-symbol requests to an unofficial endpoint is not a fill.
-MAX_NASDAQ_LOOKUPS = 150
+# The night's session is sampled on this many of the largest members; fewer
+# answers than the minimum and it is reported unverified rather than passed.
+LATEST_SAMPLE = 30
+MIN_LATEST_NAMES = 20
+# Per frame. Rebuilding a whole session is ~550 single-symbol requests; that
+# is allowed, since the alternative is not publishing, but a run of failures
+# means the endpoint is refusing and the rest are not asked.
+MAX_NASDAQ_LOOKUPS = 600
+NASDAQ_GIVE_UP_AFTER = 5
+# Each historical-quotes request takes ~2.5 s; one at a time, a whole session
+# would take twenty minutes.
+NASDAQ_WORKERS = 6
 # Index closes: FRED first (official daily series), Nasdaq where it lists one.
 FRED_INDEX = {"^GSPC": "SP500", "^NDX": "NASDAQ100"}
 NASDAQ_INDEX = {"^NDX": "NDX"}
@@ -82,15 +97,9 @@ def _factor(frame: pd.DataFrame, raw: pd.DataFrame | None, day: pd.Timestamp, sy
     return float(adjusted) / float(split_only)
 
 
-def verify(frame: pd.DataFrame, raw: pd.DataFrame | None, *, use_cache: bool = True) -> dict | None:
-    """Compare the frame's session on the IVV holdings date with IVV's closes.
-
-    Returns {"date", "names", "median_deviation_pct", "suspect"}, or None when
-    the holdings date is not a row with prices to compare.
-    """
-    day, closes = _holdings(use_cache)
-    if day is None or day not in frame.index or day not in frame.index[-(LOOKBACK + 1):]:
-        return None
+def _compare(frame: pd.DataFrame, raw: pd.DataFrame | None, day: pd.Timestamp,
+             closes: dict[str, float], *, source: str, min_names: int) -> dict | None:
+    """Yahoo's session ``day`` against published closes, by symbol key."""
     deviations = []
     for symbol in frame.columns:
         close = closes.get(ticker_key(symbol))
@@ -98,14 +107,48 @@ def verify(frame: pd.DataFrame, raw: pd.DataFrame | None, *, use_cache: bool = T
         value = frame.at[day, symbol]
         if close and factor and pd.notna(value):
             deviations.append(abs(float(value) / (close * factor) - 1) * 100)
-    if len(deviations) < MIN_VERIFY_NAMES:
+    if len(deviations) < min_names:
         return None
     median = float(np.median(deviations))
-    return {"date": day.strftime("%Y-%m-%d"), "names": len(deviations),
+    return {"date": day.strftime("%Y-%m-%d"), "source": source, "names": len(deviations),
             "median_deviation_pct": round(median, 4), "suspect": median > VERIFY_TOLERANCE}
 
 
-def _nasdaq_closes(symbol: str, start: str, end: str, classes: tuple[str, ...], use_cache: bool) -> dict[str, float]:
+def verify(frame: pd.DataFrame, raw: pd.DataFrame | None, *, use_cache: bool = True) -> dict | None:
+    """Compare the frame's session on the IVV holdings date with IVV's closes.
+
+    Returns {"date", "source", "names", "median_deviation_pct", "suspect"}, or
+    None when the holdings date is not a recent row with prices to compare.
+    """
+    day, closes = _holdings(use_cache)
+    if day is None or day not in frame.index or day not in frame.index[-(LOOKBACK + 1):]:
+        return None
+    return _compare(frame, raw, day, closes, source="ishares", min_names=MIN_VERIFY_NAMES)
+
+
+def verify_latest(frame: pd.DataFrame, raw: pd.DataFrame | None, sample: list[str], *,
+                  use_cache: bool = True) -> dict:
+    """Compare the frame's last session with Nasdaq's closes for ``sample``.
+
+    Always returns a result; ``verified`` is False when too few closes came
+    back to judge (Nasdaq not yet updated, or refusing), and the page says so.
+    """
+    day = frame.index[-1]
+    key = day.strftime("%Y-%m-%d")
+    start = (day - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
+    end = (day + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    histories = _nasdaq_many(sample[:LATEST_SAMPLE], start, end, ("stocks",), use_cache)
+    closes = {ticker_key(s): h[key] for s, h in histories.items() if key in h}
+    result = _compare(frame, raw, day, closes, source="nasdaq", min_names=MIN_LATEST_NAMES)
+    if result is None:
+        return {"date": key, "source": "nasdaq", "names": len(closes), "verified": False, "suspect": False}
+    return {**result, "verified": True}
+
+
+def _nasdaq_closes(symbol: str, start: str, end: str, classes: tuple[str, ...],
+                   use_cache: bool) -> dict[str, float] | None:
+    """{date: close}; empty when Nasdaq does not list the symbol, None when the
+    request itself failed."""
     if symbol.startswith("^"):
         code, kinds = NASDAQ_INDEX.get(symbol), ("index",)
         if code is None:
@@ -116,10 +159,28 @@ def _nasdaq_closes(symbol: str, start: str, end: str, classes: tuple[str, ...], 
         try:
             closes = nasdaq.fetch_history(code, start, end, asset=kind, use_cache=use_cache)
         except Exception:
-            return {}
+            return None
         if closes:
             return closes
     return {}
+
+
+def _nasdaq_many(symbols: list[str], start: str, end: str, classes: tuple[str, ...],
+                 use_cache: bool) -> dict[str, dict[str, float]]:
+    """``_nasdaq_closes`` for many symbols, a batch at a time. After a run of
+    failed requests the rest are not asked: the endpoint is refusing."""
+    out: dict[str, dict[str, float]] = {}
+    failures = 0
+    with ThreadPoolExecutor(NASDAQ_WORKERS) as pool:
+        for i in range(0, len(symbols), NASDAQ_WORKERS):
+            if failures >= NASDAQ_GIVE_UP_AFTER:
+                break
+            batch = symbols[i:i + NASDAQ_WORKERS]
+            for symbol, history in zip(batch, pool.map(
+                    lambda s: _nasdaq_closes(s, start, end, classes, use_cache), batch)):
+                out[symbol] = history or {}
+                failures = failures + 1 if history is None else 0
+    return out
 
 
 def _fred_closes(symbol: str, use_cache: bool) -> dict[str, float]:
@@ -176,10 +237,9 @@ def fill(frame: pd.DataFrame, raw: pd.DataFrame | None, *, label: str, replace=(
                 closes[symbol] = ("fred", fred_closes[key])
         need = [s for s in frame.columns if pd.isna(frame.at[day, s]) and s not in closes]
         if len(need) <= MAX_NASDAQ_LOOKUPS:
+            looked_up.update(_nasdaq_many([s for s in need if s not in looked_up], start, end, classes, use_cache))
             for symbol in need:
-                if symbol not in looked_up:
-                    looked_up[symbol] = _nasdaq_closes(symbol, start, end, classes, use_cache)
-                if key in looked_up[symbol]:
+                if key in looked_up.get(symbol, {}):
                     closes[symbol] = ("nasdaq", looked_up[symbol][key])
         for symbol, (_, close) in closes.items():
             factor = _factor(frame, raw, day, symbol) or 1.0

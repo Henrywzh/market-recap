@@ -79,7 +79,7 @@ python -m market_recap.cli refresh --panels markets --skip-sec
 
 The nightly job is a GitHub Actions workflow,
 [`.github/workflows/refresh.yml`](.github/workflows/refresh.yml): weekdays at
-23:37 UTC it tests, refreshes with `--strict`, and deploys only if that passed.
+23:47 UTC it tests, refreshes with `--strict`, and deploys only if that passed.
 It runs on GitHub's machines, so it does not depend on a laptop being awake —
 the launchd job this replaced missed its first night because the lid was shut.
 
@@ -95,13 +95,13 @@ Not the closing bell, because the publishers this reads post after it: State
 Street's holdings and NAV files land in the evening, and Treasury sometimes
 does not post the par curve until early evening ET. A job firing at 16:00 ET
 builds a page entirely from the previous session and reports itself perfectly
-healthy. GitHub cron is UTC, and 23:37 UTC is after 18:30 New York in both
+healthy. GitHub cron is UTC, and 23:47 UTC is after 18:30 New York in both
 halves of the year:
 
 | UTC | New York |
 |---|---|
-| 23:37 | 19:37 EDT (Mar – Nov) |
-| 23:37 | 18:37 EST (Nov – Mar) |
+| 23:47 | 19:47 EDT (Mar – Nov) |
+| 23:47 | 18:47 EST (Nov – Mar) |
 
 GitHub can start a scheduled run late under load; minute 37 avoids the
 on-the-hour and half-hour slots that are delayed most.
@@ -260,7 +260,22 @@ data/cache/                raw snapshots and parsed frames, pruned each build
   rebuilt from IVV (S&P 500 members), Nasdaq's historical quotes (other
   stocks, ETFs) and FRED (S&P 500 and Nasdaq-100), put on the adjusted basis
   with each name's factor from the session before. The MARKETS tab says so at
-  the top, with the counts by source and anything still missing.
+  the top, with the counts by source and anything still missing. IVV's file
+  comes out the morning after, so the night's own session is checked against
+  Nasdaq's closes for the 30 largest members instead; when too few answer,
+  the page says the session was not cross-checked.
+- **Optional feeds cannot hold back the page.** Validation has three levels:
+  an error is not publishable, a warning makes `--strict` refuse the deploy,
+  and a notice is shown on its tab and nothing more. The catalyst calendars
+  and the ETF holdings files -- several of them unofficial endpoints -- report
+  notices; prices, index holdings and SEC filings report warnings.
+- **CATALYSTS notices a renamed release.** The macro lane matches agency
+  titles by pattern, so a renamed release would silently vanish. The key ones
+  carry `expect_within_days`; none found that far ahead in the agency's own
+  calendar is reported on the tab.
+- **The repository lives in `market-recap.nosync`.** macOS syncs the Desktop
+  to iCloud, which was leaving `dist 2`, `dist 3`… conflict copies; a folder
+  ending in `.nosync` is not synced, and `market-recap` is a symlink to it.
 
 - **ETF X-RAY matches holdings within a market.** A ticker only names the same
   company on one exchange: EFA's `DG` is Vinci in Paris and its `EL` is

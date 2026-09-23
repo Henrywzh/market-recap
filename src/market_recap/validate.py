@@ -14,10 +14,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 
 from .config import ARTIFACT_DIR, PERIOD_TRADING_DAYS, SESSION_COVERAGE_THRESHOLD, load_config
 
-SEVERITIES = ("error", "warning")
+# error: not publishable. warning: publishable, but --strict refuses it.
+# notice: a gap in an optional feed, shown on its own tab; never blocks.
+SEVERITIES = ("error", "warning", "notice")
+
+# Feeds whose failure leaves a gap on one tab rather than a wrong number on
+# the page: the catalyst calendars and the ETF look-through holdings. Unofficial
+# endpoints among them fail for reasons of their own, and one of them being
+# down must not hold back the prices every other tab needs.
+OPTIONAL_SOURCES = re.compile(r"^(catalysts_\w+|(ssga|ishares|vanguard)_xray_holdings)$")
 
 
 @dataclass(frozen=True)
@@ -168,8 +177,10 @@ def _check_catalysts(payload: dict | None) -> list[Finding]:
     """A calendar with a source missing reads as a quiet week; say so."""
     if payload is None:
         return []
-    out = [Finding("warning", "catalysts", f"{source} not fetched: {why}")
+    out = [Finding("notice", "catalysts", f"{source} not fetched: {why}")
            for source, why in (payload.get("failed_sources") or {}).items()]
+    out += [Finding("notice", "catalysts", f"expected release not in its calendar: {m}")
+            for m in payload.get("expected_missing") or []]
     if not payload.get("events"):
         out.append(Finding("error", "catalysts", "no upcoming event at all"))
     return out
@@ -190,7 +201,7 @@ def _check_xray(config: dict, payload: dict | None) -> list[Finding]:
         if fund is None:
             out.append(Finding("error", "xray", f"{ticker} is configured but not listed"))
         elif not spec.startswith("none") and fund.get("status") != "ok":
-            out.append(Finding("warning", "xray", f"{ticker}: holdings not fetched ({fund.get('reason')})"))
+            out.append(Finding("notice", "xray", f"{ticker}: holdings not fetched ({fund.get('reason')})"))
         elif fund.get("kind") == "equity":
             low, high = XRAY_EQUITY_WEIGHT_RANGE
             if not low <= (fund.get("equity_weight") or 0) <= high:
@@ -258,11 +269,12 @@ def _check_flow_attribution(heatmaps: dict | None) -> list[Finding]:
 def _check_sources(manifest: dict) -> list[Finding]:
     out = []
     for record in manifest.get("sources", []):
+        severity = "notice" if OPTIONAL_SOURCES.match(record["source_id"]) else "warning"
         if record.get("status") == "error":
-            out.append(Finding("warning", "source", f"{record['source_id']}: {record.get('error')}"))
+            out.append(Finding(severity, "source", f"{record['source_id']}: {record.get('error')}"))
         if record.get("freshness") == "stale":
             out.append(Finding(
-                "warning", "freshness",
+                severity, "freshness",
                 f"{record['source_id']} observed {record.get('observed_date')} is past its "
                 f"{record.get('policy')} window",
             ))
@@ -295,10 +307,11 @@ def run() -> dict:
     for name, reason in (manifest.get("errors") or {}).items():
         findings.append(Finding("error", "panel", f"{name} failed: {reason}"))
 
-    errors = [f for f in findings if f.severity == "error"]
+    count = {severity: sum(f.severity == severity for f in findings) for severity in SEVERITIES}
     return {
-        "ok": not errors,
-        "errors": len(errors),
-        "warnings": len(findings) - len(errors),
+        "ok": not count["error"],
+        "errors": count["error"],
+        "warnings": count["warning"],
+        "notices": count["notice"],
         "findings": [f.as_dict() for f in findings],
     }

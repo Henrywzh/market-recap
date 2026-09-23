@@ -248,8 +248,13 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
     # Yahoo's session on IVV's holdings date is checked against IVV's own
     # closes; a session that disagrees is rebuilt in every frame, not just this one.
     check = gapfill.verify(ctx.closes, ctx.prices)
-    ctx.session_check = check
-    suspect = [pd.Timestamp(check["date"])] if check and check["suspect"] else []
+    latest = None
+    if not check or check["date"] != ctx.closes.index[-1].strftime("%Y-%m-%d"):
+        primary = ctx.members[next(s.key for s in specs if s.primary)]
+        largest = primary.sort_values("weight", ascending=False)["yahoo_symbol"].drop_duplicates()
+        latest = gapfill.verify_latest(ctx.closes, ctx.prices, [s for s in largest if s in ctx.closes.columns])
+    ctx.session_check = {"holdings": check, "latest": latest}
+    suspect = [pd.Timestamp(c["date"]) for c in (check, latest) if c and c["suspect"]]
     ctx.closes, ctx.prices, filled = gapfill.fill(ctx.closes, ctx.prices, label="constituents", replace=suspect)
     ctx.filled_sessions.update({f"{day} constituents": r for day, r in filled.items()})
     missing = sorted(set(symbols) - set(ctx.closes.columns))

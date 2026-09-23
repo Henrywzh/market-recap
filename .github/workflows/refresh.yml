@@ -4,11 +4,12 @@ name: refresh
 
 on:
   schedule:
-    # GitHub cron is UTC. 23:37 UTC is 19:37 New York in summer (EDT) and 18:37
+    # GitHub cron is UTC. 23:47 UTC is 19:47 New York in summer (EDT) and 18:47
     # in winter (EST): after the evening publishers (State Street holdings/NAV,
-    # Treasury's par curve) year-round, with no DST arithmetic to redo twice a
-    # year. Off the hour and half hour, which are the slots GitHub delays most.
-    - cron: "37 23 * * 1-5"
+    # Treasury's par curve) and the 18:30 session rollover year-round, with no
+    # DST arithmetic to redo twice a year -- 17 minutes clear of the rollover in
+    # winter rather than 7. Off the hour and half hour, which GitHub delays most.
+    - cron: "47 23 * * 1-5"
   workflow_dispatch:
     inputs:
       deploy:
@@ -31,15 +32,15 @@ jobs:
     env:
       PYTHONPATH: src
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: requirements.lock
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -61,7 +62,7 @@ jobs:
       # -- but only one written by the same locked library versions. A cache
       # built by pandas 3 / yfinance 1 once put the page a session behind.
       - name: Restore cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data/cache
           key: data-cache-${{ hashFiles('requirements.lock') }}-${{ github.run_id }}
@@ -74,7 +75,7 @@ jobs:
 
       - name: Save cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: data/cache
           key: data-cache-${{ hashFiles('requirements.lock') }}-${{ github.run_id }}

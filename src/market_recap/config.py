@@ -119,9 +119,9 @@ CACHE_TTL = {
     "macro_series": timedelta(hours=12),        # FRED, revised on a publication schedule
     "reference_data": timedelta(days=7),        # ticker maps, screeners, GICS labels
     # SEC company facts are refetched when the filer's submissions index shows
-    # a newer 10-K/10-Q (sources.sec); this lifetime is only the backstop for
-    # a change the index does not announce.
-    "filings": timedelta(days=30),
+    # a newer 10-K/10-Q, or when they pass a backstop age staggered by filer
+    # (sources.sec); this lifetime is only the last resort behind both.
+    "filings": timedelta(days=40),
     "missing": timedelta(days=7),               # negative cache for a 404
 }
 

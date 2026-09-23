@@ -56,9 +56,26 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
 
-def _macro_events(ctx, start: date, end: date, use_cache: bool) -> tuple[list[dict], dict[str, str]]:
-    """Raw events from every macro source, and the sources that failed."""
-    raw, failed = [], {}
+def _expected_missing(everything: list[dict], releases: list[dict], start: date) -> list[str]:
+    """Releases that recur within ``expect_within_days`` but have no match that
+    far ahead in their agency's calendar: the title changed, or the pattern broke."""
+    missing = []
+    fetched = {e["source_id"] for e in everything}
+    for release in releases:
+        days = release.get("expect_within_days")
+        if not days or release["source"] not in fetched:
+            continue
+        until = (start + timedelta(days=int(days))).isoformat()
+        if not any(e["source_id"] == release["source"] and start.isoformat() <= (e["date"] or "") <= until
+                   and re.search(release["match"], e["title"]) for e in everything):
+            missing.append(f"{release['label'] or release['match']} ({release['source']}, none within {days} days)")
+    return missing
+
+
+def _macro_events(ctx, start: date, end: date, use_cache: bool) -> tuple[list[dict], dict[str, str], list[dict]]:
+    """Events from every macro source within the horizon, the sources that
+    failed, and everything the sources returned (for the recurrence check)."""
+    raw, failed, everything = [], {}, []
     fetchers = {
         "bls": lambda: calendars.fetch_bls(use_cache=use_cache),
         "bea": lambda: calendars.fetch_bea(use_cache=use_cache),
@@ -72,13 +89,14 @@ def _macro_events(ctx, start: date, end: date, use_cache: bool) -> tuple[list[di
         except Exception as exc:
             failed[source] = str(exc)[:ERROR_DETAIL_CHARS]
             continue
+        everything.extend(events)
         label, url = SOURCE_LABELS[source]
         kept = [e for e in events if e["date"] and start.isoformat() <= e["date"] <= end.isoformat()]
         ctx.log.add(SourceRecord(f"catalysts_{source}", label, url, rows=len(kept),
                                  observed_date=ctx.as_of, policy="daily_close"))
         raw.extend(kept)
     raw.extend(C.rule_events(start, end))
-    return raw, failed
+    return raw, failed, everything
 
 
 def _match(event: dict, releases: list[dict]) -> dict | None:
@@ -109,8 +127,8 @@ def _prints(specs: list[dict], use_cache: bool, cache: dict) -> list[dict]:
     return out
 
 
-def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool) -> tuple[list[dict], dict[str, str]]:
-    raw, failed = _macro_events(ctx, start, end, use_cache)
+def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool) -> tuple[list[dict], dict[str, str], list[str]]:
+    raw, failed, everything = _macro_events(ctx, start, end, use_cache)
     series_cache: dict = {}
     events, seen = [], set()
     for event in raw:
@@ -152,7 +170,7 @@ def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool) -> tupl
                 "source_id": "manual", "source_url": item.get("source_url"),
                 "reference_period": None, "detail": item.get("detail"), "prints": [],
             })
-    return events, failed
+    return events, failed, _expected_missing(everything, settings["releases"], start)
 
 
 def _universe(ctx) -> dict[str, dict]:
@@ -285,7 +303,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     previous = next(d for d in (session - timedelta(days=k) for k in range(1, 10)) if C.is_session(d))
     end = session + timedelta(days=int(settings["horizon_days"]))
 
-    macro, failed = _macro(ctx, settings, session, end, use_cache)
+    macro, failed, expected_missing = _macro(ctx, settings, session, end, use_cache)
     earnings_dates = [previous] + C.sessions(session, end)
     earnings, earnings_failed = _earnings(ctx, settings, earnings_dates, use_cache)
     ctx.log.add(SourceRecord(
@@ -307,6 +325,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         "week": _week(week_sessions, upcoming, session),
         "events": upcoming,
         "recent": _recent(ctx, macro, earnings, session, previous, use_cache),
+        "expected_missing": expected_missing,
         "failed_sources": {**failed, **({"nasdaq": f"dates not fetched: {', '.join(earnings_failed)}"} if earnings_failed else {})},
         "certainty_labels": {
             "official_schedule": "agency's published schedule",

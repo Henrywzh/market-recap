@@ -63,3 +63,31 @@ def test_nothing_to_do_returns_the_frame_untouched(sources):
     adjusted, raw = _frames()
     same, _, report = gapfill.fill(adjusted, raw, label="constituents")
     assert report == {} and same is adjusted
+
+
+def test_the_nights_session_is_checked_against_nasdaq(monkeypatch):
+    adjusted, raw = _frames()
+    adjusted.loc["2026-09-23"] *= 1.02                       # the last session off by 2%
+    monkeypatch.setattr(gapfill, "_nasdaq_closes", lambda s, a, b, c, u: {"2026-09-23": 102.0})
+    check = gapfill.verify_latest(adjusted, raw, SYMBOLS)
+    assert check["verified"] and check["suspect"] and check["names"] == gapfill.LATEST_SAMPLE
+
+
+def test_too_few_answers_leave_the_session_unverified_not_passed(monkeypatch):
+    adjusted, raw = _frames()
+    monkeypatch.setattr(gapfill, "_nasdaq_closes", lambda s, a, b, c, u: {})
+    check = gapfill.verify_latest(adjusted, raw, SYMBOLS)
+    assert check["verified"] is False and check["suspect"] is False
+
+
+def test_nasdaq_is_not_asked_again_after_a_run_of_failures(monkeypatch):
+    monkeypatch.setattr(gapfill, "_holdings", lambda use_cache: (None, {}))
+    monkeypatch.setattr(gapfill, "_fred_closes", lambda s, u: {})
+    calls = []
+    monkeypatch.setattr(gapfill, "_nasdaq_closes", lambda s, a, b, c, u: calls.append(s))   # returns None: a failure
+    adjusted, raw = _frames()
+    adjusted.loc["2026-09-22"] = np.nan
+    _, _, report = gapfill.fill(adjusted, raw, label="constituents")
+    # Batches of NASDAQ_WORKERS: the batch that crosses the limit is the last one asked.
+    assert len(calls) <= gapfill.NASDAQ_GIVE_UP_AFTER + gapfill.NASDAQ_WORKERS
+    assert report["2026-09-22"]["unfilled"] == len(SYMBOLS)

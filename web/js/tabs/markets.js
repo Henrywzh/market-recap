@@ -120,6 +120,13 @@ export default function renderMarkets(root, data, manifest) {
   const blocks = order.map((key) => data.indices[key]).filter(Boolean);
   const filled = filledNotice(manifest);
   if (filled) root.append(filled);
+  // The night's session is cross-checked against Nasdaq's closes; when too few
+  // came back to judge, the page says it was not, rather than implying it was.
+  const latest = manifest && manifest.session_check && manifest.session_check.latest;
+  if (latest && latest.verified === false) {
+    root.append(notice(`${latest.date}: not yet cross-checked against published closes `
+      + `(${latest.names} of the largest members answered). Yahoo's closes are shown as served.`));
+  }
 
   root.append(el('div', { class: 'stat-strip' }, [
     ...data.quotes.map(quoteStat),
