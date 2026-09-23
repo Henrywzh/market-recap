@@ -71,8 +71,15 @@ def nyse_early_closes(year: int) -> dict[date, str]:
     return {d: name for d, name in candidates.items() if d.weekday() < SATURDAY and d not in holidays}
 
 
+# Closures no rule predicts, kept so a skipped day is not taken for a gap at the
+# source. Add one when NYSE announces it.
+SPECIAL_CLOSURES = {
+    date(2025, 1, 9): "National Day of Mourning for President Carter",
+}
+
+
 def is_session(day: date) -> bool:
-    return day.weekday() < SATURDAY and day not in nyse_holidays(day.year)
+    return day.weekday() < SATURDAY and day not in nyse_holidays(day.year) and day not in SPECIAL_CLOSURES
 
 
 def sessions(start: date, end: date) -> list[date]:

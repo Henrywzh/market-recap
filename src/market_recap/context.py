@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
+from .compute import catalysts
 from .config import SESSION_COVERAGE_THRESHOLD, load_config
 from .sources import ssga, wikipedia, yahoo
 from .util import BuildLog, SourceRecord, to_iso_date
@@ -41,6 +42,28 @@ def completed_sessions(closes: pd.DataFrame) -> pd.DataFrame:
     if not complete.any():
         return closes
     return closes.loc[: complete[complete].index[-1]]
+
+
+# How many recent sessions are checked against the NYSE calendar. Enough to
+# cover the 1D and 1W windows; a gap further back is history the source has
+# long since had the chance to fill.
+MISSING_SESSION_LOOKBACK = 5
+
+
+def mark_missing_sessions(frame: pd.DataFrame) -> pd.DataFrame:
+    """Insert an empty row for any recent NYSE session the source left out.
+
+    Yahoo has served a whole session as NaN, which the 1D figures already
+    report as missing -- and has also dropped the row entirely, which they did
+    not: counting rows, "1D" then measured the two sessions either side of the
+    gap. An empty row makes a missing session look missing.
+    """
+    if frame.empty:
+        return frame
+    tail = frame.index[-(MISSING_SESSION_LOOKBACK + 1):]
+    expected = pd.DatetimeIndex([pd.Timestamp(d) for d in catalysts.sessions(tail[0].date(), tail[-1].date())])
+    missing = expected.difference(frame.index)
+    return frame.reindex(frame.index.union(missing)) if len(missing) else frame
 
 
 def _through(frame: pd.DataFrame, session: pd.Timestamp) -> pd.DataFrame:
@@ -212,7 +235,7 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
             *(set(frame["yahoo_symbol"]) for frame in ctx.members.values())
         )
     )
-    ctx.closes = completed_sessions(yahoo.fetch_closes(symbols, period=history_period))
+    ctx.closes = mark_missing_sessions(completed_sessions(yahoo.fetch_closes(symbols, period=history_period)))
     if ctx.closes.empty:
         raise RuntimeError("no constituent prices were fetched; the page has no session to describe")
     ctx.splits = _through(yahoo.fetch_splits(history_period), ctx.closes.index[-1])
@@ -236,7 +259,8 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
         | {config["universe"]["market_proxy"]}
         | set(_preset_symbols(config))
     )
-    ctx.etf_closes = _through(yahoo.fetch_closes(etf_symbols, period=history_period), ctx.closes.index[-1])
+    ctx.etf_closes = mark_missing_sessions(
+        _through(yahoo.fetch_closes(etf_symbols, period=history_period), ctx.closes.index[-1]))
     log.add(SourceRecord(
         "yahoo_etfs", "Sector / broad ETF daily closes", YAHOO_URL,
         to_iso_date(ctx.etf_closes.index[-1]) if not ctx.etf_closes.empty else None,
@@ -247,10 +271,10 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
         ctx.watchlist = _build_watchlist(ctx, watchlist_specs, watchlist_symbols)
 
     # 5. Long index history for the drawdown and price charts.
-    ctx.index_closes = _through(
+    ctx.index_closes = mark_missing_sessions(_through(
         yahoo.fetch_closes([s.symbol for s in specs], period=f"{config['universe']['history_years']}y"),
         ctx.closes.index[-1],
-    )
+    ))
     log.add(SourceRecord(
         "yahoo_indices", " / ".join(s.key for s in specs) + " index history", YAHOO_URL,
         to_iso_date(ctx.index_closes.index[-1]) if not ctx.index_closes.empty else None,

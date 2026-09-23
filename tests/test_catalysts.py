@@ -97,3 +97,17 @@ def test_nasdaq_rows_parse_timing_money_and_negatives():
     cost, azo = nasdaq.parse_earnings(text)
     assert (cost["symbol"], cost["timing"], cost["eps_forecast"], cost["estimates"], cost["last_year_eps"]) == ("COST", "amc", 6.48, 11, -0.12)
     assert (azo["timing"], azo["eps_forecast"], azo["eps"], azo["surprise_pct"]) == (None, None, 56.05, 2.77)
+
+
+def test_a_session_the_source_dropped_becomes_an_empty_row():
+    """Yahoo dropped 2026-09-22 entirely; counting rows, "1D" spanned two sessions."""
+    from market_recap.compute.returns import period_return
+    from market_recap.context import mark_missing_sessions
+
+    frame = pd.DataFrame({"X": [100.0, 101.0, 103.0]}, index=pd.to_datetime(["2026-09-18", "2026-09-21", "2026-09-23"]))
+    marked = mark_missing_sessions(frame)
+    assert pd.Timestamp("2026-09-22") in marked.index and marked.loc["2026-09-22", "X"] != marked.loc["2026-09-22", "X"]
+    assert period_return(marked["X"], 1) is None
+    # A holiday is not a gap: Labor Day 2026.
+    holiday = pd.DataFrame({"X": [1.0, 2.0]}, index=pd.to_datetime(["2026-09-04", "2026-09-08"]))
+    assert mark_missing_sessions(holiday).equals(holiday)
