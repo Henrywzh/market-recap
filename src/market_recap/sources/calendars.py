@@ -46,9 +46,18 @@ COUPON_TYPES = {"Note", "Bond", "TIPS", "FRN"}
 COUPON_AUCTION_CLOSE = "13:00"
 
 
+# A calendar is small and either answers promptly or is refusing this client;
+# an edge that holds a refused connection open would otherwise cost the full
+# retry ladder on every build.
+CALENDAR_TIMEOUT_SECONDS = 30.0
+CALENDAR_RETRIES = 1
+
+
 def _text(name: str, url: str, *, use_cache: bool) -> str:
     return cache.fetch_text(
-        NAMESPACE, name, lambda: get_text(url, timeout=45.0), kind="daily_file", suffix=".txt", use_cache=use_cache
+        NAMESPACE, name,
+        lambda: get_text(url, timeout=CALENDAR_TIMEOUT_SECONDS, retries=CALENDAR_RETRIES),
+        kind="daily_file", suffix=".txt", use_cache=use_cache,
     )
 
 

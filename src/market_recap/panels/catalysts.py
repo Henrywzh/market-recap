@@ -48,6 +48,7 @@ SOURCE_LABELS = {
     "treasury": ("Treasury announced auctions", calendars.TREASURY_URL),
 }
 TEN_YEAR = "10Y"
+NASDAQ_GIVE_UP_AFTER = 2
 BP_PER_PCT = 100
 
 
@@ -176,11 +177,20 @@ def _universe(ctx) -> dict[str, dict]:
 def _earnings(ctx, settings: dict, dates: list[date], use_cache: bool) -> tuple[list[dict], list[str]]:
     names = _universe(ctx)
     events, failed = [], []
+    misses = 0
     for day in dates:
+        # Two misses in a row means the endpoint is refusing this client, not
+        # having a bad date: the rest are listed as not fetched instead of each
+        # waiting out its own timeout.
+        if misses >= NASDAQ_GIVE_UP_AFTER:
+            failed.append(day.isoformat())
+            continue
         try:
             rows = nasdaq.fetch_earnings(day.isoformat(), use_cache=use_cache)
+            misses = 0
         except Exception:
             failed.append(day.isoformat())
+            misses += 1
             continue
         for row in rows:
             entry = names.get(ticker_key(row["symbol"]))

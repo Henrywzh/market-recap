@@ -64,7 +64,7 @@ def parse_earnings(text: str) -> list[dict]:
 def fetch_earnings(date: str, *, use_cache: bool = True) -> list[dict]:
     text = cache.fetch_text(
         NAMESPACE, f"earnings-{date}",
-        lambda: get_text(EARNINGS_URL.format(date=date), timeout=30.0, user_agent=USER_AGENT,
+        lambda: get_text(EARNINGS_URL.format(date=date), timeout=20.0, retries=1, user_agent=USER_AGENT,
                          headers={"Accept": "application/json"}),
         kind="daily_file", suffix=".json", use_cache=use_cache,
     )
