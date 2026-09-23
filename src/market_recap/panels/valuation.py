@@ -161,6 +161,8 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             meta.setdefault(row.yahoo_symbol, {"name": str(row.name).title(), "sector": row.sector})
             indices.setdefault(row.yahoo_symbol, []).append(key)
 
+    if use_cache:
+        sec.check_filings(cik_for(symbol, cik_map) for symbol in symbols)
     rows, skipped = [], {}
     for symbol in symbols:
         cik = cik_for(symbol, cik_map)
@@ -194,7 +196,9 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     ctx.log.add(SourceRecord(
         "sec_trailing", "SEC XBRL company facts (trailing twelve months)",
         "https://data.sec.gov/api/xbrl/companyfacts/",
+        observed_date=max((r["filed"] for r in rows if r["filed"]), default=None),
         rows=len(rows),
+        policy="filings",
         status="ok" if not skipped else "partial",
         error=None if not skipped else f"{len(skipped)} of {len(symbols)} not extracted",
     ))

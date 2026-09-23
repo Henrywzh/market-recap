@@ -46,7 +46,7 @@ def path_for(namespace: str, name: str, suffix: str = "") -> Path:
     return CACHE_DIR / namespace / f"{name}{suffix}"
 
 
-def _modified(path: Path) -> datetime | None:
+def modified(path: Path) -> datetime | None:
     if not path.exists():
         return None
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
@@ -70,13 +70,13 @@ def last_rollover(now: datetime | None = None) -> datetime:
 
 
 def is_fresh(path: Path, kind: str, *, now: datetime | None = None) -> bool:
-    modified = _modified(path)
-    if modified is None:
+    modified_at = modified(path)
+    if modified_at is None:
         return False
     now = now or datetime.now(timezone.utc)
-    if now - modified >= ttl(kind):
+    if now - modified_at >= ttl(kind):
         return False
-    return kind not in SESSION_KINDS or modified >= last_rollover(now)
+    return kind not in SESSION_KINDS or modified_at >= last_rollover(now)
 
 
 def _write(path: Path, payload: bytes, *, compress: bool) -> None:

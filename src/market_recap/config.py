@@ -90,6 +90,9 @@ FRESHNESS = {
     "published_curve": {"stale_after_calendar_days": 7},
     "monthly_release": {"stale_after_calendar_days": 100},
     "fund_holdings": {"stale_after_calendar_days": 10},
+    # The newest 10-K/10-Q across the whole universe. Some member files one in
+    # almost every week of the year; three without any means the check broke.
+    "filings": {"stale_after_calendar_days": 21},
 }
 DEFAULT_FRESHNESS_POLICY = "daily_close"
 
@@ -112,7 +115,10 @@ CACHE_TTL = {
     "daily_file": timedelta(days=1),            # per session: see SESSION_KINDS
     "macro_series": timedelta(hours=12),        # FRED, revised on a publication schedule
     "reference_data": timedelta(days=7),        # ticker maps, screeners, GICS labels
-    "filings": timedelta(days=3),               # SEC company facts
+    # SEC company facts are refetched when the filer's submissions index shows
+    # a newer 10-K/10-Q (sources.sec); this lifetime is only the backstop for
+    # a change the index does not announce.
+    "filings": timedelta(days=30),
     "missing": timedelta(days=7),               # negative cache for a 404
 }
 

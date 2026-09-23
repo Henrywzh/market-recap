@@ -303,3 +303,31 @@ def test_a_price_request_that_never_answers_is_abandoned():
         yahoo._within(0.2, lambda: _time.sleep(30))
     assert _time.monotonic() - started < 5
     assert yahoo._within(1, lambda: 42) == 42
+
+
+def _recent(*filings):
+    keys = ("form", "accessionNumber", "filingDate", "acceptanceDateTime", "isXBRL")
+    return {key: [f[i] for f in filings] for i, key in enumerate(keys)}
+
+
+def test_the_latest_statement_filing_ignores_other_forms_and_filings_without_xbrl():
+    recent = _recent(
+        ("4", "a1", "2026-09-24", "2026-09-24T21:00:00.000Z", 0),
+        ("8-K", "a2", "2026-09-23", "2026-09-23T20:00:00.000Z", 1),
+        ("10-Q", "a3", "2026-09-22", "2026-09-22T20:04:02.000Z", 1),
+        ("10-K/A", "a4", "2026-09-01", "2026-09-01T12:00:00.000Z", 0),
+        ("10-K", "a5", "2026-07-01", "2026-07-01T12:00:00.000Z", 1),
+    )
+    latest = sec._latest_statement(recent)
+    assert latest.accession == "a3" and latest.accepted.isoformat() == "2026-09-22T20:04:02+00:00"
+    assert sec._latest_statement(_recent(("4", "a1", "2026-09-24", "2026-09-24T21:00:00.000Z", 0))) is None
+
+
+def test_company_facts_are_refetched_only_when_they_can_predate_the_latest_filing():
+    from datetime import datetime, timezone
+    accepted = datetime(2026, 9, 22, 20, 4, tzinfo=timezone.utc)
+    latest = sec.LatestFiling("10-Q", "a3", "2026-09-22", accepted)
+    assert sec.predates(datetime(2026, 9, 21, 23, 40, tzinfo=timezone.utc), latest)      # fetched the night before
+    assert sec.predates(datetime(2026, 9, 22, 23, 40, tzinfo=timezone.utc), latest)      # same evening: maybe unprocessed
+    assert not sec.predates(datetime(2026, 9, 23, 23, 40, tzinfo=timezone.utc), latest)  # the night after: settled
+    assert not sec.predates(None, latest) and not sec.predates(datetime(2026, 9, 21, tzinfo=timezone.utc), None)

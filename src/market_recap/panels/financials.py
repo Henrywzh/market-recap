@@ -76,7 +76,10 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         for row in frame.drop_duplicates("yahoo_symbol").itertuples():
             meta.setdefault(row.yahoo_symbol, {"name": str(row.name).title(), "sector": row.sector})
 
+    if use_cache:
+        sec.check_filings(cik_for(symbol, cik_map) for symbol in symbols)
     available, skipped = [], {}
+    latest_filed = None
     for symbol in symbols:
         cik = cik_for(symbol, cik_map)
         if cik is None:
@@ -87,14 +90,18 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         except Exception as exc:
             skipped[symbol] = str(exc)[:ERROR_DETAIL_CHARS]
             continue
-        write_json(FINANCIALS_ARTIFACT_DIR / f"{symbol}.json", _payload(symbol, extracted, meta.get(symbol, {})))
+        payload = _payload(symbol, extracted, meta.get(symbol, {}))
+        write_json(FINANCIALS_ARTIFACT_DIR / f"{symbol}.json", payload)
         available.append({"ticker": symbol, "name": meta.get(symbol, {}).get("name")})
+        latest_filed = max(filter(None, [latest_filed, *(c["filed"] for c in payload["columns"])]), default=None)
 
     prune_stale(FINANCIALS_ARTIFACT_DIR, (c["ticker"] for c in available))
     ctx.log.add(SourceRecord(
         "sec_financials", "SEC XBRL company facts (statements)",
         "https://data.sec.gov/api/xbrl/companyfacts/",
+        observed_date=latest_filed,
         rows=len(available),
+        policy="filings",
         status="ok" if not skipped else "partial",
         error=None if not skipped else f"{len(skipped)} of {len(symbols)} not extracted",
     ))

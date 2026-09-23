@@ -13,7 +13,8 @@ from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
 from .panels import cross_listing, dcf, financials, fixed_income, heatmaps, macro, markets, valuation
 from .panels import technicals as technicals_panel
-from .util import utc_now_iso, write_json
+from .sources import sec
+from .util import SourceRecord, utc_now_iso, write_json
 
 # Order matters only for readability; panels do not depend on each other.
 PANELS = {
@@ -60,6 +61,18 @@ def run(
         write_json(ARTIFACT_DIR / f"{name}.json", payload)
         written.append(name)
 
+    check = sec.filing_check()
+    if check["checked"]:
+        ctx.log.add(SourceRecord(
+            "sec_submissions", "SEC submissions index (new 10-K / 10-Q since the last fetch)",
+            "https://data.sec.gov/submissions/",
+            observed_date=check["latest_filed"],
+            rows=check["checked"],
+            policy="filings",
+            status="ok" if not check["failed"] else "partial",
+            error=f"{check['failed']} of {check['checked']} indexes unreadable" if check["failed"] else None,
+        ))
+
     manifest = {
         "brand": config["brand"],
         "as_of": ctx.as_of,
@@ -85,6 +98,8 @@ def run(
         "series_priced": int(ctx.closes.shape[1]),
         "panels": written,
         "skipped_panels": sorted(set(selected) - set(written)),
+        # Filers whose company facts were refetched because a newer 10-K/10-Q was accepted.
+        "sec_filings": check,
         **ctx.log.to_dict(),
     }
     if prune_cache:

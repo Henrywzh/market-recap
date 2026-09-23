@@ -10,10 +10,13 @@ revenue" is only meaningful alongside when it became public.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 import math
 from functools import lru_cache
 import json
+import threading
 import time
 
 import httpx
@@ -24,6 +27,7 @@ from ..config import SEC_USER_AGENT
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
+SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 
 # Annual report forms. A foreign private issuer files 20-F or 40-F rather
 # than a 10-K, and excluding them would silently drop every ADR.
@@ -32,6 +36,11 @@ ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
 # SEC asks for no more than ten requests per second from one client.
 _MIN_INTERVAL = 0.12
 _last_call = 0.0
+_throttle_lock = threading.Lock()
+
+# Answers worth one more try: SEC's rate limiter and its edge's transient failures.
+RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+ATTEMPTS = 3
 
 # Every line item this repository reads from a filing, with the US-GAAP tags
 # that actually carry it across filers. Order matters: for each fiscal year the
@@ -165,20 +174,34 @@ NAMESPACE = "sec"
 
 
 def _throttle() -> None:
+    """Space request starts, across threads, at least _MIN_INTERVAL apart."""
     global _last_call
-    wait = _MIN_INTERVAL - (time.monotonic() - _last_call)
-    if wait > 0:
-        time.sleep(wait)
-    _last_call = time.monotonic()
+    with _throttle_lock:
+        wait = _MIN_INTERVAL - (time.monotonic() - _last_call)
+        if wait > 0:
+            time.sleep(wait)
+        _last_call = time.monotonic()
 
 
 def _get(url: str, timeout: float) -> str:
     """SEC asks automated clients to identify themselves and to stay under ten
-    requests a second; the throttle is shared across every call in the build."""
-    _throttle()
-    response = httpx.get(url, headers={"User-Agent": SEC_USER_AGENT}, timeout=timeout)
-    response.raise_for_status()
-    return response.text
+    requests a second; the throttle is shared across every call in the build.
+    One unanswered request in five hundred is routine, so a throttled or
+    dropped request is retried before it counts as a failure."""
+    for attempt in range(ATTEMPTS):
+        last = attempt == ATTEMPTS - 1
+        _throttle()
+        try:
+            response = httpx.get(url, headers={"User-Agent": SEC_USER_AGENT}, timeout=timeout)
+        except httpx.TransportError:
+            if last:
+                raise
+        else:
+            if response.status_code not in RETRY_STATUSES or last:
+                response.raise_for_status()
+                return response.text
+        time.sleep(2 ** attempt)
+    raise AssertionError("unreachable")
 
 
 def fetch_ticker_cik_map(*, use_cache: bool = True) -> dict[str, int]:
@@ -193,14 +216,122 @@ def fetch_ticker_cik_map(*, use_cache: bool = True) -> dict[str, int]:
     return {v["ticker"].upper(): int(v["cik_str"]) for v in json.loads(text).values()}
 
 
+# Forms whose XBRL carries the statements read here; an amendment restates them.
+STATEMENT_FORMS = frozenset(
+    form + suffix for form in ANNUAL_FORMS | {"10-Q"} for suffix in ("", "/A")
+)
+
+# SEC turns a filing into company facts within minutes of accepting it, but a
+# copy fetched inside those minutes predates it. A copy fetched less than this
+# long after the latest filing was accepted is fetched again on the next build.
+PROCESSING_MARGIN = timedelta(hours=6)
+
+
+@dataclass(frozen=True)
+class LatestFiling:
+    form: str
+    accession: str
+    filed: str
+    accepted: datetime
+
+
+# What each filer's submissions index said this build, for the manifest.
+_checked: dict[int, dict] = {}
+
+
+def _latest_statement(recent: dict) -> LatestFiling | None:
+    """The newest statement filing with XBRL in a submissions index's recent block."""
+    filings = [
+        LatestFiling(form, accession, filed, datetime.fromisoformat(accepted.replace("Z", "+00:00")))
+        for form, accession, filed, accepted, xbrl in zip(
+            recent.get("form", []), recent.get("accessionNumber", []), recent.get("filingDate", []),
+            recent.get("acceptanceDateTime", []), recent.get("isXBRL", []),
+        )
+        if form in STATEMENT_FORMS and xbrl
+    ]
+    return max(filings, key=lambda f: f.accepted, default=None)
+
+
+def latest_statement_filing(cik: int, *, use_cache: bool = True) -> LatestFiling | None:
+    """The filer's most recent 10-K/10-Q/20-F/40-F, or an amendment to one.
+
+    Company facts are megabytes per filer and SEC answers no conditional
+    request for them, so "has anything changed?" is asked of the submissions
+    index instead: tens of KB, updated as each filing is accepted. Read once
+    per session, like the closes.
+    """
+    text = cache.fetch_text(
+        f"{NAMESPACE}/submissions",
+        f"CIK{cik:010d}",
+        lambda: _get(SUBMISSIONS_URL.format(cik=cik), 45.0),
+        kind="daily_file",
+        suffix=".json",
+        use_cache=use_cache,
+        compress=True,
+    )
+    return _latest_statement(json.loads(text).get("filings", {}).get("recent", {}))
+
+
+def predates(fetched: datetime | None, latest: LatestFiling | None) -> bool:
+    """Whether company facts fetched at ``fetched`` can be missing ``latest``."""
+    return fetched is not None and latest is not None and latest.accepted > fetched - PROCESSING_MARGIN
+
+
+def _needs_refetch(cik: int) -> bool:
+    """Whether the cached company facts predate the filer's latest statements.
+
+    Without this the facts lived out a fixed three-day lifetime, so a 10-Q
+    filed on Monday reached the page on Thursday. If the index cannot be read,
+    the cache's own lifetime decides, as before.
+    """
+    path = cache.path_for(f"{NAMESPACE}/facts", f"CIK{cik:010d}", ".json" + cache.GZIP_SUFFIX)
+    try:
+        latest = latest_statement_filing(cik)
+    except Exception as exc:
+        _checked[cik] = {"error": str(exc)}
+        return False
+    refetch = predates(cache.modified(path), latest)
+    _checked[cik] = {"latest": latest, "refetched": refetch}
+    return refetch
+
+
+# Parallel reads of the submissions indexes. One at a time, each is a round
+# trip of ~0.35 s and five hundred took three minutes; the shared throttle
+# still holds the whole build under SEC's ten requests a second.
+CHECK_WORKERS = 6
+
+
+def check_filings(ciks) -> None:
+    """Ask every filer's submissions index up front, so the facts reads that
+    follow already know which cached copies are out of date."""
+    pending = sorted({cik for cik in ciks if cik is not None and cik not in _checked})
+    with ThreadPoolExecutor(CHECK_WORKERS) as pool:
+        list(pool.map(_needs_refetch, pending))
+
+
+def filing_check() -> dict:
+    """Summary of this build's submissions checks."""
+    latest = [c["latest"] for c in _checked.values() if c.get("latest")]
+    return {
+        "checked": len(_checked),
+        "failed": sum(1 for c in _checked.values() if "error" in c),
+        "refetched": sum(1 for c in _checked.values() if c.get("refetched")),
+        "latest_filed": max((f.filed for f in latest), default=None),
+    }
+
+
 def fetch_company_facts(cik: int, *, use_cache: bool = True) -> dict:
+    # Only filers the panels asked about (check_filings) are checked: a
+    # predecessor CIK files nothing new, and the candidates tried while looking
+    # for one include filing agents with no index at all.
+    refetch = use_cache and _checked.get(cik, {}).get("refetched", False)
     text = cache.fetch_text(
         f"{NAMESPACE}/facts",
         f"CIK{cik:010d}",
         lambda: _get(FACTS_URL.format(cik=cik), 60.0),
         kind="filings",
         suffix=".json",
-        use_cache=use_cache,
+        use_cache=use_cache and not refetch,
         # 3-4 MB of JSON per filer, of which this reads a handful of tags.
         compress=True,
     )

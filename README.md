@@ -230,6 +230,17 @@ data/cache/                raw snapshots and parsed frames, pruned each build
   nothing downstream would have shown that the flow series belonged to a
   different fund. Ticker→id now comes from BlackRock's own screener.
 - **The build validates itself.** See the table above.
+- **A new 10-Q reaches the page the night it is filed.** Company facts are
+  megabytes per filer and SEC answers no conditional request for them, so they
+  used to live out a fixed three-day cache: a 10-Q filed on Monday showed on
+  Thursday. Each night the build now reads every filer's submissions index
+  (tens of KB, updated as filings are accepted; six in parallel under SEC's
+  ten-a-second limit, about a minute for 515 filers) and refetches only the
+  company facts older than the latest 10-K/10-Q/20-F/40-F or amendment. A
+  copy fetched within six hours of that filing is fetched again the next
+  night, in case SEC had not processed it yet. The thirty-day cache lifetime
+  is only the backstop. The manifest's `sec_filings` says how many were
+  checked and refetched, and the SEC sources carry the latest filing date.
 
 ## Known limits
 

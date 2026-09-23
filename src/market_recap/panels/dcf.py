@@ -73,7 +73,10 @@ def build(ctx, *, tickers: list[str] | None = None, use_cache: bool = True) -> d
         ctx.log.fail("dcf:cik_map", exc)
         return {"as_of": ctx.as_of, "available": [], "error": str(exc)[:ERROR_DETAIL_CHARS]}
 
+    if use_cache:
+        sec.check_filings(cik_for(symbol, cik_map) for symbol in tickers)
     baked, skipped = [], {}
+    latest_filed = None
     for symbol in tickers:
         # SEC lists class shares with a dot; the price feed uses a dash.
         cik = cik_for(symbol, cik_map)
@@ -115,6 +118,9 @@ def build(ctx, *, tickers: list[str] | None = None, use_cache: bool = True) -> d
 
         write_json(DCF_ARTIFACT_DIR / f"{symbol}.json", payload)
         baked.append(symbol)
+        latest_filed = max(filter(None, [latest_filed, *(
+            value for row in payload["rows"] for key, value in row.items() if key.endswith("_filed")
+        )]), default=None)
 
     prune_stale(DCF_ARTIFACT_DIR, baked)
     ctx.log.add(
@@ -122,7 +128,9 @@ def build(ctx, *, tickers: list[str] | None = None, use_cache: bool = True) -> d
             "sec_companyfacts",
             "SEC XBRL company facts",
             "https://data.sec.gov/api/xbrl/companyfacts/",
+            observed_date=latest_filed,
             rows=len(baked),
+            policy="filings",
             status="ok" if not skipped else "partial",
             error=None if not skipped else f"{len(skipped)} tickers unavailable",
         )
