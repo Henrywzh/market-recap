@@ -115,6 +115,13 @@ CACHE_TTL = {
 }
 
 
+# A session is "complete" when nearly the whole panel has printed a close.
+# Anything less is a session in progress: the provider serves an intraday bar
+# for whatever it refreshed most recently, and a few hundred cached symbols
+# still end on the prior close. The same share decides when a basket return
+# still describes the basket rather than part of it.
+SESSION_COVERAGE_THRESHOLD = 0.90
+
 # A "daily" file is stale once a new session has been published, not 24 hours
 # after it was fetched. With a pure TTL, a nightly run that starts a few minutes
 # earlier than the night before finds yesterday's closes still "fresh", never

@@ -17,17 +17,11 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from .config import load_config
+from .config import SESSION_COVERAGE_THRESHOLD, load_config
 from .sources import ssga, wikipedia, yahoo
 from .util import BuildLog, SourceRecord, to_iso_date
 
 YAHOO_URL = "https://finance.yahoo.com"
-
-# A session is "complete" when nearly the whole panel has printed a close.
-# Anything less is a session in progress: the provider serves an intraday bar
-# for whatever it refreshed most recently, and a few hundred cached symbols
-# still end on the prior close.
-SESSION_COVERAGE_THRESHOLD = 0.90
 
 
 def completed_sessions(closes: pd.DataFrame) -> pd.DataFrame:
@@ -47,6 +41,14 @@ def completed_sessions(closes: pd.DataFrame) -> pd.DataFrame:
     if not complete.any():
         return closes
     return closes.loc[: complete[complete].index[-1]]
+
+
+def _through(frame: pd.DataFrame, session: pd.Timestamp) -> pd.DataFrame:
+    """Cut a frame to the page's session. ETFs and indices are fetched
+    separately from the constituent panel; without this they can carry a
+    session the panel has already rejected as unfinished, and the quote strip
+    describes a different day from the tables beneath it."""
+    return frame.loc[:session] if not frame.empty else frame
 
 
 @dataclass(frozen=True)
@@ -207,6 +209,8 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
         )
     )
     ctx.closes = completed_sessions(yahoo.fetch_closes(symbols, period=history_period))
+    if ctx.closes.empty:
+        raise RuntimeError("no constituent prices were fetched; the page has no session to describe")
     missing = sorted(set(symbols) - set(ctx.closes.columns))
     log.add(SourceRecord(
         "yahoo_constituents",
@@ -226,7 +230,7 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
         | {config["universe"]["market_proxy"]}
         | set(_preset_symbols(config))
     )
-    ctx.etf_closes = yahoo.fetch_closes(etf_symbols, period=history_period)
+    ctx.etf_closes = _through(yahoo.fetch_closes(etf_symbols, period=history_period), ctx.closes.index[-1])
     log.add(SourceRecord(
         "yahoo_etfs", "Sector / broad ETF daily closes", YAHOO_URL,
         to_iso_date(ctx.etf_closes.index[-1]) if not ctx.etf_closes.empty else None,
@@ -237,8 +241,9 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
         ctx.watchlist = _build_watchlist(ctx, watchlist_specs, watchlist_symbols)
 
     # 5. Long index history for the drawdown and price charts.
-    ctx.index_closes = yahoo.fetch_closes(
-        [s.symbol for s in specs], period=f"{config['universe']['history_years']}y"
+    ctx.index_closes = _through(
+        yahoo.fetch_closes([s.symbol for s in specs], period=f"{config['universe']['history_years']}y"),
+        ctx.closes.index[-1],
     )
     log.add(SourceRecord(
         "yahoo_indices", " / ".join(s.key for s in specs) + " index history", YAHOO_URL,

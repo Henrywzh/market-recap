@@ -128,3 +128,40 @@ def test_cross_listing_verdict_flags_a_timing_dominated_series():
 
     persistent = {"daily_change_sd_pp": 0.4, "level_sd_pp": 3.2, "autocorr_1d": 0.95}
     assert cross_listing._verdict(persistent, min_autocorrelation=floor)["daily_change_usable"] is True
+
+
+def test_a_missing_session_is_not_stepped_over(prices):
+    """Yahoo once served a session as an all-NaN row. Dropping it before
+    counting back made the next day's "1D" a two-session move."""
+    series = prices["A"].copy()
+    series.iloc[-2] = np.nan
+    assert R.period_return(series, 1) is None
+    expected = (series.iloc[-1] / series.iloc[-3] - 1) * 100
+    assert R.period_return(series, 2) == pytest.approx(expected)
+
+
+def test_a_basket_return_does_not_depend_on_share_prices(prices):
+    """Weighting by weight x price let a high-priced stock dominate its sector."""
+    weights = pd.Series({"A": 50.0, "B": 30.0, "C": 15.0, "D": 5.0})
+    base = R.basket_return(prices, weights, 21, min_weight_share=0.9)
+    rescaled = prices.assign(D=prices["D"] * 40)  # D becomes a $4,000 stock
+    assert R.basket_return(rescaled, weights, 21, min_weight_share=0.9) == pytest.approx(base)
+
+
+def test_a_basket_return_is_buy_and_hold_of_todays_weights(prices):
+    weights = pd.Series({"A": 50.0, "B": 30.0, "C": 15.0, "D": 5.0})
+    first, last = prices.iloc[-22], prices.iloc[-1]
+    shares = weights / last  # holdings that are worth today's weights today
+    expected = ((shares * last).sum() / (shares * first).sum() - 1) * 100
+    assert R.basket_return(prices, weights, 21, min_weight_share=0.9) == pytest.approx(expected)
+
+
+def test_a_basket_missing_too_much_weight_is_not_reported(prices):
+    weights = pd.Series({"A": 50.0, "B": 30.0, "C": 15.0, "D": 5.0})
+    thin = prices.copy()
+    thin.loc[thin.index[-1], "A"] = np.nan
+    assert R.basket_return(thin, weights, 1, min_weight_share=0.9) is None
+    small_gap = prices.copy()
+    small_gap.loc[small_gap.index[-1], "D"] = np.nan
+    without_d = R.basket_return(prices[["A", "B", "C"]], weights[["A", "B", "C"]], 1, min_weight_share=0.9)
+    assert R.basket_return(small_gap, weights, 1, min_weight_share=0.9) == pytest.approx(without_d)

@@ -35,6 +35,8 @@ def build(ctx) -> dict:
         if symbol not in closes.columns:
             commodity_rows.append({"label": label, "symbol": symbol, "price": None, "status": "unavailable"})
             continue
+        # Each instrument on its own trading days: futures, FX and ETFs keep
+        # different holidays, and a shared union calendar would blank them.
         series = closes[symbol].dropna()
         row = {
             "label": label,

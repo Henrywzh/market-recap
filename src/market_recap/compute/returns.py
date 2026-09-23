@@ -15,34 +15,82 @@ import pandas as pd
 from ..config import CHART_SESSIONS, period_sessions
 
 
-def period_return(closes: pd.Series, trading_days: int) -> float | None:
-    """Return over the last ``trading_days`` sessions, in percent.
+def _window_start(index: pd.Index, sessions: int | None) -> int | None:
+    """Position of the row a window is measured from, or None if it predates the data.
 
-    Returns None when the history is too short, rather than measuring from the
-    first available bar and silently labelling a 4-month return as 1Y.
+    ``sessions=None`` means YTD: the last row of the prior calendar year.
     """
-    clean = closes.dropna()
-    if len(clean) < trading_days + 1:
+    if len(index) == 0:
         return None
-    start = clean.iloc[-(trading_days + 1)]
-    end = clean.iloc[-1]
-    if not np.isfinite(start) or start == 0:
+    if sessions is None:
+        prior_year = np.flatnonzero(index < pd.Timestamp(year=index[-1].year, month=1, day=1))
+        return int(prior_year[-1]) if prior_year.size else None
+    start = len(index) - 1 - sessions
+    return start if start >= 0 else None
+
+
+def _endpoint_return(start: float, end: float) -> float | None:
+    if not (np.isfinite(start) and np.isfinite(end)) or start == 0:
         return None
     return float((end / start - 1.0) * 100.0)
 
 
+def period_return(closes: pd.Series, trading_days: int) -> float | None:
+    """Return over the last ``trading_days`` sessions of ``closes``' own calendar, in percent.
+
+    Sessions are counted on the index as given, and a missing print is not
+    stepped over: dropping it first turns a two-session move into a "1D" that
+    passes every check. A missing endpoint returns None instead. A caller that
+    wants a series measured on its own trading days (a future, an FX rate)
+    drops its NaNs before calling, and says so.
+
+    Returns None when the history is too short, rather than measuring from the
+    first available bar and silently labelling a 4-month return as 1Y.
+    """
+    start = _window_start(closes.index, trading_days)
+    if start is None:
+        return None
+    return _endpoint_return(closes.iloc[start], closes.iloc[-1])
+
+
 def ytd_return(closes: pd.Series) -> float | None:
-    clean = closes.dropna()
-    if clean.empty:
+    """Return since the last session of the prior calendar year, in percent."""
+    start = _window_start(closes.index, None)
+    if start is None:
         return None
-    last = clean.index[-1]
-    prior_year = clean[clean.index < pd.Timestamp(year=last.year, month=1, day=1)]
-    if prior_year.empty:
+    return _endpoint_return(closes.iloc[start], closes.iloc[-1])
+
+
+def basket_return(
+    closes: pd.DataFrame, weights: pd.Series, trading_days: int | None, *, min_weight_share: float
+) -> float | None:
+    """Return of a basket held at today's published weights, in percent.
+
+    Share counts are held fixed over the window (each member's weight backed
+    out by its own price move), which is how a cap-weighted index moves between
+    rebalances: ``1 + R = sum(w) / sum(w / (1 + r))``. Two tempting shortcuts
+    are both wrong. Summing ``weight x price`` weights members by their share
+    *price* -- a $4,000 stock at 0.1% outweighed a $180 stock at 7% by a third
+    -- and put a 1D of +0.30% beside an index that moved +0.02%. Summing
+    ``weight x return`` applies today's weights to the past and overweights
+    whatever already rose.
+
+    Members without a price at both ends of the window are left out along with
+    their weight. If less than ``min_weight_share`` of the weight remains, the
+    window is not reported rather than being described by part of the basket.
+    ``trading_days=None`` means YTD.
+    """
+    weights = weights[weights.index.isin(closes.columns)]
+    start = _window_start(closes.index, trading_days)
+    if start is None or weights.sum() <= 0:
         return None
-    start = prior_year.iloc[-1]
-    if not np.isfinite(start) or start == 0:
+    first = closes[weights.index].iloc[start]
+    last = closes[weights.index].iloc[-1]
+    valid = first.notna() & last.notna() & (first > 0)
+    held = weights[valid]
+    if held.sum() < min_weight_share * weights.sum():
         return None
-    return float((clean.iloc[-1] / start - 1.0) * 100.0)
+    return float((held.sum() / (held * first[valid] / last[valid]).sum() - 1.0) * 100.0)
 
 
 def period_returns(closes: pd.Series, periods: Sequence[str]) -> dict[str, float | None]:
@@ -57,6 +105,16 @@ def period_returns(closes: pd.Series, periods: Sequence[str]) -> dict[str, float
         sessions = period_sessions(label)
         out[label] = ytd_return(closes) if sessions is None else period_return(closes, sessions)
     return out
+
+
+def basket_returns(
+    closes: pd.DataFrame, weights: pd.Series, periods: Sequence[str], *, min_weight_share: float
+) -> dict[str, float | None]:
+    """:func:`basket_return` over each named window."""
+    return {
+        label: basket_return(closes, weights, period_sessions(label), min_weight_share=min_weight_share)
+        for label in periods
+    }
 
 
 def drawdown_from_high(closes: pd.Series) -> dict:

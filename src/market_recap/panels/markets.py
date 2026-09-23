@@ -11,7 +11,7 @@ from __future__ import annotations
 import pandas as pd
 
 from ..compute import returns as R
-from ..config import period_sessions
+from ..config import SESSION_COVERAGE_THRESHOLD, period_sessions
 from ..util import clean_float, to_iso_date
 
 # How many names each mover table lists. A round number with no analytic
@@ -48,6 +48,11 @@ def _period_returns(series: pd.Series, labels: list[str]) -> dict:
     return {k: clean_float(v, 2) for k, v in R.period_returns(series, labels).items()}
 
 
+def _basket_returns(closes: pd.DataFrame, weights: pd.Series, labels: list[str]) -> dict:
+    returns = R.basket_returns(closes, weights, labels, min_weight_share=SESSION_COVERAGE_THRESHOLD)
+    return {k: clean_float(v, 2) for k, v in returns.items()}
+
+
 def build(ctx) -> dict:
     config = ctx.config
     windows = config["periods"]
@@ -58,8 +63,10 @@ def build(ctx) -> dict:
     for ticker in config["universe"]["quote_tickers"]:
         if ticker not in ctx.etf_closes.columns:
             continue
-        series = ctx.etf_closes[ticker].dropna()
-        if len(series) < 2:
+        # The last two rows of the shared calendar, not the last two prints:
+        # a missing session must blank the change, not double it.
+        series = ctx.etf_closes[ticker]
+        if len(series) < 2 or series.iloc[-2:].isna().any():
             continue
         last, prior = float(series.iloc[-1]), float(series.iloc[-2])
         quotes.append({
@@ -139,13 +146,12 @@ def build(ctx) -> dict:
         if not symbols:
             continue
         weights = group.set_index("yahoo_symbol").loc[symbols, "weight"]
-        basket = (closes[symbols] * (weights / weights.sum())).sum(axis=1)
         row = {
             "sector": sector,
             "etf": ctx.sector_etfs.get(sector),
             "weight_pct": clean_float(group["weight"].sum(), 2),
             "members": len(symbols),
-        } | _period_returns(basket, sector_periods)
+        } | _basket_returns(closes, weights, sector_periods)
         one_day = row.get("1D")
         row["contribution_1d"] = (
             clean_float(group["weight"].sum() / 100.0 * one_day, 3) if one_day is not None else None
@@ -153,16 +159,19 @@ def build(ctx) -> dict:
         sector_rows.append(row)
     sector_rows.sort(key=lambda r: r["weight_pct"] or 0, reverse=True)
 
-    total_weight = float(primary["weight"].sum())
-    index_weights = primary.set_index("yahoo_symbol")["weight"].reindex(closes.columns).fillna(0)
-    index_basket = (closes * (index_weights / total_weight)).sum(axis=1)
+    index_weights = primary.drop_duplicates("yahoo_symbol").set_index("yahoo_symbol")["weight"]
+    index_returns = _basket_returns(closes, index_weights, sector_periods)
     index_row = {
         "sector": ctx.primary.label,
         "etf": None,
         "weight_pct": 100.0,
         "members": len(primary),
-        "contribution_1d": clean_float(R.period_return(index_basket, period_sessions("1D")), 3),
-    } | _period_returns(index_basket, sector_periods)
+        # The column's total is the sum of its rows, so the table adds up.
+        "contribution_1d": (
+            clean_float(sum(r["contribution_1d"] for r in sector_rows), 3)
+            if sector_rows and all(r["contribution_1d"] is not None for r in sector_rows) else None
+        ),
+    } | index_returns
 
     # --- Sectors rebased to 100 -------------------------------------------
     rebased = {}
@@ -230,7 +239,7 @@ def build(ctx) -> dict:
             "sessions": int(len(series)),
             "first_session": to_iso_date(series.index[0]),
             "status": "ok",
-        } | _period_returns(series, watchlist_periods)
+        } | _period_returns(closes[row.ticker], watchlist_periods)
         watchlist_rows.append(entry)
 
     index_labels = " or the ".join(s.label for s in ctx.indices)

@@ -246,6 +246,11 @@ data/cache/                raw snapshots and parsed frames, pruned each build
   and the reported total assets cover all of them — $2.3tn for VTI. Vanguard's
   own `hasMoreThan1ShareClass` flag is what detects this; the tiles are marked
   `*` and the caption says so.
+- Sector and index rows in the sector table are the buy-and-hold return of
+  **today's members at today's published weights**, from dividend-adjusted
+  closes. Over days and weeks that tracks the index to a few basis points;
+  over YTD it runs ahead of the price index by roughly the dividends plus
+  whatever joined the index after rallying (+1.7pp in September 2026).
 - Change in NWC is the year-over-year move in current assets less current
   liabilities as filed. It does not strip out cash, so a company that banked
   cash shows a working-capital build. The DCF tab says so beside the row.
