@@ -104,6 +104,12 @@ The run uses `--strict`, so a warning fails it. Nobody reads the output of an
 unattended job, and a job that exits 0 on a degraded build is how a stale page
 stays up for a week.
 
+The job installs from `requirements.lock`, not from `pyproject.toml`'s ranges.
+The first cloud run resolved pandas 3 and yfinance 1 — both newer majors than
+anything this was tested on — and failed. `make lock` re-resolves the lock on
+purpose; upgrading is then a commit that was tested, not something a clean
+machine does on its own one night.
+
 `data/cache` is carried between runs with `actions/cache`. It is not state:
 every artifact rebuilds from the publishers, so an evicted cache costs one
 slow run and more requests to them, never a wrong number.

@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: market-recap
+Version: 0.1.0
+Summary: Post-market recap dashboard built entirely on free, attributable data sources.
+Requires-Python: >=3.11
+Requires-Dist: pandas>=2.2
+Requires-Dist: numpy>=1.26
+Requires-Dist: httpx>=0.27
+Requires-Dist: yfinance>=0.2.65
+Requires-Dist: openpyxl>=3.1
+Requires-Dist: lxml>=5.0
+Requires-Dist: beautifulsoup4>=4.12
+Requires-Dist: pyarrow>=15
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"

@@ -4,7 +4,7 @@ REFRESH_FLAGS ?=
 WRANGLER_DEPLOY = ./node_modules/.bin/wrangler pages deploy dist --project-name market-recap --branch main --commit-dirty=true
 export PYTHONPATH := src
 
-.PHONY: help install refresh refresh-fast validate site serve deploy deploy-only test prune clean status run-now
+.PHONY: help install refresh refresh-fast validate site serve deploy deploy-only test lock prune clean status run-now
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -36,6 +36,13 @@ deploy: refresh ## Refresh, then publish dist/ to Cloudflare Pages
 
 deploy-only: site ## Publish what is already built, without refetching
 	$(WRANGLER_DEPLOY)
+
+lock: ## Re-resolve requirements.lock to the newest versions pyproject allows
+	rm -rf .lockvenv && $(PYTHON) -m venv .lockvenv
+	.lockvenv/bin/pip install -q -e ".[dev]"
+	{ grep '^#' requirements.lock; .lockvenv/bin/pip freeze --exclude-editable; } > requirements.lock.new
+	mv requirements.lock.new requirements.lock && rm -rf .lockvenv
+	@echo "requirements.lock updated -- run 'make test refresh' before committing it"
 
 prune: ## Delete expired cache entries
 	$(PYTHON) -m market_recap.cli prune

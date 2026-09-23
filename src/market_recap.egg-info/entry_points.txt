@@ -1,0 +1,2 @@
+[console_scripts]
+market-recap = market_recap.cli:main

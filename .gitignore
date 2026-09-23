@@ -9,3 +9,4 @@ dist/
 data/logs/
 node_modules/
 .wrangler/
+.lockvenv/
