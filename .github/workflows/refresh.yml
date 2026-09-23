@@ -57,13 +57,15 @@ jobs:
 
       # The cache is politeness and speed, not state: every artifact rebuilds
       # from the publishers, so an evicted cache costs one slow run, never a
-      # wrong number. Each run saves under its own key and restores the newest.
+      # wrong number. Each run saves under its own key and restores the newest
+      # -- but only one written by the same locked library versions. A cache
+      # built by pandas 3 / yfinance 1 once put the page a session behind.
       - name: Restore cache
         uses: actions/cache/restore@v4
         with:
           path: data/cache
-          key: data-cache-${{ github.run_id }}
-          restore-keys: data-cache-
+          key: data-cache-${{ hashFiles('requirements.lock') }}-${{ github.run_id }}
+          restore-keys: data-cache-${{ hashFiles('requirements.lock') }}-
 
       - name: Refresh
         # --strict: nobody reads an unattended run's output, so a warning is a
@@ -75,9 +77,10 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: data/cache
-          key: data-cache-${{ github.run_id }}
+          key: data-cache-${{ hashFiles('requirements.lock') }}-${{ github.run_id }}
 
-      # Only a build that passed --strict is published.
+      # Only a build that passed --strict is published, and never one dated
+      # earlier than the live page (scripts/guard_deploy.py).
       - name: Deploy
         if: github.event_name == 'schedule' || inputs.deploy
         env:

@@ -12,7 +12,7 @@ page covers without editing Python.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import time, timedelta
 from functools import lru_cache
 from pathlib import Path
 import tomllib
@@ -107,12 +107,24 @@ BUILD_AGE_HOURS = {"current": 24, "recent": 72}
 # succeeded.
 CACHE_TTL = {
     "intraday_snapshot": timedelta(hours=12),   # quotes / fund facts
-    "daily_file": timedelta(days=1),            # issuer files republished each session
+    "daily_file": timedelta(days=1),            # per session: see SESSION_KINDS
     "macro_series": timedelta(hours=12),        # FRED, revised on a publication schedule
     "reference_data": timedelta(days=7),        # ticker maps, screeners, GICS labels
     "filings": timedelta(days=3),               # SEC company facts
     "missing": timedelta(days=7),               # negative cache for a 404
 }
+
+
+# A "daily" file is stale once a new session has been published, not 24 hours
+# after it was fetched. With a pure TTL, a nightly run that starts a few minutes
+# earlier than the night before finds yesterday's closes still "fresh", never
+# fetches today's session, and passes validation a day behind. So these kinds
+# are also invalidated at every rollover: the weekday time in New York by which
+# the evening publishers (State Street holdings/NAV, Treasury's par curve, the
+# settled close) have posted. The nightly job runs after it for the same reason.
+SESSION_KINDS = frozenset({"daily_file"})
+MARKET_TIMEZONE = "America/New_York"
+SESSION_ROLLOVER = time(18, 30)
 
 
 @lru_cache(maxsize=1)

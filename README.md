@@ -110,9 +110,24 @@ anything this was tested on — and failed. `make lock` re-resolves the lock on
 purpose; upgrading is then a commit that was tested, not something a clean
 machine does on its own one night.
 
+Two checks sit around the deploy, because `--strict` validates a build
+against its own contract and cannot see the calendar:
+
+- **Daily files expire at the session rollover, not after 24 hours.** Prices
+  and issuer files count as fresh only if fetched after the latest weekday
+  18:30 New York. With a plain 24-hour lifetime, a run starting a few minutes
+  earlier than the night before reuses yesterday's closes and publishes a page
+  one session behind that passes every check.
+- **A deploy never moves the site backwards.** `scripts/guard_deploy.py`
+  refuses a build whose `as_of` is older than the live page's, and refuses
+  when it cannot read the live page — a guard that allows what it cannot check
+  is not one.
+
 `data/cache` is carried between runs with `actions/cache`. It is not state:
 every artifact rebuilds from the publishers, so an evicted cache costs one
-slow run and more requests to them, never a wrong number.
+slow run and more requests to them, never a wrong number. The cache key
+includes `requirements.lock`'s hash: files written by other library versions
+are not reused.
 
 ### Deploying
 

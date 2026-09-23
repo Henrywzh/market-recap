@@ -19,14 +19,15 @@ human is expected to remember.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import gzip
 from pathlib import Path
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from .config import CACHE_DIR, CACHE_TTL
+from .config import CACHE_DIR, CACHE_TTL, MARKET_TIMEZONE, SESSION_KINDS, SESSION_ROLLOVER
 from .sources.http import FetchError
 
 MISSING_SUFFIX = ".missing"
@@ -45,15 +46,37 @@ def path_for(namespace: str, name: str, suffix: str = "") -> Path:
     return CACHE_DIR / namespace / f"{name}{suffix}"
 
 
-def age(path: Path) -> timedelta | None:
+def _modified(path: Path) -> datetime | None:
     if not path.exists():
         return None
-    return datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)
+    return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
 
 
-def is_fresh(path: Path, kind: str) -> bool:
-    current = age(path)
-    return current is not None and current < ttl(kind)
+def last_rollover(now: datetime | None = None) -> datetime:
+    """The most recent weekday SESSION_ROLLOVER in New York at or before ``now``.
+
+    Holidays are not modelled: on one, the rollover still passes and the next
+    build re-fetches a file that has not changed. That costs a request, never a
+    stale page, which is the direction to be wrong in.
+    """
+    market = ZoneInfo(MARKET_TIMEZONE)
+    now = (now or datetime.now(timezone.utc)).astimezone(market)
+    day = now.date()
+    while True:
+        candidate = datetime.combine(day, SESSION_ROLLOVER, tzinfo=market)
+        if candidate <= now and candidate.weekday() < 5:
+            return candidate
+        day -= timedelta(days=1)
+
+
+def is_fresh(path: Path, kind: str, *, now: datetime | None = None) -> bool:
+    modified = _modified(path)
+    if modified is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    if now - modified >= ttl(kind):
+        return False
+    return kind not in SESSION_KINDS or modified >= last_rollover(now)
 
 
 def _write(path: Path, payload: bytes, *, compress: bool) -> None:

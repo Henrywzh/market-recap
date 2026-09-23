@@ -7,7 +7,7 @@ under the wrong month, a preset naming a ticker no panel priced.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import sys
 from pathlib import Path
@@ -330,3 +330,44 @@ def test_only_build_stamped_assets_are_cached_hard(tmp_path):
             )
         else:
             assert "no-cache" in joined, f"{pattern} sets neither no-cache nor a versioned cache"
+
+
+NY = config.MARKET_TIMEZONE
+
+
+def _ny(text: str) -> datetime:
+    from zoneinfo import ZoneInfo
+
+    return datetime.fromisoformat(text).replace(tzinfo=ZoneInfo(NY))
+
+
+@pytest.mark.parametrize(
+    "now, expected",
+    [
+        ("2026-09-22 19:37", "2026-09-22 18:30"),  # Tue evening run: tonight's rollover
+        ("2026-09-22 17:00", "2026-09-21 18:30"),  # Tue, before rollover: still Monday's
+        ("2026-09-21 10:00", "2026-09-18 18:30"),  # Mon morning: Friday's
+        ("2026-09-19 23:00", "2026-09-18 18:30"),  # Saturday: Friday's
+    ],
+)
+def test_the_session_rollover_is_the_last_weekday_evening_in_new_york(now, expected):
+    assert cache.last_rollover(_ny(now)) == _ny(expected)
+
+
+def test_a_daily_file_from_before_the_rollover_is_stale_even_if_under_a_day_old(tmp_path):
+    """The bug this guards: a nightly run starting a few minutes earlier than
+    the night before found yesterday's closes under 24h old, reused them, and
+    published a page one session behind that passed every check."""
+    import os
+
+    path = tmp_path / "closes.parquet"
+    path.write_bytes(b"x")
+    yesterdays_run = _ny("2026-09-21 19:45").timestamp()
+    os.utime(path, (yesterdays_run, yesterdays_run))
+    tonight = _ny("2026-09-22 19:37")
+    assert tonight - _ny("2026-09-21 19:45") < config.CACHE_TTL["daily_file"]
+    assert not cache.is_fresh(path, "daily_file", now=tonight)
+    # A kind that is not per-session keeps its plain TTL.
+    assert cache.is_fresh(path, "reference_data", now=tonight)
+    # And the same file is reused by a rerun on the evening it was written.
+    assert cache.is_fresh(path, "daily_file", now=_ny("2026-09-21 21:00"))
