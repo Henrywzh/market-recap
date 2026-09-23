@@ -136,6 +136,29 @@ def _check_financials(payload: dict | None) -> list[Finding]:
     return []
 
 
+# Share of valued companies allowed to fail the SPY-weight check or lack a
+# market cap before the build is warned. One or two are a filer's own quirk
+# and are named on the page; more means the share-count logic broke.
+VALUATION_TOLERATED_SHARE = 0.05
+
+
+def _check_valuation(payload: dict | None) -> list[Finding]:
+    if payload is None:
+        return []
+    rows = payload.get("rows") or []
+    if not rows:
+        return [Finding("error", "valuation", "no company was valued")]
+    out = []
+    check = payload.get("weight_check") or {}
+    flagged, checked = len(check.get("flagged") or []), check.get("checked") or 0
+    if checked and flagged > VALUATION_TOLERATED_SHARE * checked:
+        out.append(Finding("warning", "valuation", f"{flagged} of {checked} share counts disagree with SPY weights"))
+    missing = len(payload.get("without_market_cap") or [])
+    if missing > VALUATION_TOLERATED_SHARE * len(rows):
+        out.append(Finding("warning", "valuation", f"{missing} of {len(rows)} companies have no market cap"))
+    return out
+
+
 def _check_presets(config: dict, technicals: dict | None) -> list[Finding]:
     """A relative-strength preset whose legs were never baked renders empty."""
     if not technicals:
@@ -223,6 +246,7 @@ def run() -> dict:
         + _check_latest_session(panels.get("markets"))
         + _check_presets(config, panels.get("technicals"))
         + _check_financials(panels.get("financials"))
+        + _check_valuation(panels.get("valuation"))
         + _check_cross_listing(config, panels.get("cross_listing"))
         + _check_flow_attribution(panels.get("heatmaps"))
         + _check_sources(manifest)

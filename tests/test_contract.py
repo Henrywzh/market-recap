@@ -394,3 +394,11 @@ def test_validation_flags_financials_that_mostly_failed():
     assert validate._check_financials({"universe": 518, "available": [{}] * 512}) == []
     assert validate._check_financials({"universe": 518, "available": [{}] * 300})[0].severity == "warning"
     assert validate._check_financials({"universe": 518, "available": []})[0].severity == "error"
+
+
+def test_validation_flags_share_counts_that_broke_wholesale():
+    ok = {"rows": [{}] * 500, "weight_check": {"checked": 490, "flagged": [{}] * 2}, "without_market_cap": ["V"] * 6}
+    assert validate._check_valuation(ok) == []
+    broken = {**ok, "weight_check": {"checked": 490, "flagged": [{}] * 60}}
+    assert validate._check_valuation(broken)[0].severity == "warning"
+    assert validate._check_valuation({"rows": []})[0].severity == "error"

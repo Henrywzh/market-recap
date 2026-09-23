@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     # Ten years costs a slower first build and nothing on later ones, because
     # the day's closes are cached.
     refresh.add_argument("--history", default="10y", help="yfinance history period for constituents.")
-    refresh.add_argument("--skip-sec", action="store_true", help="Skip the SEC panels (FINANCIALS, DCF).")
+    refresh.add_argument("--skip-sec", action="store_true", help="Skip the SEC panels (FINANCIALS, VALUATION, DCF).")
     refresh.add_argument("--keep-cache", action="store_true", help="Do not prune expired cache entries.")
     refresh.add_argument(
         "--allow-warnings", action="store_true",

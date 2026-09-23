@@ -11,7 +11,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import cross_listing, dcf, financials, fixed_income, heatmaps, macro, markets
+from .panels import cross_listing, dcf, financials, fixed_income, heatmaps, macro, markets, valuation
 from .panels import technicals as technicals_panel
 from .util import utc_now_iso, write_json
 
@@ -24,11 +24,12 @@ PANELS = {
     "technicals": technicals_panel.build,
     "cross_listing": cross_listing.build,
     # The SEC panels come last: they are the slowest, and the ones a quick
-    # local rebuild skips. FINANCIALS runs first so the DCF reuses its parse.
+    # local rebuild skips. They share one parse of each filer (sec.filer).
     "financials": financials.build,
+    "valuation": valuation.build,
     "dcf": dcf.build,
 }
-SEC_PANELS = {"financials", "dcf"}
+SEC_PANELS = {"financials", "valuation", "dcf"}
 
 
 def run(

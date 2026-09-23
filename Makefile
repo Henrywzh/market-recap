@@ -17,7 +17,7 @@ install: ## Install the package and its dependencies (Python + pinned wrangler)
 refresh: ## Full pipeline: fetch, build, validate, prune (the nightly job adds --strict)
 	$(PYTHON) -m market_recap.cli refresh --history 10y $(REFRESH_FLAGS)
 
-refresh-fast: ## Same, without the SEC panels (FINANCIALS, DCF)
+refresh-fast: ## Same, without the SEC panels (FINANCIALS, VALUATION, DCF)
 	$(PYTHON) -m market_recap.cli refresh --history 10y --skip-sec $(REFRESH_FLAGS)
 
 validate: ## Re-check the artifacts already on disk

@@ -62,6 +62,8 @@ LINE_ITEMS: tuple[LineItem, ...] = (
         "RevenueFromContractWithCustomerIncludingAssessedTax",
         "Revenues",
         "SalesRevenueNet",
+        # Banks report revenue net of interest expense.
+        "RevenuesNetOfInterestExpense",
     ), "income"),
     LineItem("cost_of_revenue", "Cost of revenue", (
         "CostOfRevenue", "CostOfGoodsAndServicesSold", "CostOfGoodsSold",
@@ -95,7 +97,15 @@ LINE_ITEMS: tuple[LineItem, ...] = (
     LineItem("current_assets", "Current assets", ("AssetsCurrent",), "balance"),
     LineItem("total_assets", "Total assets", ("Assets",), "balance"),
     LineItem("current_liabilities", "Current liabilities", ("LiabilitiesCurrent",), "balance"),
-    LineItem("total_debt", "Long-term debt", ("LongTermDebtNoncurrent", "LongTermDebt"), "balance"),
+    # Noncurrent tags first; ``LongTermDebt`` includes the current portion,
+    # which the trailing snapshot records so EV does not count it twice.
+    LineItem("total_debt", "Long-term debt", (
+        "LongTermDebtNoncurrent", "LongTermDebtAndCapitalLeaseObligations", "LongTermDebt",
+    ), "balance"),
+    LineItem("debt_current", "Current debt", (
+        "DebtCurrent", "LongTermDebtCurrent", "LongTermDebtAndCapitalLeaseObligationsCurrent",
+    ), "balance"),
+    LineItem("minority_interest", "Non-controlling interest", ("MinorityInterest",), "balance"),
     LineItem("total_liabilities", "Total liabilities", ("Liabilities",), "balance"),
     LineItem("equity", "Shareholders' equity", (
         "StockholdersEquity",
@@ -117,6 +127,10 @@ LINE_ITEMS: tuple[LineItem, ...] = (
         "DepreciationAmortizationAndAccretionNet",
         "DepreciationAndAmortization",
     ), "cash_flow"),
+    # Filers without a combined D&A line (Microsoft, Alphabet, Tesla) tag the
+    # two parts; valuation adds them when the combined line is missing.
+    LineItem("depreciation", "Depreciation", ("Depreciation",), "cash_flow"),
+    LineItem("amortization", "Amortization of intangibles", ("AmortizationOfIntangibleAssets",), "cash_flow"),
     LineItem("sbc", "Stock-based compensation", ("ShareBasedCompensation",), "cash_flow"),
     LineItem("nwc_change", "Change in NWC", ("IncreaseDecreaseInOperatingCapital",), "cash_flow"),
     LineItem("buybacks", "Share repurchases", ("PaymentsForRepurchaseOfCommonStock",), "cash_flow"),
@@ -424,28 +438,221 @@ def annual_statements(facts: dict) -> list[dict]:
     return rows
 
 
+# --- Trailing twelve months ------------------------------------------------
+# Valuation needs the latest figures, not the last 10-K: a company three
+# quarters into its year has nine months of results the annual table does not
+# show. TTM = last fiscal year + this year-to-date - the same span a year ago,
+# all read from the 10-Qs' own comparative columns.
+
+QUARTERLY_FORMS = ANNUAL_FORMS | {"10-Q"}
+# 52/53-week calendars move a period end by a few days year to year, so a
+# comparative period is matched within this tolerance rather than exactly.
+PERIOD_MATCH_DAYS = 7
+DAYS_PER_YEAR = 365
+# A line missing from the latest 10-Q (Alphabet's Q2 2026 dividends) is taken
+# from the quarter before, at most this stale, and named on the row as lagged.
+MAX_LAG_DAYS = 100
+# The cover-page share count is used for market cap only if it covers the
+# whole company. A multi-class filer often tags one class (or none) on the
+# cover; checked against the diluted count, a partial figure is caught.
+COVER_COMPLETE_SHARE = 0.9
+# ...and a diluted count this many times the cover count is not a missing
+# class but a units error in the filing: Waters tagged 98.2 *billion* diluted
+# shares against 98.2 million on its cover.
+MAX_DILUTED_TO_COVER = 20
+COVER_SHARES_TAG = "EntityCommonStockSharesOutstanding"
+
+
+def _days(earlier: str, later: str) -> int:
+    return (pd.Timestamp(later) - pd.Timestamp(earlier)).days
+
+
+def _period_values(facts: dict, item: LineItem, splits) -> dict[tuple[str | None, str], dict]:
+    """Latest-filed value for every (start, end) an item was reported for, in
+    10-Ks and 10-Qs; the highest-priority tag wins a period."""
+    gaap = facts.get("facts", {}).get("us-gaap", {})
+    picked: dict[tuple[str | None, str], dict] = {}
+    for priority, tag in enumerate(item.tags):
+        for row in gaap.get(tag, {}).get("units", {}).get(item.unit, []):
+            if row.get("form") not in QUARTERLY_FORMS or row.get("end") is None or row.get("val") is None:
+                continue
+            start = row.get("start")
+            if item.instant != (start is None):
+                continue
+            key, filed = (start, row["end"]), row.get("filed") or ""
+            current = picked.get(key)
+            if current is None or priority < current["priority"] or (
+                priority == current["priority"] and filed >= current["filed"]
+            ):
+                picked[key] = {"value": row["val"], "filed": filed, "priority": priority}
+    if item.unit in PER_SHARE_UNITS:
+        for entry in picked.values():
+            factor = math.prod(ratio for last_old, ratio in splits if entry["filed"] <= last_old)
+            entry["value"] *= factor if item.unit == "shares" else 1 / factor
+    return picked
+
+
+def _near(target: str, candidates, tolerance: int = PERIOD_MATCH_DAYS):
+    """The candidate date closest to ``target`` within the tolerance, or None."""
+    best = min(candidates, key=lambda d: abs(_days(target, d)), default=None)
+    return best if best is not None and abs(_days(target, best)) <= tolerance else None
+
+
+def trailing_value(periods: dict, end: str) -> tuple[float | None, str | None]:
+    """(TTM value ending at ``end``, filing date of its newest part).
+
+    The longest reported span ending at ``end`` is the year-to-date figure. If
+    it is already a year, that is the answer; otherwise the prior fiscal year
+    is added and the same year-to-date span a year earlier subtracted. A part
+    that is missing makes the whole figure None -- never an annualised guess.
+    """
+    low, high = ANNUAL_SPAN_DAYS
+    spans = [(start, e) for (start, e) in periods if start is not None and e == end and _days(start, e) <= high]
+    if not spans:
+        return None, None
+    start, _ = max(spans, key=lambda k: _days(k[0], k[1]))
+    ytd = periods[(start, end)]
+    length = _days(start, end)
+    if length >= low:
+        return ytd["value"], ytd["filed"]
+
+    one_year_back = (pd.Timestamp(end) - pd.Timedelta(days=DAYS_PER_YEAR)).strftime("%Y-%m-%d")
+    prior = [k for k in periods if k[0] is not None and abs(_days(k[0], k[1]) - length) <= PERIOD_MATCH_DAYS]
+    prior_end = _near(one_year_back, [k[1] for k in prior])
+    fiscal_years = [k for k in periods if k[0] is not None and low <= _days(k[0], k[1]) <= high]
+    year_end = _near(start, [k[1] for k in fiscal_years])
+    if prior_end is None or year_end is None:
+        return None, None
+    prior_ytd = next(periods[k] for k in prior if k[1] == prior_end)
+    last_year = next(periods[k] for k in fiscal_years if k[1] == year_end)
+    return last_year["value"] + ytd["value"] - prior_ytd["value"], ytd["filed"]
+
+
+def _instant_near(periods: dict, end: str) -> float | None:
+    match = _near(end, [e for (start, e) in periods if start is None])
+    return periods[(None, match)]["value"] if match else None
+
+
+def trailing_snapshot(facts: dict) -> dict | None:
+    """The latest reported quarter: TTM flows and balances at its end, the same a
+    year earlier (for growth and averages), and a share count for market cap."""
+    splits = share_splits(facts)
+    periods = {item.key: _period_values(facts, item, splits) for item in LINE_ITEMS}
+    anchors = sorted({e for key in ("revenue", "net_income") for (start, e) in periods[key] if start is not None})
+    if not anchors:
+        return None
+    end = anchors[-1]
+    prior_end = _near((pd.Timestamp(end) - pd.Timedelta(days=DAYS_PER_YEAR)).strftime("%Y-%m-%d"), anchors)
+
+    lagged: list[str] = []
+
+    def flow(key, at, record):
+        value, _ = trailing_value(periods[key], at)
+        if value is not None:
+            return value
+        earlier = [e for (start, e) in periods[key] if start is not None and e < at and _days(e, at) <= MAX_LAG_DAYS]
+        if not earlier:
+            return None
+        value, _ = trailing_value(periods[key], max(earlier))
+        if value is not None and record:
+            lagged.append(key)
+        return value
+
+    def flows(at, record=False):
+        return {item.key: flow(item.key, at, record) for item in LINE_ITEMS if not item.instant} if at else {}
+
+    def balances(at):
+        return {item.key: _instant_near(periods[item.key], at) for item in LINE_ITEMS if item.instant} if at else {}
+
+    filed = max((trailing_value(periods[k], end)[1] or "") for k in ("revenue", "net_income")) or None
+    debt_tag = next(
+        (tag for tag in ITEMS_BY_KEY["total_debt"].tags
+         if any(r.get("end") == end for r in facts.get("facts", {}).get("us-gaap", {}).get(tag, {}).get("units", {}).get("USD", []))),
+        None,
+    )
+    return {
+        "period_end": end,
+        "filed": filed,
+        "prior_period_end": prior_end,
+        "ttm": flows(end, record=True),
+        "ttm_prior": flows(prior_end),
+        "balance": balances(end),
+        "balance_prior": balances(prior_end),
+        # LongTermDebt already includes the current portion; LongTermDebtNoncurrent does not.
+        "debt_includes_current": debt_tag == "LongTermDebt",
+        "lagged": lagged,
+        **_market_shares(facts, periods["shares"], end, filed),
+    }
+
+
+def _market_shares(facts: dict, diluted: dict, end: str, filed: str | None) -> dict:
+    """Shares for market cap: the latest cover-page count when it is complete,
+    else the latest quarter's diluted weighted average, else none.
+
+    ``shares_as_of`` is the date the count describes the share basis at: the
+    cover's own date, or the filing date for a weighted average (statements
+    are restated for any split before they are issued). A split after it is
+    applied by the valuation panel.
+    """
+    quarter = [k for k in diluted if k[1] == end and k[0] is not None]
+    diluted_count = diluted[min(quarter, key=lambda k: _days(k[0], k[1]))]["value"] if quarter else None
+    cover = facts.get("facts", {}).get("dei", {}).get(COVER_SHARES_TAG, {}).get("units", {}).get("shares", [])
+    latest = max(cover, key=lambda r: (r.get("filed") or "", r.get("end") or ""), default=None)
+    cover_ok = bool(latest and filed and (latest.get("filed") or "") >= filed and latest.get("val"))
+    if cover_ok and (diluted_count is None or latest["val"] >= COVER_COMPLETE_SHARE * diluted_count):
+        return {"shares": latest["val"], "shares_as_of": latest.get("end"), "shares_basis": "cover page shares outstanding"}
+    if cover_ok and diluted_count > MAX_DILUTED_TO_COVER * latest["val"]:
+        return {"shares": latest["val"], "shares_as_of": latest.get("end"),
+                "shares_basis": "cover page shares outstanding (the diluted count failed a units check)"}
+    if diluted_count:
+        return {"shares": diluted_count, "shares_as_of": filed,
+                "shares_basis": "diluted weighted-average shares, latest quarter"}
+    return {"shares": None, "shares_as_of": None, "shares_basis": "no complete share count filed"}
+
+
+@dataclass(frozen=True)
+class Filer:
+    entity_name: str | None
+    ciks: tuple[int, ...]
+    taxonomies: tuple[str, ...]
+    rows: tuple
+    trailing: dict | None
+
+
 @lru_cache(maxsize=None)
-def _filer_statements(cik: int, use_cache: bool) -> tuple[str | None, tuple[int, ...], tuple[str, ...], tuple]:
-    """Parsed once per build: the DCF and FINANCIALS read the same filer, and a
-    company-facts document is tens of MB once parsed -- the rows are kept, the
-    document is not."""
+def filer(cik: int, use_cache: bool = True) -> Filer:
+    """Parsed once per build: FINANCIALS, VALUATION and the DCF read the same
+    filer, and a company-facts document is tens of MB once parsed -- what the
+    panels need is kept, the document is not."""
     facts, ciks = fetch_filer_facts(cik, use_cache=use_cache)
     # A period with neither revenue nor net income is not a set of statements:
     # an IFRS filer's few stray US-GAAP tags would otherwise pass as ten
     # empty fiscal years.
     rows = [row for row in annual_statements(facts) if row["revenue"] is not None or row["net_income"] is not None]
-    return facts.get("entityName"), tuple(ciks), tuple(sorted(facts.get("facts", {}))), tuple(rows)
+    return Filer(
+        entity_name=facts.get("entityName"),
+        ciks=tuple(ciks),
+        taxonomies=tuple(sorted(facts.get("facts", {}))),
+        rows=tuple(rows),
+        trailing=trailing_snapshot(facts) if rows else None,
+    )
+
+
+def unextracted_reason(taxonomies) -> str:
+    """Why a filer has no statements. A foreign filer reporting under IFRS
+    (ASML, CCEP) lands here: its statements are in the ifrs-full taxonomy,
+    which this does not read."""
+    reason = "reports under IFRS, which is not extracted" if "ifrs-full" in taxonomies else (
+        "no annual US-GAAP statements filed yet"
+    )
+    return f"{reason} (taxonomies: {', '.join(taxonomies) or 'none'})"
 
 
 def extract_fundamentals(ticker: str, cik: int, *, years: int, use_cache: bool = True) -> dict:
-    entity_name, ciks, taxonomies, rows = _filer_statements(cik, use_cache)
+    data = filer(cik, use_cache)
+    entity_name, ciks, rows = data.entity_name, data.ciks, data.rows
     if not rows:
-        # A foreign filer reporting under IFRS (ASML, ARM) lands here: its
-        # statements are in the ifrs-full taxonomy, which this does not read.
-        reason = "reports under IFRS, which is not extracted" if "ifrs-full" in taxonomies else (
-            "no annual US-GAAP statements filed yet"
-        )
-        raise ValueError(f"{ticker}: {reason} (taxonomies: {', '.join(taxonomies) or 'none'})")
+        raise ValueError(f"{ticker}: {unextracted_reason(data.taxonomies)}")
     rows = [dict(row) for row in rows[-years:]]
     return {
         "ticker": ticker,

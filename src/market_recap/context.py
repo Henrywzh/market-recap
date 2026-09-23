@@ -85,6 +85,8 @@ class MarketContext:
     watchlist: pd.DataFrame = field(default_factory=pd.DataFrame)
     etf_closes: pd.DataFrame = field(default_factory=pd.DataFrame)
     index_closes: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Split ratios (date x symbol) for the constituent panel, from the same download.
+    splits: pd.DataFrame = field(default_factory=pd.DataFrame)
 
     @property
     def as_of(self) -> str | None:
@@ -211,6 +213,7 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
     ctx.closes = completed_sessions(yahoo.fetch_closes(symbols, period=history_period))
     if ctx.closes.empty:
         raise RuntimeError("no constituent prices were fetched; the page has no session to describe")
+    ctx.splits = _through(yahoo.fetch_splits(history_period), ctx.closes.index[-1])
     missing = sorted(set(symbols) - set(ctx.closes.columns))
     log.add(SourceRecord(
         "yahoo_constituents",

@@ -19,6 +19,7 @@ them.
 | **MACRO** | Commodity futures/ETF proxies with multi-period returns, last 12 monthly inflation releases as a heat table |
 | **TECHNICALS** | Any A/B relative-strength ratio with its moving averages and MACD over a chosen period; single-ticker price with **your own MA periods, slope window and period**, a ±1.5σ band, z-score regime, SMA slope, and forward return by z-score band. Every indicator is computed in the browser from the baked close history, by one module tested against pandas |
 | **CROSS-LISTING** | A US line against its home-market line at the depositary ratio, with the diagnostics that say whether the series measures a dislocation or a session gap |
+| **VALUATION & QUALITY** | Every S&P 500 / Nasdaq-100 member on one sortable table: P/E, EV/EBITDA, EV/Sales, P/B, FCF / dividend / shareholder yield, ROE, ROIC, gross profitability, margins, growth, accruals, leverage, interest cover, Piotroski F-score and margin stability — trailing twelve months from each company's own 10-Qs, market cap from the close. Valuation × quality scatter, sector medians, and colour by rank within sector |
 | **FINANCIALS** | Ten fiscal years of income statement, balance sheet and cash flow for every S&P 500 and Nasdaq-100 member, with key ratios, each column's period end and last filing date, restatements applied and pre-split years put on today's share basis |
 | **DCF** | SEC-filled 5-year history, your 5-year forecast, WACC, terminal value, equity bridge and a WACC × exit-multiple sensitivity grid |
 
@@ -36,7 +37,7 @@ Every one of these is free and requires no account.
 | **Yahoo Finance** via `yfinance` | Daily closes for constituents, ETFs and indices; ETF AUM and shares outstanding; commodity futures | Unofficial wrapper around a mutable service |
 | **US Treasury** daily par yield curve XML | The yield curve | Official publication; "latest published" is not always today |
 | **FRED** `fredgraph.csv` | PCE, core PCE, trimmed-mean PCE, personal income and spending | Keyless CSV export; current vintage, not point-in-time |
-| **SEC** XBRL company facts | FINANCIALS statements and the DCF's historical column | Annual 10-K/20-F/40-F figures with their filing dates; one extraction feeds both tabs |
+| **SEC** XBRL company facts | FINANCIALS, VALUATION & QUALITY and the DCF | Annual and quarterly 10-K/10-Q figures with their filing dates, plus the cover-page share count; one parse per filer feeds all three tabs |
 
 ### Two things worth knowing about the feeds
 
@@ -269,6 +270,20 @@ data/cache/                raw snapshots and parsed frames, pruned each build
   which matches NVIDIA, Microsoft and Apple; retailers whose year ends in late
   January call it the year before, so the period end is printed beside every
   label.
+- VALUATION's market cap is the close times a filed share count, so its
+  weak point is the count. Three things are handled and one is checked: a
+  cover page that lists one class of several (then the diluted count is used),
+  a diluted count with a units error (Waters filed 98.2 *billion*), and a split
+  after the last filing (Amphenol, Monster in 2026 — applied from the split
+  record Yahoo returns with the prices). Every count is then compared with the
+  company's SPY weight, by company rather than listing; a count more than 2.5x
+  off is listed on the tab. Berkshire, Visa and a few other multi-class filers
+  tag no complete count at all and have no market cap rather than a guessed one.
+- TTM is last fiscal year + year to date − the same span a year earlier. A
+  line the latest 10-Q did not tag (Alphabet's Q2 2026 dividends) is taken
+  from the quarter before, at most one quarter stale, and starred on the row.
+  EBIT falls back to pre-tax income + interest, and D&A to depreciation +
+  intangible amortization, for filers that tag no combined line.
 - SEC's ticker map points at a company's *current* registrant. After a
   holding-company reorganisation (Exxon, 2026) that CIK has no history, so the
   extraction follows the accession-number prefix to the predecessor CIK, and

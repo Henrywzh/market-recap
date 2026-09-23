@@ -36,15 +36,24 @@ def _silent_download(symbols: Sequence[str], **kwargs) -> pd.DataFrame:
         return yf.download(list(symbols), progress=False, auto_adjust=True, threads=True, **kwargs)
 
 
-def _download_chunk(chunk: Sequence[str], period: str) -> pd.DataFrame | None:
-    raw = _silent_download(chunk, period=period)
+def _download_chunk(chunk: Sequence[str], period: str) -> tuple[pd.DataFrame, pd.DataFrame] | None:
+    """(closes, split ratios) for a batch. Splits come in the same response
+    (``actions=True``), so knowing them costs no extra request."""
+    raw = _silent_download(chunk, period=period, actions=True)
     if raw is None or raw.empty:
         return None
     if isinstance(raw.columns, pd.MultiIndex):
-        return raw["Close"]
+        closes = raw["Close"]
+        splits = raw[SPLITS_FIELD] if SPLITS_FIELD in raw.columns.get_level_values(0) else pd.DataFrame(index=raw.index)
+        return closes, splits
     closes = raw[["Close"]].copy()
     closes.columns = list(chunk[:1])
-    return closes
+    splits = raw[[SPLITS_FIELD]].copy() if SPLITS_FIELD in raw.columns else pd.DataFrame(index=raw.index)
+    splits.columns = list(chunk[:1])[: splits.shape[1]]
+    return closes, splits
+
+
+SPLITS_FIELD = "Stock Splits"
 
 
 # One file per history length, refreshed once a session. The whole point is
@@ -53,12 +62,11 @@ def _download_chunk(chunk: Sequence[str], period: str) -> pd.DataFrame | None:
 NAMESPACE = "prices"
 
 
-def _cache_path(period: str) -> Path:
-    return cache.path_for(NAMESPACE, f"closes-{period}", ".parquet")
+def _cache_path(period: str, kind: str = "closes") -> Path:
+    return cache.path_for(NAMESPACE, f"{kind}-{period}", ".parquet")
 
 
-def _load_cache(period: str) -> pd.DataFrame:
-    path = _cache_path(period)
+def _read(path: Path) -> pd.DataFrame:
     if not cache.is_fresh(path, "daily_file"):
         return pd.DataFrame()
     try:
@@ -67,14 +75,28 @@ def _load_cache(period: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def _save_cache(period: str, frame: pd.DataFrame) -> None:
-    path = _cache_path(period)
+def _load_cache(period: str) -> pd.DataFrame:
+    # Closes cached without their splits file predate split tracking; reusing
+    # them would leave the day's splits unknown, so they count as stale.
+    if not _cache_path(period, "splits").exists():
+        return pd.DataFrame()
+    return _read(_cache_path(period))
+
+
+def _save(path: Path, frame: pd.DataFrame) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         frame.to_parquet(path)
     except Exception:
         # A cache that cannot be written is a slow build, not a wrong one.
         pass
+
+
+def fetch_splits(period: str) -> pd.DataFrame:
+    """Split ratios (date x symbol, NaN where none) seen by this session's
+    ``fetch_closes`` calls for ``period``. Read from the same download, so a
+    symbol whose closes are known has its splits known too."""
+    return _read(_cache_path(period, "splits"))
 
 
 def fetch_closes(
@@ -96,6 +118,7 @@ def fetch_closes(
     """
     wanted = sorted({s for s in symbols if s})
     collected: dict[str, pd.Series] = {}
+    splits: dict[str, pd.Series] = {}
 
     if use_cache:
         cached = _load_cache(period)
@@ -112,15 +135,18 @@ def fetch_closes(
         for start in range(0, len(pending), size):
             chunk = pending[start : start + size]
             try:
-                closes = _download_chunk(chunk, period)
+                result = _download_chunk(chunk, period)
             except Exception:
                 continue
-            if closes is None:
+            if result is None:
                 continue
+            closes, chunk_splits = result
             for column in closes.columns:
                 series = closes[column].dropna()
                 if not series.empty:
                     collected[str(column)] = closes[column]
+                    if column in chunk_splits.columns:
+                        splits[str(column)] = chunk_splits[column].where(chunk_splits[column] > 0)
             time.sleep(CHUNK_PAUSE_SECONDS)
         pending = [s for s in wanted if s not in collected]
 
@@ -131,11 +157,17 @@ def fetch_closes(
     out = out.sort_index().dropna(axis=1, how="all")
 
     if use_cache:
-        cached = _load_cache(period)
         # combine_first unions both the index and the columns, so a run that
         # only recovered part of the universe still adds to the day's cache.
-        merged = out if cached.empty else cached.combine_first(out)
-        _save_cache(period, merged.loc[:, ~merged.columns.duplicated()])
+        split_frame = pd.DataFrame(splits)
+        if not split_frame.empty:
+            split_frame.index = pd.to_datetime(split_frame.index).tz_localize(None)
+        for kind, frame in (("closes", out), ("splits", split_frame)):
+            path = _cache_path(period, kind)
+            cached = _read(path) if path.exists() else pd.DataFrame()
+            frame = frame.sort_index()
+            merged = frame if cached.empty else cached.combine_first(frame)
+            _save(path, merged.loc[:, ~merged.columns.duplicated()])
     return out
 
 
