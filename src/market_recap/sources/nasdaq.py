@@ -19,6 +19,11 @@ from .http import get_text
 
 NAMESPACE = "nasdaq"
 EARNINGS_URL = "https://api.nasdaq.com/api/calendar/earnings?date={date}"
+HISTORY_URL = (
+    "https://api.nasdaq.com/api/quote/{symbol}/historical?assetclass={asset}"
+    "&fromdate={start}&todate={end}&limit=100"
+)
+HISTORY_PAGE = "https://www.nasdaq.com/market-activity/quotes/historical"
 PAGE_URL = "https://www.nasdaq.com/market-activity/earnings"
 
 # Nasdaq's edge resets any request whose User-Agent carries a contact address
@@ -69,3 +74,40 @@ def fetch_earnings(date: str, *, use_cache: bool = True) -> list[dict]:
         kind="daily_file", suffix=".json", use_cache=use_cache,
     )
     return parse_earnings(text)
+
+
+def parse_history(text: str) -> dict[str, float]:
+    """{ISO date: close} from a historical-quotes response; empty if the
+    symbol is not listed under the asset class asked for."""
+    payload = json.loads(text)
+    if (payload.get("status") or {}).get("rCode") not in (None, 200):
+        errors = (payload.get("status") or {}).get("bCodeMessage") or []
+        # "Symbol not exists" is an answer; anything else is a bad request, not a fact to cache.
+        if not any(e.get("code") == 1001 for e in errors):
+            raise ValueError(f"Nasdaq history: {errors}")
+    data = payload.get("data") or {}
+    rows = ((data.get("tradesTable") or {}).get("rows")) or []
+    out = {}
+    for row in rows:
+        month, day, year = (row.get("date") or "//").split("/")
+        close = _money(row.get("close"))
+        if year and close is not None:
+            out[f"{year}-{month}-{day}"] = close
+    return out
+
+
+def fetch_history(symbol: str, start: str, end: str, *, asset: str, use_cache: bool = True) -> dict[str, float]:
+    """Daily closes as the exchange reports them (not dividend-adjusted).
+    ``asset`` is Nasdaq's class: stocks, etf or index."""
+    name = f"history-{asset}-{symbol}-{start}-{end}"
+    text = cache.fetch_text(
+        NAMESPACE, name,
+        lambda: get_text(HISTORY_URL.format(symbol=symbol, asset=asset, start=start, end=end), timeout=20.0,
+                         retries=1, user_agent=USER_AGENT, headers={"Accept": "application/json"}),
+        kind="daily_file", suffix=".json", use_cache=use_cache,
+    )
+    try:
+        return parse_history(text)
+    except ValueError:
+        cache.path_for(NAMESPACE, name, ".json").unlink(missing_ok=True)
+        raise

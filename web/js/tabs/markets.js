@@ -1,4 +1,4 @@
-import { el, card, table, num, pct, dirClass, periodSwitch, sectionTitle, DASH } from '../fmt.js';
+import { el, card, table, num, pct, dirClass, periodSwitch, sectionTitle, notice, DASH } from '../fmt.js';
 import { areaLine, zeroLine, multiLine } from '../charts.js';
 
 function quoteStat(quote) {
@@ -98,11 +98,28 @@ function slopeTable(data) {
     table(['SECTOR', 'ETF', ...cols], rows));
 }
 
-export default function renderMarkets(root, data) {
+// A session Yahoo dropped or got wrong, rebuilt from other publishers: said at
+// the top of the page, because every figure below it depends on that session.
+function filledNotice(manifest) {
+  const filled = Object.entries((manifest && manifest.filled_sessions) || {});
+  if (!filled.length) return null;
+  const days = [...new Set(filled.map(([key]) => key.split(' ')[0]))].join(', ');
+  const count = (source) => filled.reduce((n, [, r]) => n + (r[source] || 0), 0);
+  const unfilled = filled.flatMap(([, r]) => r.unfilled_symbols || []);
+  const why = [...new Set(filled.map(([, r]) => r.reason))].join('; ');
+  return notice(
+    `${days}: ${why}. Rebuilt from iShares IVV holdings (${count('ishares')} closes), Nasdaq (${count('nasdaq')}) `
+    + `and FRED (${count('fred')})${unfilled.length ? `; still missing: ${unfilled.join(', ')}` : ''}.`,
+  );
+}
+
+export default function renderMarkets(root, data, manifest) {
   // Indices are read in the order the contract declares them, so adding one is
   // a config change here too -- nothing on this tab names an index.
   const order = data.index_order || Object.keys(data.indices || {});
   const blocks = order.map((key) => data.indices[key]).filter(Boolean);
+  const filled = filledNotice(manifest);
+  if (filled) root.append(filled);
 
   root.append(el('div', { class: 'stat-strip' }, [
     ...data.quotes.map(quoteStat),

@@ -17,9 +17,10 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
+from . import gapfill
 from .compute import catalysts
 from .config import SESSION_COVERAGE_THRESHOLD, load_config
-from .sources import ssga, wikipedia, yahoo
+from .sources import nasdaq, ssga, wikipedia, yahoo
 from .util import BuildLog, SourceRecord, to_iso_date
 
 YAHOO_URL = "https://finance.yahoo.com"
@@ -112,6 +113,10 @@ class MarketContext:
     splits: pd.DataFrame = field(default_factory=pd.DataFrame)
     # Split-adjusted, not dividend-adjusted closes: what a multiple is quoted on.
     prices: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Sessions Yahoo skipped that were filled from other sources, by day and frame.
+    filled_sessions: dict = field(default_factory=dict)
+    # Yahoo's closes against IVV's on the holdings date (gapfill.verify).
+    session_check: dict | None = None
 
     @property
     def as_of(self) -> str | None:
@@ -240,6 +245,13 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
         raise RuntimeError("no constituent prices were fetched; the page has no session to describe")
     ctx.splits = _through(yahoo.fetch_splits(history_period), ctx.closes.index[-1])
     ctx.prices = _through(yahoo.fetch_prices(history_period), ctx.closes.index[-1])
+    # Yahoo's session on IVV's holdings date is checked against IVV's own
+    # closes; a session that disagrees is rebuilt in every frame, not just this one.
+    check = gapfill.verify(ctx.closes, ctx.prices)
+    ctx.session_check = check
+    suspect = [pd.Timestamp(check["date"])] if check and check["suspect"] else []
+    ctx.closes, ctx.prices, filled = gapfill.fill(ctx.closes, ctx.prices, label="constituents", replace=suspect)
+    ctx.filled_sessions.update({f"{day} constituents": r for day, r in filled.items()})
     missing = sorted(set(symbols) - set(ctx.closes.columns))
     log.add(SourceRecord(
         "yahoo_constituents",
@@ -261,6 +273,9 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
     )
     ctx.etf_closes = mark_missing_sessions(
         _through(yahoo.fetch_closes(etf_symbols, period=history_period), ctx.closes.index[-1]))
+    ctx.etf_closes, _, filled = gapfill.fill(ctx.etf_closes, ctx.prices, label="etfs", replace=suspect,
+                                             classes=("etf", "stocks"))
+    ctx.filled_sessions.update({f"{day} etfs": r for day, r in filled.items()})
     log.add(SourceRecord(
         "yahoo_etfs", "Sector / broad ETF daily closes", YAHOO_URL,
         to_iso_date(ctx.etf_closes.index[-1]) if not ctx.etf_closes.empty else None,
@@ -275,6 +290,18 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
         yahoo.fetch_closes([s.symbol for s in specs], period=f"{config['universe']['history_years']}y"),
         ctx.closes.index[-1],
     ))
+    ctx.index_closes, _, filled = gapfill.fill(ctx.index_closes, None, label="indices", replace=suspect)
+    ctx.filled_sessions.update({f"{day} indices": r for day, r in filled.items()})
+    if ctx.filled_sessions:
+        filled_count = sum(r["ishares"] + r["nasdaq"] + r["fred"] for r in ctx.filled_sessions.values())
+        unfilled = sum(r["unfilled"] for r in ctx.filled_sessions.values())
+        log.add(SourceRecord(
+            "gap_fill", "Sessions missing or wrong at Yahoo, rebuilt from IVV holdings, Nasdaq and FRED closes",
+            nasdaq.HISTORY_PAGE,
+            min(day.split()[0] for day in ctx.filled_sessions),
+            rows=filled_count, status="partial",
+            error=f"{unfilled} series left empty" if unfilled else None,
+        ))
     log.add(SourceRecord(
         "yahoo_indices", " / ".join(s.key for s in specs) + " index history", YAHOO_URL,
         to_iso_date(ctx.index_closes.index[-1]) if not ctx.index_closes.empty else None,

@@ -136,9 +136,9 @@ HOLDINGS_COLUMNS = {
     "Ticker": "ticker", "Name": "name", "Sector": "sector", "Asset Class": "asset_class",
     "Market Value": "market_value", "Weight (%)": "weight", "Location": "country",
     "Exchange": "exchange", "Currency": "currency", "Duration": "duration", "YTM (%)": "ytm",
-    "Maturity": "maturity", "Coupon (%)": "coupon", "Par Value": "par_value",
+    "Maturity": "maturity", "Coupon (%)": "coupon", "Par Value": "par_value", "Price": "price",
 }
-_NUMERIC = ("market_value", "weight", "duration", "ytm", "coupon", "par_value")
+_NUMERIC = ("market_value", "weight", "duration", "ytm", "coupon", "par_value", "price")
 
 
 def _parse_holdings(text: str) -> tuple[pd.DataFrame, str | None]:

@@ -248,6 +248,20 @@ data/cache/                raw snapshots and parsed frames, pruned each build
 
 ## Known limits
 
+- **Yahoo's recent sessions are checked against IVV's closes, and rebuilt when
+  wrong or missing.** Yahoo has served a session as NaN, dropped one outright
+  (1D then spanned two days), and on 2026-09-22 served adjusted closes that
+  were a stale snapshot -- RCL +1.6% on a day it closed −6.1%, advancers 291
+  against 248 -- which passed every check because every name had a price.
+  Now the last five rows are checked against the NYSE calendar (a skipped
+  session becomes an empty row), and the session on the IVV holdings date is
+  compared name by name with the prices the fund's NAV was struck at; a
+  median disagreement over 0.1% marks it wrong. A wrong or missing session is
+  rebuilt from IVV (S&P 500 members), Nasdaq's historical quotes (other
+  stocks, ETFs) and FRED (S&P 500 and Nasdaq-100), put on the adjusted basis
+  with each name's factor from the session before. The MARKETS tab says so at
+  the top, with the counts by source and anything still missing.
+
 - **ETF X-RAY matches holdings within a market.** A ticker only names the same
   company on one exchange: EFA's `DG` is Vinci in Paris and its `EL` is
   EssilorLuxottica, and matching by ticker alone priced them as Dollar General

@@ -98,6 +98,9 @@ def run(
             for spec in ctx.indices
         ],
         "series_priced": int(ctx.closes.shape[1]),
+        # Sessions Yahoo skipped, filled from iShares holdings and Nasdaq closes.
+        "filled_sessions": ctx.filled_sessions,
+        "session_check": ctx.session_check,
         "panels": written,
         "skipped_panels": sorted(set(selected) - set(written)),
         # Filers whose company facts were refetched because a newer 10-K/10-Q was accepted.
