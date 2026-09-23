@@ -10,6 +10,7 @@ import { resizeAll, disposeAll } from './charts.js';
 // harder to spot than a plain failure.
 const TABS = [
   { id: 'markets', label: 'MARKETS', artifact: 'markets', module: 'markets' },
+  { id: 'catalysts', label: 'CATALYSTS', artifact: 'catalysts', module: 'catalysts' },
   { id: 'heatmaps', label: 'HEAT MAPS', artifact: 'heatmaps', module: 'heatmaps' },
   { id: 'fixed-income', label: 'FIXED INCOME', artifact: 'fixed_income', module: 'fixed-income' },
   { id: 'macro', label: 'MACRO', artifact: 'macro', module: 'macro' },

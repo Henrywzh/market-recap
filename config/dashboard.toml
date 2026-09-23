@@ -202,6 +202,222 @@ IEF = "ishares"
 SHY = "ishares"
 TLT = "ishares"
 
+[catalysts]
+# Days ahead the tab lists, and sessions in the week strip at its top.
+horizon_days = 30
+week_sessions = 5
+# An earnings report's importance is the company's weight in the S&P 500 or
+# Nasdaq-100 (percent): a 1% name moves the index on its own.
+earnings_high_weight = 1.0
+earnings_medium_weight = 0.25
+
+# Scheduled events shown, matched by a regular expression against the title in
+# the source's own calendar; anything unmatched is left off. ``prints`` names
+# the FRED series whose latest observation is shown as the previous print,
+# with the transform applied (level / yoy / mom / change) and the unit shown.
+# Sources: bls, bea, census, fed (Federal Reserve Board calendar), treasury
+# (announced coupon auctions), rule (computed from a fixed rule).
+[[catalysts.releases]]
+source = "bls"
+match = "^Employment Situation$"
+label = "Employment report"
+importance = "high"
+prints = [
+  { series = "PAYEMS", transform = "change", label = "Payrolls", unit = "k", decimals = 0 },
+  { series = "UNRATE", transform = "level", label = "Unemployment", unit = "%", decimals = 1 },
+]
+
+[[catalysts.releases]]
+source = "bls"
+match = "^Consumer Price Index$"
+label = "CPI"
+importance = "high"
+prints = [
+  { series = "CPIAUCSL", transform = "yoy", label = "CPI y/y", unit = "%", decimals = 1 },
+  { series = "CPILFESL", transform = "yoy", label = "Core y/y", unit = "%", decimals = 1 },
+]
+
+[[catalysts.releases]]
+source = "bls"
+match = "^Producer Price Index$"
+label = "PPI"
+importance = "medium"
+prints = [{ series = "PPIFIS", transform = "yoy", label = "Final demand y/y", unit = "%", decimals = 1 }]
+
+[[catalysts.releases]]
+source = "bls"
+match = "^Job Openings and Labor Turnover Survey$"
+label = "JOLTS job openings"
+importance = "medium"
+prints = [{ series = "JTSJOL", transform = "level", label = "Openings", unit = "k", decimals = 0 }]
+
+[[catalysts.releases]]
+source = "bls"
+match = "^Employment Cost Index$"
+label = "Employment cost index"
+importance = "medium"
+
+[[catalysts.releases]]
+source = "bls"
+match = "^U.S. Import and Export Price Indexes$"
+label = "Import & export prices"
+importance = "low"
+
+[[catalysts.releases]]
+source = "bea"
+match = "^GDP"
+label = "GDP"
+importance = "high"
+prints = [{ series = "A191RL1Q225SBEA", transform = "level", label = "Real GDP q/q saar", unit = "%", decimals = 1 }]
+
+[[catalysts.releases]]
+source = "bea"
+match = "^Personal Income and Outlays$"
+label = "PCE inflation, income & spending"
+importance = "high"
+prints = [
+  { series = "PCEPI", transform = "yoy", label = "PCE y/y", unit = "%", decimals = 1 },
+  { series = "PCEPILFE", transform = "yoy", label = "Core y/y", unit = "%", decimals = 1 },
+]
+
+[[catalysts.releases]]
+source = "bea"
+match = "^U.S. International Trade in Goods and Services$"
+label = "Trade balance"
+importance = "low"
+
+[[catalysts.releases]]
+source = "census"
+match = "^Advance Monthly Sales for Retail and Food Services$"
+label = "Retail sales"
+importance = "high"
+prints = [{ series = "RSAFS", transform = "mom", label = "Retail sales m/m", unit = "%", decimals = 1 }]
+
+[[catalysts.releases]]
+source = "census"
+match = "^Advance Report on Durable Goods"
+label = "Durable goods orders"
+importance = "medium"
+prints = [{ series = "DGORDER", transform = "mom", label = "Orders m/m", unit = "%", decimals = 1 }]
+
+[[catalysts.releases]]
+source = "census"
+match = "^New Residential Construction"
+label = "Housing starts & permits"
+importance = "medium"
+prints = [{ series = "HOUST", transform = "level", label = "Starts saar", unit = "k", decimals = 0 }]
+
+[[catalysts.releases]]
+source = "census"
+match = "^New Residential Sales$"
+label = "New home sales"
+importance = "medium"
+prints = [{ series = "HSN1F", transform = "level", label = "Sales saar", unit = "k", decimals = 0 }]
+
+[[catalysts.releases]]
+source = "census"
+match = "^Construction Spending"
+label = "Construction spending"
+importance = "low"
+
+[[catalysts.releases]]
+source = "fed"
+match = "^FOMC Meeting$"
+label = "FOMC decision (statement)"
+importance = "high"
+
+[[catalysts.releases]]
+source = "fed"
+match = "^FOMC Press Conference$"
+label = "FOMC press conference"
+importance = "high"
+
+[[catalysts.releases]]
+source = "fed"
+match = "^FOMC Minutes$"
+label = "FOMC minutes"
+importance = "medium"
+
+[[catalysts.releases]]
+source = "fed"
+match = "^(Testimony|Speech) - Chair"
+label = ""
+importance = "high"
+
+[[catalysts.releases]]
+source = "fed"
+match = "^(Testimony|Speech) - "
+label = ""
+importance = "medium"
+
+[[catalysts.releases]]
+source = "fed"
+match = "^Beige Book$"
+label = "Beige Book"
+importance = "medium"
+
+[[catalysts.releases]]
+source = "fed"
+match = "^G.17 - Industrial Production"
+label = "Industrial production"
+importance = "medium"
+prints = [{ series = "INDPRO", transform = "mom", label = "IP m/m", unit = "%", decimals = 1 }]
+
+[[catalysts.releases]]
+source = "treasury"
+match = "^(2|3|5|7|10|20|30)-Year (Note|Bond)"
+label = ""
+importance = "medium"
+
+[[catalysts.releases]]
+source = "treasury"
+match = "."
+label = ""
+importance = "low"
+
+[[catalysts.releases]]
+source = "rule"
+match = "^Initial jobless claims$"
+label = ""
+importance = "medium"
+prints = [{ series = "ICSA", transform = "level", label = "Claims", unit = "k", decimals = 0, scale = 0.001 }]
+
+[[catalysts.releases]]
+source = "rule"
+match = "^ISM Manufacturing"
+label = ""
+importance = "high"
+
+[[catalysts.releases]]
+source = "rule"
+match = "^(ISM Services|Quarterly options)"
+label = ""
+importance = "medium"
+
+[[catalysts.releases]]
+source = "rule"
+match = "^(S&P 500 quarterly rebalance|Monthly options expiry)"
+label = ""
+importance = "medium"
+
+[[catalysts.releases]]
+source = "rule"
+match = "^(VIX|EIA)"
+label = ""
+importance = "low"
+
+# Events no calendar publishes -- elections, policy deadlines, summits, OPEC+
+# meetings -- kept by hand. ``date_precision`` is "day" when the date is fixed,
+# "approximate" when it is expected but not set; ``time`` is New York, if known.
+[[catalysts.manual]]
+date = "2026-11-03"
+title = "US midterm elections"
+event_type = "politics"
+importance = "high"
+date_precision = "day"
+source_url = "https://www.usa.gov/midterm-elections"
+detail = "All House seats and a third of the Senate. Fixed by law: the Tuesday after the first Monday in November."
+
 [macro.commodities]
 # Yahoo front-month futures / ETF proxies. These are proxies, not spot prints,
 # and the footer says so.

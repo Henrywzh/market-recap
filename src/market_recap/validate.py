@@ -164,6 +164,17 @@ def _check_valuation(payload: dict | None) -> list[Finding]:
     return out
 
 
+def _check_catalysts(payload: dict | None) -> list[Finding]:
+    """A calendar with a source missing reads as a quiet week; say so."""
+    if payload is None:
+        return []
+    out = [Finding("warning", "catalysts", f"{source} not fetched: {why}")
+           for source, why in (payload.get("failed_sources") or {}).items()]
+    if not payload.get("events"):
+        out.append(Finding("error", "catalysts", "no upcoming event at all"))
+    return out
+
+
 # An equity fund's listed-equity lines should be nearly the whole fund; much
 # less means the parser dropped lines, more means a percent read as a fraction.
 XRAY_EQUITY_WEIGHT_RANGE = (0.85, 1.02)
@@ -276,6 +287,7 @@ def run() -> dict:
         + _check_financials(panels.get("financials"))
         + _check_valuation(panels.get("valuation"))
         + _check_xray(config, panels.get("xray"))
+        + _check_catalysts(panels.get("catalysts"))
         + _check_cross_listing(config, panels.get("cross_listing"))
         + _check_flow_attribution(panels.get("heatmaps"))
         + _check_sources(manifest)
