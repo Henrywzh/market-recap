@@ -91,3 +91,16 @@ def test_nasdaq_is_not_asked_again_after_a_run_of_failures(monkeypatch):
     # Batches of NASDAQ_WORKERS: the batch that crosses the limit is the last one asked.
     assert len(calls) <= gapfill.NASDAQ_GIVE_UP_AFTER + gapfill.NASDAQ_WORKERS
     assert report["2026-09-22"]["unfilled"] == len(SYMBOLS)
+
+
+def test_the_nights_session_can_be_checked_after_the_gap_before_it_is_filled(sources, monkeypatch):
+    """2026-09-23: the check ran before 09-22 was filled and compared nothing."""
+    adjusted, raw = _frames()
+    adjusted.loc["2026-09-22"] = np.nan
+    before = gapfill._compare(adjusted, raw, pd.Timestamp("2026-09-23"), {gapfill.ticker_key(s): 102.0 for s in SYMBOLS},
+                              source="nasdaq", min_names=gapfill.MIN_LATEST_NAMES)
+    assert before is None
+    fixed, fixed_raw, _ = gapfill.fill(adjusted, raw, label="constituents")
+    after = gapfill._compare(fixed, fixed_raw, pd.Timestamp("2026-09-23"), {gapfill.ticker_key(s): 102.0 for s in SYMBOLS},
+                             source="nasdaq", min_names=gapfill.MIN_LATEST_NAMES)
+    assert after is not None and not after["suspect"]

@@ -283,7 +283,7 @@ def tradingview(client: httpx.Client, today: date):
                      "lead_coverage": _lead_buckets(lead, today)}
 
 
-NASDAQ_PATTERNS = {"claims": r"^initial jobless claims$", "durables": r"^durable goods orders \(mom\)$",
+NASDAQ_PATTERNS = {"claims": r"^initial jobless claims$", "durables": r"^durable goods orders( \(mom\))?$",
                    "core_pce_yoy": r"^core pce price index \(yoy\)$", "gdp_final": r"^gdp \(qoq\)$",
                    "nfp": r"^nonfarm payrolls$", "unrate": r"^unemployment rate$", "cpi_mom": r"^cpi \(mom\)$",
                    "cpi_yoy": r"^cpi \(yoy\)$", "core_cpi_yoy": r"^core cpi \(yoy\)$"}
@@ -294,7 +294,10 @@ def nasdaq(client: httpx.Client, today: date):
     days = sorted({date.fromisoformat(d) for _, d in TARGETS.values()} | {today + timedelta(days=k) for k in (1, 3, 7, 14)})
     for day in days:
         data = _get(client, "https://api.nasdaq.com/api/calendar/economicevents", params={"date": str(day)},
-                    headers={"Accept": "application/json", "User-Agent": "market-recap/0.1"}).json()["data"]
+                    headers={"Accept": "application/json", "User-Agent": "market-recap/0.1"}).json().get("data")
+        if data is None:
+            # Seen overnight: HTTP 200 with "data": null. Counted, not parsed.
+            raise RuntimeError(f"HTTP 200 with no data for {day}")
         for r in data.get("rows") or []:
             if r.get("country") != "United States":
                 continue
