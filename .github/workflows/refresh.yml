@@ -69,9 +69,21 @@ jobs:
           restore-keys: data-cache-${{ hashFiles('requirements.lock') }}-
 
       - name: Refresh
+        env:
+          # Restore the last published observation ledger, never an evictable cache.
+          MONITOR_PUBLISHED_STATE: "1"
         # --strict: nobody reads an unattended run's output, so a warning is a
         # failure. A red run emails the repo owner; a stale page does not.
         run: make refresh REFRESH_FLAGS=--strict
+
+      - name: Archive monitor observations
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: monitor-${{ github.run_id }}
+          path: artifacts/monitor.json
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Save cache
         if: always()

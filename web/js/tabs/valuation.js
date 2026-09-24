@@ -306,7 +306,8 @@ export default async function renderValuation(root, data) {
   root.append(card('VALUATION × QUALITY', null, [scatterNode, scatterNote]));
 
   // ---------------- P/E against its own history ---------------------------
-  const historyInput = el('input', { value: 'AAPL', size: '8' });
+  const requestedTicker = new URLSearchParams(location.search).get('ticker')?.toUpperCase();
+  const historyInput = el('input', { value: requestedTicker || 'AAPL', size: '8' });
   const historyStatus = el('span', { class: 'field-note', text: '' });
   const historyNode = el('div', { class: 'chart tall' });
   const epsNode = el('div', { class: 'chart short' });

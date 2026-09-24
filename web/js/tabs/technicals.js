@@ -289,7 +289,8 @@ export default async function renderTechnicals(root, data) {
 
   // ---------------- Single ticker ----------------------------------------
   const stStatus = el('span', { class: 'field-note', text: '' });
-  const tickerInput = el('input', { value: available.has('NVDA') ? 'NVDA' : data.available[0], size: '8' });
+  const requestedTicker = new URLSearchParams(location.search).get('ticker')?.toUpperCase();
+  const tickerInput = el('input', { value: requestedTicker || (available.has('NVDA') ? 'NVDA' : data.available[0]), size: '8' });
   const maInput = el('input', { value: defaults.ma_periods.join(','), size: '12' });
   const slopeInput = el('input', { value: String(defaults.slope_window), size: '4', type: 'number', min: '1', max: String(MAX_SLOPE_WINDOW) });
   const stPeriod = periodSelect(data.periods, defaults.single_ticker_period);

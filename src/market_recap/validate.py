@@ -26,7 +26,7 @@ SEVERITIES = ("error", "warning", "notice")
 # the page: the catalyst calendars and the ETF look-through holdings. Unofficial
 # endpoints among them fail for reasons of their own, and one of them being
 # down must not hold back the prices every other tab needs.
-OPTIONAL_SOURCES = re.compile(r"^(catalysts_\w+|(ssga|ishares|vanguard)_xray_holdings)$")
+OPTIONAL_SOURCES = re.compile(r"^(catalysts_\w+|(ssga|ishares|vanguard)_xray_holdings|yahoo_estimates)$")
 
 
 @dataclass(frozen=True)
@@ -186,6 +186,25 @@ def _check_catalysts(payload: dict | None) -> list[Finding]:
     return out
 
 
+def _check_monitor(payload: dict | None) -> list[Finding]:
+    if payload is None:
+        return []
+    from .sources.monitor_state import validate_previous
+
+    try:
+        validate_previous(payload)
+    except (ValueError, TypeError, KeyError) as exc:
+        return [Finding("error", "monitor", f"invalid observation ledger: {exc}")]
+    rows = [row for row in payload["rows"] if row["in_universe"]]
+    if not rows or len(rows) != payload["universe"]["members"]:
+        return [Finding("error", "monitor", "monitor rows do not match the declared universe")]
+    missing = sum(row.get("drawdown_pct") is None for row in rows)
+    if missing == len(rows):
+        return [Finding("error", "monitor", "no member has a measurable drawdown")]
+    return ([Finding("notice", "monitor", f"{missing} members have unknown drawdown; see row data gaps")]
+            if missing else [])
+
+
 # An equity fund's listed-equity lines should be nearly the whole fund; much
 # less means the parser dropped lines, more means a percent read as a fraction.
 XRAY_EQUITY_WEIGHT_RANGE = (0.85, 1.02)
@@ -300,6 +319,7 @@ def run() -> dict:
         + _check_valuation(panels.get("valuation"))
         + _check_xray(config, panels.get("xray"))
         + _check_catalysts(panels.get("catalysts"))
+        + _check_monitor(panels.get("monitor"))
         + _check_cross_listing(config, panels.get("cross_listing"))
         + _check_flow_attribution(panels.get("heatmaps"))
         + _check_sources(manifest)

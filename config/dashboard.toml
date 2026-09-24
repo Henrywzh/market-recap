@@ -220,6 +220,7 @@ earnings_medium_weight = 0.25
 # the pattern no longer matches -- a quiet drop the page then reports.
 # Sources: bls, bea, census, fed (Federal Reserve Board calendar), treasury
 # (announced coupon auctions), rule (computed from a fixed rule).
+# expect names which forecasts to show. The questions live in compute/expectations.py.
 [[catalysts.releases]]
 source = "bls"
 match = "^Employment Situation$"
@@ -230,6 +231,7 @@ prints = [
   { series = "PAYEMS", transform = "change", label = "Payrolls", unit = "k", decimals = 0 },
   { series = "UNRATE", transform = "level", label = "Unemployment", unit = "%", decimals = 1 },
 ]
+expect = ["nfp", "unrate"]
 
 [[catalysts.releases]]
 source = "bls"
@@ -241,6 +243,7 @@ prints = [
   { series = "CPIAUCSL", transform = "yoy", label = "CPI y/y", unit = "%", decimals = 1 },
   { series = "CPILFESL", transform = "yoy", label = "Core y/y", unit = "%", decimals = 1 },
 ]
+expect = ["cpi_yoy", "core_cpi_yoy", "cpi_mom", "core_cpi_mom"]
 
 [[catalysts.releases]]
 source = "bls"
@@ -275,6 +278,7 @@ label = "GDP"
 importance = "high"
 expect_within_days = 45
 prints = [{ series = "A191RL1Q225SBEA", transform = "level", label = "Real GDP q/q saar", unit = "%", decimals = 1 }]
+expect = ["gdp"]
 
 [[catalysts.releases]]
 source = "bea"
@@ -286,6 +290,7 @@ prints = [
   { series = "PCEPI", transform = "yoy", label = "PCE y/y", unit = "%", decimals = 1 },
   { series = "PCEPILFE", transform = "yoy", label = "Core y/y", unit = "%", decimals = 1 },
 ]
+expect = ["pce_yoy", "core_pce_yoy", "core_pce_mom"]
 
 [[catalysts.releases]]
 source = "bea"
@@ -307,6 +312,7 @@ match = "^Advance Report on Durable Goods"
 label = "Durable goods orders"
 importance = "medium"
 prints = [{ series = "DGORDER", transform = "mom", label = "Orders m/m", unit = "%", decimals = 1 }]
+expect = ["durables"]
 
 [[catalysts.releases]]
 source = "census"
@@ -334,6 +340,7 @@ match = "^FOMC Meeting$"
 label = "FOMC decision (statement)"
 importance = "high"
 expect_within_days = 60
+expect = ["fomc"]
 
 [[catalysts.releases]]
 source = "fed"
@@ -390,6 +397,7 @@ match = "^Initial jobless claims$"
 label = ""
 importance = "medium"
 prints = [{ series = "ICSA", transform = "level", label = "Claims", unit = "k", decimals = 0, scale = 0.001 }]
+expect = ["claims"]
 
 [[catalysts.releases]]
 source = "rule"
@@ -514,6 +522,33 @@ ratio_ma_periods = [60, 200]
 # The period each chart opens on (one of periods.technicals_chart).
 single_ticker_period = "1Y"
 ratio_period = "5Y"
+
+# MONITOR: a research queue, not a signal. A name enters when its adjusted
+# close is threshold_pct below its drawdown_period high, or when its
+# relative_period return trails its sector peers' median (other index members,
+# the company excluded) by peer_excess_pp. The watchlist above is measured
+# too, as explicit non-members. Manual watch/exclude reasons live in
+# config/monitor_notes.toml.
+[monitor]
+index = "SPX"
+drawdown_period = "1Y"
+threshold_pct = 20.0
+relative_period = "1M"
+ma_sessions = 20
+earnings_days = 30
+peer_excess_pp = 10.0
+# A sector is weak as a whole when its ETF trails the market AND its median
+# member trails the median of all members, each by this much over
+# relative_period (cap-weighted against cap-weighted, equal against equal).
+sector_event_pp = 3.0
+# FY1 consensus EPS moving this much in 30 days counts as a cut or a raise.
+revision_pct = 2.0
+min_analysts = 3
+# A reported quarter counts as evidence for this many days.
+report_days = 100
+expectations = true
+# The published artifact is the durable observation ledger for cloud builds.
+published_base_url = "https://market-recap-b5p.pages.dev"
 
 [financials]
 # Every member of these indices gets ten fiscal years of filed statements.

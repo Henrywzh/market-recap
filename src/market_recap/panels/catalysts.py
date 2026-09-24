@@ -23,9 +23,10 @@ import re
 import pandas as pd
 
 from ..compute import catalysts as C
+from ..compute import expectations as X
 from ..compute.returns import period_return
 from ..compute.xray import ticker_key
-from ..sources import calendars, fred, nasdaq, treasury
+from ..sources import calendars, expectations as expectation_feeds, fred, nasdaq, treasury
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float
 
 # How each source's dates are known.
@@ -158,6 +159,7 @@ def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool) -> tupl
             "reference_period": event.get("reference_period"),
             "detail": detail,
             "prints": _prints(release.get("prints"), use_cache, series_cache),
+            "_expect": [key for key in (release.get("expect") or []) if key in X.CATALOG],
         })
     for item in settings.get("manual") or []:
         if start.isoformat() <= item["date"] <= end.isoformat():
@@ -170,7 +172,36 @@ def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool) -> tupl
                 "source_id": "manual", "source_url": item.get("source_url"),
                 "reference_period": None, "detail": item.get("detail"), "prints": [],
             })
+    failed.update(_attach_expectations(ctx, events, use_cache))
     return events, failed, _expected_missing(everything, settings["releases"], start)
+
+
+def _attach_expectations(ctx, events: list[dict], use_cache: bool) -> dict[str, str]:
+    """Survey points, Kalshi distributions and Cleveland nowcasts. Optional."""
+    if not any(event.get("_expect") for event in events):
+        for event in events:
+            event.pop("_expect", None)
+        return {}
+    try:
+        book, failed = expectation_feeds.load(events, use_cache=use_cache)
+    except Exception as exc:
+        book, failed = X.empty_book(), {"expectations": str(exc)[:ERROR_DETAIL_CHARS]}
+    attached = 0
+    for event in events:
+        keys = event.pop("_expect", None) or []
+        rows = X.expectations_for(event, keys, book) if keys else []
+        if rows:
+            event["expectations"] = rows
+            attached += 1
+    ctx.log.add(SourceRecord(
+        "catalysts_expectations",
+        "Survey forecasts, Kalshi distributions and Cleveland nowcasts",
+        expectation_feeds.KALSHI_URL,
+        rows=attached, observed_date=ctx.as_of, policy="daily_close",
+        status="ok" if not failed else "partial",
+        error="; ".join(f"{name}: {why}" for name, why in sorted(failed.items())) or None,
+    ))
+    return {f"expectations_{name.replace(' ', '_')}": why for name, why in failed.items()}
 
 
 def _universe(ctx) -> dict[str, dict]:
@@ -342,6 +373,11 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             "defines. Earnings dates are Nasdaq's calendar, an unofficial source that does not say "
             "whether a date is company-confirmed. Previous prints are FRED's latest observation for "
             "the period shown -- until FRED updates after a release, that is the print before it. "
-            "Importance for earnings is the company's weight in either index."
+            "Importance for earnings is the company's weight in either index. "
+            "Where a release has one, the row also shows a survey point (TradingView, checked "
+            "against Nasdaq and ForexFactory), a Kalshi distribution for that same release "
+            "(median, 10th to 90th, open interest) and Cleveland's nowcast for the month the "
+            "release covers. A contract for a different period or transform is left off. "
+            "A source that did not answer is omitted, not shown as zero."
         ),
     }

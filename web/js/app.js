@@ -10,6 +10,7 @@ import { resizeAll, disposeAll } from './charts.js';
 // harder to spot than a plain failure.
 const TABS = [
   { id: 'markets', label: 'MARKETS', artifact: 'markets', module: 'markets' },
+  { id: 'monitor', label: 'MONITOR', artifact: 'monitor', module: 'monitor' },
   { id: 'catalysts', label: 'CATALYSTS', artifact: 'catalysts', module: 'catalysts' },
   { id: 'heatmaps', label: 'HEAT MAPS', artifact: 'heatmaps', module: 'heatmaps' },
   { id: 'fixed-income', label: 'FIXED INCOME', artifact: 'fixed_income', module: 'fixed-income' },
@@ -117,6 +118,9 @@ async function select(id, silent = false) {
   main.append(el('div', { class: 'loading', text: `Loading ${tab.label}…` }));
 
   try {
+    if (tab.id === 'monitor' && !state.manifest?.panels?.includes('monitor')) {
+      throw new Error('monitor was not built for this session');
+    }
     const [payload, render] = await Promise.all([
       loadArtifact(tab.artifact),
       rendererFor(tab),
@@ -215,4 +219,3 @@ export async function boot(manifest, version) {
   });
   window.addEventListener('resize', () => requestAnimationFrame(resizeAll));
 }
-

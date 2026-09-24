@@ -1,0 +1,17 @@
+# Research decisions on MONITOR names, kept in the repo so the reason a name
+# was watched or set aside survives devices and rebuilds. One [[note]] per
+# ticker; the latest entry for a ticker wins.
+#
+#   status  = "watch"   -> its stabilisation and evidence changes are listed
+#                          under TODAY even when it is not in the queue
+#             "exclude" -> hidden from the queue views (still under ALL),
+#                          with the reason shown
+#   since   = the date of the decision
+#   reason  = why, in a sentence
+#   outcome = optional; what happened, once known
+#
+# [[note]]
+# ticker = "XYZ"
+# status = "exclude"
+# since = "2026-09-24"
+# reason = "Accounting restatement pending; revisit after the 10-K/A."

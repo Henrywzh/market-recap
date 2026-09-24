@@ -64,6 +64,37 @@ function formatPrint(p) {
   return `${p.label} ${num(p.value, p.decimals)}${p.unit}${period}`;
 }
 
+function compactCount(value) {
+  if (value >= 1e6) return num(value / 1e6, 2) + 'm';
+  if (value >= 1e3) return num(value / 1e3, 0) + 'k';
+  return num(value, 0);
+}
+
+function formatExpectation(row) {
+  const shown = row.unit === 'p'
+    ? num(row.value * 100, row.decimals) + '%'
+    : num(row.value, row.decimals) + row.unit;
+  let range = '';
+  if (row.low != null && row.high != null) {
+    range = ' (' + num(row.low, row.decimals) + '\u2013' + num(row.high, row.decimals) + ')';
+  } else if (row.low != null) {
+    range = ' (p10 ' + num(row.low, row.decimals) + ')';
+  }
+  const interest = row.open_interest != null ? ' OI ' + compactCount(row.open_interest) : '';
+  const spread = row.spread != null ? ' spread ' + Math.round(row.spread * 100) + '\u00a2' : '';
+  return row.label + ' ' + shown + range + interest + spread + ' ' + row.source_label;
+}
+
+function expectationLines(event) {
+  const rows = event.expectations || [];
+  return ['survey', 'market', 'model'].map((kind) => {
+    const items = rows.filter((row) => row.kind === kind);
+    if (!items.length) return null;
+    const label = kind === 'survey' ? 'Survey' : kind === 'market' ? 'Market' : 'Nowcast';
+    return el('div', { class: 'cat-detail', text: label + ': ' + items.map(formatExpectation).join(' \u00b7 ') });
+  });
+}
+
 function certaintyTag(event, labels) {
   if (event.certainty_class === 'official_schedule' || event.certainty_class === 'official_announcement') return null;
   return el('span', { class: 'cat-tag', title: labels[event.certainty_class] || '', text: event.certainty_class.replace('_', ' ').toUpperCase() });
@@ -88,6 +119,7 @@ function macroRow(event, labels) {
         event.source_url ? el('a', { class: 'cat-src', href: event.source_url, target: '_blank', rel: 'noopener', text: event.source_id }) : null,
       ]),
       event.detail ? el('div', { class: 'cat-detail', text: event.detail }) : null,
+      ...expectationLines(event),
       prints.length ? el('div', { class: 'cat-detail', text: `Previous: ${prints.map(formatPrint).join(' · ')}` }) : null,
     ]),
   ]);

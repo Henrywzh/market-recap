@@ -133,7 +133,8 @@ export default async function renderFinancials(root, data) {
   }
 
   const names = new Map(data.available.map((c) => [c.ticker, c.name]));
-  const tickerInput = el('input', { id: 'fin-ticker', value: names.has('AAPL') ? 'AAPL' : data.available[0].ticker, size: '8', list: 'fin-list' });
+  const requestedTicker = new URLSearchParams(location.search).get('ticker')?.toUpperCase();
+  const tickerInput = el('input', { id: 'fin-ticker', value: requestedTicker || (names.has('AAPL') ? 'AAPL' : data.available[0].ticker), size: '8', list: 'fin-list' });
   const datalist = el('datalist', { id: 'fin-list' },
     data.available.map((c) => el('option', { value: c.ticker, text: c.name || '' })));
   const skippedCount = Object.keys(data.skipped || {}).length;

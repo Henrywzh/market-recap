@@ -13,6 +13,7 @@ them.
 
 | Tab | Contents |
 |---|---|
+| **MONITOR** | Research queue over the S&P 500 and the watchlist. A name enters at a 20% drawdown from its 1Y high or when it trails its sector peers (company excluded) by 10 pp over 1M. **TODAY** lists what changed since the previous build (entered, stabilising, evidence turned, reported, left), with weak-as-a-whole sectors grouped as one event; **QUEUE** has a price-state × evidence-state 2×2; evidence for and against (FY1 EPS revisions from Yahoo, revenue, FCF, last quarter vs consensus) is listed, never scored; candidate history persists between builds, and watch/exclude reasons live in `config/monitor_notes.toml`. See [the monitor contract](docs/monitor.md). |
 | **MARKETS** | SPY/QQQ/IWM quote strip, SPX/NDX drawdown with sessions since the high, advance/decline, a price + net-breadth + movers block for **each index**, a **watchlist** of names no index holds, sector performance / weight / **contribution**, sectors rebased to 100, % of each sector above its moving averages, SMA200 slope by sector |
 | **CATALYSTS** | Things to watch, in two lanes. **Macro & broad index**: BLS, BEA and Census releases at the time each agency publishes, FOMC decisions / press conferences / minutes and Board speeches from the Fed's calendar, announced Treasury coupon auctions, rule-based events (options expiry and quad witching, S&P rebalance, VIX expiry, jobless claims, ISM, EIA crude inventories) and hand-kept events (elections, deadlines) from the config — each with the previous print from FRED and the period it covers. **Single name**: earnings of every S&P 500 / Nasdaq-100 member and watchlist name with before-open / after-close timing, consensus EPS, estimates and index weight. A **last session** block shows what was released and who reported, with EPS vs. consensus and the day's move. Times in New York and the reader's own zone; every event says how its date is known |
 | **HEAT MAPS** | S&P 500 treemap sized by the **issuer-published SPY weight** and coloured by return; US ETF treemap sized by AUM and coloured by estimated net flow |
@@ -130,8 +131,12 @@ against its own contract and cannot see the calendar:
   is not one.
 
 `data/cache` is carried between runs with `actions/cache`. It is not state:
-every artifact rebuilds from the publishers, so an evicted cache costs one
-slow run and more requests to them, never a wrong number. The cache key
+source-derived readings rebuild from the publishers, so an evicted cache costs one
+slow run and more requests to them, never a wrong number. MONITOR's observation
+ledger is different: cloud refreshes restore the last published monitor artifact,
+and refuse to reset it if restoration fails. The workflow also archives that
+artifact for recovery. Manual follows live in the reader's browser and can be
+exported/imported. The cache key
 includes `requirements.lock`'s hash: files written by other library versions
 are not reused.
 

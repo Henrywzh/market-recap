@@ -131,43 +131,115 @@ def _ladder_quantiles(ladder: list[tuple[float, float]]) -> dict:
     return out
 
 
+def _strike(subtitle: str) -> float | None:
+    """Kalshi words the same threshold as 'Above 3.5%' or 'At least 180,000'."""
+    match = re.search(r"(?:above|at least)\s+([-\d.,]+)", subtitle or "", re.I)
+    return _num(match.group(1)) if match else None
+
+
+_YOY = re.compile(r"yoy|y/y|year[- ]over[- ]year", re.I)
+THOUSANDS = {"nfp", "claims"}
+
+
+def kalshi_event_fits(target: str, event: dict, release: str) -> bool:
+    """True only when this contract closes on the release and is that print.
+
+    Taking the earliest event that closes on or after the release answered a
+    different question twice. KXGDP's next open contract is Q3 growth, not the
+    Q2 final. KXPCECORE on the PCE release date is "how much will core PCE
+    increase", a monthly ladder, not August year-over-year.
+    """
+    markets = event.get("markets") or []
+    if not markets:
+        return False
+    if min(m["close_time"][:10] for m in markets) != release:
+        return False
+    title = event.get("title") or ""
+    if target in ("cpi_yoy", "core_cpi_yoy", "core_pce_yoy"):
+        return _YOY.search(title) is not None
+    if target == "cpi_mom":
+        return _YOY.search(title) is None
+    if target == "gdp_final":
+        return re.search(r"\bq2\b", title, re.I) is not None
+    return True
+
+
+def select_kalshi_event(target: str, events: list[dict]) -> dict | None:
+    release = TARGETS[target][1]
+    fits = [event for event in events if kalshi_event_fits(target, event, release)]
+    if not fits:
+        return None
+    return min(fits, key=lambda event: min(m["close_time"] for m in event["markets"]))
+
+
+def ignored_kalshi(target: str, series: str, events: list[dict]) -> list[dict]:
+    """Why this series did not answer the target, when it had some other event."""
+    release = TARGETS[target][1]
+    same_day, later = [], []
+    for event in events:
+        markets = event.get("markets") or []
+        if not markets:
+            continue
+        close = min(m["close_time"][:10] for m in markets)
+        if close < release:
+            continue
+        title = event.get("title")
+        if close == release:
+            same_day.append(title)
+        else:
+            later.append((close, title))
+    if same_day:
+        return [{"target": target, "series": series, "event": title, "close": release,
+                 "reason": "closes on the release date but is not that print"} for title in same_day]
+    if later:
+        close, title = min(later)
+        return [{"target": target, "series": series, "event": title, "close": close,
+                 "reason": "next open event is a later release"}]
+    return []
+
+
+def quote_kalshi_event(target: str, event: dict, series: str) -> dict:
+    markets = event["markets"]
+    oi = sum(_num(m.get("open_interest_fp")) or 0 for m in markets)
+    if target == "fomc_hike":
+        probs = {m.get("yes_sub_title"): _kalshi_probability(m) for m in markets}
+        hike = sum(p or 0 for label, p in probs.items() if label and "hike" in label.lower())
+        return {"value": round(hike, 3), "detail": {k: v for k, v in probs.items()}, "series": series,
+                "event": event.get("title"), "release": TARGETS[target][1], "open_interest": round(oi)}
+    ladder = []
+    for market in markets:
+        strike = _strike(market.get("yes_sub_title") or "")
+        probability = _kalshi_probability(market)
+        if strike is not None and probability is not None:
+            ladder.append((strike, probability))
+    quantiles = _ladder_quantiles(ladder)
+    scale = 0.001 if target in THOUSANDS else 1.0
+
+    def scaled(value):
+        return round(value * scale, 3) if value is not None else None
+
+    return {"value": scaled(quantiles["median"]), "p10": scaled(quantiles["p10"]), "p90": scaled(quantiles["p90"]),
+            "series": series, "event": event.get("title"), "release": TARGETS[target][1],
+            "strikes": len(ladder), "open_interest": round(oi)}
+
+
 def kalshi(client: httpx.Client, today: date):
-    content, freshest, liquidity = {}, None, {}
+    content, freshest, liquidity, ignored = {}, None, {}, []
     for target, series_list in KALSHI_SERIES.items():
-        release = TARGETS[target][1]
         for series in series_list:
             data = _get(client, KALSHI_URL, params={"series_ticker": series, "status": "open", "with_nested_markets": "true"}).json()
             events = [e for e in data.get("events") or [] if e.get("markets")]
-            # The event settling on the target release: the earliest closing on or after it.
-            events = [e for e in events if min(m["close_time"][:10] for m in e["markets"]) >= release] or []
-            if not events:
+            event = select_kalshi_event(target, events)
+            if event is None:
+                ignored.extend(ignored_kalshi(target, series, events))
                 continue
-            event = min(events, key=lambda e: min(m["close_time"] for m in e["markets"]))
             markets = event["markets"]
             freshest = max([freshest or ""] + [m.get("updated_time") or "" for m in markets])
-            oi = sum(_num(m.get("open_interest_fp")) or 0 for m in markets)
-            if target == "fomc_hike":
-                probs = {m.get("yes_sub_title"): _kalshi_probability(m) for m in markets}
-                hike = sum(p or 0 for k, p in probs.items() if k and "hike" in k.lower())
-                content[target] = {"value": round(hike, 3), "detail": {k: v for k, v in probs.items()}, "series": series,
-                                   "event": event.get("title"), "open_interest": round(oi)}
-            else:
-                ladder = []
-                for m in markets:
-                    match = re.search(r"above\s+([-\d.,]+)", m.get("yes_sub_title") or "", re.I)
-                    p = _kalshi_probability(m)
-                    if match and p is not None:
-                        ladder.append((_num(match.group(1)), p))
-                q = _ladder_quantiles(ladder)
-                scale = 0.001 if target == "nfp" else 1.0
-                content[target] = {"value": q["median"] * scale if q["median"] is not None else None,
-                                   "p10": q["p10"] * scale if q["p10"] is not None else None,
-                                   "p90": q["p90"] * scale if q["p90"] is not None else None,
-                                   "series": series, "event": event.get("title"), "strikes": len(ladder),
-                                   "open_interest": round(oi)}
-            liquidity[target] = round(oi)
+            content[target] = quote_kalshi_event(target, event, series)
+            liquidity[target] = content[target]["open_interest"]
             break
-    return content, {"source_asof": freshest, "depth": "full probability ladder", "open_interest": liquidity}
+    return content, {"source_asof": freshest, "depth": "full probability ladder", "open_interest": liquidity,
+                     "ignored": ignored}
 
 
 POLY_URL = "https://gamma-api.polymarket.com/events"
@@ -283,33 +355,123 @@ def tradingview(client: httpx.Client, today: date):
                      "lead_coverage": _lead_buckets(lead, today)}
 
 
-NASDAQ_PATTERNS = {"claims": r"^initial jobless claims$", "durables": r"^durable goods orders( \(mom\))?$",
-                   "core_pce_yoy": r"^core pce price index \(yoy\)$", "gdp_final": r"^gdp \(qoq\)$",
-                   "nfp": r"^nonfarm payrolls$", "unrate": r"^unemployment rate$", "cpi_mom": r"^cpi \(mom\)$",
-                   "cpi_yoy": r"^cpi \(yoy\)$", "core_cpi_yoy": r"^core cpi \(yoy\)$"}
+NASDAQ_EXACT = {
+    "initial jobless claims": "claims",
+    "durable goods orders": "durables",
+    "nonfarm payrolls": "nfp",
+    "unemployment rate": "unrate",
+    "gdp": "gdp_final",
+}
+# One display name, two rows: the monthly change and the year-over-year print.
+# The descriptions are copies of each other, so the previous print separates
+# them. A yearly US inflation print is at least twice the monthly one.
+NASDAQ_INFLATION = {
+    "cpi": ("cpi_mom", "cpi_yoy"),
+    "core cpi": ("core_cpi_mom", "core_cpi_yoy"),
+    "core pce price index": ("core_pce_mom", "core_pce_yoy"),
+}
+
+
+def nasdaq_release_day(query_day: date) -> date:
+    """US release date of a Nasdaq calendar page.
+
+    The date parameter is one calendar day after the release. Thursday
+    2026-09-24 claims are on the 09-25 page; Wednesday 2026-10-14 CPI is on
+    the 10-15 page; Wednesday 2026-10-28 FOMC is on the 10-29 page.
+    """
+    return query_day - timedelta(days=1)
+
+
+def nasdaq_query_days(today: date) -> list[date]:
+    """Pages that can hold a target, plus the lead-time sample."""
+    pages = {date.fromisoformat(day) + timedelta(days=1) for _, day in TARGETS.values()}
+    pages |= {today + timedelta(days=k) for k in (1, 3, 7, 14)}
+    return sorted(pages)
+
+
+def nasdaq_rows(data, day: date) -> list:
+    """Rows from one page. HTTP 200 with data null is a failed attempt."""
+    if not isinstance(data, dict):
+        raise RuntimeError(f"HTTP 200 with no data for {day}")
+    return data.get("rows") or []
+
+
+def _nasdaq_reading(row: dict, release: date) -> dict:
+    return {"value": _num(row.get("consensus")), "previous": _num(row.get("previous")),
+            "release": release.isoformat()}
+
+
+def _nasdaq_scale(row: dict) -> float | None:
+    for field in ("previous", "consensus"):
+        number = _num(row.get(field))
+        if number is not None:
+            return abs(number)
+    return None
+
+
+def _split_inflation(rows: list[dict]) -> dict[str, dict]:
+    scaled = []
+    for row in rows:
+        scale = _nasdaq_scale(row)
+        if scale is not None:
+            scaled.append((scale, row))
+    if len(scaled) != 2:
+        return {}
+    scaled.sort(key=lambda item: item[0])
+    small, large = scaled
+    if large[0] < small[0] * 2:
+        return {}
+    return {"mom": small[1], "yoy": large[1]}
+
+
+def _keep_nasdaq(content: dict, key: str, release: date, row: dict) -> None:
+    target = TARGETS.get(key)
+    if target and target[1] == release.isoformat() and key not in content:
+        content[key] = _nasdaq_reading(row, release)
+
+
+def read_nasdaq_page(query_day: date, rows: list[dict]) -> tuple[dict, list[tuple[date, bool]]]:
+    """Consensus for the releases this page actually lists, dated back one day."""
+    release = nasdaq_release_day(query_day)
+    content: dict = {}
+    lead: list[tuple[date, bool]] = []
+    grouped: dict[str, list] = {}
+    for row in rows:
+        if row.get("country") != "United States":
+            continue
+        name = (row.get("eventName") or "").strip()
+        lead.append((release, _num(row.get("consensus")) is not None))
+        exact = NASDAQ_EXACT.get(name.casefold())
+        if exact:
+            _keep_nasdaq(content, exact, release, row)
+            continue
+        if name.casefold() in NASDAQ_INFLATION:
+            grouped.setdefault(name.casefold(), []).append(row)
+    for name, group in grouped.items():
+        mom_key, yoy_key = NASDAQ_INFLATION[name]
+        split = _split_inflation(group)
+        if "mom" in split:
+            _keep_nasdaq(content, mom_key, release, split["mom"])
+        if "yoy" in split:
+            _keep_nasdaq(content, yoy_key, release, split["yoy"])
+    return content, lead
 
 
 def nasdaq(client: httpx.Client, today: date):
     content, lead, names = {}, [], set()
-    days = sorted({date.fromisoformat(d) for _, d in TARGETS.values()} | {today + timedelta(days=k) for k in (1, 3, 7, 14)})
-    for day in days:
+    for day in nasdaq_query_days(today):
         data = _get(client, "https://api.nasdaq.com/api/calendar/economicevents", params={"date": str(day)},
                     headers={"Accept": "application/json", "User-Agent": "market-recap/0.1"}).json().get("data")
-        if data is None:
-            # Seen overnight: HTTP 200 with "data": null. Counted, not parsed.
-            raise RuntimeError(f"HTTP 200 with no data for {day}")
-        for r in data.get("rows") or []:
-            if r.get("country") != "United States":
-                continue
-            name = (r.get("eventName") or "").strip()
-            names.add(name)
-            consensus = (r.get("consensus") or "").strip()
-            lead.append((day, bool(consensus)))
-            key = _match(name, NASDAQ_PATTERNS)
-            if key and str(day) == TARGETS[key][1] and key not in content:
-                content[key] = {"value": _num(consensus), "previous": _num(r.get("previous"))}
-    return content, {"source_asof": None, "depth": "single consensus + previous", "lead_coverage": _lead_buckets(lead, today),
-                     "_names": sorted(names)[:80]}
+        rows = nasdaq_rows(data, day)
+        page, page_lead = read_nasdaq_page(day, rows)
+        for key, reading in page.items():
+            content.setdefault(key, reading)
+        lead.extend(page_lead)
+        for row in rows:
+            if row.get("country") == "United States":
+                names.add((row.get("eventName") or "").strip())
+    return content, {"source_asof": None, "depth": "single consensus + previous",
+                     "lead_coverage": _lead_buckets(lead, today), "_names": sorted(names)[:80]}
 
 
 FF_PATTERNS = {"claims": r"^unemployment claims$", "durables": r"^durable goods orders m/m$",

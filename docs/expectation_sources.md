@@ -64,3 +64,40 @@ rows made "CPI y/y" compare 13 months — the build now matches changes by date
 Markets and surveys answer different questions: a Kalshi ladder is where
 money is, with a risk premium and thin books in places; a survey median is
 what economists wrote down. The page should label which is which.
+
+## Mapping corrections (2026-09-24)
+
+Two of the joins above were right as observations and wrong in the probe's
+JSON. The success rates and the quoted medians are unchanged; what changed
+is which contract is allowed to fill a target.
+
+Nasdaq's `date` parameter is the calendar day after the US release. Thursday
+2026-09-24 initial claims (consensus 201K, previous 196K) are on the 09-25
+page; Friday 2026-09-25 durable goods (−0.3, previous 1.1) are on the 09-26
+page; the 09-30 GDP and PCE prints are on the 10-01 page. The probe was
+matching the page date to the release date, so `content` stayed empty while
+the event name still showed up in `_names`. A page is now dated back one
+day. The lead shares in the table were counted on the page date, one day
+late. CPI, core CPI and core PCE are each listed twice under one name, with
+identical descriptions; the yearly row is the one whose previous print is at
+least twice the monthly one (3.4 against 0.4, 2.4 against 0.3, 3.3 against
+0.2). When the two prints are less than twice apart, neither is used.
+
+Kalshi's "earliest close on or after the release" rule answered a different
+question twice. `KXGDP` has no open Q2-final contract; the rule returned Q3
+growth, which closes 2026-10-30. `KXPCECORE` on 2026-09-30 is "how much will
+core PCE increase in Aug", strikes of 0.1, not August year-over-year. An
+event is used only when it closes on the release date and its title is that
+print, so both of those stay unmatched and the ignored event is recorded.
+Claims thresholds are worded "At least 180,000", not "Above"; those ladders
+are read, in thousands.
+
+## On the catalysts timeline
+
+The same joins are what the CATALYSTS tab shows. A survey point comes from
+TradingView, checked against Nasdaq and ForexFactory when they have a number.
+A Kalshi distribution is shown only when that contract closes on the release
+date and is the same transform, with its median, 10th to 90th percentile and
+open interest. Cleveland's nowcast is shown only for the month the release
+covers. The Q3 GDP contract is not attached to the Q2 final, and the August
+core PCE market is labeled month-over-month, not year-over-year.
