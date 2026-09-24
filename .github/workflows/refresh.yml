@@ -70,7 +70,8 @@ jobs:
 
       - name: Refresh
         env:
-          # Restore the last published observation ledger, never an evictable cache.
+          # Restore the last published ledgers (MONITOR observations, the earnings
+          # season's captured year-ago EPS), never an evictable cache.
           MONITOR_PUBLISHED_STATE: "1"
         # --strict: nobody reads an unattended run's output, so a warning is a
         # failure. A red run emails the repo owner; a stale page does not.
@@ -81,7 +82,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: monitor-${{ github.run_id }}
-          path: artifacts/monitor.json
+          path: |
+            artifacts/monitor.json
+            artifacts/earnings.json
           if-no-files-found: ignore
           retention-days: 90
 

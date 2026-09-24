@@ -65,6 +65,7 @@ def parse_trend(payload: Any) -> dict[str, dict] | None:
             "eps": _raw(eps.get("current")) if eps.get("current") else _raw(estimate.get("avg")),
             "eps_7d": _raw(eps.get("7daysAgo")),
             "eps_30d": _raw(eps.get("30daysAgo")),
+            "eps_60d": _raw(eps.get("60daysAgo")),
             "eps_90d": _raw(eps.get("90daysAgo")),
             "low": _raw(estimate.get("low")),
             "high": _raw(estimate.get("high")),

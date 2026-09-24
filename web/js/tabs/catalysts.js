@@ -95,6 +95,26 @@ function expectationLines(event) {
   });
 }
 
+// Released value against the survey point, when TradingView has printed it.
+function actualLine(event) {
+  const rows = event.actuals || [];
+  if (!rows.length) return null;
+  const parts = rows.map((row) => {
+    const unit = row.unit === '%' ? '%' : row.unit ? ' ' + row.unit : '';
+    const surprise = row.surprise == null ? ''
+      : ` (${row.surprise >= 0 ? '+' : ''}${num(row.surprise, row.decimals)} vs ${num(row.forecast, row.decimals)} expected)`;
+    return el('span', {}, [
+      row.label + ' ',
+      el('span', { class: row.surprise == null ? '' : row.surprise > 0 ? 'up' : row.surprise < 0 ? 'down' : 'flat', text: num(row.value, row.decimals) + unit }),
+      surprise,
+    ]);
+  });
+  const line = el('div', { class: 'cat-detail cat-actual' }, ['Actual: ']);
+  parts.forEach((part, index) => { if (index) line.append(' \u00b7 '); line.append(part); });
+  line.append(el('span', { class: 'dim', text: ' \u00b7 TradingView; the agency release is authoritative' }));
+  return line;
+}
+
 function certaintyTag(event, labels) {
   if (event.certainty_class === 'official_schedule' || event.certainty_class === 'official_announcement') return null;
   return el('span', { class: 'cat-tag', title: labels[event.certainty_class] || '', text: event.certainty_class.replace('_', ' ').toUpperCase() });
@@ -119,6 +139,7 @@ function macroRow(event, labels) {
         event.source_url ? el('a', { class: 'cat-src', href: event.source_url, target: '_blank', rel: 'noopener', text: event.source_id }) : null,
       ]),
       event.detail ? el('div', { class: 'cat-detail', text: event.detail }) : null,
+      actualLine(event),
       ...expectationLines(event),
       prints.length ? el('div', { class: 'cat-detail', text: `Previous: ${prints.map(formatPrint).join(' · ')}` }) : null,
     ]),
@@ -304,7 +325,7 @@ export default async function renderCatalysts(root, data) {
     switchGroup([['both', 'BOTH LANES'], ['macro', 'MACRO'], ['single_name', 'SINGLE NAME']], filter.lane, set('lane')),
     switchGroup([[false, 'ALL NAMES'], [true, 'WATCHLIST']], filter.watchlist, set('watchlist')),
     el('div', { class: 'field' }, [el('label', { text: 'FIND' }), search]),
-    el('span', { class: 'field-note', text: `Through ${data.horizon_end}` }),
+    el('span', { class: 'field-note', text: data.high_importance_horizon_end && data.high_importance_horizon_end > data.horizon_end ? `Through ${data.horizon_end}; high-importance macro through ${data.high_importance_horizon_end}` : `Through ${data.horizon_end}` }),
   ])));
   root.append(host);
   root.append(notice(data.note));

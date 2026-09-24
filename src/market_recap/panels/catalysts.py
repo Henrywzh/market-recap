@@ -129,12 +129,15 @@ def _prints(specs: list[dict], use_cache: bool, cache: dict) -> list[dict]:
 
 
 def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool) -> tuple[list[dict], dict[str, str], list[str]]:
-    raw, failed, everything = _macro_events(ctx, start, end, use_cache)
+    # High-importance releases are listed further out than the rest: an FOMC
+    # decision five weeks away matters more than claims next Thursday.
+    far = max(end, start + timedelta(days=int(settings.get("high_importance_horizon_days", 0))))
+    raw, failed, everything = _macro_events(ctx, start, far, use_cache)
     series_cache: dict = {}
     events, seen = [], set()
     for event in raw:
         release = _match(event, settings["releases"])
-        if release is None:
+        if release is None or (event["date"] > end.isoformat() and release["importance"] != "high"):
             continue
         title = release["label"] or event["title"]
         key = f"{event['source_id']}:{event['date']}:{_slug(title)}"
@@ -162,7 +165,8 @@ def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool) -> tupl
             "_expect": [key for key in (release.get("expect") or []) if key in X.CATALOG],
         })
     for item in settings.get("manual") or []:
-        if start.isoformat() <= item["date"] <= end.isoformat():
+        last = far if item.get("importance") == "high" else end
+        if start.isoformat() <= item["date"] <= last.isoformat():
             events.append({
                 "event_key": f"manual:{item['date']}:{_slug(item['title'])}",
                 "lane": "macro", "scope": "us_macro", "event_type": item.get("event_type", "other"),
@@ -193,6 +197,9 @@ def _attach_expectations(ctx, events: list[dict], use_cache: bool) -> dict[str, 
         if rows:
             event["expectations"] = rows
             attached += 1
+        actuals = X.actuals_for(event, keys, book) if keys else []
+        if actuals:
+            event["actuals"] = actuals
     ctx.log.add(SourceRecord(
         "catalysts_expectations",
         "Survey forecasts, Kalshi distributions and Cleveland nowcasts",
@@ -352,6 +359,8 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     return {
         "as_of": ctx.as_of,
         "horizon_end": end.isoformat(),
+        "high_importance_horizon_end": max(
+            end, session + timedelta(days=int(settings.get("high_importance_horizon_days", 0)))).isoformat(),
         "week_sessions": [d.isoformat() for d in week_sessions],
         "week": _week(week_sessions, upcoming, session),
         "events": upcoming,

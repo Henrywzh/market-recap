@@ -96,6 +96,8 @@ FRESHNESS = {
     "filings": {"stale_after_calendar_days": 21},
     # Vanguard publishes holdings monthly, a few weeks after month end.
     "monthly_holdings": {"stale_after_calendar_days": 60},
+    # FactSet's Earnings Insight: weekly in season, less often between them.
+    "weekly_article": {"stale_after_calendar_days": 45},
 }
 DEFAULT_FRESHNESS_POLICY = "daily_close"
 
@@ -123,6 +125,7 @@ CACHE_TTL = {
     # (sources.sec); this lifetime is only the last resort behind both.
     "filings": timedelta(days=40),
     "missing": timedelta(days=7),               # negative cache for a 404
+    "archive": timedelta(days=365),             # published articles, past calendar pages
 }
 
 

@@ -103,8 +103,24 @@ SOURCE_LABEL = {
 SURVEY_SOURCES = ("tradingview", "nasdaq", "forexfactory")
 
 
+def actuals_for(event: dict, keys: list[str], book: dict) -> list[dict]:
+    """Released values for this event, each with the survey point it beat or missed."""
+    out = []
+    for key in keys:
+        spec = CATALOG.get(key)
+        actual = (book.get("actuals") or {}).get(("tradingview", event["date"], key))
+        if spec is None or not actual or actual.get("value") is None:
+            continue
+        forecast = (book["points"].get(("tradingview", event["date"], key)) or {}).get("value")
+        row = _reading("actual", "tradingview", spec, actual["value"])
+        row["forecast"] = forecast
+        row["surprise"] = round(actual["value"] - forecast, 4) if forecast is not None else None
+        out.append(row)
+    return out
+
+
 def empty_book() -> dict:
-    return {"points": {}, "markets": {}, "models": {}, "polymarket": []}
+    return {"points": {}, "actuals": {}, "markets": {}, "models": {}, "polymarket": []}
 
 
 def num(value) -> float | None:
@@ -225,6 +241,15 @@ def _titled_points(rows: list[dict], *, date_field: str, title_field: str, value
 
 def tradingview_points(rows: list[dict]) -> dict[tuple[str, str], dict]:
     return _titled_points(rows, date_field="date", title_field="title", value_field="forecast", pattern_field="tv")
+
+
+def tradingview_actuals(rows: list[dict]) -> dict[tuple[str, str], dict]:
+    """What TradingView printed as the actual once a release is out.
+
+    Third-party and fast: the agency's own figure (and FRED's copy of it) can
+    arrive later and can differ; the page says which this is.
+    """
+    return _titled_points(rows, date_field="date", title_field="title", value_field="actual", pattern_field="tv")
 
 
 def forexfactory_points(rows: list[dict]) -> dict[tuple[str, str], dict]:

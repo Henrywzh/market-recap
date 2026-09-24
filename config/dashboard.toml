@@ -201,6 +201,8 @@ TLT = "ishares"
 [catalysts]
 # Days ahead the tab lists, and sessions in the week strip at its top.
 horizon_days = 30
+# High-importance macro events (FOMC, CPI, payrolls, GDP) are listed this far out.
+high_importance_horizon_days = 45
 week_sessions = 5
 # An earnings report's importance is the company's weight in the S&P 500 or
 # Nasdaq-100 (percent): a 1% name moves the index on its own.
@@ -518,6 +520,12 @@ ratio_ma_periods = [60, 200]
 # The period each chart opens on (one of periods.technicals_chart).
 single_ticker_period = "1Y"
 ratio_period = "5Y"
+
+# EARNINGS (under CATALYSTS): FactSet's Earnings Insight figures, a daily
+# bottom-up revision tracker from each member's consensus trend, and the
+# reporting season from Nasdaq's calendar. ``estimates`` switches the tracker.
+[earnings]
+estimates = true
 
 # MONITOR: a research queue, not a signal. A name enters when its adjusted
 # close is threshold_pct below its drawdown_period high, or when its

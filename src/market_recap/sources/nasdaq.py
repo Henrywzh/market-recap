@@ -66,12 +66,14 @@ def parse_earnings(text: str) -> list[dict]:
     return out
 
 
-def fetch_earnings(date: str, *, use_cache: bool = True) -> list[dict]:
+def fetch_earnings(date: str, *, use_cache: bool = True, kind: str = "daily_file") -> list[dict]:
+    """One day's calendar. A day well in the past no longer changes, so the
+    season scoreboard reads those with ``kind="archive"``."""
     text = cache.fetch_text(
         NAMESPACE, f"earnings-{date}",
         lambda: get_text(EARNINGS_URL.format(date=date), timeout=20.0, retries=1, user_agent=USER_AGENT,
                          headers={"Accept": "application/json"}),
-        kind="daily_file", suffix=".json", use_cache=use_cache,
+        kind=kind, suffix=".json", use_cache=use_cache,
     )
     return parse_earnings(text)
 

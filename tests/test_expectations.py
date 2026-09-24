@@ -147,3 +147,21 @@ def test_attach_writes_the_rows_and_forgets_the_private_key(monkeypatch):
     assert events[0]["expectations"][0]["source_label"] == "TradingView"
     assert failed == {"expectations_forexfactory": "HTTP 429"}
     assert ctx.log.records[0].status == "partial"
+
+
+def test_actual_is_joined_with_the_survey_point_it_is_compared_to():
+    from market_recap.compute import expectations as E
+
+    rows = [{"date": "2026-09-24T12:30:00.000Z", "title": "Initial Jobless Claims", "forecast": 201000, "actual": 195000},
+            {"date": "2026-09-25T12:30:00.000Z", "title": "Initial Jobless Claims", "forecast": 205000, "actual": None}]
+    book = E.empty_book()
+    for (day, key), point in E.tradingview_points(rows).items():
+        book["points"][("tradingview", day, key)] = point
+    for (day, key), point in E.tradingview_actuals(rows).items():
+        book["actuals"][("tradingview", day, key)] = point
+    released = E.actuals_for({"date": "2026-09-24"}, ["claims"], book)
+    assert len(released) == 1
+    assert released[0]["kind"] == "actual" and released[0]["value"] == 195000
+    assert released[0]["surprise"] == -6000
+    # Not out yet: nothing, rather than a zero or the forecast.
+    assert E.actuals_for({"date": "2026-09-25"}, ["claims"], book) == []

@@ -154,6 +154,8 @@ def load(events: list[dict], *, use_cache: bool = True) -> tuple[dict, dict[str,
             rows = fetch_tradingview(dates[0], dates[-1] + timedelta(days=1), use_cache=use_cache)
             for (day, key), point in E.tradingview_points(rows).items():
                 book["points"][("tradingview", day, key)] = point
+            for (day, key), point in E.tradingview_actuals(rows).items():
+                book["actuals"][("tradingview", day, key)] = point
         except (FetchError, ValueError, KeyError, TypeError) as exc:
             failed["tradingview"] = _clip(exc)
 

@@ -11,7 +11,8 @@ import { resizeAll, disposeAll } from './charts.js';
 const TABS = [
   { id: 'markets', label: 'MARKETS', artifact: 'markets', module: 'markets' },
   { id: 'monitor', label: 'MONITOR', artifact: 'monitor', module: 'monitor' },
-  { id: 'catalysts', label: 'CATALYSTS', artifact: 'catalysts', module: 'catalysts' },
+  { id: 'catalysts', label: 'CALENDAR', artifact: 'catalysts', module: 'catalysts', group: 'catalysts-earnings' },
+  { id: 'earnings', label: 'EARNINGS', artifact: 'earnings', module: 'earnings', group: 'catalysts-earnings' },
   { id: 'heatmaps', label: 'HEAT MAPS', artifact: 'heatmaps', module: 'heatmaps' },
   { id: 'fixed-income', label: 'FIXED INCOME', artifact: 'fixed_income', module: 'fixed-income', group: 'rates-macro' },
   { id: 'macro', label: 'MACRO', artifact: 'macro', module: 'macro', group: 'rates-macro' },
@@ -26,6 +27,7 @@ const TABS = [
 // Views that answer one question share a top-level tab and switch beneath it.
 // Each view keeps its own hash, so existing links (#dcf, #fixed-income) work.
 const GROUPS = {
+  'catalysts-earnings': 'CATALYSTS',
   'rates-macro': 'RATES & MACRO',
   'valuation-dcf': 'VALUATION',
 };

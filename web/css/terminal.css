@@ -581,3 +581,8 @@ table.data.monitor-table td.wrap-cell { overflow-wrap: normal; word-break: norma
 table.data.monitor-table td.monitor-ticker-cell { min-width: 150px; max-width: 220px; }
 table.data.monitor-change-table td.wrap-cell { overflow-wrap: normal; }
 table.data.monitor-change-table td.monitor-why { min-width: 260px; }
+
+/* EARNINGS */
+.earn-sub { color: var(--text-dim); font-size: 10.5px; letter-spacing: 0.08em; margin: 10px 0 6px; }
+.earn-sub a { color: var(--accent); }
+.cat-actual { color: var(--text); }
