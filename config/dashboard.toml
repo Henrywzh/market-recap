@@ -78,10 +78,6 @@ ticker = "TSM"
 label = "TSMC (ADR)"
 
 [[watchlist]]
-ticker = "BESIY"
-label = "BE Semiconductor (ADR)"
-
-[[watchlist]]
 ticker = "ASML"
 label = "ASML (ADR)"
 

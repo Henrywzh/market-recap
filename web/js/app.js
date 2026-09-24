@@ -13,15 +13,34 @@ const TABS = [
   { id: 'monitor', label: 'MONITOR', artifact: 'monitor', module: 'monitor' },
   { id: 'catalysts', label: 'CATALYSTS', artifact: 'catalysts', module: 'catalysts' },
   { id: 'heatmaps', label: 'HEAT MAPS', artifact: 'heatmaps', module: 'heatmaps' },
-  { id: 'fixed-income', label: 'FIXED INCOME', artifact: 'fixed_income', module: 'fixed-income' },
-  { id: 'macro', label: 'MACRO', artifact: 'macro', module: 'macro' },
+  { id: 'fixed-income', label: 'FIXED INCOME', artifact: 'fixed_income', module: 'fixed-income', group: 'rates-macro' },
+  { id: 'macro', label: 'MACRO', artifact: 'macro', module: 'macro', group: 'rates-macro' },
   { id: 'technicals', label: 'TECHNICALS', artifact: 'technicals', module: 'technicals' },
   { id: 'cross-listing', label: 'CROSS-LISTING', artifact: 'cross_listing', module: 'cross-listing' },
   { id: 'xray', label: 'ETF X-RAY', artifact: 'xray', module: 'xray' },
-  { id: 'valuation', label: 'VALUATION & QUALITY', artifact: 'valuation', module: 'valuation' },
+  { id: 'valuation', label: 'VALUATION & QUALITY', artifact: 'valuation', module: 'valuation', group: 'valuation-dcf' },
+  { id: 'dcf', label: 'DCF', artifact: 'dcf', module: 'dcf', group: 'valuation-dcf' },
   { id: 'financials', label: 'FINANCIALS', artifact: 'financials', module: 'financials' },
-  { id: 'dcf', label: 'DCF', artifact: 'dcf', module: 'dcf' },
 ];
+
+// Views that answer one question share a top-level tab and switch beneath it.
+// Each view keeps its own hash, so existing links (#dcf, #fixed-income) work.
+const GROUPS = {
+  'rates-macro': 'RATES & MACRO',
+  'valuation-dcf': 'VALUATION',
+};
+const lastInGroup = new Map();
+
+function navItems() {
+  const items = [];
+  TABS.forEach((tab) => {
+    if (!tab.group) items.push({ id: tab.id, label: tab.label, views: [tab] });
+    else if (!items.some((item) => item.id === tab.group)) {
+      items.push({ id: tab.group, label: GROUPS[tab.group], views: TABS.filter((t) => t.group === tab.group) });
+    }
+  });
+  return items;
+}
 
 const renderers = new Map();
 
@@ -90,16 +109,27 @@ function applyTheme(theme) {
 function buildTabs() {
   const nav = document.getElementById('tabs');
   nav.innerHTML = '';
-  TABS.forEach((tab) => {
+  navItems().forEach((item) => {
     nav.append(el('button', {
       class: 'tab',
       role: 'tab',
-      id: `tab-${tab.id}`,
-      text: tab.label,
+      id: `tab-${item.id}`,
+      text: item.label,
       'aria-selected': 'false',
-      onclick: () => select(tab.id),
+      onclick: () => select(lastInGroup.get(item.id) || item.views[0].id),
     }));
   });
+}
+
+function subTabs(tab) {
+  if (!tab.group) return null;
+  return el('div', { class: 'subtabs', role: 'tablist' }, TABS.filter((t) => t.group === tab.group).map((view) => el('button', {
+    class: 'subtab',
+    role: 'tab',
+    text: view.label,
+    'aria-selected': String(view.id === tab.id),
+    onclick: () => select(view.id),
+  })));
 }
 
 async function select(id, silent = false) {
@@ -107,12 +137,16 @@ async function select(id, silent = false) {
   if (!tab) return;
   state.active = id;
   if (!silent) location.hash = id;
+  if (tab.group) lastInGroup.set(tab.group, id);
 
+  const navId = tab.group || id;
   document.querySelectorAll('.tab').forEach((node) => {
-    node.setAttribute('aria-selected', String(node.id === `tab-${id}`));
+    node.setAttribute('aria-selected', String(node.id === `tab-${navId}`));
   });
 
   const main = document.getElementById('main');
+  const host = document.getElementById('subtabs');
+  host.replaceChildren(...[subTabs(tab)].filter(Boolean));
   disposeAll();
   main.innerHTML = '';
   main.append(el('div', { class: 'loading', text: `Loading ${tab.label}…` }));

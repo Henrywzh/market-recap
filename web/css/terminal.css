@@ -129,6 +129,15 @@ select.control {
 }
 .tab:hover { color: var(--text); }
 .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+/* A grouped tab's views, directly under the tab bar. Empty for single views. */
+.subtabs-host:empty { display: none; }
+.subtabs { display: flex; gap: 2px; padding: 8px 12px 0; overflow-x: auto; scrollbar-width: none; }
+.subtab {
+  appearance: none; background: none; border: 1px solid var(--border); color: var(--text-dim);
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; padding: 5px 11px; cursor: pointer; white-space: nowrap;
+}
+.subtab:hover { color: var(--text); }
+.subtab[aria-selected="true"] { color: var(--text); border-color: var(--accent); }
 
 /* ---------- Layout ---------- */
 main { padding: 14px 12px 60px; }
