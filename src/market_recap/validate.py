@@ -26,7 +26,7 @@ SEVERITIES = ("error", "warning", "notice")
 # the page: the catalyst calendars and the ETF look-through holdings. Unofficial
 # endpoints among them fail for reasons of their own, and one of them being
 # down must not hold back the prices every other tab needs.
-OPTIONAL_SOURCES = re.compile(r"^(catalysts_\w+|(ssga|ishares|vanguard)_xray_holdings|yahoo_estimates)$")
+OPTIONAL_SOURCES = re.compile(r"^(catalysts_\w+|(ssga|ishares|vanguard|invesco)_xray_holdings|yahoo_estimates)$")
 
 
 @dataclass(frozen=True)

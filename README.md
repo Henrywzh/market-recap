@@ -20,7 +20,7 @@ them.
 | **RATES & MACRO → FIXED INCOME** | Published par yield curve vs. 1 week / 1 month / start of year, level and bps change by tenor, 10Y−2Y and 10Y−3M spreads |
 | **RATES & MACRO → MACRO** | Commodity futures/ETF proxies with multi-period returns, last 12 monthly inflation releases as a heat table |
 | **TECHNICALS** | Any A/B relative-strength ratio with its moving averages and MACD over a chosen period; single-ticker price with **your own MA periods, slope window and period**, a ±1.5σ band, z-score regime, SMA slope, and forward return by z-score band. Every indicator is computed in the browser from the baked close history, by one module tested against pandas |
-| **ETF X-RAY** | Every fund on the ETF heat map looked through to its holdings, from the **issuer's own file** (State Street and iShares daily, Vanguard monthly): concentration (top-10 weight, effective N), sector and country weights against SPY, the top 25 holdings with each one's contribution to the day, overlap with every other fund, and a **valuation look-through** (P/E, P/B, ROE, FCF and dividend yield, growth, margin) aggregated like an index and joined to the VALUATION rows, with the share of the fund it covers. Bond funds show duration, yield to maturity, coupon and maturity buckets. Funds with no usable holdings file (QQQ, RSP, the commodity funds) are listed with the reason, never proxied |
+| **ETF X-RAY** | Every fund on the ETF heat map looked through to its holdings, from the **issuer's own file** (State Street, iShares and Invesco daily, Vanguard monthly): concentration (top-10 weight, effective N), sector and country weights against SPY, the top 25 holdings with each one's contribution to the day, overlap with every other fund, and a **valuation look-through** (P/E, P/B, ROE, FCF and dividend yield, growth, margin) aggregated like an index and joined to the VALUATION rows, with the share of the fund it covers. Bond funds show duration, yield to maturity, coupon and maturity buckets. Funds with no usable holdings file (the commodity funds) are listed with the reason, never proxied |
 | **CROSS-LISTING** | A US line against its home-market line at the depositary ratio, with the diagnostics that say whether the series measures a dislocation or a session gap |
 | **VALUATION → VALUATION & QUALITY** | Every S&P 500 / Nasdaq-100 member on one sortable table: P/E, EV/EBITDA, EV/Sales, P/B, FCF / dividend / shareholder yield, ROE, ROIC, gross profitability, margins, growth, accruals, leverage, interest cover, Piotroski F-score and margin stability — trailing twelve months from each company's own 10-Qs, market cap from the close. Valuation × quality scatter, sector medians, and colour by rank within sector. **P/E against each company's own ten years**: price ÷ TTM EPS as it was filed at the time, with its median, percentile band and where today sits |
 | **FINANCIALS** | Ten fiscal years of income statement, balance sheet and cash flow for every S&P 500 and Nasdaq-100 member, with key ratios, each column's period end and last filing date, restatements applied and pre-split years put on today's share basis |
@@ -35,12 +35,13 @@ Every one of these is free and requires no account.
 | **SSGA daily holdings** (`holdings-daily-us-en-<fund>.xlsx`) | S&P 500 and Nasdaq-100 constituents, official index weights, share counts | The issuer's own published basket with an explicit as-of date |
 | **SSGA NAV / premium history** (`navhist-...`, `pdhist-...`) | Net flow and premium for State Street funds | Daily NAV, shares outstanding and premium back to 2003 |
 | **BlackRock fund download** | Net flow and ETF X-RAY holdings for iShares funds | The workbook's `Historical` sheet carries NAV and shares outstanding back to inception; fund ids resolve through the iShares product screener |
-| **Vanguard fund API** (`/vmf/api/<ticker>/{profile,price,portfolio-holding}`) | Premium to NAV, whether an ETF is one share class of a larger fund, and monthly stock holdings for ETF X-RAY | No shares-outstanding history, so no flow series; holdings published weeks after month end, with no sector or country |
+| **Vanguard fund API** (`/vmf/api/<ticker>/{profile,price,characteristic,portfolio-holding}`) | Premium to NAV, whether an ETF is one share class of a larger fund, that share class's month-end net assets (tile size), and monthly stock holdings for ETF X-RAY | No shares-outstanding history, so no flow series; holdings published weeks after month end, with no sector or country |
 | **Wikipedia** — List of S&P 500 companies | GICS sector and sub-industry | Current descriptive labels, cached weekly |
 | **Yahoo Finance** via `yfinance` | Daily closes for constituents, ETFs and indices; ETF AUM and shares outstanding; commodity futures | Unofficial wrapper around a mutable service |
 | **US Treasury** daily par yield curve XML | The yield curve | Official publication; "latest published" is not always today |
 | **FRED** `fredgraph.csv` | PCE, core PCE, trimmed-mean PCE, personal income and spending | Keyless CSV export; current vintage, not point-in-time |
 | **BLS / BEA** iCalendar feeds, **Census** indicator calendar, **Federal Reserve** calendar JSON, **Treasury** fiscaldata upcoming auctions | CATALYSTS macro lane | Each agency's own schedule with its release time; Treasury lists auctions only once announced, about a week ahead |
+| **Invesco** holdings API (`dng-api.invesco.com/.../shareclasses/<CUSIP>/holdings/fund`) | ETF X-RAY holdings for QQQ and RSP | Unofficial JSON behind invesco.com; asked by ticker it answers for QQQ only, so funds are named by CUSIP. No shares-outstanding history, so still no flow |
 | **Nasdaq** earnings calendar (`api.nasdaq.com/api/calendar/earnings`) | CATALYSTS single-name lane | Unofficial JSON behind nasdaq.com; timing, consensus EPS and, for past dates, reported EPS. Not marked company-confirmed |
 | **SEC** XBRL company facts | FINANCIALS, VALUATION & QUALITY and the DCF | Annual and quarterly 10-K/10-Q figures with their filing dates, plus the cover-page share count; one parse per filer feeds all three tabs |
 
@@ -305,11 +306,17 @@ data/cache/                raw snapshots and parsed frames, pruned each build
   daily share history, and a sampled substitute is not offered: a vendor's
   `sharesOutstanding` for QQQ disagrees with its own assets-over-price by 67%,
   and day-over-day changes in a field that inconsistent would be fiction.
-- **Four tiles are drawn too large.** VOO, VTI, VEA and VWO are single share
-  classes of funds that also have investor, admiral and institutional classes,
-  and the reported total assets cover all of them — $2.3tn for VTI. Vanguard's
-  own `hasMoreThan1ShareClass` flag is what detects this; the tiles are marked
-  `*` and the caption says so.
+- **EFA and EEM flows go unknown when iShares stops updating.** Their published
+  share count has sat unchanged for up to 127 sessions (every other fund moves
+  within 19), so past 20 unchanged sessions a window lying wholly inside that
+  stretch is shown as unknown, not as a measured zero; longer windows that
+  contain real changes are kept.
+- **Vanguard tiles are month-end and rounded.** VOO, VTI, VEA and VWO are one
+  share class of larger funds; a vendor's total assets cover every class
+  ($2.3tn for VTI). They are sized by Vanguard's own share-class net assets
+  (`/characteristic`, month end, published to one decimal: VOO's "$1.0
+  trillion" is good to about 5%). A tile falls back to the whole-fund figure,
+  marked `*`, only if that call fails.
 - Sector and index rows in the sector table are the buy-and-hold return of
   **today's members at today's published weights**, from dividend-adjusted
   closes. Over days and weeks that tracks the index to a few basis points;

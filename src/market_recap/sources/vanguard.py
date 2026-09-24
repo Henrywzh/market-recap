@@ -16,6 +16,7 @@ no measured flow series here. Two things it does publish are worth having:
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import pandas as pd
@@ -25,6 +26,7 @@ from .http import FetchError, get_text
 
 PROFILE_URL = "https://investor.vanguard.com/vmf/api/{ticker}/profile"
 PRICE_URL = "https://investor.vanguard.com/vmf/api/{ticker}/price"
+CHARACTERISTIC_URL = "https://investor.vanguard.com/vmf/api/{ticker}/characteristic"
 HOLDINGS_URL = "https://investor.vanguard.com/vmf/api/{ticker}/portfolio-holding/stock?start={start}&count={count}"
 # Vanguard answers up to this many holdings per request; VTI has ~3,500.
 HOLDINGS_PAGE = 1000
@@ -123,3 +125,28 @@ def fetch_holdings(ticker: str, *, use_cache: bool = True) -> tuple[pd.DataFrame
     frame["asset_class"] = "Equity"
     as_of = str(entities[0].get("asOfDate") or "")[:10] or None
     return frame, as_of, HOLDINGS_URL.format(ticker=ticker, start=1, count=HOLDINGS_PAGE)
+
+
+_SCALE = {"thousand": 1e3, "million": 1e6, "billion": 1e9, "trillion": 1e12}
+
+
+def parse_money(text: str | None) -> float | None:
+    """'$690.1 billion' -> 6.901e11. Vanguard publishes these pre-formatted."""
+    match = re.match(r"^\s*\$?\s*([\d,]+(?:\.\d+)?)\s*(thousand|million|billion|trillion)?\s*$", str(text or ""), re.I)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", "")) * _SCALE.get((match.group(2) or "").lower(), 1.0)
+
+
+def fetch_share_class_assets(ticker: str, *, use_cache: bool = True) -> tuple[float | None, str | None]:
+    """The ETF share class's own net assets and their date (month end).
+
+    A Vanguard ETF is usually one share class of a larger fund; the fund's
+    total is not the ETF's size. Published rounded to one decimal of its
+    unit, so VOO's "$1.0 trillion" is good to about 5%: enough to size a tile.
+    """
+    payload = _cached_json(CHARACTERISTIC_URL.format(ticker=ticker.upper()), f"characteristic-{ticker.upper()}",
+                           use_cache=use_cache, kind="reference_data")
+    fund = ((payload or {}).get("equityCharacteristic") or {}).get("fund") or {}
+    date = str(fund.get("shareClassTotalNetAssetsDate") or "")[:10] or None
+    return parse_money(fund.get("shareClassTotalNetAssets")), date

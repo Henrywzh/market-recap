@@ -18,13 +18,15 @@ import pandas as pd
 from ..compute import xray as X
 from ..compute.returns import period_return
 from ..config import XRAY_ARTIFACT_DIR
-from ..sources import ishares, ssga, vanguard
+from ..sources import invesco, ishares, ssga, vanguard
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, prune_stale, write_json
 
 PROVIDERS = {
     "ssga": ("State Street daily holdings", ssga.fetch_holdings, "fund_holdings"),
     "ishares": ("iShares daily holdings", ishares.fetch_holdings, "fund_holdings"),
     "vanguard": ("Vanguard monthly holdings", vanguard.fetch_holdings, "monthly_holdings"),
+    # Named "invesco:<CUSIP>" in the config: Invesco's API answers by CUSIP.
+    "invesco": ("Invesco daily holdings", invesco.fetch_holdings, "fund_holdings"),
 }
 BOND_GROUP = "Fixed Income"
 INTERNATIONAL_GROUP = "International"
@@ -174,12 +176,13 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     for ticker, group in groups.items():
         spec = settings["holdings"].get(ticker, "none: no holdings source configured")
         entry = {"ticker": ticker, "group": group, "provider": None, "status": "unavailable"}
+        spec, _, fund_id = spec.partition(":") if spec.startswith("invesco:") else (spec, "", ticker)
         if spec not in PROVIDERS:
             funds.append({**entry, "reason": spec.split(":", 1)[-1].strip()})
             continue
         label, fetch, _ = PROVIDERS[spec]
         try:
-            frame, as_of, url = fetch(ticker, use_cache=use_cache)
+            frame, as_of, url = fetch(fund_id.strip() or ticker, use_cache=use_cache)
         except Exception as exc:
             funds.append({**entry, "provider": spec, "reason": str(exc)[:ERROR_DETAIL_CHARS]})
             records[spec].append((ticker, None, False))
@@ -235,8 +238,8 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         "funds": funds,
         "overlap": {"tickers": order, "matrix": matrix},
         "note": (
-            "Holdings are each issuer's own published file: State Street and iShares daily (as of the "
-            "prior session), Vanguard monthly, weeks after month end, and each fund shows its date. "
+            "Holdings are each issuer's own published file: State Street, iShares and Invesco daily (as "
+            "of the prior session), Vanguard monthly, weeks after month end, and each fund shows its date. "
             "Vanguard weights are shares of the fund's stock holdings; the others are shares of the "
             "whole fund, cash and derivatives included. Sectors are GICS: the issuer's own label where "
             "it publishes one, otherwise the name's label from this build's index members or another "

@@ -119,11 +119,16 @@ export default function renderHeatmaps(root, data) {
         if (row.flow_status === 'published') {
           meta = `AUM ${aum(row.aum)} · NAV ${num(row.nav)}`
             + (row.premium_pct === null || row.premium_pct === undefined ? '' : ` · premium ${num(row.premium_pct, 4)}%`)
-            + `<br>flow published since ${row.history_start}`;
+            + `<br>flow published since ${row.history_start}`
+            + (row.shares_unchanged_since
+              ? `<br>issuer share count unchanged since ${row.shares_unchanged_since} (${row.shares_unchanged_sessions} sessions): windows inside that stretch are unknown, not 0`
+              : '');
         } else {
           const size = row.aum_basis === 'all_share_classes'
             ? `size ${aum(row.aum)} covers all ${row.share_classes ?? ''} share classes of this fund, not the ETF alone`
-            : `size ${aum(row.aum)} (reported total assets)`;
+            : row.aum_basis === 'share_class_month_end'
+              ? `size ${aum(row.aum)}: Vanguard's net assets for the ETF share class, ${row.aum_as_of || 'month end'}, rounded as published`
+              : `size ${aum(row.aum)} (reported total assets)`;
           const prem = row.premium_pct === null || row.premium_pct === undefined
             ? ''
             : `<br>premium ${num(row.premium_pct, 2)}% (${row.premium_source || 'issuer'})`;
@@ -147,12 +152,20 @@ export default function renderHeatmaps(root, data) {
     etfBody.unshift(notice(
       `${coverage.published.length} funds carry a published net-flow series (${bySource}). `
       + `${coverage.unpublished.length} have no issuer NAV history located, so they are sized by reported `
-      + 'total assets and left uncoloured rather than filled with an estimate: '
+      + 'total assets (Vanguard ETFs: the issuer\'s month-end net assets for the ETF share class) '
+      + 'and left uncoloured rather than filled with an estimate: '
       + `${coverage.unpublished.join(', ')}.`
       + ((data.oversized_aum || []).length
         ? ` Tiles marked * (${data.oversized_aum.join(', ')}) are one share class of a fund whose `
           + 'reported assets cover the other classes too, so those tiles are drawn larger than the ETF is.'
         : ''),
+    ));
+  }
+  const unchanged = Object.entries(data.shares_unchanged || {});
+  if (unchanged.length) {
+    etfBody.unshift(notice(
+      `Issuer share count not updated for ${unchanged.map(([t, d]) => `${t} since ${d}`).join(', ')}. `
+      + 'Other funds change within a few sessions, so a window lying entirely in that stretch is shown as unknown rather than as zero flow.',
     ));
   }
   root.append(card('US ETFs — PUBLISHED NET FLOW',
@@ -225,7 +238,8 @@ export default function renderHeatmaps(root, data) {
         ]));
       }
 
-      status.textContent = `${ticker}: ${payload.sessions} published sessions since ${payload.history_start}.`;
+      status.textContent = `${ticker}: ${payload.sessions} published sessions since ${payload.history_start}.`
+        + (payload.shares_unchanged_since ? ` Issuer share count unchanged since ${payload.shares_unchanged_since}; the flat bars since then are the issuer not updating, not a measured zero.` : '');
     } catch (error) {
       status.textContent = error.message;
     }

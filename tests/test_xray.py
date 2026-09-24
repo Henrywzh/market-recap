@@ -71,3 +71,24 @@ def test_bond_profile_weights_duration_and_buckets_maturities():
     assert profile["duration"] == pytest.approx(0.5 * 2 + 0.4 * 10 + 0.1 * 0.1)
     buckets = {b["label"]: b["weight"] for b in profile["maturity_buckets"]}
     assert buckets["1-3y"] == 0.5 and buckets["10-20y"] == 0.4 and buckets[X.CASH_LABEL] == 0.1
+
+
+def test_invesco_holdings_keep_equities_and_issuer_weights():
+    from market_recap.sources import invesco
+
+    payload = {"effectiveDate": "2026-09-23", "holdings": [
+        {"ticker": "NVDA", "issuerName": "NVIDIA Corp", "percentageOfTotalNetAssets": 8.2, "securityTypeCode": "COM"},
+        {"ticker": "ASML", "issuerName": "ASML Holding", "percentageOfTotalNetAssets": 0.7, "securityTypeCode": "ADR"},
+        {"ticker": "BRK/B", "issuerName": "Berkshire", "percentageOfTotalNetAssets": 0.2, "securityTypeCode": "COM"},
+        {"ticker": "ARE", "issuerName": "Alexandria &amp; Co", "percentageOfTotalNetAssets": 0.2, "securityTypeCode": "REIT"},
+        {"ticker": "NQZ6", "issuerName": "Future", "percentageOfTotalNetAssets": 0.14, "securityTypeCode": "IFUT"},
+        {"ticker": None, "issuerName": "Synthetic", "percentageOfTotalNetAssets": -0.14, "securityTypeCode": "SYN"},
+        {"ticker": "USDPDV", "issuerName": "Cash", "percentageOfTotalNetAssets": None, "securityTypeCode": "CURR"},
+    ]}
+    frame, as_of = invesco.parse_holdings(payload)
+    assert as_of == "2026-09-23"
+    equity = frame[frame["asset_class"] == "Equity"]
+    assert list(equity["ticker"]) == ["NVDA", "ASML", "BRK/B", "ARE"]
+    assert equity["weight"].sum() == pytest.approx(0.093)
+    assert "Alexandria & Co" in set(frame["name"])
+    assert "USDPDV" not in set(frame["ticker"])

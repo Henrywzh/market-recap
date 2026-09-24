@@ -14,6 +14,38 @@ def _returns_for(series: pd.Series, periods: list[str]) -> dict:
     return {k: clean_float(v, 2) for k, v in R.period_returns(series, periods).items()}
 
 
+# Every issuer series here changes its share count within 19 sessions at most,
+# except iShares' EFA and EEM, whose published count has sat unchanged for up
+# to 127 sessions. Past this many unchanged sessions a window lying wholly in
+# the unchanged stretch is unknown, not a measured zero.
+STALE_SHARE_SESSIONS = 20
+
+
+def _unchanged_run(shares: pd.Series) -> tuple[pd.Timestamp | None, int]:
+    """Date of the last published change in units, and sessions since it."""
+    clean = shares.dropna()
+    if clean.empty:
+        return None, 0
+    changed = clean.diff().ne(0)
+    changed.iloc[0] = True
+    last = clean.index[changed.to_numpy()][-1]
+    return last, int((clean.index > last).sum())
+
+
+def _mask_unchanged(flows: dict, periods: list[str], last_change: pd.Timestamp | None,
+                    unchanged: int, latest: pd.Timestamp) -> dict:
+    if last_change is None or unchanged < STALE_SHARE_SESSIONS:
+        return flows
+    out = dict(flows)
+    for period in periods:
+        sessions = period_sessions(period)
+        inside = (pd.Timestamp(year=latest.year, month=1, day=1) > last_change) if sessions is None \
+            else sessions <= unchanged
+        if inside:
+            out[period] = None
+    return out
+
+
 def _cumulative_flows(flows: pd.Series, periods: list[str]) -> dict:
     """Net flow summed over each window, in dollars.
 
@@ -80,6 +112,9 @@ def _build_published_flow(
         except Exception:
             premium = None
 
+    last_change, unchanged = _unchanged_run(shares)
+    stale_since = to_iso_date(last_change) if unchanged >= STALE_SHARE_SESSIONS else None
+
     tail = flow.dropna().tail(chart_sessions)
     price_tail = prices.reindex(tail.index).ffill() if not prices.empty else pd.Series(dtype=float)
     mas = {
@@ -104,11 +139,15 @@ def _build_published_flow(
             [clean_float(v, 4) for v in premium.reindex(tail.index).to_numpy()] if premium is not None else []
         ),
         "latest_premium_pct": clean_float(premium.iloc[-1], 4) if premium is not None and not premium.empty else None,
+        "shares_unchanged_since": stale_since,
+        "shares_unchanged_sessions": unchanged if stale_since else None,
     }
     write_json(ETF_ARTIFACT_DIR / f"{ticker}.json", payload)
 
     return {
-        "flows": _cumulative_flows(flow, periods),
+        "flows": _mask_unchanged(_cumulative_flows(flow, periods), periods, last_change, unchanged, frame.index[-1]),
+        "shares_unchanged_since": stale_since,
+        "shares_unchanged_sessions": payload["shares_unchanged_sessions"],
         # State Street publishes total net assets directly; BlackRock's sheet
         # does not, so it is NAV times units -- which is the same quantity, and
         # reconstructing it here keeps every published fund sizeable on the map.
@@ -208,6 +247,8 @@ def build(ctx) -> dict:
                 "shares_outstanding": result["shares_outstanding"],
                 "flows": result["flows"],
                 "flow_status": "published",
+                "shares_unchanged_since": result["shares_unchanged_since"],
+                "shares_unchanged_sessions": result["shares_unchanged_sessions"],
                 "premium_pct": result["premium_pct"],
                 "history_start": result["history_start"],
                 "sessions": result["sessions"],
@@ -226,6 +267,17 @@ def build(ctx) -> dict:
             if node["flow_status"] != "published":
                 node["aum"] = clean_float(sizes.get(node["ticker"]))
                 node["aum_source"] = "yahoo_total_assets" if node["aum"] else None
+                if node.get("multi_share_class"):
+                    # Vanguard's own figure for the ETF share class alone,
+                    # month-end and rounded, beats a whole-fund total.
+                    try:
+                        own, own_date = vanguard.fetch_share_class_assets(node["ticker"])
+                    except Exception:
+                        own, own_date = None, None
+                    if own:
+                        node |= {"aum": clean_float(own), "aum_source": "vanguard_share_class",
+                                 "aum_basis": "share_class_month_end", "aum_as_of": own_date}
+                        continue
                 # An ETF that is one share class of a multi-class fund reports
                 # assets for the whole fund. VTI comes back at $2.3tn that way,
                 # which would make it the largest tile on the map. The tile is
@@ -234,13 +286,20 @@ def build(ctx) -> dict:
                 node["aum_basis"] = (
                     "all_share_classes" if node.get("multi_share_class") else "reported_total_assets"
                 )
+        share_class = [n for n in etf_nodes if n.get("aum_source") == "vanguard_share_class"]
+        if share_class:
+            ctx.log.add(SourceRecord(
+                "vanguard_share_class_assets", "Vanguard ETF share-class net assets (month end)",
+                vanguard.HOME_URL, min((n["aum_as_of"] for n in share_class if n.get("aum_as_of")), default=None),
+                rows=len(share_class), policy="monthly_holdings",
+            ))
         ctx.log.add(
             SourceRecord(
                 "yahoo_etf_assets",
                 "Total assets for funds without a published NAV file",
                 "https://finance.yahoo.com",
                 ctx.as_of,
-                rows=int(sum(1 for n in etf_nodes if n.get("aum_source"))),
+                rows=int(sum(1 for n in etf_nodes if n.get("aum_source") == "yahoo_total_assets")),
                 status="ok" if len(sizes) == len(unpublished) else "partial",
             )
         )
@@ -287,6 +346,8 @@ def build(ctx) -> dict:
         "flow_coverage": {"published": sorted(published), "unpublished": sorted(unpublished)},
         "flow_sources": {k: sorted(v) for k, v in by_source.items()},
         "oversized_aum": sorted(n["ticker"] for n in etf_nodes if n.get("aum_basis") == "all_share_classes"),
+        "shares_unchanged": {n["ticker"]: n["shares_unchanged_since"] for n in etf_nodes
+                             if n.get("shares_unchanged_since")},
         "note": (
             f"Constituent tiles are sized by the weight State Street publishes for "
             f"{ctx.primary.holdings_etf}, not by an "
@@ -294,7 +355,7 @@ def build(ctx) -> dict:
             "outstanding valued at that day's NAV, taken from State Street's or BlackRock's own "
             "published history -- a measured series back to the fund's inception, not an estimate "
             "accrued since this dashboard was first run. Funds whose issuer publishes no such file "
-            "are sized by reported total assets and shown without flow rather than with a "
+            "are sized by reported total assets (Vanguard ETFs by the issuer's month-end figure for the ETF share class) and shown without flow rather than with a "
             "market-cap guess -- a vendor's shares-outstanding field for those funds disagrees "
             "with its own assets-over-price by more than half, so a sampled flow built on it "
             "would be fiction. Premium/discount comes from State Street and Vanguard, each for "

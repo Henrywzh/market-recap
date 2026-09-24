@@ -161,18 +161,18 @@ top_holdings = 25
 
 [etf_xray.holdings]
 # Where each fund on the heat map gets its holdings: the issuer's own file, or
-# why there is none. A fund without one is never stood in for by a look-alike
+# why there is none. Invesco funds are named by CUSIP ("invesco:<CUSIP>"). A fund without one is never stood in for by a look-alike
 # (QQQ is not QNDX's basket, however close): it is listed with the reason.
 SPY = "ssga"
 IVV = "ishares"
 VOO = "vanguard"
-QQQ = "none: Invesco serves no holdings file to scripted clients"
+QQQ = "invesco:46090E103"
 QNDX = "ssga"
 VTI = "vanguard"
 IWM = "ishares"
 DIA = "ssga"
 MDY = "ssga"
-RSP = "none: Invesco serves no holdings file to scripted clients"
+RSP = "invesco:46137V357"
 XLK = "ssga"
 XLF = "ssga"
 XLV = "ssga"
