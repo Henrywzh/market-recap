@@ -205,3 +205,46 @@ def test_eps_history_uses_only_what_had_been_filed_at_the_time():
     history = {h["period_end"]: h for h in sec.eps_history(facts)}
     q1 = history["2026-03-31"]
     assert sum(v * sign for v, _, sign in q1["parts"]) == 10.0 + 3.0 - 2.0
+
+
+def test_aggregate_pe_counts_losses_and_blanks_thin_coverage():
+    import numpy as np
+    import pandas as pd
+
+    from market_recap.compute import valuation as V
+
+    sessions = pd.date_range("2026-01-02", periods=3, freq="B")
+    caps = pd.DataFrame({"A": [100.0, 100.0, 100.0], "B": [100.0, 100.0, 100.0]}, index=sessions)
+    earnings = pd.DataFrame({"A": [10.0, 10.0, 10.0], "B": [-5.0, np.nan, 5.0]}, index=sessions)
+    out = V.aggregate_pe(caps, earnings)
+    # A loss lowers the group's earnings rather than dropping out.
+    assert out["pe"].iloc[0] == 200.0 / 5.0
+    # Half the priced cap without an EPS in force is below the coverage floor.
+    assert out["coverage"].iloc[1] == 0.5 and np.isnan(out["pe"].iloc[1])
+    assert out["pe"].iloc[2] == 200.0 / 15.0
+
+
+def test_eps_in_force_keeps_losses_and_expires():
+    import numpy as np
+    import pandas as pd
+
+    from market_recap.compute import valuation as V
+
+    sessions = pd.DatetimeIndex(["2026-01-05", "2026-02-10", "2026-12-01"])
+    eps = V.eps_in_force(sessions, [("2026-02-01", "2025-12-31", -1.5)])
+    assert np.isnan(eps.iloc[0])
+    assert eps.iloc[1] == -1.5
+    assert np.isnan(eps.iloc[2])  # stood longer than EPS_STALE_AFTER_DAYS
+
+
+def test_pe_series_blanks_an_eps_in_the_wrong_units():
+    import numpy as np
+    import pandas as pd
+
+    from market_recap.compute import valuation as V
+
+    prices = pd.Series([30.0, 30.0], index=pd.DatetimeIndex(["2021-08-02", "2022-01-03"]))
+    steps = [("2021-07-23", "2021-06-30", 3519996.66), ("2021-10-22", "2021-09-30", 1.5)]
+    pe = V.pe_series(prices, steps)
+    assert np.isnan(pe.iloc[0])
+    assert pe.iloc[1] == 20.0

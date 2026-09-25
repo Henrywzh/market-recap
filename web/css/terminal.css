@@ -635,6 +635,8 @@ table.data.monitor-change-table td.monitor-why { min-width: 260px; }
 .earn-sub { color: var(--text-dim); font-size: 10.5px; letter-spacing: 0.08em; margin: 10px 0 6px; }
 .earn-sub a { color: var(--accent); }
 .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.val-agg { margin-bottom: 10px; }
+.val-agg-stats { margin-bottom: 6px; }
 @media (max-width: 1100px) { .grid.three { grid-template-columns: minmax(0, 1fr); } }
 .earn-charts { margin-top: 6px; }
 .earn-chart { min-width: 0; }

@@ -4,7 +4,7 @@
 // is compared with other utilities, never with software. The top fifth by the
 // metric's own "better" direction is green, the bottom fifth red.
 
-import { el, card, table, num, sectionTitle, notice, DASH } from '../fmt.js';
+import { el, card, table, num, sectionTitle, notice, metaRow, DASH } from '../fmt.js';
 import { render, SERIES_COLORS } from '../charts.js';
 
 const BILLION = 1e9;
@@ -136,13 +136,15 @@ async function loadHistory(symbol) {
   return response.json();
 }
 
-function historyChart(node, history) {
+// `cap` stops the axis where a year of near-zero group earnings would
+// otherwise stretch it to hundreds and flatten the decade into a line.
+function historyChart(node, history, { cap = null } = {}) {
   const s = history.stats;
   render(node, (option, p) => ({
     ...option,
     grid: { ...option.grid, right: 60, bottom: 30 },
     xAxis: { ...option.xAxis, data: history.dates },
-    yAxis: { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 10, formatter: (v) => `${v}x` } },
+    yAxis: { ...option.yAxis, max: cap ? Math.ceil(cap) : undefined, axisLabel: { color: p.dim, fontSize: 10, formatter: (v) => `${v}x` } },
     series: [{
       name: 'P/E', type: 'line', data: history.pe, showSymbol: false, connectNulls: false,
       lineStyle: { width: 1.4, color: p.text },
@@ -159,6 +161,121 @@ function historyChart(node, history) {
       },
     }],
   }));
+}
+
+// Axis top for an index or sector decade, as a multiple of its 90th percentile.
+const AGGREGATE_AXIS_CAP = 1.6;
+const SECTOR_SHORT = {
+  'Communication Services': 'Comm Services',
+  'Consumer Discretionary': 'Cons Discretionary',
+  'Consumer Staples': 'Cons Staples',
+  'Information Technology': 'Info Tech',
+};
+
+// Where each index and sector P/E sits in its own ten years, most expensive
+// on top; a click draws that group's decade beside it.
+function percentileChart(node, series, selected, onPick) {
+  const shown = series.filter((s) => s.stats && s.stats.percentile !== null)
+    .sort((a, b) => a.stats.percentile - b.stats.percentile);
+  const chart = render(node, (option, p) => ({
+    ...option,
+    grid: { left: 124, right: 92, top: 6, bottom: 24 },
+    tooltip: {
+      ...option.tooltip,
+      trigger: 'item',
+      axisPointer: undefined,
+      formatter: (q) => {
+        const s = shown[q.dataIndex];
+        return `<b>${s.label}</b> · ${s.companies} companies<br>P/E ${num(s.stats.current, 1)}x · 10Y median ${num(s.stats.median, 1)}x`
+          + `<br>${num(s.stats.percentile, 0)}th percentile of its own ten years`;
+      },
+    },
+    xAxis: {
+      type: 'value', min: 0, max: 100, interval: 25,
+      axisLabel: { color: p.dim, fontSize: 10, formatter: '{value}' },
+      splitLine: { lineStyle: { color: p.border, opacity: 0.45 } },
+    },
+    yAxis: {
+      type: 'category',
+      // Labels answer clicks too: a bar at the 1st percentile is too short to hit.
+      triggerEvent: true,
+      data: shown.map((s) => SECTOR_SHORT[s.label] || s.label),
+      axisLabel: {
+        fontSize: 10,
+        color: (value, index) => (shown[index]?.kind === 'index' ? p.text : p.dim),
+        fontWeight: (value, index) => (shown[index]?.kind === 'index' ? 'bold' : 'normal'),
+      },
+      axisLine: { show: false },
+      axisTick: { show: false },
+    },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 13,
+      data: shown.map((s) => {
+        const pct = s.stats.percentile;
+        const color = s.kind === 'index' ? p.blue : pct >= 80 ? p.down : pct <= 20 ? p.up : p.accent;
+        return {
+          value: Math.round(pct),
+          itemStyle: { color, opacity: s.key === selected ? 1 : 0.7, borderColor: s.key === selected ? p.text : color, borderWidth: s.key === selected ? 1 : 0 },
+        };
+      }),
+      label: {
+        show: true, position: 'right', color: p.dim, fontSize: 10,
+        formatter: (q) => `${num(shown[q.dataIndex].stats.current, 1)}x · ${q.value}th`,
+      },
+      markLine: {
+        silent: true, symbol: 'none',
+        data: [{ xAxis: 50 }],
+        lineStyle: { color: p.faint, type: 'dashed' },
+        label: { show: false },
+      },
+    }],
+  }));
+  chart?.on('click', (q) => {
+    const index = q.componentType === 'yAxis'
+      ? shown.findIndex((s) => (SECTOR_SHORT[s.label] || s.label) === q.value)
+      : q.dataIndex;
+    if (shown[index]) onPick(shown[index].key);
+  });
+}
+
+function aggregateSection(data) {
+  const agg = data.aggregates;
+  if (!agg || !agg.series?.length) return null;
+  const primary = agg.series.find((s) => s.kind === 'index') || agg.series[0];
+  let selected = primary.key;
+  const barsNode = el('div', { class: 'chart tall' });
+  const lineNode = el('div', { class: 'chart tall' });
+  const lineTitle = el('span', { class: 'dim' });
+  const stats = el('div', { class: 'stat-strip val-agg-stats' });
+  const stat = (label, value, note, cls = '') => el('div', { class: 'stat' }, [
+    el('div', { class: 'stat-label', text: label }),
+    el('div', { class: `stat-value ${cls}`, text: value }),
+    note ? el('div', { class: 'stat-note', text: note }) : null,
+  ]);
+  const draw = () => {
+    const s = agg.series.find((x) => x.key === selected);
+    percentileChart(barsNode, agg.series, selected, (key) => { selected = key; draw(); });
+    lineTitle.textContent = `${s.label} · ${s.companies} companies · weekly`;
+    if (s.stats) {
+      const cap = s.stats.max > s.stats.p90 * AGGREGATE_AXIS_CAP ? s.stats.p90 * AGGREGATE_AXIS_CAP : null;
+      historyChart(lineNode, { dates: agg.dates, pe: s.pe, stats: s.stats }, { cap });
+    }
+    const st = s.stats || {};
+    stats.replaceChildren(
+      stat('P/E (TTM)', present(st.current) ? `${num(st.current, 1)}x` : DASH, s.label),
+      stat('OWN 10Y PERCENTILE', present(st.percentile) ? `${num(st.percentile, 0)}th` : DASH, `range ${num(st.min, 1)}x – ${num(st.max, 1)}x`,
+        st.percentile >= 80 ? 'down' : st.percentile <= 20 ? 'up' : ''),
+      stat('VS 10Y MEDIAN', present(st.vs_median) ? `${st.vs_median > 0 ? '+' : ''}${num(st.vs_median, 0)}%` : DASH, `median ${num(st.median, 1)}x · IQR ${num(st.p25, 1)}–${num(st.p75, 1)}x`),
+      stat('COVERAGE', present(s.coverage) ? `${num(s.coverage * 100, 0)}%` : DASH, 'of its market cap with filed EPS'),
+    );
+  };
+  const section = el('div', { class: 'grid two val-agg' }, [
+    card('P/E VS OWN 10 YEARS · INDICES & SECTORS', el('span', { class: 'dim', text: 'percentile · red ≥ 80th · green ≤ 20th · click to chart' }), [barsNode]),
+    card('P/E · 10 YEARS', lineTitle, [stats, lineNode]),
+  ]);
+  requestAnimationFrame(draw);
+  return section;
 }
 
 function epsChart(node, history) {
@@ -240,6 +357,17 @@ export default async function renderValuation(root, data) {
     root.append(el('div', { class: 'gap', text: 'No companies were valued in this build. Run the refresh command without --skip-sec.' }));
     return;
   }
+  const agg = data.aggregates;
+  root.append(metaRow(`AS OF ${data.as_of} · ${data.rows.length} COMPANIES FROM THEIR OWN FILINGS`, [
+    agg ? `INDEX & SECTOR P/E: total market cap over total TTM diluted earnings, each company's EPS as filed at the time (split-adjusted close over the TTM EPS public that day). Losses count, as in an index's own P/E. `
+      + `Each company is held at today's share count, one listing per company: its own P/E is exact on every date, but the weights between companies are today's, and the members are today's -- a company that has left the index is not in its past. `
+      + `A week is drawn only when companies with an EPS in force hold at least ${num(agg.min_coverage * 100, 0)}% of the group's priced market cap. `
+      + `When a group's total earnings approach zero (Energy through 2016's losses, Utilities in 2019–20, most sectors on 2020's earnings in early 2021) its P/E runs into the hundreds; the chart's axis stops at ${AGGREGATE_AXIS_CAP}x the group's 90th percentile, and the range in the stats is the true one. `
+      + 'An EPS more than twice the share price either way is taken as a units error in the filing and left out. '
+      + 'This is trailing GAAP, not FactSet\'s forward operating P/E (on EARNINGS), so it runs higher and moves more around recessions. Percentile and band are over the last ten years of sessions.' : null,
+  ]));
+  const aggregates = aggregateSection(data);
+  if (aggregates) root.append(aggregates);
 
   const metrics = data.metrics;
   const valuationMetrics = metrics.filter((m) => m.group === 'valuation');

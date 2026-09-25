@@ -123,6 +123,47 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
     }
 
 
+def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dict[str, pd.Series]) -> dict | None:
+    """Each index's and each sector's P/E against its own ten years.
+
+    A company counts at today's share count throughout: its own P/E is exact
+    on every date, but the weights between companies are today's, and the
+    members are today's (no company that has left the index is in its past).
+    """
+    if not caps:
+        return None
+    cap_frame, earnings_frame = pd.DataFrame(caps), pd.DataFrame(earnings)
+    groups = [(spec.key, spec.label, "index", [r["ticker"] for r in rows if spec.key in r["indices"]])
+              for spec in ctx.indices]
+    primary = [r for r in rows if ctx.primary.key in r["indices"] and r["sector"]]
+    for sector in sorted({r["sector"] for r in primary}):
+        groups.append((sector, sector, "sector", [r["ticker"] for r in primary if r["sector"] == sector]))
+    dates, series = None, []
+    for key, label, kind, tickers in groups:
+        columns = [t for t in tickers if t in cap_frame.columns]
+        if not columns:
+            continue
+        frame = V.aggregate_pe(cap_frame[columns], earnings_frame[columns]).iloc[-V.HISTORY_SESSIONS:]
+        stats = V.pe_stats(frame["pe"])
+        weekly = frame.groupby(frame.index.to_period("W-FRI")).tail(1)
+        dates = dates or [d.strftime("%Y-%m-%d") for d in weekly.index]
+        series.append({
+            "key": key,
+            "label": label,
+            "kind": kind,
+            "companies": len(columns),
+            "coverage": clean_float(frame["coverage"].iloc[-1], 3),
+            "stats": {k: clean_float(v, 2) if isinstance(v, float) else v for k, v in stats.items()} if stats else None,
+            "pe": [clean_float(v, 2) for v in weekly["pe"].to_numpy()],
+        })
+    return {
+        "dates": dates,
+        "series": series,
+        "window_sessions": V.HISTORY_SESSIONS,
+        "min_coverage": V.AGGREGATE_MIN_COVERAGE,
+    }
+
+
 def _weight_check(rows: list[dict], weights: dict[str, float]) -> dict:
     """Each checked company's share of total market cap over its share of SPY.
 
@@ -168,6 +209,9 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     if use_cache:
         sec.check_filings(cik_for(symbol, cik_map) for symbol in symbols)
     rows, skipped = [], {}
+    # Market cap and TTM earnings through time, one listing per company: a
+    # second share class carries the whole company's cap again.
+    caps, earnings, companies = {}, {}, set()
     for symbol in symbols:
         cik = cik_for(symbol, cik_map)
         if cik is None:
@@ -185,7 +229,14 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         price = float(closes.iloc[-1]) if closes is not None and not closes.empty else None
         symbol_splits = ctx.splits[symbol] if symbol in ctx.splits.columns else None
         history = _history(symbol, data, ctx.prices.get(symbol), symbol_splits)
-        rows.append(_row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history))
+        row = _row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history)
+        rows.append(row)
+        prices = ctx.prices.get(symbol)
+        if prices is not None and data.eps_history and row["market_cap"] and price and row["cik"] not in companies:
+            companies.add(row["cik"])
+            shares = row["market_cap"] / price
+            caps[symbol] = prices * shares
+            earnings[symbol] = V.plausible_eps(prices, V.eps_steps(data.eps_history, symbol_splits)) * shares
 
     primary = ctx.members[ctx.primary.key].drop_duplicates("yahoo_symbol").set_index("yahoo_symbol")["weight"]
     check = _weight_check([r for r in rows if ctx.primary.key in r["indices"]], primary.to_dict())
@@ -225,6 +276,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             "disagree": disagree,
         },
         "weight_check": check,
+        "aggregates": _aggregates(ctx, rows, caps, earnings),
         "financials_sector": V.FINANCIALS_SECTOR,
         "note": (
             "Market cap is the closing price times a filed share count: the latest cover-page count "

@@ -274,6 +274,11 @@ HISTORY_QUANTILES = {"p10": 0.10, "p25": 0.25, "median": 0.50, "p75": 0.75, "p90
 # earnings divided into every price since; two quarters without a successor
 # and the multiple goes blank instead.
 EPS_STALE_AFTER_DAYS = 190
+# A TTM EPS more than this multiple of the share price, either way, is a units
+# error in the filing's facts, not a result: Halliburton's 2021-25 figures
+# came through in the millions of dollars. A real loss that deep is rare
+# enough (APA's 2020 was about 1.3x its price) that the bound costs nothing.
+EPS_PRICE_LIMIT = 2.0
 
 
 def split_factor_after(splits: pd.Series | None, date: str) -> float:
@@ -300,24 +305,40 @@ def eps_steps(history: Sequence[dict], splits: pd.Series | None) -> list[tuple[s
     return steps
 
 
-def pe_series(prices: pd.Series, steps: Sequence[tuple[str, str, float]]) -> pd.Series:
-    """Daily P/E: the split-adjusted close over the TTM EPS already public.
+def eps_in_force(sessions: pd.DatetimeIndex, steps: Sequence[tuple[str, str, float]]) -> pd.Series:
+    """The TTM EPS already public on each session, losses included.
 
     A quarter's EPS applies from the session after its filing date -- a filing
-    can land after the close -- and a loss leaves the multiple blank.
+    can land after the close. Before the first filing, and once a figure has
+    stood EPS_STALE_AFTER_DAYS without a successor, it is unknown.
     """
-    prices = prices.dropna()
-    if prices.empty or not steps:
-        return pd.Series(dtype=float)
+    if not len(sessions) or not steps:
+        return pd.Series(np.nan, index=sessions, dtype=float)
     known = pd.Series(
         {pd.Timestamp(filed) + pd.Timedelta(days=1): eps for filed, _, eps in sorted(steps)}
     ).groupby(level=0).last()
     # The figure in force each session, and how long it has been in force.
-    position = known.index.searchsorted(prices.index, side="right") - 1
+    position = known.index.searchsorted(sessions, side="right") - 1
     in_force = position >= 0
-    eps = pd.Series(np.where(in_force, known.to_numpy()[position.clip(0)], np.nan), index=prices.index)
-    age = (prices.index - known.index[position.clip(0)]).days
+    eps = pd.Series(np.where(in_force, known.to_numpy()[position.clip(0)], np.nan), index=sessions)
+    age = (sessions - known.index[position.clip(0)]).days
     eps[~in_force | (age > EPS_STALE_AFTER_DAYS)] = np.nan
+    return eps
+
+
+def plausible_eps(prices: pd.Series, steps: Sequence[tuple[str, str, float]]) -> pd.Series:
+    """eps_in_force on the price's sessions, blank where it cannot be a real figure."""
+    eps = eps_in_force(prices.index, steps)
+    return eps.where((eps / prices).abs() <= EPS_PRICE_LIMIT)
+
+
+def pe_series(prices: pd.Series, steps: Sequence[tuple[str, str, float]]) -> pd.Series:
+    """Daily P/E: the split-adjusted close over the TTM EPS already public.
+    A loss leaves the multiple blank."""
+    prices = prices.dropna()
+    if prices.empty or not steps:
+        return pd.Series(dtype=float)
+    eps = plausible_eps(prices, steps)
     return (prices / eps.where(eps > 0)).rename("pe")
 
 
@@ -339,3 +360,26 @@ def pe_stats(pe: pd.Series) -> dict | None:
     stats["percentile"] = None if pd.isna(current) else float((valid <= current).mean() * 100)
     stats["vs_median"] = None if pd.isna(current) else (float(current) / stats["median"] - 1) * 100
     return stats
+
+
+# --- Index and sector P/E -------------------------------------------------------
+# A session's aggregate is drawn only when the companies with an EPS in force
+# hold at least this share of the group's priced market cap; below it the
+# multiple describes whichever companies happened to have filed.
+AGGREGATE_MIN_COVERAGE = 0.8
+
+
+def aggregate_pe(caps: pd.DataFrame, earnings: pd.DataFrame) -> pd.DataFrame:
+    """Total market cap over total TTM earnings, per session (dates x companies in).
+
+    Losses count, as in an index's own P/E, so a group whose earnings sum to
+    zero or less has no multiple. ``coverage`` is the share of the group's
+    priced market cap that has an EPS in force.
+    """
+    both = caps.notna() & earnings.notna()
+    total_cap = caps.where(both).sum(axis=1, min_count=1)
+    total_earnings = earnings.where(both).sum(axis=1, min_count=1)
+    coverage = total_cap / caps.sum(axis=1, min_count=1)
+    pe = total_cap / total_earnings.where(total_earnings > 0)
+    pe = pe.where(coverage >= AGGREGATE_MIN_COVERAGE)
+    return pd.DataFrame({"pe": pe, "coverage": coverage})
