@@ -65,6 +65,22 @@ commodity_history = "2y"
 above_ma_windows = [5, 20, 50, 100, 200]
 slope_lookbacks = [5, 20, 50, 100, 200]
 
+# Intraday strip on MARKETS, fetched in the reader's browser through
+# functions/api/quotes.js. It sits beside the recap, never inside it: every
+# other figure on the page is the nightly build's close. The symbols are the
+# quote strip, the indices and the watchlist above; only the rates are named
+# here, because they come from a different publisher (CNBC).
+[live]
+refresh_seconds = 60        # automatic refresh while the session is open and the tab visible
+closed_refresh_seconds = 300  # how often a closed session checks whether it has opened
+server_cache_seconds = 15   # repeated clicks and readers share one fetch per window
+stale_after_seconds = 1200  # during the session, an older price is marked STALE
+rates = [
+  { symbol = "US2Y", label = "UST 2Y" },
+  { symbol = "US10Y", label = "UST 10Y" },
+  { symbol = "US30Y", label = "UST 30Y" },
+]
+
 # Names to follow that no tracked index carries. A watchlist entry gets the
 # same price treatment as an index member and is never mixed into an index's
 # breadth, weight or advance/decline figures -- it is not a constituent.

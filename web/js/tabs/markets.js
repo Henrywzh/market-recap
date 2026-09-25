@@ -1,5 +1,6 @@
 import { el, card, table, num, pct, dirClass, periodSwitch, sectionTitle, notice, DASH } from '../fmt.js';
 import { areaLine, zeroLine, multiLine } from '../charts.js';
+import { mountLive } from '../live.js';
 
 function quoteStat(quote) {
   return el('div', { class: 'stat' }, [
@@ -127,6 +128,10 @@ export default function renderMarkets(root, data, manifest) {
     root.append(notice(`${latest.date}: not yet cross-checked against published closes `
       + `(${latest.names} of the largest members answered). Yahoo's closes are shown as served.`));
   }
+
+  // Intraday prices first, the recap's closes beneath: the live strip is
+  // labelled as such and nothing below it changes during the session.
+  root.append(mountLive());
 
   root.append(el('div', { class: 'stat-strip' }, [
     ...data.quotes.map(quoteStat),

@@ -649,3 +649,24 @@ table.data.monitor-change-table td.monitor-why { min-width: 260px; }
 .earn-progress-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); opacity: 0.35; }
 .earn-progress-text { position: relative; display: block; padding: 3px 8px; font-size: 11px; color: var(--text); }
 .cat-actual-item { white-space: nowrap; }
+
+/* ---------- Live strip (MARKETS) ---------- */
+.live-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.live-status { font-size: 10.5px; letter-spacing: 0.08em; color: var(--text-dim); }
+.live-status.down { color: var(--down); }
+.live-refresh {
+  background: transparent;
+  border: 1px solid var(--accent-dim);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  padding: 3px 10px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.live-refresh:hover { border-color: var(--accent); }
+.live-refresh:disabled { opacity: 0.5; cursor: progress; }
+.live-strip { margin-bottom: 6px; }
+.live-stale .stat-value { color: var(--text-dim); }
+.live-stale .live-age { color: var(--down); }

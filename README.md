@@ -5,16 +5,17 @@ Live: **https://market-recap-b5p.pages.dev**
 A post-market recap dashboard for the US equity market, built entirely on
 free, attributable data sources and published as a static site.
 
-There is no backend, no API key and no paid data feed. A Python build step
-fetches the day's sources, writes JSON artifacts, and a static page renders
-them.
+There is no API key and no paid data feed. A Python build step fetches the
+day's sources, writes JSON artifacts, and a static page renders them. The one
+piece of server code is the live strip's quote function (below); everything
+else is the static build.
 
 ## What it shows
 
 | Tab | Contents |
 |---|---|
 | **MONITOR** | Research queue over the S&P 500 and the watchlist. A name enters at a 20% drawdown from its 1Y high or when it trails its sector peers (company excluded) by 10 pp over 1M. **TODAY** lists what changed since the previous build (entered, stabilising, evidence turned, reported, left), with weak-as-a-whole sectors grouped as one event; **QUEUE** has a price-state × evidence-state 2×2; evidence for and against (FY1 EPS revisions from Yahoo, revenue, FCF, last quarter vs consensus) is listed, never scored; candidate history persists between builds, and watch/exclude reasons live in `config/monitor_notes.toml`. See [the monitor contract](docs/monitor.md). |
-| **MARKETS** | SPY/QQQ/IWM quote strip, SPX/NDX drawdown with sessions since the high, advance/decline, a price + net-breadth + movers block for **each index**, a **watchlist** of names no index holds, sector performance / weight / **contribution**, sectors rebased to 100, % of each sector above its moving averages, SMA200 slope by sector |
+| **MARKETS** | A **live intraday strip** (see below), then the recap: SPY/QQQ/IWM quote strip, SPX/NDX drawdown with sessions since the high, advance/decline, a price + net-breadth + movers block for **each index**, a **watchlist** of names no index holds, sector performance / weight / **contribution**, sectors rebased to 100, % of each sector above its moving averages, SMA200 slope by sector |
 | **CATALYSTS → CALENDAR** | Things to watch, in two lanes. **Macro & broad index**: BLS, BEA and Census releases at the time each agency publishes, FOMC decisions / press conferences / minutes and Board speeches from the Fed's calendar, announced Treasury coupon auctions, rule-based events (options expiry and quad witching, S&P rebalance, VIX expiry, jobless claims, ISM, EIA crude inventories) and hand-kept events (elections, deadlines) from the config — each with the previous print from FRED and the period it covers. **Single name**: earnings of every S&P 500 / Nasdaq-100 member and watchlist name with before-open / after-close timing, consensus EPS, estimates and index weight. A **last session** block shows what was released and who reported, with EPS vs. consensus and the day's move. Times in New York and the reader's own zone; every event says how its date is known | High-importance releases (FOMC, CPI, payrolls, GDP) are listed 45 days out. After a release the last-session block shows the actual against the survey point (TradingView).
 | **CATALYSTS → EARNINGS** | S&P 500 earnings in three blocks. **FactSet Earnings Insight** figures read from its articles (growth, beat rates, forward P/E vs its 10-year average, the quarter's and year's EPS revision against FactSet's typical one; history from 2014). A **daily bottom-up revision tracker** built from every member's consensus trend (current quarter, this year and next, 7–90 days, by sector, with the names that moved it). The **reporting season** from Nasdaq's calendar: reported, beat rate, surprise, growth against year-ago EPS captured before each report |
 | **HEAT MAPS** | S&P 500 treemap sized by the **issuer-published SPY weight** and coloured by return; US ETF treemap sized by AUM and coloured by estimated net flow |
@@ -66,7 +67,7 @@ gap, never back-filled.
 ```bash
 make install
 make refresh
-make serve
+make serve        # static build only; make serve-live adds the quote function
 ```
 
 `make refresh` is the whole pipeline: fetch, build, **validate**, prune. It
@@ -215,6 +216,38 @@ artifacts/                 generated JSON the site reads
 data/cache/                raw snapshots and parsed frames, pruned each build
 ```
 
+## Live intraday strip
+
+The top of MARKETS carries intraday prices for the quote strip, the indices
+and the watchlist (Yahoo's v8 chart) and the 2Y/10Y/30Y Treasury yields
+(CNBC's quote service). It is the only thing on the page that changes during
+the session, and it is labelled that way: each price shows its source and its
+age, the strip says whether the session is open, a price older than
+`stale_after_seconds` during the session is marked STALE, and one that did not
+arrive is a dash. The recap beneath it is untouched: every other figure is
+the nightly build's close.
+
+- **Refresh.** Every `refresh_seconds` (60) while the regular session is open
+  and the tab is visible; every `closed_refresh_seconds` (300) otherwise, to
+  notice the open. A hidden tab or another dashboard tab does not poll. The
+  REFRESH button fetches on demand.
+- **Server side.** `functions/api/quotes.js` is a Cloudflare Pages Function,
+  deployed with the site because `wrangler pages deploy` picks up
+  `functions/` from the repository root. It fetches only what `dist/live.json`
+  lists; `site.build` writes that file from `config/dashboard.toml`
+  (`[universe]`, `[[watchlist]]`, `[live]`), so the endpoint cannot proxy
+  arbitrary symbols. Readers share one fetch per `server_cache_seconds` (15)
+  per Cloudflare isolate, so clicks do not multiply requests to Yahoo.
+- **Session.** Open means now falls inside the regular period Yahoo reports
+  for the symbols, which handles weekends and exchange holidays without a
+  calendar here. Change is against Yahoo's previous close.
+- **Sources were chosen by measurement** from Cloudflare's edge (2026-09-24
+  after the close, 2026-09-25 mid-session): Yahoo chart ~45 ms with prices a
+  few seconds old, CNBC ~120 ms and ~15 s behind. Nasdaq (2-3 s per call) and
+  Cboe (15-minute delay, up to 0.3% off) were not used.
+- **Locally**, `make serve` has no function, so the strip reports HTTP 404;
+  `make serve-live` runs the same tree under `wrangler pages dev` with it.
+
 ## Design rules this repo follows
 
 - **Absence is rendered as an em dash, never as zero.** "No data" and "no
@@ -227,6 +260,8 @@ data/cache/                raw snapshots and parsed frames, pruned each build
   footer with a freshness label. The header shows how old the build is, not a
   ticking clock: this is a static build, and a live-looking clock beside stale
   data is a lie the page tells for free.
+  The live strip is the one intraday element, and it carries its own age per
+  price instead of borrowing the header's.
 - **Short history degrades per reading, not per ticker.** A recent listing
   keeps the readings its history supports and names what the rest would need
   ("needs 200 sessions, has 51") rather than vanishing from the tab.

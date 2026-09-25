@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 import shutil
 
-from .config import ARTIFACT_DIR, REPO_ROOT
+from .config import ARTIFACT_DIR, REPO_ROOT, load_config
 
 WEB_DIR = REPO_ROOT / "web"
 DIST_DIR = REPO_ROOT / "dist"
@@ -47,6 +47,36 @@ def import_map(web: Path = WEB_DIR) -> str:
         path = f"./{source.relative_to(web).as_posix()}"
         imports[path] = f"{path}?h={hashlib.sha256(source.read_bytes()).hexdigest()[:10]}"
     return '<script type="importmap">' + json.dumps({"imports": imports}, separators=(",", ":")) + "</script>"
+
+
+def live_contract(config: dict | None = None) -> dict:
+    """What the intraday strip may fetch, derived from the dashboard contract.
+
+    The quote function reads this file and fetches nothing else, so it is an
+    allowlist as much as a list: the endpoint cannot be used to proxy
+    arbitrary symbols, and adding a watchlist name adds it here without a
+    second list to keep in step.
+    """
+    config = config or load_config()
+    live = config.get("live", {})
+    universe = config["universe"]
+    equities: list[dict] = []
+    for ticker in universe.get("quote_tickers", []):
+        equities.append({"symbol": ticker, "label": ticker, "kind": "etf"})
+    for index in universe.get("indices", []):
+        equities.append({"symbol": index["symbol"], "label": index["key"], "kind": "index"})
+    for entry in config.get("watchlist", []):
+        equities.append({"symbol": entry["ticker"], "label": entry["ticker"], "kind": "watchlist"})
+    seen: set[str] = set()
+    equities = [e for e in equities if not (e["symbol"] in seen or seen.add(e["symbol"]))]
+    return {
+        "refresh_seconds": live.get("refresh_seconds", 60),
+        "closed_refresh_seconds": live.get("closed_refresh_seconds", 300),
+        "server_cache_seconds": live.get("server_cache_seconds", 15),
+        "stale_after_seconds": live.get("stale_after_seconds", 1200),
+        "equities": equities,
+        "rates": [{"symbol": r["symbol"], "label": r["label"], "kind": "rate"} for r in live.get("rates", [])],
+    }
 
 
 def _link_or_copy(source: Path, target: Path) -> None:
@@ -96,6 +126,11 @@ def build(*, dist: Path | None = None) -> dict:
         _link_or_copy(source, dist / "artifacts" / source.relative_to(ARTIFACT_DIR))
         assets += 1
 
+    # Beside the page rather than under artifacts/: it is the contract the
+    # quote function enforces, written from config on every site build, not a
+    # data product of the refresh.
+    (dist / "live.json").write_text(json.dumps(live_contract(), indent=1), encoding="utf-8")
+
     # Cloudflare Pages serves _headers from the site root.
     #
     # Only the JS may be cached hard, and only because its URLs carry the
@@ -121,6 +156,8 @@ def build(*, dist: Path | None = None) -> dict:
         "/index.html\n"
         "  Cache-Control: no-cache\n"
         "/_headers\n"
+        "  Cache-Control: no-cache\n"
+        "/live.json\n"
         "  Cache-Control: no-cache\n"
         "/css/*\n"
         "  Cache-Control: no-cache\n"
