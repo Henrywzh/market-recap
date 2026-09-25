@@ -14,6 +14,7 @@ exactly the same bytes.
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 import shutil
 
@@ -22,6 +23,7 @@ from .config import ARTIFACT_DIR, REPO_ROOT
 WEB_DIR = REPO_ROOT / "web"
 DIST_DIR = REPO_ROOT / "dist"
 CODE_VERSION_PLACEHOLDER = "__CODE_VERSION__"
+IMPORTMAP_PLACEHOLDER = "<!--IMPORTMAP-->"
 
 
 def code_version(web: Path = WEB_DIR) -> str:
@@ -31,6 +33,20 @@ def code_version(web: Path = WEB_DIR) -> str:
         digest.update(source.relative_to(web).as_posix().encode())
         digest.update(source.read_bytes())
     return digest.hexdigest()[:12]
+
+
+def import_map(web: Path = WEB_DIR) -> str:
+    """Map every script to its URL plus a hash of its own bytes.
+
+    Tabs import shared modules by plain relative path (``../fmt.js``), and the
+    JS is served immutable, so without the map a browser that once loaded
+    ``fmt.js`` keeps that copy for a year whatever is deployed after it.
+    """
+    imports = {}
+    for source in sorted((web / "js").rglob("*.js")):
+        path = f"./{source.relative_to(web).as_posix()}"
+        imports[path] = f"{path}?h={hashlib.sha256(source.read_bytes()).hexdigest()[:10]}"
+    return '<script type="importmap">' + json.dumps({"imports": imports}, separators=(",", ":")) + "</script>"
 
 
 def _link_or_copy(source: Path, target: Path) -> None:
@@ -72,7 +88,9 @@ def build(*, dist: Path | None = None) -> dict:
     # The JS is cached as immutable under a versioned URL; the version has to
     # move when the code does, not only when the data is rebuilt.
     index = dist / "index.html"
-    index.write_text(index.read_text(encoding="utf-8").replace(CODE_VERSION_PLACEHOLDER, code_version()), encoding="utf-8")
+    page = index.read_text(encoding="utf-8")
+    page = page.replace(CODE_VERSION_PLACEHOLDER, code_version()).replace(IMPORTMAP_PLACEHOLDER, import_map())
+    index.write_text(page, encoding="utf-8")
 
     for source in ARTIFACT_DIR.rglob("*.json"):
         _link_or_copy(source, dist / "artifacts" / source.relative_to(ARTIFACT_DIR))
