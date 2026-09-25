@@ -44,7 +44,10 @@
   // against this build's data, which looks like the edit never landed.
   const response = await fetch('artifacts/manifest.json', { cache: 'no-store' });
   const manifest = response.ok ? await response.json() : null;
-  const version = encodeURIComponent(manifest?.generated_at || Date.now());
+  // The data build and the code are stamped separately: a code-only deploy
+  // keeps the manifest, and must still change every module URL. site.build
+  // replaces the placeholder with a hash of js/.
+  const version = encodeURIComponent(`${manifest?.generated_at || Date.now()}-__CODE_VERSION__`);
   const app = await import(`./js/app.js?v=${version}`);
   app.boot(manifest, version);
 </script>

@@ -13,6 +13,7 @@ exactly the same bytes.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 import shutil
 
@@ -20,6 +21,16 @@ from .config import ARTIFACT_DIR, REPO_ROOT
 
 WEB_DIR = REPO_ROOT / "web"
 DIST_DIR = REPO_ROOT / "dist"
+CODE_VERSION_PLACEHOLDER = "__CODE_VERSION__"
+
+
+def code_version(web: Path = WEB_DIR) -> str:
+    """A short hash of every script, in path order."""
+    digest = hashlib.sha256()
+    for source in sorted((web / "js").rglob("*.js")):
+        digest.update(source.relative_to(web).as_posix().encode())
+        digest.update(source.read_bytes())
+    return digest.hexdigest()[:12]
 
 
 def _link_or_copy(source: Path, target: Path) -> None:
@@ -58,6 +69,11 @@ def build(*, dist: Path | None = None) -> dict:
             shutil.copy2(source, target)
             pages += 1
 
+    # The JS is cached as immutable under a versioned URL; the version has to
+    # move when the code does, not only when the data is rebuilt.
+    index = dist / "index.html"
+    index.write_text(index.read_text(encoding="utf-8").replace(CODE_VERSION_PLACEHOLDER, code_version()), encoding="utf-8")
+
     for source in ARTIFACT_DIR.rglob("*.json"):
         _link_or_copy(source, dist / "artifacts" / source.relative_to(ARTIFACT_DIR))
         assets += 1
@@ -65,8 +81,9 @@ def build(*, dist: Path | None = None) -> dict:
     # Cloudflare Pages serves _headers from the site root.
     #
     # Only the JS may be cached hard, and only because its URLs carry the
-    # build stamp (`app.js?v=<generated_at>`): a new build is a new URL, so an
-    # immutable copy of the old one is never consulted again.
+    # build stamp (`app.js?v=<generated_at>-<code hash>`): a new build or a
+    # code change is a new URL, so an immutable copy of the old one is never
+    # consulted again.
     #
     # Everything else is `no-cache`, which still revalidates against the ETag
     # and answers 304 when nothing changed -- it costs a round trip, not a
