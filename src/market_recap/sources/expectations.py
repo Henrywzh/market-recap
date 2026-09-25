@@ -25,6 +25,8 @@ CLEVELAND_MONTH = "https://www.clevelandfed.org/-/media/files/webcharts/inflatio
 CLEVELAND_YEAR = "https://www.clevelandfed.org/-/media/files/webcharts/inflationnowcasting/nowcast_year.json"
 FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 POLY_URL = "https://gamma-api.polymarket.com/events"
+# How far past the nearest release Nasdaq pages are expected to be filled.
+NASDAQ_LEAD_DAYS = 7
 
 
 class EmptyPage(RuntimeError):
@@ -165,11 +167,19 @@ def load(events: list[dict], *, use_cache: bool = True) -> tuple[dict, dict[str,
     })
     if nasdaq_days:
         missed = []
+        # Nasdaq fills a day's page about a week ahead; an empty page for a
+        # release further out is not published yet, not a failed fetch.
+        published_until = nasdaq_days[0] + timedelta(days=NASDAQ_LEAD_DAYS)
         for release in nasdaq_days:
             page = release + timedelta(days=1)
             try:
                 rows = fetch_nasdaq_page(page, use_cache=use_cache)
-            except (FetchError, EmptyPage, ValueError, TypeError) as exc:
+            except EmptyPage as exc:
+                if page > published_until:
+                    continue
+                missed.append(f"{page.isoformat()}: {_clip(exc)}")
+                continue
+            except (FetchError, ValueError, TypeError) as exc:
                 missed.append(f"{page.isoformat()}: {_clip(exc)}")
                 continue
             for (day, key), point in E.nasdaq_points(page, rows).items():

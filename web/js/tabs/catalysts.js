@@ -3,16 +3,35 @@
 // Two lanes, as the build assembles them: MACRO & BROAD INDEX (agency
 // releases at the agency's time, the Fed's calendar, announced auctions, rule
 // events, hand-kept events) and SINGLE NAME (index members' and watchlist
-// earnings). Every row says how its date is known, because an agency's
-// schedule and a vendor's earnings calendar are different claims.
+// earnings). The page leads with the shape of the next three weeks and the
+// releases that matter; every event keeps its full detail one click down.
 
-import { el, card, table, num, pct, dirClass, sectionTitle, notice, gap, DASH } from '../fmt.js';
+import { el, card, table, num, pct, dirClass, sectionTitle, gap, metaRow, DASH } from '../fmt.js';
 
 const NEW_YORK = 'America/New_York';
 const IMPORTANCE_RANK = { high: 0, medium: 1, low: 2 };
 const TIMING_LABEL = { bmo: 'BEFORE OPEN', amc: 'AFTER CLOSE' };
+const TIMING_SHORT = { bmo: 'BMO', amc: 'AMC' };
 const TIMING_RANK = { bmo: 0, null: 1, amc: 2 };
 const FILTER_KEY = 'mr-catalysts-filter';
+const STRIP_SESSIONS = 15;
+const KEY_RELEASES = 6;
+const SHORT_TITLE = {
+  'Employment report': 'Payrolls',
+  'FOMC decision (statement)': 'FOMC',
+  'FOMC minutes': 'FOMC minutes',
+  'FOMC press conference': 'FOMC presser',
+  'PCE inflation, income & spending': 'PCE',
+  'ISM Manufacturing PMI': 'ISM mfg',
+  'ISM Services PMI': 'ISM services',
+  'JOLTS job openings': 'JOLTS',
+  'Initial jobless claims': 'Claims',
+  'Durable goods orders': 'Durables',
+  'Housing starts & permits': 'Housing starts',
+  'Industrial production': 'Ind. production',
+  'Monthly options expiry': 'OpEx',
+  'US midterm elections': 'Midterms',
+};
 
 // --- Time ---------------------------------------------------------------------
 
@@ -34,17 +53,24 @@ function newYorkInstant(day, time) {
 
 const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+function localTime(event) {
+  if (!event.time || viewerZone === NEW_YORK) return null;
+  return newYorkInstant(event.date, event.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function localZoneName(day) {
+  const parts = new Intl.DateTimeFormat([], { timeZoneName: 'short' }).formatToParts(new Date(`${day}T12:00:00Z`));
+  return parts.find((p) => p.type === 'timeZoneName')?.value || viewerZone;
+}
+
 function timeCell(event) {
-  if (event.timing) return el('span', { class: 'cat-time', text: TIMING_LABEL[event.timing] });
-  if (!event.time) return el('span', { class: 'cat-time dim', text: 'TIME TBA' });
-  const children = [el('span', { text: `${event.time} ET` })];
-  if (viewerZone !== NEW_YORK) {
-    const local = newYorkInstant(event.date, event.time).toLocaleTimeString([], {
-      hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short',
-    });
-    children.push(el('span', { class: 'dim', text: ` · ${local}` }));
-  }
-  return el('span', { class: 'cat-time' }, children);
+  if (event.timing) return el('span', { class: 'cat-time', text: TIMING_SHORT[event.timing], title: TIMING_LABEL[event.timing] });
+  if (!event.time) return el('span', { class: 'cat-time dim', text: 'TBA' });
+  const local = localTime(event);
+  return el('span', { class: 'cat-time' }, [
+    `${event.time}`,
+    local ? el('span', { class: 'dim', text: ` ${local}` }) : null,
+  ]);
 }
 
 function dayLabel(day) {
@@ -52,16 +78,33 @@ function dayLabel(day) {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).toUpperCase();
 }
 
-// --- Pieces ---------------------------------------------------------------------
-
-function importanceDot(importance) {
-  return el('span', { class: `cat-dot cat-${importance}`, title: `${importance} importance` });
+function stripLabel(day) {
+  const d = new Date(`${day}T12:00:00Z`);
+  const weekday = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).toUpperCase();
+  return `${weekday} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
 }
 
-function formatPrint(p) {
-  if (p.value === null || p.value === undefined) return `${p.label}: ${DASH}`;
-  const period = p.period ? ` (${p.period.slice(0, 7)})` : '';
-  return `${p.label} ${num(p.value, p.decimals)}${p.unit}${period}`;
+function addDays(day, count) {
+  const d = new Date(`${day}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + count);
+  return d.toISOString().slice(0, 10);
+}
+
+function weekdaysAfter(day, count) {
+  const out = [];
+  let cursor = day;
+  while (out.length < count) {
+    cursor = addDays(cursor, 1);
+    const weekday = new Date(`${cursor}T12:00:00Z`).getUTCDay();
+    if (weekday !== 0 && weekday !== 6) out.push(cursor);
+  }
+  return out;
+}
+
+// --- Numbers ----------------------------------------------------------------------
+
+function shortTitle(event) {
+  return SHORT_TITLE[event.title] || (event.title.length > 16 ? `${event.title.slice(0, 15)}…` : event.title);
 }
 
 function compactCount(value) {
@@ -70,49 +113,68 @@ function compactCount(value) {
   return num(value, 0);
 }
 
+function expectationValue(row) {
+  return row.unit === 'p' ? num(row.value * 100, row.decimals) + '%' : num(row.value, row.decimals) + row.unit;
+}
+
+function printValue(p) {
+  return p.value === null || p.value === undefined ? DASH : `${num(p.value, p.decimals)}${p.unit}`;
+}
+
+// The period a print covers, as its release names it: a quarter for q/q
+// series, a month otherwise.
+function periodOf(p) {
+  if (!p?.period) return '';
+  const d = new Date(`${p.period.slice(0, 10)}T12:00:00Z`);
+  if (/q\/q/i.test(p.label)) return `Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
+  return d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+}
+
 function formatExpectation(row) {
-  const shown = row.unit === 'p'
-    ? num(row.value * 100, row.decimals) + '%'
-    : num(row.value, row.decimals) + row.unit;
   let range = '';
-  if (row.low != null && row.high != null) {
-    range = ' (' + num(row.low, row.decimals) + '\u2013' + num(row.high, row.decimals) + ')';
-  } else if (row.low != null) {
-    range = ' (p10 ' + num(row.low, row.decimals) + ')';
+  if (row.low != null && row.high != null) range = ` (${num(row.low, row.decimals)}–${num(row.high, row.decimals)})`;
+  else if (row.low != null) range = ` (p10 ${num(row.low, row.decimals)})`;
+  const interest = row.open_interest != null ? ` OI ${compactCount(row.open_interest)}` : '';
+  const spread = row.spread != null ? ` spread ${Math.round(row.spread * 100)}¢` : '';
+  return `${row.label} ${expectationValue(row)}${range}${interest}${spread} ${row.source_label}`;
+}
+
+// Two labels name the same measure when they agree on the change basis
+// (y/y, m/m, q/q) and on core-or-headline; without a basis, on the first word.
+function sameMeasure(a, b) {
+  const basis = (label) => (/(y\/y|m\/m|q\/q)/i.exec(label) || [''])[0].toLowerCase();
+  const core = (label) => /\bcore\b/i.test(label);
+  if (basis(a) || basis(b)) return basis(a) === basis(b) && core(a) === core(b);
+  return a.toLowerCase().split(' ')[0] === b.toLowerCase().split(' ')[0];
+}
+
+const KIND_ORDER = ['survey', 'market', 'model'];
+
+function knownPrints(event) {
+  return (event.prints || []).filter((p) => p.value !== null && p.value !== undefined);
+}
+
+// The headline pair: the first forecast (survey, else market, else nowcast)
+// that has a previous print on the same measure; failing that, the first
+// forecast alone. A forecast is never set against a different measure.
+function headline(event) {
+  const rows = [...(event.expectations || [])].sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
+  const prints = knownPrints(event);
+  for (const row of rows) {
+    const previous = prints.find((p) => sameMeasure(row.label, p.label));
+    if (previous) return { expectation: row, previous };
   }
-  const interest = row.open_interest != null ? ' OI ' + compactCount(row.open_interest) : '';
-  const spread = row.spread != null ? ' spread ' + Math.round(row.spread * 100) + '\u00a2' : '';
-  return row.label + ' ' + shown + range + interest + spread + ' ' + row.source_label;
+  return { expectation: rows[0] || null, previous: rows.length ? null : prints[0] || null };
 }
 
-function expectationLines(event) {
-  const rows = event.expectations || [];
-  return ['survey', 'market', 'model'].map((kind) => {
-    const items = rows.filter((row) => row.kind === kind);
-    if (!items.length) return null;
-    const label = kind === 'survey' ? 'Survey' : kind === 'market' ? 'Market' : 'Nowcast';
-    return el('div', { class: 'cat-detail', text: label + ': ' + items.map(formatExpectation).join(' \u00b7 ') });
-  });
+function eventWeight(event) {
+  return (event.index_weights || {}).SPX || 0;
 }
 
-// Released value against the survey point, when TradingView has printed it.
-function actualLine(event) {
-  const rows = event.actuals || [];
-  if (!rows.length) return null;
-  const parts = rows.map((row) => {
-    const unit = row.unit === '%' ? '%' : row.unit ? ' ' + row.unit : '';
-    const surprise = row.surprise == null ? ''
-      : ` (${row.surprise >= 0 ? '+' : ''}${num(row.surprise, row.decimals)} vs ${num(row.forecast, row.decimals)} expected)`;
-    return el('span', {}, [
-      row.label + ' ',
-      el('span', { class: row.surprise == null ? '' : row.surprise > 0 ? 'up' : row.surprise < 0 ? 'down' : 'flat', text: num(row.value, row.decimals) + unit }),
-      surprise,
-    ]);
-  });
-  const line = el('div', { class: 'cat-detail cat-actual' }, ['Actual: ']);
-  parts.forEach((part, index) => { if (index) line.append(' \u00b7 '); line.append(part); });
-  line.append(el('span', { class: 'dim', text: ' \u00b7 TradingView; the agency release is authoritative' }));
-  return line;
+// --- Pieces ------------------------------------------------------------------------
+
+function importanceDot(importance) {
+  return el('span', { class: `cat-dot cat-${importance}`, title: `${importance} importance` });
 }
 
 function certaintyTag(event, labels) {
@@ -120,106 +182,216 @@ function certaintyTag(event, labels) {
   return el('span', { class: 'cat-tag', title: labels[event.certainty_class] || '', text: event.certainty_class.replace('_', ' ').toUpperCase() });
 }
 
-function weightText(event) {
-  const w = event.index_weights || {};
-  const parts = Object.entries(w).map(([k, v]) => `${k} ${num(v, 2)}%`);
-  return parts.length ? parts.join(' · ') : (event.watchlist ? 'watchlist' : '');
+function rangeBar(row) {
+  if (row.low == null || row.high == null || row.high <= row.low) return null;
+  const pad = (row.high - row.low) * 0.25;
+  const lo = row.low - pad;
+  const span = row.high + pad - lo;
+  const at = (value) => `${Math.max(0, Math.min(100, ((value - lo) / span) * 100))}%`;
+  return el('div', { class: 'cat-range', title: formatExpectation(row) }, [
+    el('span', { class: 'cat-range-label', text: `${row.source_label} ${row.label}` }),
+    el('span', { class: 'cat-range-track' }, [
+      el('span', { class: 'cat-range-fill', style: `left:${at(row.low)};right:calc(100% - ${at(row.high)})` }),
+      el('span', { class: 'cat-range-dot', style: `left:${at(row.value)}` }),
+    ]),
+    el('span', { class: 'cat-range-ends', text: `${num(row.low, row.decimals)}–${num(row.high, row.decimals)}` }),
+  ]);
 }
 
-function macroRow(event, labels) {
+function actualSpans(event) {
+  return (event.actuals || []).map((row) => {
+    const unit = row.unit === '%' ? '%' : row.unit ? row.unit : '';
+    return el('span', { class: 'cat-actual-item' }, [
+      el('span', { class: 'dim', text: `${row.label} ` }),
+      el('span', { class: row.surprise == null ? '' : dirClass(row.surprise), text: num(row.value, row.decimals) + unit }),
+      row.forecast == null ? null : el('span', { class: 'dim', text: ` vs ${num(row.forecast, row.decimals)}${unit}` }),
+    ]);
+  });
+}
+
+// Everything the build knows about one release, shown when its row is opened.
+function macroDetail(event, labels) {
+  const rows = event.expectations || [];
+  const lines = ['survey', 'market', 'model'].map((kind) => {
+    const items = rows.filter((row) => row.kind === kind);
+    if (!items.length) return null;
+    const label = kind === 'survey' ? 'Survey' : kind === 'market' ? 'Market' : 'Nowcast';
+    return el('div', { text: `${label}: ${items.map(formatExpectation).join(' · ')}` });
+  });
   const prints = (event.prints || []).filter((p) => p.value !== null);
-  return el('div', { class: 'cat-row' }, [
-    timeCell(event),
+  return el('div', { class: 'cat-detail' }, [
+    event.source_title && event.source_title !== event.title ? el('div', { text: event.source_title }) : null,
+    event.detail ? el('div', { text: event.detail }) : null,
+    event.actuals?.length ? el('div', { text: `Actual (TradingView; the agency release is authoritative): ${event.actuals.map((a) => `${a.label} ${num(a.value, a.decimals)}${a.unit === '%' ? '%' : a.unit || ''}`).join(' · ')}` }) : null,
+    ...lines,
+    prints.length ? el('div', { text: `Previous: ${prints.map((p) => `${p.label} ${printValue(p)}${p.period ? ` (${p.period.slice(0, 7)})` : ''}`).join(' · ')}` }) : null,
     el('div', {}, [
-      el('div', {}, [
-        importanceDot(event.importance),
-        el('span', { class: 'cat-title', text: event.title }),
-        event.reference_period ? el('span', { class: 'dim', text: ` · ${event.reference_period}` }) : null,
-        certaintyTag(event, labels),
-        event.source_url ? el('a', { class: 'cat-src', href: event.source_url, target: '_blank', rel: 'noopener', text: event.source_id }) : null,
-      ]),
-      event.detail ? el('div', { class: 'cat-detail', text: event.detail }) : null,
-      actualLine(event),
-      ...expectationLines(event),
-      prints.length ? el('div', { class: 'cat-detail', text: `Previous: ${prints.map(formatPrint).join(' · ')}` }) : null,
+      labels[event.certainty_class] ? `Date: ${labels[event.certainty_class]}` : null,
+      event.source_url ? el('span', {}, [' · ', el('a', { href: event.source_url, target: '_blank', rel: 'noopener', text: event.source_id })]) : null,
     ]),
   ]);
 }
 
-function earningsRow(event) {
-  const estimate = event.eps_forecast === null
-    ? 'no consensus'
-    : `EPS est $${num(event.eps_forecast, 2)}${event.estimates ? ` (${event.estimates})` : ''}`;
-  const lastYear = event.last_year_eps === null ? '' : ` · yr ago $${num(event.last_year_eps, 2)}`;
-  return el('div', { class: 'cat-row' }, [
+function macroRow(event, labels) {
+  const { expectation, previous } = headline(event);
+  const figures = [];
+  if (event.actuals?.length) figures.push(...actualSpans(event));
+  else {
+    // A probability names its outcome; a level is read against the previous print.
+    if (expectation) figures.push(el('span', {}, [el('span', { class: 'dim', text: expectation.unit === 'p' ? `${expectation.label} ` : 'F ' }), expectationValue(expectation)]));
+    if (previous) figures.push(el('span', { class: 'dim', text: `P ${printValue(previous)}` }));
+  }
+  const summary = el('summary', { class: 'cat-row' }, [
     timeCell(event),
-    el('div', {}, [
-      el('div', {}, [
-        importanceDot(event.importance),
-        el('span', { class: 'cat-title', text: event.symbol }),
-        el('span', { class: 'dim', text: ` ${event.name || ''}` }),
-      ]),
-      el('div', { class: 'cat-detail', text:
-        [weightText(event), event.sector, `${estimate}${lastYear}`, event.fiscal_quarter ? `FQ ${event.fiscal_quarter}` : null]
-          .filter(Boolean).join(' · ') }),
+    el('span', { class: 'cat-name' }, [
+      importanceDot(event.importance),
+      el('span', { class: 'cat-title', text: event.title }),
+      event.reference_period ? el('span', { class: 'dim', text: ` · ${event.reference_period}` }) : null,
+      certaintyTag(event, labels),
+    ]),
+    el('span', { class: 'cat-figures' }, figures),
+  ]);
+  return el('details', { class: 'cat-item' }, [summary, macroDetail(event, labels)]);
+}
+
+function earningsRow(event) {
+  const weight = eventWeight(event);
+  return el('div', { class: 'cat-row cat-row-flat', title: [event.name, event.sector, event.fiscal_quarter ? `FQ ${event.fiscal_quarter}` : null, event.estimates ? `${event.estimates} estimates` : null].filter(Boolean).join(' · ') }, [
+    timeCell(event),
+    el('span', { class: 'cat-name' }, [
+      importanceDot(event.importance),
+      el('span', { class: 'cat-title', text: event.symbol }),
+      el('span', { class: 'dim cat-company', text: ` ${event.name || ''}` }),
+      event.watchlist ? el('span', { class: 'cat-tag', text: 'WATCHLIST' }) : null,
+    ]),
+    el('span', { class: 'cat-figures' }, [
+      weight ? el('span', { class: 'dim', text: `${num(weight, 2)}%` }) : null,
+      el('span', {}, [el('span', { class: 'dim', text: 'EST ' }), event.eps_forecast === null ? DASH : `$${num(event.eps_forecast, 2)}`]),
+      event.last_year_eps === null ? null : el('span', { class: 'dim', text: `YR AGO $${num(event.last_year_eps, 2)}` }),
     ]),
   ]);
 }
 
 // --- Sections -------------------------------------------------------------------
 
+// Three weeks as columns: how much of the S&P 500 reports each day, and which
+// releases land on it.
+function sessionStrip(data, onPick) {
+  const weekStatus = new Map(data.week.map((day) => [day.date, day]));
+  const days = weekdaysAfter(data.as_of, STRIP_SESSIONS);
+  const perDay = days.map((day) => {
+    const names = data.events.filter((e) => e.date === day && e.lane === 'single_name');
+    const macro = data.events.filter((e) => e.date === day && e.lane === 'macro' && e.importance !== 'low')
+      .sort((a, b) => IMPORTANCE_RANK[a.importance] - IMPORTANCE_RANK[b.importance] || String(a.time).localeCompare(String(b.time)));
+    return {
+      day,
+      status: weekStatus.get(day),
+      weight: names.reduce((sum, e) => sum + eventWeight(e), 0),
+      reports: names.length,
+      leaders: [...names].sort((a, b) => eventWeight(b) - eventWeight(a)).slice(0, 2).map((e) => e.symbol),
+      macro,
+    };
+  });
+  const top = Math.max(1, ...perDay.map((d) => d.weight));
+  const columns = perDay.map((d) => {
+    const closed = d.status?.status === 'holiday';
+    const chips = d.macro.slice(0, 3).map((e) => el('span', {
+      class: `cat-chip cat-chip-${e.importance}`,
+      title: `${e.time ? `${e.time} ET · ` : ''}${e.title}${e.reference_period ? ` · ${e.reference_period}` : ''}`,
+      text: shortTitle(e),
+    }));
+    if (d.macro.length > 3) chips.push(el('span', { class: 'cat-chip-more', text: `+${d.macro.length - 3}` }));
+    return el('button', {
+      type: 'button',
+      class: `cat-col ${closed ? 'is-closed' : ''} ${d.day > data.week_sessions[data.week_sessions.length - 1] ? 'is-later' : ''}`,
+      title: d.reports ? `${d.reports} reports · ${num(d.weight, 1)}% of S&P 500 weight${d.leaders.length ? ` · largest ${d.leaders.join(', ')}` : ''}` : 'no index member reports',
+      onclick: () => onPick(d.day),
+    }, [
+      el('span', { class: 'cat-col-day', text: stripLabel(d.day), title: dayLabel(d.day) }),
+      el('span', { class: 'cat-col-weight', text: d.weight ? `${num(d.weight, d.weight >= 10 ? 0 : 1)}%` : '' }),
+      el('span', { class: 'cat-col-bar' }, [
+        el('span', { class: 'cat-col-fill', style: `height:${Math.max(d.weight ? 3 : 0, (d.weight / top) * 100)}%` }),
+      ]),
+      el('span', { class: 'cat-col-names', text: closed ? 'CLOSED' : d.leaders.join(' ') || DASH }),
+      el('span', { class: 'cat-col-chips' }, chips),
+    ]);
+  });
+  return card('NEXT THREE WEEKS', el('span', { class: 'dim', text: 'bar = share of S&P 500 weight reporting · chips = macro, red = high' }), [
+    el('div', { class: 'cat-strip', style: `grid-template-columns:repeat(${days.length}, minmax(72px, 1fr))` }, columns),
+  ]);
+}
+
+function keyReleaseCard(event) {
+  const { expectation, previous } = headline(event);
+  const market = (event.expectations || []).find((r) => r.kind === 'market' && r.low != null && r.high != null);
+  const others = (event.expectations || []).length - (expectation ? 1 : 0);
+  const local = localTime(event);
+  return el('div', { class: 'cat-key' }, [
+    el('div', { class: 'cat-key-when', text: `${dayLabel(event.date)} · ${event.time ? `${event.time} ET${local ? ` (${local})` : ''}` : 'TIME TBA'}` }),
+    el('div', { class: 'cat-key-title', text: shortTitle(event) }),
+    el('div', { class: 'cat-key-period dim', text: event.reference_period || event.title }),
+    el('div', { class: 'cat-key-figures' }, [
+      el('div', {}, [
+        el('div', { class: 'stat-label', text: 'FORECAST', title: expectation ? expectation.source_label : '' }),
+        el('div', { class: 'cat-key-value', text: expectation ? expectationValue(expectation) : DASH }),
+        el('div', { class: 'stat-note', text: expectation ? `${expectation.label} · ${expectation.source_label}` : 'none published yet' }),
+      ]),
+      el('div', {}, [
+        el('div', { class: 'stat-label', text: 'PREVIOUS' }),
+        el('div', { class: 'cat-key-value dim', text: previous ? printValue(previous) : DASH }),
+        el('div', { class: 'stat-note', text: previous ? `${previous.label}${previous.period ? ` · ${periodOf(previous)}` : ''}` : 'no print on this measure' }),
+      ]),
+    ]),
+    market ? rangeBar(market) : null,
+    others > 0 ? el('div', { class: 'stat-note', title: (event.expectations || []).map(formatExpectation).join('\n'), text: `+${others} more forecast${others === 1 ? '' : 's'} · hover` }) : null,
+  ]);
+}
+
+function keyReleases(data) {
+  const upcoming = data.events
+    .filter((e) => e.lane === 'macro' && e.importance === 'high' && e.date > data.as_of)
+    .sort((a, b) => a.date.localeCompare(b.date) || String(a.time).localeCompare(String(b.time)))
+    .slice(0, KEY_RELEASES);
+  if (!upcoming.length) return null;
+  return card('KEY RELEASES', el('span', { class: 'dim', text: 'high importance · forecast vs previous' }), [
+    el('div', { class: 'cat-keys' }, upcoming.map(keyReleaseCard)),
+  ]);
+}
+
 function lastSession(recent, labels) {
   const m = recent.market || {};
   const ten = m.ten_year;
-  const marketLine = el('div', { class: 'field-note' }, [
-    `S&P 500 ${pct(m.spx_1d)} · 10Y ${ten ? `${num(ten.level, 2)}% (${ten.change_bp >= 0 ? '+' : ''}${num(ten.change_bp, 1)} bp)` : DASH}`,
-    ' — the session\'s moves, not attributed to any one event.',
+  const right = el('span', { class: 'dim' }, [
+    'S&P 500 ', el('span', { class: dirClass(m.spx_1d), text: pct(m.spx_1d) }),
+    ' · 10Y ', ten ? `${num(ten.level, 2)}% ` : DASH,
+    ten ? el('span', { class: dirClass(ten.change_bp), text: `${ten.change_bp >= 0 ? '+' : ''}${num(ten.change_bp, 1)} bp` }) : null,
   ]);
-  const macro = recent.macro.length
-    ? recent.macro.map((e) => macroRow(e, labels))
-    : [el('div', { class: 'field-note', text: 'No scheduled macro event in this session.' })];
-
+  const macro = recent.macro.map((event) => {
+    const previous = knownPrints(event)[0] || null;
+    return el('div', { class: 'cat-row cat-row-flat' }, [
+      timeCell(event),
+      el('span', { class: 'cat-name' }, [importanceDot(event.importance), el('span', { class: 'cat-title', text: event.title })]),
+      el('span', { class: 'cat-figures' }, event.actuals?.length ? actualSpans(event)
+        : previous ? [el('span', { text: printValue(previous) }), previous.period ? el('span', { class: 'dim', text: periodOf(previous) }) : null] : []),
+    ]);
+  });
   const reportRow = (e, reacted) => el('tr', {}, [
     el('td', { text: e.symbol }),
-    el('td', { class: 'dim', text: e.timing ? TIMING_LABEL[e.timing].toLowerCase() : 'time n/a' }),
     el('td', { text: e.eps === null ? DASH : `$${num(e.eps, 2)}` }),
     el('td', { class: 'dim', text: e.eps_forecast === null ? DASH : `$${num(e.eps_forecast, 2)}` }),
     el('td', { class: dirClass(e.surprise_pct), text: e.surprise_pct === null ? DASH : pct(e.surprise_pct, 1) }),
     el('td', { class: reacted ? dirClass(e.return_1d) : 'dim', text: reacted ? pct(e.return_1d) : 'next session' }),
-    el('td', { class: 'dim', text: weightText(e) }),
   ]);
-  const headers = ['TICKER', 'TIMING', 'EPS', 'EST', 'SURPRISE', '1D', 'WEIGHT'];
   const reports = [...recent.earnings_reacted.map((e) => reportRow(e, true)), ...recent.earnings_after_close.map((e) => reportRow(e, false))];
-
-  return card(`LAST SESSION · ${dayLabel(recent.session)}`, null, [
-    marketLine,
+  return card(`LAST SESSION · ${dayLabel(recent.session)}`, right, [
     el('div', { class: 'grid two' }, [
-      el('div', {}, [el('div', { class: 'cat-lane', text: 'MACRO & BROAD INDEX' }), ...macro]),
+      el('div', {}, [el('div', { class: 'cat-lane', text: 'MACRO' }), ...(macro.length ? macro : [el('div', { class: 'dim', text: 'No scheduled release.' })])]),
       el('div', {}, [
         el('div', { class: 'cat-lane', text: 'EARNINGS' }),
-        reports.length ? table(headers, reports) : el('div', { class: 'field-note', text: 'No index member or watchlist name reported.' }),
-        el('div', { class: 'field-note', text:
-          `Reacted: reported before this session's open, or after the previous close (${dayLabel(recent.previous_session)}). `
-          + 'After-close reports trade next session.' }),
+        reports.length ? table(['TICKER', 'EPS', 'EST', 'SURPRISE', '1D'], reports) : el('div', { class: 'dim', text: 'No index member or watchlist name reported.' }),
       ]),
     ]),
   ]);
-}
-
-function weekStrip(data, onPick) {
-  return el('div', { class: 'stat-strip cat-week' }, data.week.map((day) => {
-    const top = data.events.filter((e) => e.date === day.date && e.importance === 'high').slice(0, 3);
-    return el('div', { class: 'stat', style: 'cursor:pointer', onclick: () => onPick(day.date) }, [
-      el('div', { class: 'stat-label', text: dayLabel(day.date) }),
-      day.status === 'holiday'
-        ? el('div', { class: 'stat-value dim', text: 'CLOSED' })
-        : el('div', { class: 'stat-value', text: `${day.macro_high + day.earnings_high} high` }),
-      el('div', { class: 'stat-note', text:
-        day.status === 'holiday' ? day.note
-          : `${day.macro} macro · ${day.earnings} earnings${day.status === 'early_close' ? ` · 1:00 pm close (${day.note})` : ''}` }),
-      ...top.map((e) => el('div', { class: 'stat-note cat-high-line', text: e.lane === 'single_name' ? `${e.symbol} earnings` : e.title })),
-    ]);
-  }));
 }
 
 function loadFilter() {
@@ -261,7 +433,7 @@ function visible(event, filter) {
 function laneColumn(title, events, weekEnd, render) {
   const column = el('div', {}, [el('div', { class: 'cat-lane', text: title })]);
   if (!events.length) {
-    column.append(el('div', { class: 'field-note', text: 'Nothing matches the filter.' }));
+    column.append(el('div', { class: 'dim', text: 'Nothing matches the filter.' }));
     return column;
   }
   let dividerShown = false;
@@ -277,26 +449,46 @@ function laneColumn(title, events, weekEnd, render) {
   return column;
 }
 
+function methodNotes(data) {
+  const failed = Object.entries(data.failed_sources || {});
+  const expected = data.expected_missing || [];
+  return [
+    data.note,
+    `Times are New York${viewerZone !== NEW_YORK ? `, with your local time (${localZoneName(data.as_of)}) beside them` : ''}. BMO / AMC: the company reports before the open / after the close.`,
+    'F = the headline forecast (a survey where one exists, else a prediction market, else a nowcast); P = the previous print on the same measure. Open a release for every source, its range and open interest, and the source link.',
+    'KEY RELEASES shows the next six high-importance releases. The Kalshi bar spans the market\'s 10th–90th percentile with the dot at its median.',
+    'LAST SESSION: reported before that session\'s open, or after the previous close, is a reaction in that session; an after-close report trades the next one. Actuals are TradingView\'s print against its forecast; the agency release is authoritative.',
+    `Date sources: ${Object.entries(data.certainty_labels || {}).map(([k, v]) => `${k.replace('_', ' ')} = ${v}`).join('; ')}.`,
+    failed.length ? `Not fetched this build: ${failed.map(([s, why]) => `${s} (${why})`).join('; ')}.` : null,
+    expected.length ? `Not found in its agency's calendar, so likely renamed and missing: ${expected.join('; ')}.` : null,
+  ];
+}
+
 export default async function renderCatalysts(root, data) {
-  root.append(sectionTitle('CATALYSTS', 'THINGS TO WATCH · TIMES IN NEW YORK AND YOURS'));
+  root.append(sectionTitle('CATALYSTS', 'WHAT IS SCHEDULED NEXT'));
   if (!data.events) {
     root.append(gap('No catalyst calendar in this build.'));
     return;
   }
-  const failed = Object.entries(data.failed_sources || {});
-  if (failed.length) {
-    root.append(notice(`Not fetched this build, so missing below: ${failed.map(([s, why]) => `${s} (${why})`).join('; ')}`));
+  const failed = Object.keys(data.failed_sources || {});
+  const horizon = data.high_importance_horizon_end && data.high_importance_horizon_end > data.horizon_end
+    ? `THROUGH ${data.horizon_end} · HIGH-IMPORTANCE MACRO THROUGH ${data.high_importance_horizon_end}`
+    : `THROUGH ${data.horizon_end}`;
+  root.append(metaRow(
+    [`AS OF ${data.as_of}`, horizon, 'TIMES ET', failed.length ? `${failed.length} SOURCE${failed.length === 1 ? '' : 'S'} NOT FETCHED: ${failed.join(', ').toUpperCase()}` : null].filter(Boolean).join(' · '),
+    methodNotes(data),
+  ));
+  if ((data.expected_missing || []).length) {
+    root.append(gap(`Likely renamed at its agency, so missing below: ${data.expected_missing.join('; ')}`));
   }
-
-  const expected = data.expected_missing || [];
-  if (expected.length) {
-    root.append(notice(`Not found in its agency's calendar, so likely renamed and missing below: ${expected.join('; ')}`));
-  }
-  root.append(lastSession(data.recent, data.certainty_labels));
 
   const filter = loadFilter();
   const host = el('div', {});
   const weekEnd = data.week_sessions[data.week_sessions.length - 1];
+  const jump = (day) => {
+    const target = document.getElementById(`cat-m-${day}`) || document.getElementById(`cat-s-${day}`);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   const draw = () => {
     host.innerHTML = '';
@@ -304,7 +496,7 @@ export default async function renderCatalysts(root, data) {
     const macro = shown.filter((e) => e.lane === 'macro');
     const names = shown.filter((e) => e.lane === 'single_name').sort((a, b) => a.date.localeCompare(b.date)
       || TIMING_RANK[a.timing] - TIMING_RANK[b.timing]
-      || IMPORTANCE_RANK[a.importance] - IMPORTANCE_RANK[b.importance]
+      || eventWeight(b) - eventWeight(a)
       || a.symbol.localeCompare(b.symbol));
     const columns = [];
     if (filter.lane !== 'single_name') columns.push(laneColumn('MACRO & BROAD INDEX', macro, weekEnd, (e) => macroRow(e, data.certainty_labels)));
@@ -316,18 +508,17 @@ export default async function renderCatalysts(root, data) {
   const search = el('input', { size: '10', placeholder: 'ticker / text' });
   search.addEventListener('input', () => { filter.query = search.value.trim(); draw(); });
 
-  root.append(weekStrip(data, (day) => {
-    const target = document.getElementById(`cat-m-${day}`) || document.getElementById(`cat-s-${day}`);
-    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }));
-  root.append(card('FILTER', null, el('div', { class: 'field-row' }, [
+  root.append(sessionStrip(data, jump));
+  const keys = keyReleases(data);
+  if (keys) root.append(keys);
+  root.append(lastSession(data.recent, data.certainty_labels));
+  root.append(el('div', { class: 'field-row cat-filter' }, [
+    el('span', { class: 'cat-lane', text: 'ALL EVENTS' }),
     switchGroup([['high', 'HIGH'], ['medium', 'MEDIUM+'], ['low', 'ALL']], filter.importance, set('importance')),
     switchGroup([['both', 'BOTH LANES'], ['macro', 'MACRO'], ['single_name', 'SINGLE NAME']], filter.lane, set('lane')),
     switchGroup([[false, 'ALL NAMES'], [true, 'WATCHLIST']], filter.watchlist, set('watchlist')),
-    el('div', { class: 'field' }, [el('label', { text: 'FIND' }), search]),
-    el('span', { class: 'field-note', text: data.high_importance_horizon_end && data.high_importance_horizon_end > data.horizon_end ? `Through ${data.horizon_end}; high-importance macro through ${data.high_importance_horizon_end}` : `Through ${data.horizon_end}` }),
-  ])));
+    el('div', { class: 'field' }, [search]),
+  ]));
   root.append(host);
-  root.append(notice(data.note));
   draw();
 }

@@ -112,3 +112,16 @@ export function gap(message) {
 export function notice(message) {
   return el('div', { class: 'notice', text: message });
 }
+
+// One line of context, with the method notes folded behind it: the page shows
+// numbers first and explains itself on request.
+export function metaRow(line, paragraphs) {
+  const notes = (paragraphs || []).filter(Boolean);
+  return el('div', { class: 'meta-row' }, [
+    el('div', { class: 'meta-line', text: line }),
+    notes.length ? el('details', { class: 'method-fold' }, [
+      el('summary', { text: 'ⓘ METHOD & DATA' }),
+      ...notes.map((text) => el('div', { class: 'method-copy', text })),
+    ]) : null,
+  ]);
+}

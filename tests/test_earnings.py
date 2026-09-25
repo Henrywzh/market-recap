@@ -82,3 +82,11 @@ def test_factset_seed_is_committed_and_typed():
     assert len(rows) >= 369
     assert rows[0]["report_date"] <= rows[-1]["report_date"]
     assert any(isinstance(r["forward_12m_pe"], float) for r in rows)
+
+
+def test_factset_row_drops_an_implausible_pe_average():
+    from market_recap.sources import factset
+
+    row = factset._row({"report_date": "2025-10-10", "forward_12m_pe": "22.8", "forward_12m_pe_10y_avg": "39.0"})
+    assert row["forward_12m_pe"] == 22.8
+    assert row["forward_12m_pe_10y_avg"] is None

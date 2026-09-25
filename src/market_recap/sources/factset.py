@@ -818,10 +818,24 @@ def _number(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
+# S&P 500 forward P/E has stayed within these bounds since the 1990s (the
+# 2000 peak was about 26). The text
+# parser can take another "10-year average" in the same article (a preview's
+# count of negative guidance, say) for the P/E one; such a figure is dropped,
+# not charted.
+PLAUSIBLE = {
+    "forward_12m_pe": (8.0, 30.0),
+    "forward_12m_pe_10y_avg": (8.0, 30.0),
+}
+
+
 def _row(record: dict) -> dict:
     out = {key: record.get(key) or None for key in COLUMNS}
     for key in FACTSET_NUMERIC_FIELDS:
         out[key] = _number(out[key])
+        low, high = PLAUSIBLE.get(key, (-math.inf, math.inf))
+        if out[key] is not None and not low <= out[key] <= high:
+            out[key] = None
     return out
 
 
