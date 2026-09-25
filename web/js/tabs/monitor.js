@@ -1,7 +1,9 @@
-// MONITOR: a static, prospective drawdown queue.  The artifact is the only
-// data source for this tab; there are deliberately no browser feed requests.
+// MONITOR: a static, prospective drawdown queue.  Everything shown comes from
+// this build's artifacts (monitor, heatmaps weights, per-ticker closes); there
+// are deliberately no browser feed requests.
 
 import { el, card, table, num, pct, sectionTitle, notice, gap, DASH } from '../fmt.js';
+import { render } from '../charts.js';
 import {
   FOLLOW_STORAGE_KEY,
   MONITOR_STATUSES,
@@ -46,6 +48,84 @@ const REASON_SHORT = {
 const EXPECTATION_TEXT = {
   cut: 'CUT', raised: 'RAISED', steady: 'STEADY', stale: 'STALE', thin: 'THIN',
 };
+const ANOMALY_TAG = { company: 'CO', sector: 'SECTOR' };
+const QUADRANT_SHORT = {
+  'weak-steady': 'WEAK · STEADY',
+  'weak-other': 'WEAK · AGAINST / UNKNOWN',
+  'stabilising-steady': 'STABILISING · STEADY',
+  'stabilising-other': 'STABILISING · AGAINST / UNKNOWN',
+};
+const SECTOR_SHORT = {
+  'Communication Services': 'Comm Services',
+  'Consumer Discretionary': 'Cons Discretionary',
+  'Consumer Staples': 'Cons Staples',
+  'Information Technology': 'Info Tech',
+};
+// Display clip for the revision axis; the tooltip keeps the true value. The
+// axis is square-root scaled: most revisions sit within a few percent of zero,
+// and a linear axis would draw them as one line.
+const REVISION_CLIP = 10;
+const rootScale = (value) => Math.sign(value) * Math.sqrt(Math.abs(value));
+const REVISION_TICKS = [-10, -5, -2, 0, 2, 5, 10];
+
+// Dot size is the S&P 500 weight HEAT MAPS already publishes. Without it the
+// dots are drawn equal, which loses emphasis but no fact.
+let weightsPromise = null;
+function loadWeights() {
+  if (!weightsPromise) {
+    weightsPromise = fetch('artifacts/heatmaps.json', { cache: 'no-cache' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => new Map((data?.constituents || []).map((c) => [c.ticker, c.weight])))
+      .catch(() => new Map());
+  }
+  return weightsPromise;
+}
+
+const tickerPayloads = new Map();
+async function loadTicker(symbol) {
+  const key = String(symbol).toUpperCase();
+  if (!tickerPayloads.has(key)) {
+    tickerPayloads.set(key, fetch(`artifacts/tickers/${key}.json`, { cache: 'no-cache' }).then((response) => {
+      if (!response.ok) throw new Error(`${key} has no price history in this build`);
+      return response.json();
+    }));
+  }
+  try {
+    return await tickerPayloads.get(key);
+  } catch (error) {
+    tickerPayloads.delete(key);
+    throw error;
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// A signed value drawn as a bar either side of a centre line, then the number.
+function divergingCell(value, scale, text, title) {
+  const known = value !== null && value !== undefined && Number.isFinite(value);
+  const width = known ? Math.min(50, (Math.abs(value) / scale) * 50) : 0;
+  const side = known && value < 0 ? `right:50%` : 'left:50%';
+  return el('td', { class: `monitor-bar-cell ${directionClass(value)}`, title }, [
+    el('span', { class: 'mbar' }, [
+      el('span', { class: 'mbar-mid' }),
+      known ? el('span', { class: `mbar-fill ${value < 0 ? 'down' : 'up'}`, style: `${side};width:${width}%` }) : null,
+    ]),
+    el('span', { class: 'mbar-text', text }),
+  ]);
+}
+
+function drawdownCell(value, qualifies, text) {
+  const known = value !== null && value !== undefined && Number.isFinite(value);
+  const width = known ? Math.min(100, (Math.abs(value) / 70) * 100) : 0;
+  return el('td', { class: `monitor-bar-cell ${!known ? 'dim' : qualifies ? 'down' : 'flat'}` }, [
+    el('span', { class: 'mbar' }, [
+      known ? el('span', { class: 'mbar-fill down', style: `right:0;width:${width}%` }) : null,
+    ]),
+    el('span', { class: 'mbar-text', text }),
+  ]);
+}
 
 const RAW_FIELDS = [
   ['ticker', 'TICKER'],
@@ -122,27 +202,6 @@ function raw(value) {
   return String(value);
 }
 
-function factCell(value, label) {
-  const known = value === true || value === false;
-  const text = known ? (value ? 'YES' : 'NO') : UNKNOWN;
-  const box = el('input', {
-    type: 'checkbox',
-    disabled: '',
-    tabindex: '-1',
-    'aria-label': `${label}: ${text}`,
-  });
-  box.checked = value === true;
-  box.indeterminate = !known;
-  return el('span', { class: `monitor-fact ${known ? (value ? 'is-yes' : 'is-no') : 'is-unknown'}` }, [
-    box,
-    el('span', { text }),
-  ]);
-}
-
-function statusClass(status) {
-  return `monitor-status-${String(status || 'unknown').replaceAll(' ', '-')}`;
-}
-
 function stat(label, value, note, cls = '') {
   return el('div', { class: 'stat' }, [
     el('div', { class: 'stat-label', text: label }),
@@ -175,16 +234,24 @@ function artifactNote(data) {
   const relativeSessions = configValue(data, 'relative_sessions', UNKNOWN);
   const maSessions = configValue(data, 'ma_sessions', UNKNOWN);
   const earningsDays = configValue(data, 'earnings_days', UNKNOWN);
-  return el('div', { class: 'monitor-meta' }, [
-    el('div', { class: 'monitor-meta-line', text: [
-      `INDEX ${index} · ${label} · MONITOR OBSERVED TO ${data.as_of || UNKNOWN} · `,
-      `TRACKING STARTED ${data.tracking_started || UNKNOWN} · `,
-      `DRAWDOWN ${drawdownPeriod} / ${drawdownSessions} SESSIONS · `,
-      `RELATIVE ${relativePeriod} / ${relativeSessions} SESSIONS · `,
-      `MA ${maSessions} SESSIONS · EARNINGS NEXT ${earningsDays} DAYS · `,
-      `HOLDINGS AS OF ${universe.holdings_as_of || UNKNOWN}`,
-    ].join(' ') }),
-  ]);
+  return [
+    `INDEX ${index} · ${label} · MONITOR OBSERVED TO ${data.as_of || UNKNOWN} · `,
+    `TRACKING STARTED ${data.tracking_started || UNKNOWN} · `,
+    `DRAWDOWN ${drawdownPeriod} / ${drawdownSessions} SESSIONS · `,
+    `RELATIVE ${relativePeriod} / ${relativeSessions} SESSIONS · `,
+    `MA ${maSessions} SESSIONS · EARNINGS NEXT ${earningsDays} DAYS · `,
+    `HOLDINGS AS OF ${universe.holdings_as_of || UNKNOWN}`,
+  ].join(' ');
+}
+
+function metaLine(data) {
+  const universe = data.universe || {};
+  return [
+    universe.label || universe.key || UNKNOWN,
+    `${universe.members ?? '?'} MEMBERS${universe.watchlist ? ` + ${universe.watchlist} WATCHLIST` : ''}`,
+    `OBSERVED TO ${data.as_of || UNKNOWN}`,
+    `TRACKING SINCE ${data.tracking_started || UNKNOWN}`,
+  ].join(' · ');
 }
 
 function modeButton(mode, label, state, onPick) {
@@ -229,16 +296,23 @@ export default function renderMonitor(root, data, manifest) {
 
   root.replaceChildren();
   root.append(sectionTitle('MONITOR', 'RESEARCH QUEUE · WHAT CHANGED TODAY'));
-  root.append(artifactNote(artifact));
 
-  const noticesHost = el('div', { class: 'monitor-notices' });
-  const controlsHost = el('div');
   const methodHost = el('div', { class: 'monitor-method-host' });
-  const messageHost = el('div', { class: 'monitor-messages' });
+  const noticesHost = el('div', { class: 'monitor-notices' });
   const statsHost = el('div');
-  const tableHost = el('div');
+  const visualsHost = el('div', { class: 'monitor-visuals' });
   const detailHost = el('div');
-  root.append(noticesHost, controlsHost, methodHost, messageHost, statsHost, detailHost, tableHost);
+  const controlsHost = el('div');
+  const messageHost = el('div', { class: 'monitor-messages' });
+  const tableHost = el('div');
+  root.append(methodHost, noticesHost, statsHost, visualsHost, detailHost, controlsHost, messageHost, tableHost);
+  let weights = new Map();
+
+  function select(ticker) {
+    state.selected = ticker;
+    renderData();
+    requestAnimationFrame(() => detailHost.scrollIntoView?.({ behavior: 'smooth', block: 'start' }));
+  }
 
   function setMessage(text, kind = 'notice') {
     state.message = text ? { text, kind } : null;
@@ -400,9 +474,9 @@ export default function renderMonitor(root, data, manifest) {
       const file = fileInput.files && fileInput.files[0];
       if (file) void importFile(file);
     });
-    const importButton = el('button', { type: 'button', class: 'monitor-tool', text: 'IMPORT FOLLOWS' });
+    const importButton = el('button', { type: 'button', class: 'monitor-tool', text: 'IMPORT FOLLOWS', title: storageNote() });
     importButton.addEventListener('click', () => fileInput.click());
-    const exportButton = el('button', { type: 'button', class: 'monitor-tool', text: 'EXPORT FOLLOWS' });
+    const exportButton = el('button', { type: 'button', class: 'monitor-tool', text: 'EXPORT FOLLOWS', title: storageNote() });
     exportButton.addEventListener('click', downloadFollows);
 
     const actions = el('div', { class: 'monitor-actions' }, [exportButton, importButton, fileInput]);
@@ -430,8 +504,10 @@ export default function renderMonitor(root, data, manifest) {
         searchInput,
       ]),
       actions,
-      el('div', { class: 'monitor-storage-note' }, [storageNote()]),
     ]));
+    if (state.storageState.status !== 'ok') {
+      controlsHost.append(el('div', { class: 'monitor-storage-note gap', text: storageNote() }));
+    }
   }
 
   function renderNotices() {
@@ -445,16 +521,28 @@ export default function renderMonitor(root, data, manifest) {
   }
 
   function renderMethod() {
-    const details = el('details', { class: 'monitor-method' }, [
-      el('summary', { text: 'METHOD & DATA' }),
-      artifact.note
-        ? el('div', { class: 'monitor-method-copy', text: String(artifact.note) })
-        : el('div', { class: 'monitor-method-copy', text: 'No additional artifact method note was supplied.' }),
-    ]);
-    methodHost.replaceChildren(
-      details,
-      el('div', { class: 'monitor-plain-note', text: 'No score and no buy/sell label. Evidence for and against is listed side by side; UNKNOWN is never read as steady.' }),
-    );
+    const band = configValue(artifact, 'revision_pct', '?');
+    const paragraphs = [
+      artifactNote(artifact),
+      'No score and no buy/sell label. Evidence for and against is listed side by side; UNKNOWN is never read as steady.',
+      artifact.note ? String(artifact.note) : null,
+      `PRICE VS ESTIMATES: each dot is a member at its drawdown from the 1Y high (x) and the 30-day change in its FY1 consensus EPS (y). `
+        + `Dot size is the S&P 500 weight; names outside the queue are faint. The y axis is square-root scaled so small revisions separate; the shaded band is ±${band}%, inside which a revision reads as steady. `
+        + `Revisions beyond ±${REVISION_CLIP}% are drawn at the edge; the tooltip has the true value. Colour is the price state × evidence state below the chart; none of the four is a buy box.`,
+      `QUEUE BY SECTOR: share of each sector's members in the queue at the threshold set below. Red sectors are weak as a whole: the ETF trails the market (cap-weighted) and the median member trails the median of all members (equal-weight) by ≥ ${configValue(artifact, 'sector_event_pp', '?')} pp over ${relativePeriod}.`,
+      'EVIDENCE: listed, not weighed. DETERIORATING = anything against; STEADY = nothing against and a live FY1 estimate; otherwise UNKNOWN.',
+      'FY1 CONSENSUS EPS is Yahoo earningsTrend for the same fiscal period at each look-back. No estimate is unknown, not unchanged.',
+      'HISTORY is observed daily since the MONITOR feature started. Same-day observations replace earlier prints; missing dates stay UNKNOWN; UNKNOWN is never a zero and never an inferred exit. '
+        + 'The state log adds a line only when a state changes. Watch/exclude reasons live in config/monitor_notes.toml.',
+      storageNote(),
+    ].filter(Boolean);
+    methodHost.replaceChildren(el('div', { class: 'monitor-meta-row' }, [
+      el('div', { class: 'monitor-meta-line', text: metaLine(artifact) }),
+      el('details', { class: 'monitor-method' }, [
+        el('summary', { text: 'ⓘ METHOD & DATA' }),
+        ...paragraphs.map((text) => el('div', { class: 'monitor-method-copy', text })),
+      ]),
+    ]));
   }
 
   function renderMessage() {
@@ -471,14 +559,225 @@ export default function renderMonitor(root, data, manifest) {
     const groups = todayChanges(artifact, [...state.followed]);
     const count = (kind) => groups.find((group) => group.kind === kind)?.items.length || 0;
     const events = (artifact.sectors || []).filter((sector) => sector.event);
+    const expectation = (state) => queued.filter((view) => view.row.expectations?.state === state).length;
+    const market = artifact.market_return_pct;
+    const median = artifact.members_median_return_pct;
+    const breadth = present(market) && present(median) ? median - market : null;
     statsHost.replaceChildren(el('div', { class: 'stat-strip monitor-stat-strip' }, [
       stat('IN QUEUE', String(queued.length), `≤ −${threshold} from high, or ${configValue(artifact, 'peer_excess_pp', '?')} pp behind peers`),
-      stat('TODAY', `+${count('entered') + count('first_observed')} / −${count('left')}`, 'entered / left the queue'),
-      stat('STABILISING', String(count('stabilising')), `evidence weaker: ${count('evidence_down')}`),
-      stat('WEAK SECTORS', String(events.length), events.map((sector) => sector.sector).join(', ') || 'none'),
-      stat('UNKNOWN DRAWDOWN', String(coverage.unknown), `${coverage.known} of ${coverage.universe} known`),
-      stat('OBSERVED TO', artifact.as_of || UNKNOWN, artifact.previous_as_of ? `previous build ${artifact.previous_as_of}` : `tracking from ${artifact.tracking_started || UNKNOWN}`),
+      stat('TODAY', artifact.previous_as_of ? `+${count('entered')} / −${count('left')}` : 'BASELINE',
+        artifact.previous_as_of ? `entered / left since ${artifact.previous_as_of}` : 'changes start next session'),
+      stat('ESTIMATES CUT', String(expectation('cut')), `in the queue · raised ${expectation('raised')}`, expectation('cut') ? 'down' : ''),
+      stat('STABILISING', String(count('stabilising')), `evidence weaker ${count('evidence_down')}`),
+      stat('WEAK SECTORS', String(events.length), events.map((sector) => SECTOR_SHORT[sector.sector] || sector.sector).join(', ') || 'none'),
+      stat(`BREADTH ${relativePeriod}`, formatPp(breadth), `median member ${formatPct(median)} · index ${formatPct(market)}`, breadth !== null && breadth <= -3 ? 'down' : ''),
+      stat('UNKNOWN', String(coverage.unknown), `drawdown not observed · ${coverage.known} known`),
     ]));
+  }
+
+  function quadrantColors(p) {
+    return { 'weak-steady': p.blue, 'weak-other': p.down, 'stabilising-steady': p.up, 'stabilising-other': p.accent };
+  }
+
+  function scatterChart(node, views) {
+    const band = Number(configValue(artifact, 'revision_pct', 2)) || 2;
+    const revision = (view) => view.row.expectations?.change_30d_pct ?? null;
+    const plotted = views.filter((view) => view.inUniverse && view.currentValue !== null && revision(view) !== null);
+    const queued = plotted.filter(inQueue);
+    const labelled = new Set([
+      ...[...queued].filter((view) => weights.has(view.row.ticker))
+        .sort((a, b) => weights.get(b.row.ticker) - weights.get(a.row.ticker)).slice(0, 10).map((view) => view.row.ticker),
+      ...state.followed,
+      state.selected,
+    ]);
+    const size = (ticker) => {
+      const weight = weights.get(ticker);
+      return weight ? Math.min(34, 5 + 7 * Math.sqrt(weight)) : 6;
+    };
+    const tip = (view) => {
+      const row = view.row;
+      const exp = row.expectations || {};
+      return `<b>${escapeHtml(row.ticker)}</b> ${escapeHtml(row.name || '')}<br>`
+        + `From 1Y high ${formatPct(view.currentValue)} · vs peers ${formatPp(row.peer_excess_pct)}<br>`
+        + `FY1 EPS 30D ${formatPct(exp.change_30d_pct)} (${EXPECTATION_TEXT[exp.state] || UNKNOWN}, ${exp.analysts ?? '?'} analysts)<br>`
+        + `Price ${(row.price_state || UNKNOWN).toUpperCase()} · evidence ${(row.evidence_state || UNKNOWN).toUpperCase()}`
+        + (weights.has(row.ticker) ? `<br>S&P weight ${num(weights.get(row.ticker), 2)}%` : '');
+    };
+    const clip = (value) => rootScale(Math.max(-REVISION_CLIP, Math.min(REVISION_CLIP, value)));
+    return render(node, (option, p) => {
+      const colors = quadrantColors(p);
+      const point = (view, color, opacity) => ({
+        value: [view.currentValue, clip(revision(view))],
+        ticker: view.row.ticker,
+        tip: tip(view),
+        symbolSize: size(view.row.ticker),
+        itemStyle: {
+          color,
+          opacity,
+          borderColor: view.row.ticker === state.selected ? p.text : color,
+          borderWidth: view.row.ticker === state.selected ? 2 : 0,
+        },
+        label: {
+          show: labelled.has(view.row.ticker),
+          formatter: view.row.ticker,
+          position: 'right',
+          color: p.text,
+          fontSize: 9,
+        },
+      });
+      const outside = plotted.filter((view) => !inQueue(view));
+      const groups = QUADRANTS.map((q) => ({
+        key: q.key,
+        views: queued.filter((view) => quadrantOf(view.row) === q.key),
+      }));
+      const other = queued.filter((view) => !quadrantOf(view.row));
+      const dimmed = (key) => (state.quadrant && state.quadrant !== key ? 0.12 : 0.85);
+      const series = [
+        {
+          type: 'scatter',
+          name: 'OUTSIDE',
+          data: outside.map((view) => point(view, p.faint, 0.35)),
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            data: [{ xAxis: -state.threshold }],
+            lineStyle: { color: p.accent, type: 'dashed', width: 1 },
+            label: { formatter: `−${formatThreshold(state.threshold)}`, color: p.accent, fontSize: 10 },
+          },
+          markArea: {
+            silent: true,
+            itemStyle: { color: p.text, opacity: 0.04 },
+            data: [[{ yAxis: rootScale(-band) }, { yAxis: rootScale(band) }]],
+          },
+        },
+        ...groups.map((group) => ({
+          type: 'scatter',
+          name: group.key,
+          labelLayout: { moveOverlap: 'shiftY' },
+          data: group.views.map((view) => point(view, colors[group.key], dimmed(group.key))),
+        })),
+        { type: 'scatter', name: 'OTHER', data: other.map((view) => point(view, p.dim, dimmed(''))) },
+      ];
+      return {
+        ...option,
+        grid: { left: 58, right: 24, top: 14, bottom: 42 },
+        tooltip: { ...option.tooltip, trigger: 'item', axisPointer: undefined, formatter: (params) => params.data?.tip || '' },
+        xAxis: {
+          type: 'value',
+          max: 0,
+          min: (extent) => Math.floor(extent.min / 10) * 10,
+          name: 'FROM 1Y HIGH %',
+          nameLocation: 'middle',
+          nameGap: 26,
+          nameTextStyle: { color: p.dim, fontSize: 10 },
+          axisLine: { lineStyle: { color: p.border } },
+          axisLabel: { color: p.dim, fontSize: 10 },
+          splitLine: { lineStyle: { color: p.border, opacity: 0.45 } },
+        },
+        yAxis: {
+          type: 'value',
+          min: -rootScale(REVISION_CLIP) - 0.1,
+          max: rootScale(REVISION_CLIP) + 0.1,
+          name: 'FY1 EPS 30D % (√ SCALE)',
+          nameLocation: 'middle',
+          nameGap: 38,
+          nameTextStyle: { color: p.dim, fontSize: 10 },
+          axisLine: { show: false },
+          axisTick: { show: false },
+          axisLabel: {
+            color: p.dim,
+            fontSize: 10,
+            customValues: REVISION_TICKS.map(rootScale),
+            formatter: (value) => `${value > 0 ? '+' : ''}${Math.round(Math.sign(value) * value * value)}`,
+          },
+          splitLine: { lineStyle: { color: p.border, opacity: 0.45 } },
+        },
+        graphic: [
+          { type: 'text', left: 66, top: 18, style: { text: 'ESTIMATES RAISED ↑', fill: p.faint, font: '10px ui-monospace, Menlo, monospace' } },
+          { type: 'text', left: 66, bottom: 50, style: { text: 'ESTIMATES CUT ↓', fill: p.faint, font: '10px ui-monospace, Menlo, monospace' } },
+        ],
+        series,
+      };
+    });
+  }
+
+  function sectorChart(node, views) {
+    const events = new Set((artifact.sectors || []).filter((s) => s.event).map((s) => s.sector));
+    const bySector = new Map();
+    views.filter((view) => view.inUniverse && view.row.membership === 'index').forEach((view) => {
+      const sector = view.row.sector || UNKNOWN;
+      const entry = bySector.get(sector) || { members: 0, queued: 0 };
+      entry.members += 1;
+      if (inQueue(view)) entry.queued += 1;
+      bySector.set(sector, entry);
+    });
+    // Category axes draw bottom-up, so ascending puts the largest share on top.
+    const list = [...bySector.entries()]
+      .map(([sector, entry]) => ({ sector, ...entry, share: (100 * entry.queued) / entry.members }))
+      .sort((a, b) => a.share - b.share);
+    return render(node, (option, p) => ({
+      ...option,
+      grid: { left: 118, right: 52, top: 6, bottom: 24 },
+      tooltip: {
+        ...option.tooltip,
+        trigger: 'item',
+        axisPointer: undefined,
+        formatter: (params) => {
+          const item = list[params.dataIndex];
+          return `<b>${escapeHtml(item.sector)}</b><br>${item.queued} of ${item.members} members in the queue`
+            + (events.has(item.sector) ? '<br>weak as a whole' : '');
+        },
+      },
+      xAxis: {
+        type: 'value',
+        max: (extent) => Math.min(100, Math.ceil(extent.max / 10) * 10 + 10),
+        axisLabel: { color: p.dim, fontSize: 10, formatter: '{value}%' },
+        axisLine: { show: false },
+        splitLine: { lineStyle: { color: p.border, opacity: 0.45 } },
+      },
+      yAxis: {
+        type: 'category',
+        data: list.map((item) => SECTOR_SHORT[item.sector] || item.sector),
+        axisLabel: { color: p.dim, fontSize: 10 },
+        axisLine: { show: false },
+        axisTick: { show: false },
+      },
+      series: [{
+        type: 'bar',
+        barMaxWidth: 14,
+        data: list.map((item) => ({
+          value: Math.round(item.share * 10) / 10,
+          sector: item.sector,
+          itemStyle: { color: events.has(item.sector) ? p.down : p.accent, opacity: state.sector && state.sector !== item.sector ? 0.3 : 0.85 },
+        })),
+        label: {
+          show: true,
+          position: 'right',
+          color: p.dim,
+          fontSize: 10,
+          formatter: (params) => `${list[params.dataIndex].queued}/${list[params.dataIndex].members}`,
+        },
+      }],
+    }));
+  }
+
+  function renderVisuals(views) {
+    const scatterNode = el('div', { class: 'chart tall' });
+    const sectorNode = el('div', { class: 'chart tall' });
+    visualsHost.replaceChildren(
+      card('PRICE VS ESTIMATES', el('span', { class: 'dim', text: 'click a dot for detail' }), [scatterNode, quadrantBar(views)]),
+      card('QUEUE BY SECTOR', el('span', { class: 'dim', text: 'click to filter · red = weak as a whole' }), [sectorNode]),
+    );
+    scatterChart(scatterNode, views)?.on('click', (params) => {
+      if (params.data?.ticker) select(params.data.ticker);
+    });
+    sectorChart(sectorNode, views)?.on('click', (params) => {
+      if (!params.data?.sector) return;
+      state.sector = state.sector === params.data.sector ? '' : params.data.sector;
+      if (state.sector && state.mode !== 'queue' && state.mode !== 'all') state.mode = 'queue';
+      renderControls();
+      renderData();
+    });
   }
 
   function tableHeader(columns) {
@@ -522,70 +821,42 @@ export default function renderMonitor(root, data, manifest) {
     const ticker = row.ticker || UNKNOWN;
     const changed = view.status === MONITOR_STATUSES.NEWLY_ENTERED
       || view.status === MONITOR_STATUSES.EXITED;
-    const statusNode = el('td', { class: `monitor-status ${statusClass(view.status)}` }, [
-      el('span', { text: view.status.toUpperCase() }),
-      changed
-        ? el('span', { class: 'sub', text: `since previous observation ${view.previousDate || UNKNOWN}` })
-        : null,
-    ]);
     const tr = el('tr', {
       class: `monitor-row ${state.selected === ticker ? 'is-selected' : ''}`,
       tabindex: '0',
       'aria-selected': String(state.selected === ticker),
     });
-    const select = () => {
-      state.selected = ticker;
-      renderData();
-      requestAnimationFrame(() => {
-        if (typeof detailHost.scrollIntoView === 'function') {
-          detailHost.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      });
-    };
-    tr.addEventListener('click', select);
+    tr.addEventListener('click', () => select(ticker));
     tr.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        select();
+        select(ticker);
       }
     });
     const exp = row.expectations || null;
     const quadrant = quadrantOf(row);
+    const tags = [
+      ANOMALY_TAG[row.anomaly],
+      row.membership === 'watchlist' ? 'WATCHLIST' : null,
+      row.note ? String(row.note.status).toUpperCase() : null,
+      changed ? view.status.toUpperCase() : null,
+    ].filter(Boolean);
     tr.append(
-      el('td', { class: 'wrap-cell monitor-ticker-cell' }, [
+      el('td', { class: 'monitor-ticker-cell', title: `${row.name || ''}${row.reasons?.length ? ` · ${row.reasons.map((r) => REASON_SHORT[r] || r).join(' · ')}` : ''}` }, [
         el('span', { class: 'monitor-ticker', text: ticker }),
-        el('span', { class: 'sub', text: [row.name || DASH, row.membership === 'watchlist' ? ' · WATCHLIST' : '',
-          row.note ? ` · ${String(row.note.status).toUpperCase()}` : ''].join('') }),
+        ...tags.map((tag) => el('span', { class: 'mchip', text: tag })),
+        el('span', { class: 'sub monitor-name', text: row.name || DASH }),
       ]),
-      el('td', { class: 'wrap-cell dim', text: row.sector || UNKNOWN }),
-      el('td', { class: 'wrap-cell monitor-anomaly' }, [
-        el('span', { text: ANOMALY_TEXT[row.anomaly] || (row.candidate === false ? DASH : UNKNOWN) }),
-        el('span', { class: 'sub', text: (row.reasons || []).map((r) => REASON_SHORT[r] || r).join(' · ') }),
-      ]),
-      el('td', { class: view.currentQualifies === null ? 'dim' : view.currentQualifies ? 'down' : 'flat', text: formatPct(view.currentValue) }),
-      el('td', { class: `wrap-cell ${directionClass(row.peer_excess_pct)}` }, [
-        el('span', { text: formatPp(row.peer_excess_pct) }),
-        el('span', { class: 'sub', text: row.peer_count ? `vs ${row.peer_count} peers` : '' }),
-      ]),
-      el('td', { class: directionClass(row.sector_excess_pct), text: formatPp(row.sector_excess_pct) }),
+      el('td', { class: 'dim', text: SECTOR_SHORT[row.sector] || row.sector || UNKNOWN }),
+      drawdownCell(view.currentValue, view.currentQualifies, formatPct(view.currentValue)),
+      divergingCell(row.peer_excess_pct, 20, formatPp(row.peer_excess_pct), row.peer_count ? `vs ${row.peer_count} sector peers` : ''),
+      divergingCell(exp?.change_30d_pct ?? null, 10, exp ? formatPct(exp.change_30d_pct) : UNKNOWN,
+        exp ? `${EXPECTATION_TEXT[exp.state] || UNKNOWN} · ${exp.analysts ?? '?'} analysts` : 'no estimates'),
       el('td', { class: `monitor-price-${row.price_state || 'unknown'}`, text: (row.price_state || UNKNOWN).toUpperCase() }),
-      el('td', { class: 'wrap-cell' }, [
-        el('span', { class: `monitor-evidence-${row.evidence_state || 'unknown'}`, text: (row.evidence_state || UNKNOWN).toUpperCase() }),
-        el('span', { class: 'sub', text: `${(row.evidence_for || []).length} for · ${(row.evidence_against || []).length} against` }),
-      ]),
-      el('td', { class: 'wrap-cell' }, [
-        el('span', { class: directionClass(exp?.change_30d_pct), text: exp ? formatPct(exp.change_30d_pct) : UNKNOWN }),
-        el('span', { class: 'sub', text: exp ? `${EXPECTATION_TEXT[exp.state] || UNKNOWN} · ${exp.analysts ?? '?'} an.` : '' }),
-      ]),
+      el('td', { class: `monitor-evidence-${row.evidence_state || 'unknown'}`, title: `${(row.evidence_for || []).length} for · ${(row.evidence_against || []).length} against`, text: (row.evidence_state || UNKNOWN).toUpperCase() }),
       el('td', { text: formatPercentile(row.pe_percentile) }),
-      el('td', { class: 'wrap-cell monitor-earnings-cell' }, [
-        el('span', { text: row.earnings_date || (row.earnings_status === 'not_scheduled' ? DASH : UNKNOWN) }),
-        el('span', { class: 'sub', text: row.earnings_date ? (row.earnings_status || '') : (row.earnings_status === 'not_scheduled' ? `none in ${configValue(artifact, 'earnings_days', '?')}d` : '') }),
-      ]),
-      el('td', { class: 'wrap-cell' }, [
-        el('span', { class: directionClass(row.since_first_seen_pct), text: formatPct(row.since_first_seen_pct) }),
-        el('span', { class: 'sub', text: row.first_seen ? `since ${row.first_seen.date}${row.peers_since_first_seen_pct !== null && row.peers_since_first_seen_pct !== undefined ? ` · peers ${pct(row.peers_since_first_seen_pct, 1)}` : ''}` : '' }),
-      ]),
+      el('td', { class: row.earnings_date ? '' : 'dim', title: row.earnings_status || '', text: row.earnings_date || DASH }),
+      el('td', { class: directionClass(row.since_first_seen_pct), title: row.first_seen ? `since ${row.first_seen.date}` : '', text: present(row.since_first_seen_pct) ? pct(row.since_first_seen_pct, 1) : DASH }),
       el('td', { class: 'monitor-follow-cell' }, [followButton(ticker)]),
     );
     if (quadrant) tr.dataset.quadrant = quadrant;
@@ -593,21 +864,20 @@ export default function renderMonitor(root, data, manifest) {
   }
 
   const columns = [
-    { key: 'ticker', label: 'TICKER / NAME' },
+    { key: 'ticker', label: 'TICKER' },
     { key: 'sector', label: 'SECTOR' },
-    { key: 'anomaly', label: 'ANOMALY' },
-    { key: 'drawdown_pct', label: 'DRAWDOWN' },
+    { key: 'drawdown_pct', label: 'FROM 1Y HIGH' },
     { key: 'peer_excess_pct', label: `VS PEERS ${relativePeriod}` },
-    { key: 'sector_excess_pct', label: `VS SECTOR ETF ${relativePeriod}` },
+    { key: 'estimate_revision', label: 'FY1 EPS 30D' },
     { key: 'price_state', label: 'PRICE' },
     { key: 'evidence_state', label: 'EVIDENCE' },
-    { key: 'estimate_revision', label: 'FY1 EPS 30D' },
     { key: 'pe_percentile', label: 'P/E PCTL' },
-    { key: 'earnings_date', label: 'NEXT EARNINGS' },
-    { key: 'since_first_seen_pct', label: 'SINCE FIRST SEEN' },
-    { key: 'followed', label: 'FOLLOW' },
+    { key: 'earnings_date', label: 'EARNINGS' },
+    { key: 'since_first_seen_pct', label: 'SINCE SEEN' },
+    { key: 'followed', label: '' },
   ];
 
+  // The scatter's legend doubles as the price × evidence filter.
   function quadrantBar(views) {
     const queued = views.filter(inQueue);
     const counts = new Map(QUADRANTS.map((q) => [q.key, 0]));
@@ -615,13 +885,18 @@ export default function renderMonitor(root, data, manifest) {
       const key = quadrantOf(view.row);
       if (counts.has(key)) counts.set(key, counts.get(key) + 1);
     });
-    const unknownCount = queued.length - [...counts.values()].reduce((a, b) => a + b, 0);
+    const colors = { 'weak-steady': 'var(--blue)', 'weak-other': 'var(--down)', 'stabilising-steady': 'var(--up)', 'stabilising-other': 'var(--accent)' };
     const buttons = QUADRANTS.map((q) => {
       const button = el('button', {
         type: 'button',
         class: `monitor-quadrant q-${q.key}`,
+        title: `${q.label} · click to filter the table`,
         'aria-pressed': String(state.quadrant === q.key),
-      }, [el('span', { class: 'monitor-quadrant-count', text: String(counts.get(q.key)) }), el('span', { text: q.label })]);
+      }, [
+        el('span', { class: 'monitor-swatch', style: `background:${colors[q.key]}` }),
+        el('span', { text: QUADRANT_SHORT[q.key] }),
+        el('span', { class: 'monitor-quadrant-count', text: String(counts.get(q.key)) }),
+      ]);
       button.addEventListener('click', () => {
         state.quadrant = state.quadrant === q.key ? '' : q.key;
         if (state.mode !== 'queue' && state.mode !== 'following' && state.mode !== 'all') state.mode = 'queue';
@@ -631,8 +906,8 @@ export default function renderMonitor(root, data, manifest) {
       return button;
     });
     return el('div', { class: 'monitor-quadrants' }, [
+      el('span', { class: 'dim', text: 'PRICE · EVIDENCE' }),
       ...buttons,
-      el('div', { class: 'monitor-quadrant-note', text: `Queue names by price state × evidence state. ${unknownCount} without a price state. Click to filter; none of the four is a buy box.` }),
     ]);
   }
 
@@ -651,69 +926,27 @@ export default function renderMonitor(root, data, manifest) {
       el('td', { class: 'dim', text: `${(row.price_state || UNKNOWN).toUpperCase()} · ${(row.evidence_state || UNKNOWN).toUpperCase()}` }),
       el('td', { class: 'dim', text: row.earnings_date || DASH }),
     ]);
-    const open = () => { state.selected = change.ticker; renderData(); detailHost.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); };
+    const open = () => select(change.ticker);
     tr.addEventListener('click', open);
     tr.addEventListener('keydown', (event) => { if (event.key === 'Enter') open(); });
     return tr;
   }
 
-  function sectorEventCard(sector, items) {
-    const repair = sector.above_ma_share !== null && sector.above_ma_share_before !== null
-      ? `${pct(sector.above_ma_share * 100, 0)} above MA${maSessions} (${pct(sector.above_ma_share_before * 100, 0)} on ${sector.repair_since})`
-      : `above MA${maSessions}: ${UNKNOWN}`;
-    return el('div', { class: 'monitor-sector-event' }, [
-      el('div', { class: 'monitor-sector-head' }, [
-        el('span', { class: 'monitor-ticker', text: sector.sector.toUpperCase() }),
-        el('span', { class: 'dim', text: ` ${sector.etf || ''} ${formatPp(sector.etf_excess_pct)} vs market · median member ${formatPp(sector.median_excess_pct)} vs all members · ${sector.down_share !== null ? pct(sector.down_share * 100, 0) : UNKNOWN} of ${sector.members} down over ${relativePeriod} · ${repair}` }),
-      ]),
-      el('div', { class: 'monitor-sector-names', text: items.length
-        ? `Entered today as part of it: ${items.map((c) => c.ticker).join(', ')}`
-        : `${sector.candidates} of ${sector.members} members in the queue` }),
-    ]);
-  }
-
-  function breadthNote() {
-    const market = artifact.market_return_pct;
-    const median = artifact.members_median_return_pct;
-    if (!present(market) || !present(median) || Math.abs(market - median) < 3) return null;
-    return `NARROW MARKET: over ${relativePeriod} the market proxy is ${pct(market, 1)} and the median member ${pct(median, 1)}. `
-      + 'Much of the drawdown queue is market-wide weakness under a few large winners, not a sector or company event.';
-  }
-
   function renderToday() {
     tableHost.replaceChildren();
-    const groups = todayChanges(artifact, [...state.followed]);
-    const events = (artifact.sectors || []).filter((sector) => sector.event);
-    const breadth = breadthNote();
-    if (breadth) tableHost.append(notice(breadth));
-    if (!artifact.previous_as_of) {
-      tableHost.append(notice(`First MONITOR build (${artifact.as_of || UNKNOWN}): everything in the queue is a baseline observation, not a new entry. Changes are listed from the next session. See QUEUE.`));
-    }
-    if (events.length) {
-      const sectorEntries = new Map();
-      groups.forEach((group) => group.items
-        .filter((c) => c.anomaly === 'sector' && (c.kind === 'entered' || c.kind === 'first_observed'))
-        .forEach((c) => { if (!sectorEntries.has(c.sector)) sectorEntries.set(c.sector, []); sectorEntries.get(c.sector).push(c); }));
-      tableHost.append(card('SECTOR EVENTS', el('span', { class: 'dim', text: `trailing by ≥ ${configValue(artifact, 'sector_event_pp', '?')} pp over ${relativePeriod}, cap- and equal-weighted` }),
-        events.map((sector) => sectorEventCard(sector, sectorEntries.get(sector.sector) || []))));
-    }
-    const shown = groups.map((group) => ({
-      ...group,
-      // Sector-wide entries are listed once, under their sector event above.
-      items: group.items.filter((c) => !(c.anomaly === 'sector' && events.some((e) => e.sector === c.sector)
-        && (c.kind === 'entered' || c.kind === 'first_observed'))),
-    })).filter((group) => group.items.length);
-    if (!shown.length) {
+    // The first build's queue is all baseline, not news; it is under QUEUE.
+    const groups = todayChanges(artifact, [...state.followed])
+      .filter((group) => group.kind !== 'first_observed');
+    if (!groups.length) {
       tableHost.append(el('div', { class: 'monitor-detail-empty', text: artifact.previous_as_of
         ? `No queue changes between ${artifact.previous_as_of} and ${artifact.as_of}.`
-        : 'Nothing to compare against yet.' }));
+        : `Baseline build ${artifact.as_of || UNKNOWN}: changes are listed from the next session. The queue is under QUEUE.` }));
     }
-    for (const group of shown) {
+    for (const group of groups) {
       tableHost.append(card(group.label, el('span', { class: 'dim', text: String(group.items.length) }),
-        table(['TICKER', 'SECTOR', 'ANOMALY', 'WHY TODAY', 'DRAWDOWN', `VS PEERS ${relativePeriod}`, 'PRICE · EVIDENCE', 'NEXT EARNINGS'],
+        table(['TICKER', 'SECTOR', 'TYPE', 'WHY TODAY', 'FROM 1Y HIGH', `VS PEERS ${relativePeriod}`, 'PRICE · EVIDENCE', 'EARNINGS'],
           group.items.map(changeRow), { class: 'monitor-change-table' })));
     }
-    tableHost.append(quadrantBar(deriveMonitorRows(artifact, state.threshold, [...state.followed])));
   }
 
   function renderSectors() {
@@ -736,7 +969,6 @@ export default function renderMonitor(root, data, manifest) {
         el('td', { class: sector.event ? 'down' : 'dim', text: sector.event ? 'WEAK AS A WHOLE' : DASH }),
       ])),
     ));
-    tableHost.append(el('div', { class: 'note-text monitor-table-note', text: `Over ${relativePeriod}: market proxy ${formatPct(artifact.market_return_pct)}, median member ${formatPct(artifact.members_median_return_pct)}. The ETF is compared with the market (both cap-weighted), the median member with the median of all members (both equal-weight); a sector is weak as a whole only when it trails on both. ABOVE MA now against 5 sessions ago is the internal repair check.` }));
   }
 
   function renderTable(filtered) {
@@ -744,18 +976,13 @@ export default function renderMonitor(root, data, manifest) {
     if (!filtered.length) {
       const modeLabel = MODES.find(([mode]) => mode === state.mode)?.[1] || state.mode.toUpperCase();
       tableHost.append(gap(`No rows match ${modeLabel} at ≤ −${formatThreshold(state.threshold)} with the current filters.`));
-      if (state.quadrant) tableHost.append(quadrantBar(deriveMonitorRows(artifact, state.threshold, [...state.followed])));
       return;
     }
     const node = el('table', { class: 'data monitor-table' }, [
       tableHeader(columns),
       el('tbody', {}, filtered.map(displayRow)),
     ]);
-    if (state.mode === 'queue' || state.quadrant) tableHost.append(quadrantBar(deriveMonitorRows(artifact, state.threshold, [...state.followed])));
     tableHost.append(el('div', { class: 'table-scroll' }, [node]));
-    tableHost.append(el('div', { class: 'note-text monitor-table-note' }, [
-      'Click a row for raw values, dates, gaps and observed history. UNKNOWN is neutral; it is never a zero and never an inferred exit.',
-    ]));
   }
 
   function provenanceTable(row) {
@@ -808,121 +1035,158 @@ export default function renderMonitor(root, data, manifest) {
     ]);
   }
 
+  function priceCard(row, view) {
+    const node = el('div', { class: 'chart' });
+    const status = el('div', { class: 'dim', text: 'Loading price history…' });
+    const body = card('PRICE · 1Y', el('span', { class: 'dim', text: `close · MA${maSessions} · 1Y high · −${formatThreshold(state.threshold)} line` }), [node, status]);
+    loadTicker(row.ticker).then((payload) => {
+      if (!node.isConnected) return;
+      const dates = (payload.dates || []).slice(-252);
+      const close = (payload.close || []).slice(-252);
+      if (!close.length) { status.textContent = 'No price history in this build.'; return; }
+      status.remove();
+      const window = Number(maSessions) || 20;
+      const full = payload.close || [];
+      const offset = full.length - close.length;
+      const ma = close.map((_, i) => {
+        const end = offset + i + 1;
+        if (end < window) return null;
+        const slice = full.slice(end - window, end);
+        return Math.round((slice.reduce((a, b) => a + b, 0) / window) * 100) / 100;
+      });
+      const high = Math.max(...close.filter((v) => v !== null));
+      const floor = high * (1 - state.threshold / 100);
+      const firstSeen = row.first_seen?.date;
+      render(node, (option, p) => ({
+        ...option,
+        grid: { ...option.grid, right: 56 },
+        xAxis: { ...option.xAxis, data: dates },
+        series: [
+          {
+            type: 'line', name: 'CLOSE', data: close, showSymbol: false, lineStyle: { width: 1.4, color: p.accent },
+            markLine: {
+              silent: true,
+              symbol: 'none',
+              data: [
+                { yAxis: high, lineStyle: { color: p.faint, type: 'dashed' }, label: { formatter: '1Y HIGH', color: p.dim, fontSize: 9 } },
+                { yAxis: floor, lineStyle: { color: p.down, type: 'dashed', opacity: 0.7 }, label: { formatter: `−${formatThreshold(state.threshold)}`, color: p.down, fontSize: 9 } },
+                ...(firstSeen && dates.includes(firstSeen) ? [{ xAxis: firstSeen, lineStyle: { color: p.blue, type: 'dotted' }, label: { formatter: 'FIRST SEEN', color: p.blue, fontSize: 9 } }] : []),
+              ],
+            },
+          },
+          { type: 'line', name: `MA${window}`, data: ma, showSymbol: false, lineStyle: { width: 1, color: p.blue, opacity: 0.8 } },
+        ],
+      }));
+    }).catch((error) => { status.textContent = error.message; });
+    return body;
+  }
+
+  function epsCard(exp) {
+    if (!exp) {
+      return card('FY1 CONSENSUS EPS', null, el('div', { class: 'dim', text: 'No estimates for this name in this build.' }));
+    }
+    const points = [['90D AGO', exp.eps_90d], ['60D AGO', exp.eps_60d], ['30D AGO', exp.eps_30d], ['7D AGO', exp.eps_7d], ['NOW', exp.eps]]
+      .filter(([, value]) => present(value));
+    const node = el('div', { class: 'chart' });
+    const state30 = EXPECTATION_TEXT[exp.state] || UNKNOWN;
+    const body = card('FY1 CONSENSUS EPS', el('span', { class: `${directionClass(exp.change_30d_pct)}`, text: `${state30} · 30D ${formatPct(exp.change_30d_pct)} · 90D ${formatPct(exp.change_90d_pct)}` }), [
+      node,
+      el('div', { class: 'monitor-chart-foot dim', text: `FY ending ${exp.fiscal_year_end || UNKNOWN} · ${exp.up_30d ?? '?'} up / ${exp.down_30d ?? '?'} down in 30D · ${exp.analysts ?? '?'} analysts · range ${present(exp.low) ? num(exp.low, 2) : '?'}–${present(exp.high) ? num(exp.high, 2) : '?'}` }),
+    ]);
+    requestAnimationFrame(() => render(node, (option, p) => ({
+      ...option,
+      grid: { ...option.grid, top: 26, right: 30 },
+      xAxis: { ...option.xAxis, boundaryGap: true, data: points.map(([label]) => label) },
+      series: [{
+        type: 'line',
+        symbolSize: 7,
+        lineStyle: { width: 1.4, color: p.accent },
+        itemStyle: { color: p.accent },
+        data: points.map(([, value]) => Math.round(value * 100) / 100),
+        label: { show: true, position: 'top', color: p.text, fontSize: 10, formatter: (q) => num(q.value, 2) },
+      }],
+    })));
+    return body;
+  }
+
+  function evidenceCard(row) {
+    const chips = (items, cls) => (items || []).length
+      ? el('div', { class: 'monitor-evidence-chips' }, items.map((item) => el('span', { class: `mchip ${cls}`, text: item })))
+      : el('div', { class: 'dim', text: 'nothing recorded' });
+    return card('EVIDENCE', el('span', { class: `monitor-evidence-${row.evidence_state || 'unknown'}`, text: (row.evidence_state || UNKNOWN).toUpperCase() }), [
+      el('div', { class: 'grid two monitor-evidence' }, [
+        el('div', {}, [el('div', { class: 'monitor-detail-label', text: 'FOR' }), chips(row.evidence_for, 'up')]),
+        el('div', {}, [el('div', { class: 'monitor-detail-label', text: 'AGAINST' }), chips(row.evidence_against, 'down')]),
+      ]),
+    ]);
+  }
+
   function renderDetail(view) {
     detailHost.replaceChildren();
-    if (!view) {
-      detailHost.append(el('div', { class: 'monitor-detail-empty', text: 'Select a row to inspect raw metrics, provenance, gaps and observed history.' }));
-      return;
-    }
+    if (!view) return;
     const row = view.row;
     const ticker = row.ticker || UNKNOWN;
-    const statusNote = view.status === MONITOR_STATUSES.NEWLY_ENTERED
-      || view.status === MONITOR_STATUSES.EXITED
-      ? `since previous observation ${view.previousDate || UNKNOWN}; exact crossing date is not known`
-      : view.status === MONITOR_STATUSES.BASELINE
-        ? 'first qualifying observation in the tracked history'
-        : view.status === MONITOR_STATUSES.UNKNOWN
-          ? (view.stale ? `no observation on artifact as-of ${artifact.as_of || UNKNOWN}` : 'latest observed value is unknown')
-          : 'derived from observed history';
     const heading = el('div', { class: 'monitor-detail-heading' }, [
       el('div', {}, [
         el('div', { class: 'monitor-detail-ticker', text: ticker }),
-        el('div', { class: 'monitor-detail-name', text: row.name || UNKNOWN }),
+        el('div', { class: 'monitor-detail-name', text: `${row.name || UNKNOWN} · ${row.sector || UNKNOWN}` }),
       ]),
-      followButton(ticker),
+      el('div', { class: 'monitor-detail-actions' }, [
+        el('span', { class: 'monitor-detail-links' }, [linkTo('technicals', ticker), ' · ', linkTo('valuation', ticker), ' · ', linkTo('financials', ticker)]),
+        followButton(ticker),
+        el('button', { type: 'button', class: 'monitor-tool', text: 'CLOSE', onclick: () => { state.selected = null; renderData(); } }),
+      ]),
     ]);
     const summary = el('div', { class: 'stat-strip monitor-detail-stats' }, [
-      stat(`DRAWDOWN AT ≤ −${formatThreshold(state.threshold)}`, formatPct(view.currentValue), view.stale ? `last observed ${view.latestDate}; current observation unknown` : view.latestDate || UNKNOWN),
-      stat('STATUS', view.status.toUpperCase(), statusNote),
-            stat('PRICE SOURCE DATE', raw(row.price_as_of), 'adjusted-close source date from artifact'),
-      stat(`VS PEERS ${relativePeriod}`, formatPp(row.peer_excess_pct), row.peer_count ? `${row.peer_count} sector peers, equal weight, company excluded` : 'peer basket unavailable'),
-      stat(`VS MARKET ${relativePeriod}`, formatPp(row.market_excess_pct), `${row.market_benchmark || UNKNOWN}; ${row.sector_benchmark || 'sector ETF'} ${formatPp(row.sector_excess_pct)}`),
-      stat('PRICE STATE', (row.price_state || UNKNOWN).toUpperCase(), `RS vs peers improving: ${raw(row.rs_improving)} · above MA${maSessions}: ${raw(row.above_ma)}`),
+      stat('FROM 1Y HIGH', formatPct(view.currentValue), view.stale ? `last observed ${view.latestDate}` : view.status.toUpperCase(), view.currentQualifies ? 'down' : ''),
+      stat(`VS PEERS ${relativePeriod}`, formatPp(row.peer_excess_pct), row.peer_count ? `${row.peer_count} peers, equal weight` : 'no peer basket', directionClass(row.peer_excess_pct)),
+      stat(`VS MARKET ${relativePeriod}`, formatPp(row.market_excess_pct), `${row.sector_benchmark || 'sector ETF'} ${formatPp(row.sector_excess_pct)}`, directionClass(row.market_excess_pct)),
+      stat('PRICE', (row.price_state || UNKNOWN).toUpperCase(), `RS ${row.rs_improving === true ? 'improving' : row.rs_improving === false ? 'not improving' : UNKNOWN} · ${row.above_ma === true ? 'above' : row.above_ma === false ? 'below' : '?'} MA${maSessions}`, `monitor-price-${row.price_state || 'unknown'}`),
+      stat('P/E', present(row.pe) ? num(row.pe, 1) : UNKNOWN, `${formatPercentile(row.pe_percentile)} of own 10Y`),
+      stat('NEXT EARNINGS', row.earnings_date || DASH, row.earnings_status === 'not_scheduled'
+        ? `none in the next ${configValue(artifact, 'earnings_days', '?')} days` : (row.earnings_status || '').replaceAll('_', ' ')),
     ]);
-    const links = el('div', { class: 'monitor-detail-links' }, [
-      el('span', { class: 'dim', text: 'OPEN COMPANY PANELS: ' }),
-      linkTo('technicals', ticker),
-      el('span', { class: 'dim', text: ' · ' }),
-      linkTo('valuation', ticker),
-      el('span', { class: 'dim', text: ' · ' }),
-      linkTo('financials', ticker),
-    ]);
-    const exp = row.expectations || null;
-    const evidenceCard = card('EVIDENCE', el('span', { class: `monitor-evidence-${row.evidence_state || 'unknown'}`, text: (row.evidence_state || UNKNOWN).toUpperCase() }), [
-      el('div', { class: 'grid two monitor-evidence' }, [
-        el('div', {}, [
-          el('div', { class: 'monitor-detail-label', text: 'FOR' }),
-          (row.evidence_for || []).length
-            ? el('ul', { class: 'monitor-gap-list' }, row.evidence_for.map((item) => el('li', { text: item })))
-            : el('div', { class: 'dim', text: 'NOTHING RECORDED' }),
-        ]),
-        el('div', {}, [
-          el('div', { class: 'monitor-detail-label', text: 'AGAINST' }),
-          (row.evidence_against || []).length
-            ? el('ul', { class: 'monitor-gap-list' }, row.evidence_against.map((item) => el('li', { class: 'down', text: item })))
-            : el('div', { class: 'dim', text: 'NOTHING RECORDED' }),
-        ]),
-      ]),
-      el('div', { class: 'note-text', text: 'Listed, not weighed. DETERIORATING = anything against; STEADY = nothing against and a live FY1 estimate; otherwise UNKNOWN.' }),
-    ]);
-    const fmtEps = (value) => (value === null || value === undefined ? UNKNOWN : num(value, 2));
-    const expectationCard = card('FY1 CONSENSUS EPS', el('span', { class: 'dim', text: 'Yahoo earningsTrend · same fiscal period' }), exp
-      ? table(['', 'VALUE'], [
-        ['FISCAL YEAR ENDING', exp.fiscal_year_end || UNKNOWN],
-        ['NOW', fmtEps(exp.eps)],
-        ['30 DAYS AGO', `${fmtEps(exp.eps_30d)} (${formatPct(exp.change_30d_pct)})`],
-        ['90 DAYS AGO', `${fmtEps(exp.eps_90d)} (${formatPct(exp.change_90d_pct)})`],
-        ['REVISIONS 30D', `${exp.up_30d ?? '?'} up · ${exp.down_30d ?? '?'} down`],
-        ['ANALYSTS', exp.analysts ?? UNKNOWN],
-        ['RANGE', `${fmtEps(exp.low)} – ${fmtEps(exp.high)}`],
-        ['READING', EXPECTATION_TEXT[exp.state] || UNKNOWN],
-      ].map(([label, value]) => el('tr', {}, [el('td', { class: 'dim', text: label }), el('td', { text: String(value) })])))
-      : el('div', { class: 'dim', text: 'No estimates for this name in this build. Unknown, not unchanged.' }));
     const log = Array.isArray(row.state_log) ? row.state_log : [];
     const reported = row.reported;
+    const historyLines = [
+      row.first_seen
+        ? `FIRST SEEN ${row.first_seen.date}${row.first_seen.baseline ? ' (baseline)' : ''} · ${(row.first_seen.reasons || []).map((r) => REASON_TEXT[r] || r).join(', ')}`
+          + (row.first_seen.date !== artifact.as_of ? ` · since then ${formatPct(row.since_first_seen_pct)} vs peers ${formatPct(row.peers_since_first_seen_pct)}` : '')
+        : 'Never in the queue since tracking began.',
+      reported ? `Last reported ${reported.date}${reported.fiscal_quarter ? ` (${reported.fiscal_quarter})` : ''}: EPS ${reported.eps ?? '?'} vs ${reported.eps_forecast ?? '?'} expected${present(reported.return_1d) ? `, stock ${pct(reported.return_1d, 1)} next session` : ''}` : null,
+      row.note ? `${String(row.note.status).toUpperCase()}${row.note.since ? ` since ${row.note.since}` : ''}: ${row.note.reason}${row.note.outcome ? ` → ${row.note.outcome}` : ''}` : null,
+    ].filter(Boolean);
     const historyCard = card('CANDIDATE HISTORY', null, [
-      el('div', { class: 'monitor-timeline' }, [
-        el('div', { text: row.first_seen
-          ? `FIRST SEEN ${row.first_seen.date}${row.first_seen.baseline ? ' (baseline: already there when tracking began)' : ''} · ${(row.first_seen.reasons || []).map((r) => REASON_TEXT[r] || r).join(', ')}`
-          : 'Never in the queue since tracking began.' }),
-        row.first_seen ? el('div', { class: 'dim', text: row.first_seen.date === artifact.as_of ? 'First seen in this build; the outcome is measured from the next one.' : `Since then: ${formatPct(row.since_first_seen_pct)} (adjusted) · sector peers ${formatPct(row.peers_since_first_seen_pct)} median` }) : null,
-        reported ? el('div', { class: 'dim', text: `Last reported ${reported.date}${reported.fiscal_quarter ? ` (${reported.fiscal_quarter})` : ''}: EPS ${reported.eps ?? '?'} vs ${reported.eps_forecast ?? '?'} expected${reported.return_1d !== null && reported.return_1d !== undefined ? `, stock ${pct(reported.return_1d, 1)} next session` : ''}` }) : null,
-        row.note ? el('div', { class: row.note.status === 'exclude' ? 'down' : 'up', text: `${String(row.note.status).toUpperCase()}${row.note.since ? ` since ${row.note.since}` : ''}: ${row.note.reason}${row.note.outcome ? ` → ${row.note.outcome}` : ''}` }) : null,
-      ]),
-      log.length ? table(['FROM', 'IN QUEUE', 'PRICE', 'EVIDENCE'], [...log].reverse().map((entry) => el('tr', {}, [
+      el('div', { class: 'monitor-timeline' }, historyLines.map((text) => el('div', { text }))),
+      log.length > 1 ? table(['FROM', 'IN QUEUE', 'PRICE', 'EVIDENCE'], [...log].reverse().map((entry) => el('tr', {}, [
         el('td', { text: entry[0] }),
         el('td', { text: entry[1] === null ? UNKNOWN : entry[1] ? 'YES' : 'NO' }),
         el('td', { text: (entry[2] || UNKNOWN).toUpperCase() }),
         el('td', { text: (entry[3] || UNKNOWN).toUpperCase() }),
       ]))) : null,
-      el('div', { class: 'note-text', text: 'A new line only when a state changes; a day with an unknown reading keeps the last known state. Watch/exclude reasons live in config/monitor_notes.toml.' }),
     ]);
-    detailHost.append(
-      el('div', { class: 'monitor-detail' }, [
-        heading,
-        summary,
-        el('div', { class: 'grid two monitor-detail-grid' }, [evidenceCard, expectationCard]),
-        historyCard,
-        el('div', { class: 'grid two monitor-detail-grid' }, [
-          card('RAW MONITOR METRICS', null, rawMetricsTable(row)),
-          card('PROVENANCE / COVERAGE', null, [provenanceTable(row), gapsBlock(row)]),
-        ]),
-        card(`OBSERVED HISTORY — THRESHOLD VIEW`, null, [
-          historyTable(view),
-          el('div', { class: 'note-text' }, [
-            'History is daily observed since MONITOR feature start only. Same-day observations replace earlier prints; missing dates stay UNKNOWN. ',
-            'The FIRST OBSERVED label is derived from this history and is not a claim about actual historical entry.',
-          ]),
-        ]),
-        links,
+    const rawData = el('details', { class: 'monitor-method monitor-raw' }, [
+      el('summary', { text: 'RAW DATA · PROVENANCE · OBSERVED HISTORY' }),
+      el('div', { class: 'grid two monitor-detail-grid' }, [
+        card('RAW MONITOR METRICS', null, rawMetricsTable(row)),
+        card('PROVENANCE / COVERAGE', null, [provenanceTable(row), gapsBlock(row)]),
       ]),
-    );
+      card('OBSERVED HISTORY — THRESHOLD VIEW', null, historyTable(view)),
+    ]);
+    detailHost.append(el('div', { class: 'monitor-detail' }, [
+      heading,
+      summary,
+      el('div', { class: 'grid two monitor-detail-grid' }, [priceCard(row, view), epsCard(row.expectations || null)]),
+      el('div', { class: 'grid two monitor-detail-grid' }, [evidenceCard(row), historyCard]),
+      rawData,
+    ]));
   }
 
   function renderData() {
     const views = deriveMonitorRows(artifact, state.threshold, [...state.followed]);
     const selected = state.selected ? views.find((view) => view.row.ticker === state.selected) : null;
     renderStats(views);
+    renderVisuals(views);
     if (state.mode === 'today') renderToday();
     else if (state.mode === 'sectors') renderSectors();
     else {
@@ -953,4 +1217,8 @@ export default function renderMonitor(root, data, manifest) {
     setMessage('The MONITOR artifact contains no rows. No automatic pool or score is inferred.', 'gap');
   }
   renderAll();
+  loadWeights().then((loaded) => {
+    weights = loaded;
+    if (weights.size && root.isConnected) renderData();
+  });
 }
