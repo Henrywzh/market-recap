@@ -614,3 +614,43 @@ min_autocorrelation = 0.3
 min_sessions = 20
 min_correlation_pairs = 10
 history_period = "2y"
+
+# Recorded history that cannot be downloaded later (src/market_recap/snapshots,
+# docs/information_architecture.md). Nothing here feeds the page yet. The
+# scheduled job checks the `snapshots` branch out at `root` and commits what
+# each run appends.
+[snapshots]
+root = "data/snapshots"
+
+[snapshots.options]
+# New York wall-clock window on weekdays. Late in the session, because free
+# chains fetched after the close often carry zero bids or stale quotes.
+window = ["15:10", "16:00"]
+# Recorded every session so each has a continuous IV history: index and
+# sector ETFs, rates/credit/gold funds and the largest index weights.
+fixed = [
+  "SPY", "QQQ", "IWM", "DIA",
+  "XLK", "XLF", "XLE", "XLV", "XLY", "XLP", "XLI", "XLU", "XLB", "XLRE", "XLC", "SMH",
+  "TLT", "HYG", "GLD",
+  "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "TSLA", "JPM", "LLY",
+]
+include_watchlist = true
+# MONITOR candidates added on top, read from the published monitor.json: those
+# reporting within monitor_earnings_days first, then the furthest behind peers.
+monitor_max = 15
+monitor_earnings_days = 30
+# Expiries: the nearest at least min_days out, plus those either side of each
+# target (calendar days), so a constant-maturity vol can be interpolated later.
+min_days = 2
+target_days = [30, 60]
+# Contracts kept raw: strikes within this fraction of spot.
+strike_band = 0.25
+# Discount rate: 13-week T-bill yield, in percent.
+rate_symbol = "^IRX"
+time_budget_seconds = 1200
+
+[snapshots.expectations]
+fed_funds_months = 12
+sofr_quarters = 8
+kalshi_series = ["KXFEDDECISION", "KXFED", "KXCPIYOY", "KXCPICOREYOY", "KXPAYROLLS", "KXU3", "KXGDP"]
+polymarket_tags = ["fed", "fed-rates"]

@@ -51,6 +51,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("validate", help="Re-check the artifacts already on disk.")
     sub.add_parser("site", help="Assemble dist/ from the artifacts already on disk.")
 
+    snapshot = sub.add_parser("snapshot", help="Record option chains or market expectations (see snapshots/).")
+    snapshot.add_argument("kind", choices=("options", "expectations"))
+    snapshot.add_argument("--root", help="Directory to write under (default: [snapshots] root).")
+    snapshot.add_argument(
+        "--force", action="store_true",
+        help="options: snapshot even outside the configured New York window.",
+    )
+
     prune = sub.add_parser("prune", help="Delete expired cache entries.")
     prune.add_argument("--all", action="store_true", help="Delete every cache entry, not just expired ones.")
 
@@ -78,6 +86,17 @@ def main(argv: list[str] | None = None) -> int:
         report = validate.run()
         _print(report)
         return 0 if report["ok"] else 1
+
+    if args.command == "snapshot":
+        if args.kind == "options":
+            from .snapshots import options as snap
+            result = snap.run(root=args.root, force=args.force)
+        else:
+            from .snapshots import expectations as snap
+            result = snap.run(root=args.root)
+        _print(result)
+        # A skipped run (outside the window, market closed) is not a failure.
+        return 1 if result["status"] == "failed" else 0
 
     if args.command == "prune":
         from datetime import timedelta

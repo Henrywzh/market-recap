@@ -5,7 +5,7 @@ SITE_URL = https://market-recap-b5p.pages.dev
 WRANGLER_DEPLOY = ./node_modules/.bin/wrangler pages deploy dist --project-name market-recap --branch main --commit-dirty=true
 export PYTHONPATH := src
 
-.PHONY: help install refresh refresh-fast validate site serve serve-live deploy deploy-only test lock prune clean status run-now
+.PHONY: help install refresh refresh-fast validate site serve serve-live deploy deploy-only test lock prune clean status run-now snapshot-options snapshot-expectations
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -50,6 +50,12 @@ lock: ## Re-resolve requirements.lock to the newest versions pyproject allows
 	{ grep '^#' requirements.lock; .lockvenv/bin/pip freeze --exclude-editable; } > requirements.lock.new
 	mv requirements.lock.new requirements.lock && rm -rf .lockvenv
 	@echo "requirements.lock updated -- run 'make test refresh' before committing it"
+
+snapshot-options: ## Record today's option chains into data/snapshots (inside the New York window only)
+	$(PYTHON) -m market_recap.cli snapshot options
+
+snapshot-expectations: ## Record rates futures and event-market pricing into data/snapshots
+	$(PYTHON) -m market_recap.cli snapshot expectations
 
 prune: ## Delete expired cache entries
 	$(PYTHON) -m market_recap.cli prune

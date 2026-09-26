@@ -210,11 +210,34 @@ src/market_recap/
   context.py               constituents + prices, fetched once per build
   build.py                 orchestrator, writes manifest.json
   validate.py              checks the artifacts against the contract
+  snapshots/               recorded option chains and market pricing (not read by the page yet)
 web/                       static site (ES modules, ECharts from CDN)
   js/technicals-math.js    every technical indicator; tested against pandas from tests/
 artifacts/                 generated JSON the site reads
 data/cache/                raw snapshots and parsed frames, pruned each build
+data/snapshots/            checkout of the `snapshots` branch (recorded history)
 ```
+
+## Recorded snapshots
+
+Two kinds of history cannot be downloaded later for free, so
+`.github/workflows/snapshots.yml` records them from the day it runs and
+commits each run to the orphan `snapshots` branch (data only):
+
+- **Option chains**, once a session between 15:10 and 16:00 New York: about
+  50 underlyings (`[snapshots.options]`: index, sector and macro ETFs, the
+  largest index weights, the watchlist, and up to 15 MONITOR candidates).
+  Per expiry, ATM IV, 25-delta put and call IV, the ATM straddle and open
+  interest, all solved from bid/ask mids under Black-76 against the
+  parity-implied forward, never Yahoo's last-trade IV. Contracts within 25%
+  of spot are kept raw.
+- **Market pricing**, four times a weekday: fed funds and SOFR futures,
+  every open Kalshi market in the configured series, Polymarket's Fed
+  markets. Inputs only; probabilities are derived from them later.
+
+`make snapshot-options` and `make snapshot-expectations` write the same files
+under `data/snapshots/` locally. The plan they serve is
+`docs/information_architecture.md`.
 
 ## Live intraday strip
 
