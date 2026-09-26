@@ -7,6 +7,7 @@
 // a link in a note never lands on an empty page.
 
 export const VIEWS = [
+  { id: 'brief', label: 'BRIEF', group: 'brief', artifact: 'brief', module: 'brief' },
   { id: 'markets', label: 'OVERVIEW', group: 'market', artifact: 'markets', module: 'markets' },
   { id: 'heatmaps', label: 'HEAT MAPS', group: 'market', artifact: 'heatmaps', module: 'heatmaps' },
   { id: 'rotation', label: 'SECTORS', group: 'market', artifact: 'rotation', module: 'rotation' },
@@ -26,6 +27,7 @@ export const VIEWS = [
 
 // In the order of the trading loop: how much risk, where, who, when.
 export const GROUPS = [
+  { id: 'brief', label: 'BRIEF' },
   { id: 'risk', label: 'RISK' },
   { id: 'market', label: 'MARKET' },
   { id: 'names', label: 'NAMES' },
@@ -41,7 +43,7 @@ export const ALIASES = {
   sectors: 'rotation',
 };
 
-export const DEFAULT_VIEW = 'markets';
+export const DEFAULT_VIEW = 'brief';
 
 const TICKER_PATTERN = /^[A-Z0-9^][A-Z0-9.\-=]{0,14}$/;
 

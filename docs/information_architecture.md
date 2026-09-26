@@ -329,6 +329,29 @@ run only from `main`, so recording starts once this is merged there.
 Each new source gets a probe and an evaluation note in the style of
 `docs/expectation_sources.md` before it reaches a page.
 
+## Phase 2 as built (2026-09-26)
+
+- **BRIEF is the default view** (`panels/brief.py`), assembled from this
+  session's RISK, PRICED PATH, CATALYSTS, MONITOR, anchor and journal
+  artifacts; one that did not build is named at the top and its line stays
+  empty. Lines: live strip; systematic anchor; priced strip (next FOMC with
+  its 1D / 1W change, priced to year end, next CPI's Kalshi median, VIX
+  against 20-day realised); risk strip in a tactical and a slow row
+  (`[brief]` names the tiles); what changed (risk lines crossed this week,
+  MONITOR entries and exits, post-earnings moves ≥ 5%); the next three
+  sessions (high- and medium-importance releases, not speeches; earnings of
+  watchlist names and the 20 largest weights); my list (watchlist names and
+  names with an open journal checkpoint).
+- **Systematic anchor** (`compute/anchor.py`, `panels/anchor.py`): the
+  frozen v1 friend-plus-joint control re-implemented from quantamental-lab,
+  checked on 2026-09-26 to reproduce that repository's daily exposure and
+  NAV exactly over 8,472 sessions (1993-01-29 to 2026-09-25). The recession
+  gate is that repository's model output and is not ported; it is neutral,
+  the frozen rule's own policy for a missing input. Its five-year daily
+  history is kept for the journal.
+- **Not done:** "revision breadth that turned" (needs the tracker's history
+  as a series) and the implied move beside each earnings name (phase 3).
+
 ## Phase 1 as built (2026-09-26)
 
 - **Navigation.** MARKET could not take Risk and Priced Path within the

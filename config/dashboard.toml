@@ -937,3 +937,10 @@ fed_funds_months = 13
 sofr_quarters = 8
 disagreement_bp = 10
 releases_per_series = 2
+
+# BRIEF: the risk tiles shown on the landing page, tactical and slow kept in
+# separate rows. Keys are [[risk.tiles]] keys.
+[brief]
+tactical = ["vix", "vix_term", "vrp", "move", "hyg_ief", "hy_oas", "cor1m", "realised_corr"]
+slow = ["spx_vs_200d", "spx_drawdown", "breadth_200d", "net_liquidity", "nfci", "cftc_es", "put_call"]
+top_weights = 20
