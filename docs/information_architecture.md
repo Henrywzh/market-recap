@@ -328,6 +328,25 @@ run only from `main`, so recording starts once this is merged there.
 Each new source gets a probe and an evaluation note in the style of
 `docs/expectation_sources.md` before it reaches a page.
 
+## Phase 0 as built (2026-09-26)
+
+- **Navigation** follows `web/js/routes.js`: MARKET · NAMES · CATALYSTS ·
+  TOOLS. BRIEF does not exist yet, so MARKET → Overview is the landing view.
+  Until Risk and Priced Path exist, MARKET keeps Heat maps and Sector
+  rotation as their own views rather than folding them into Overview, and
+  Rates & Macro stacks the two existing panels on one page.
+- **Ticker page** is assembled from exported section renderers
+  (`renderPeHistory`, `renderStatements`, `renderSingleTicker`) that the
+  SCREEN, FINANCIALS and TECHNICALS code also uses. A fund or index gets its
+  technicals and one line saying why the company sections are absent. The
+  standalone FINANCIALS view is gone; its hash opens the ticker page.
+- **Research note** shows the existing `config/monitor_notes.toml` fields
+  (status, since, reason, outcome). A checkpoint list is not added yet: the
+  note is part of the MONITOR ledger that cloud builds restore and validate
+  (`sources/monitor_state.py`), so changing its shape is its own change.
+- **Snapshots** are recorded as described above; they start when the
+  workflow reaches `main`.
+
 ## Deferred
 
 - **Holdings.** Not connected yet. BRIEF's list and the ticker page reserve

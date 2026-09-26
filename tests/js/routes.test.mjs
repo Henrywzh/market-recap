@@ -1,0 +1,58 @@
+// Navigation: every hash lands on a view, and old bookmarks still work.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readdirSync } from 'node:fs';
+import * as R from '../../web/js/routes.js';
+
+test('a view with an argument reads it after the slash', () => {
+  assert.deepEqual(R.parseHash('#ticker/aapl'), { id: 'ticker', arg: 'AAPL' });
+  assert.deepEqual(R.parseHash('#dcf/BRK-B'), { id: 'dcf', arg: 'BRK-B' });
+});
+
+test('a view without an argument ignores one', () => {
+  assert.deepEqual(R.parseHash('#monitor/AAPL'), { id: 'monitor', arg: null });
+});
+
+test('an argument falls back to ?ticker= from links written before the regrouping', () => {
+  assert.deepEqual(R.parseHash('#technicals', '?ticker=nvda'), { id: 'technicals', arg: 'NVDA' });
+  assert.deepEqual(R.parseHash('#ticker/MSFT', '?ticker=nvda'), { id: 'ticker', arg: 'MSFT' });
+});
+
+test('merged views redirect, carrying the ticker', () => {
+  assert.deepEqual(R.parseHash('#fixed-income'), { id: 'rates', arg: null });
+  assert.deepEqual(R.parseHash('#macro'), { id: 'rates', arg: null });
+  assert.deepEqual(R.parseHash('#financials', '?ticker=AAPL'), { id: 'ticker', arg: 'AAPL' });
+});
+
+test('unknown or empty hashes land on the default view', () => {
+  assert.deepEqual(R.parseHash(''), { id: R.DEFAULT_VIEW, arg: null });
+  assert.deepEqual(R.parseHash('#nope'), { id: R.DEFAULT_VIEW, arg: null });
+});
+
+test('an argument that is not a ticker is dropped, not passed on', () => {
+  assert.equal(R.parseHash('#ticker/<script>').arg, null);
+  assert.equal(R.cleanTicker('^GSPC'), '^GSPC');
+  assert.equal(R.cleanTicker(''), null);
+});
+
+test('hashFor round-trips through parseHash', () => {
+  assert.deepEqual(R.parseHash(`#${R.hashFor('ticker', 'BRK-B')}`), { id: 'ticker', arg: 'BRK-B' });
+  assert.equal(R.hashFor('monitor'), 'monitor');
+});
+
+test('every view has a module, a known group, and a unique id', () => {
+  const modules = new Set(readdirSync(new URL('../../web/js/tabs/', import.meta.url)).map((f) => f.replace(/\.js$/, '')));
+  const groups = new Set(R.GROUPS.map((g) => g.id));
+  const ids = new Set();
+  for (const view of R.VIEWS) {
+    assert.ok(modules.has(view.module), `${view.id}: no module ${view.module}.js`);
+    assert.ok(groups.has(view.group), `${view.id}: unknown group ${view.group}`);
+    assert.ok(!ids.has(view.id), `${view.id} is listed twice`);
+    ids.add(view.id);
+  }
+  for (const target of Object.values(R.ALIASES)) assert.ok(ids.has(target), `alias target ${target} is not a view`);
+});
+
+test('no group offers more than four views', () => {
+  for (const group of R.GROUPS) assert.ok(R.viewsIn(group.id).length <= 4, group.id);
+});

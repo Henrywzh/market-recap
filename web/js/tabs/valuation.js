@@ -339,7 +339,12 @@ function mainTable(rows, metrics, data, sort, onSort, onPick) {
   })));
   const body = sorted.map((row) => el('tr', {}, columns.map((c) => {
     if (c.key === 'ticker') {
-      return el('td', { text: row.ticker, title: rowNote(row, data), style: 'cursor:pointer;text-decoration:underline dotted', onclick: () => onPick(row.ticker) });
+      // The ticker draws its P/E history above; the arrow opens its ticker page.
+      return el('td', {}, [
+        el('span', { text: row.ticker, title: rowNote(row, data), style: 'cursor:pointer;text-decoration:underline dotted', onclick: () => onPick(row.ticker) }),
+        ' ',
+        el('a', { href: `#ticker/${encodeURIComponent(row.ticker)}`, class: 'dim', title: `${row.ticker} ticker page`, text: '↗' }),
+      ]);
     }
     if (c.key === 'sector') return el('td', { class: 'dim', text: row.sector || DASH });
     if (c.key === 'market_cap') return el('td', { text: present(row.market_cap) ? num(row.market_cap / BILLION, 1) : DASH });
@@ -351,7 +356,36 @@ function mainTable(rows, metrics, data, sort, onSort, onPick) {
   return el('div', { class: 'table-scroll' }, node);
 }
 
-export default async function renderValuation(root, data) {
+// One company's P/E against its own ten years into `host`. Returns a one-line
+// status; throws when the company has no P/E history in this build.
+export async function renderPeHistory(host, symbol, data) {
+  const history = await loadHistory(symbol);
+  const historyNode = el('div', { class: 'chart tall' });
+  const epsNode = el('div', { class: 'chart short' });
+  const historyStats = historyTable(history);
+  host.replaceChildren(
+    el('div', { class: 'grid two' }, [
+      el('div', {}, [historyNode]),
+      el('div', {}, [historyStats, el('div', { class: 'card-title', text: 'TTM DILUTED EPS, TODAY\'S SHARE BASIS, BY FILING DATE' }), epsNode]),
+    ]),
+    el('div', { class: 'note-text', text:
+      `Each session's P/E is the split-adjusted close (not dividend-adjusted) over the TTM diluted EPS `
+      + `public by then: every quarter is built only from filings made by the day it was first reported, `
+      + `so the history never uses a number before it was published. A loss leaves a gap; an EPS with no `
+      + `successor for two quarters expires rather than being carried forward. Band: 25th–75th percentile. `
+      + `The table's P/E (market cap / net income) and this one (price / EPS) disagree by more than `
+      + `${Math.round(data.pe_history.agreement_tolerance * 100)}% for ${data.pe_history.disagree.length} companies`
+      + (data.pe_history.disagree.length ? ` (${data.pe_history.disagree.join(', ')}) — usually a merger or spin-off `
+        + 'moving the share count, preferred dividends, or a large minority interest' : '')
+      + '.' }),
+  );
+  historyChart(historyNode, history);
+  epsChart(epsNode, history);
+  const row = data.rows.find((r) => r.ticker === symbol);
+  return `${row?.name || symbol} · weekly, ${history.dates[0]} → ${history.dates[history.dates.length - 1]}`;
+}
+
+export default async function renderValuation(root, data, _manifest, ctx = {}) {
   root.append(sectionTitle('VALUATION & QUALITY', 'FILED FUNDAMENTALS × CLOSING PRICE'));
   if (!data.rows || !data.rows.length) {
     root.append(el('div', { class: 'gap', text: 'No companies were valued in this build. Run the refresh command without --skip-sec.' }));
@@ -434,26 +468,17 @@ export default async function renderValuation(root, data) {
   root.append(card('VALUATION × QUALITY', null, [scatterNode, scatterNote]));
 
   // ---------------- P/E against its own history ---------------------------
-  const requestedTicker = new URLSearchParams(location.search).get('ticker')?.toUpperCase();
+  const requestedTicker = ctx.arg;
   const historyInput = el('input', { value: requestedTicker || 'AAPL', size: '8' });
   const historyStatus = el('span', { class: 'field-note', text: '' });
-  const historyNode = el('div', { class: 'chart tall' });
-  const epsNode = el('div', { class: 'chart short' });
-  const historyStats = el('div', {});
+  const historyHost = el('div', {});
   async function loadPeHistory() {
     const symbol = historyInput.value.trim().toUpperCase();
     historyStatus.textContent = `Loading ${symbol}…`;
     try {
-      const history = await loadHistory(symbol);
-      historyChart(historyNode, history);
-      epsChart(epsNode, history);
-      historyStats.replaceChildren(historyTable(history));
-      const row = data.rows.find((r) => r.ticker === symbol);
-      historyStatus.textContent = `${row?.name || symbol} · weekly, ${history.dates[0]} → ${history.dates[history.dates.length - 1]}`;
+      historyStatus.textContent = await renderPeHistory(historyHost, symbol, data);
     } catch (error) {
-      historyNode.innerHTML = '';
-      epsNode.innerHTML = '';
-      historyStats.replaceChildren();
+      historyHost.replaceChildren();
       historyStatus.textContent = error.message;
     }
   }
@@ -464,20 +489,7 @@ export default async function renderValuation(root, data) {
       el('button', { class: 'action', text: 'LOAD', onclick: loadPeHistory }),
       historyStatus,
     ]),
-    el('div', { class: 'grid two' }, [
-      el('div', {}, [historyNode]),
-      el('div', {}, [historyStats, el('div', { class: 'card-title', text: 'TTM DILUTED EPS, TODAY\'S SHARE BASIS, BY FILING DATE' }), epsNode]),
-    ]),
-    el('div', { class: 'note-text', text:
-      `Each session's P/E is the split-adjusted close (not dividend-adjusted) over the TTM diluted EPS `
-      + `public by then: every quarter is built only from filings made by the day it was first reported, `
-      + `so the history never uses a number before it was published. A loss leaves a gap; an EPS with no `
-      + `successor for two quarters expires rather than being carried forward. Band: 25th–75th percentile. `
-      + `The table's P/E (market cap / net income) and this one (price / EPS) disagree by more than `
-      + `${Math.round(data.pe_history.agreement_tolerance * 100)}% for ${data.pe_history.disagree.length} companies`
-      + (data.pe_history.disagree.length ? ` (${data.pe_history.disagree.join(', ')}) — usually a merger or spin-off `
-        + 'moving the share count, preferred dividends, or a large minority interest' : '')
-      + '.' }),
+    historyHost,
   ]);
   root.append(historyCard);
   root.append(card('SECTOR MEDIANS', null, sectorHost));

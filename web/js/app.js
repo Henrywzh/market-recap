@@ -2,62 +2,28 @@
 
 import { el } from './fmt.js';
 import { resizeAll, disposeAll } from './charts.js';
+import { GROUPS, parseHash, hashFor, viewById, viewsIn } from './routes.js';
 
-// Tab modules load on demand, stamped with the build they belong to. A
+// View modules load on demand, stamped with the build they belong to. A
 // browser keeps an ES module in memory under its URL, so an unversioned
 // module survives a reload, a new tab and a no-store response alike: the page
 // then renders last build's code against this build's data, which is far
-// harder to spot than a plain failure.
-const TABS = [
-  { id: 'markets', label: 'MARKETS', artifact: 'markets', module: 'markets' },
-  { id: 'monitor', label: 'MONITOR', artifact: 'monitor', module: 'monitor' },
-  { id: 'catalysts', label: 'CALENDAR', artifact: 'catalysts', module: 'catalysts', group: 'catalysts-earnings' },
-  { id: 'earnings', label: 'EARNINGS', artifact: 'earnings', module: 'earnings', group: 'catalysts-earnings' },
-  { id: 'heatmaps', label: 'HEAT MAPS', artifact: 'heatmaps', module: 'heatmaps', group: 'heatmaps-rotation' },
-  { id: 'rotation', label: 'SECTOR ROTATION', artifact: 'rotation', module: 'rotation', group: 'heatmaps-rotation' },
-  { id: 'fixed-income', label: 'FIXED INCOME', artifact: 'fixed_income', module: 'fixed-income', group: 'rates-macro' },
-  { id: 'macro', label: 'MACRO', artifact: 'macro', module: 'macro', group: 'rates-macro' },
-  { id: 'technicals', label: 'TECHNICALS', artifact: 'technicals', module: 'technicals' },
-  { id: 'cross-listing', label: 'CROSS-LISTING', artifact: 'cross_listing', module: 'cross-listing' },
-  { id: 'xray', label: 'ETF X-RAY', artifact: 'xray', module: 'xray' },
-  { id: 'valuation', label: 'VALUATION & QUALITY', artifact: 'valuation', module: 'valuation', group: 'valuation-dcf' },
-  { id: 'dcf', label: 'DCF', artifact: 'dcf', module: 'dcf', group: 'valuation-dcf' },
-  { id: 'financials', label: 'FINANCIALS', artifact: 'financials', module: 'financials' },
-];
-
-// Views that answer one question share a top-level tab and switch beneath it.
-// Each view keeps its own hash, so existing links (#dcf, #fixed-income) work.
-const GROUPS = {
-  'catalysts-earnings': 'CATALYSTS',
-  'heatmaps-rotation': 'HEAT MAPS & ROTATION',
-  'rates-macro': 'RATES & MACRO',
-  'valuation-dcf': 'VALUATION',
-};
+// harder to spot than a plain failure. The views and their grouping live in
+// routes.js.
 const lastInGroup = new Map();
-
-function navItems() {
-  const items = [];
-  TABS.forEach((tab) => {
-    if (!tab.group) items.push({ id: tab.id, label: tab.label, views: [tab] });
-    else if (!items.some((item) => item.id === tab.group)) {
-      items.push({ id: tab.group, label: GROUPS[tab.group], views: TABS.filter((t) => t.group === tab.group) });
-    }
-  });
-  return items;
-}
 
 const renderers = new Map();
 
-async function rendererFor(tab) {
-  if (renderers.has(tab.id)) return renderers.get(tab.id);
-  const module = await import(`./tabs/${tab.module}.js?v=${encodeURIComponent(state.version)}`);
-  renderers.set(tab.id, module.default);
+async function rendererFor(view) {
+  if (renderers.has(view.id)) return renderers.get(view.id);
+  const module = await import(`./tabs/${view.module}.js?v=${encodeURIComponent(state.version)}`);
+  renderers.set(view.id, module.default);
   return module.default;
 }
 
 const ARTIFACT_BASE = 'artifacts';
 const cache = new Map();
-const state = { manifest: null, active: null, version: 'dev' };
+const state = { manifest: null, active: null, arg: null, version: 'dev' };
 
 export async function loadArtifact(name) {
   if (cache.has(name)) return cache.get(name);
@@ -107,68 +73,98 @@ function startBuildAge(generatedAt, thresholds) {
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
   try { localStorage.setItem('mr-theme', theme); } catch { /* private window */ }
-  if (state.active) select(state.active, true);
+  if (state.active) select(state.active, { silent: true, arg: state.arg });
 }
 
 function buildTabs() {
   const nav = document.getElementById('tabs');
   nav.innerHTML = '';
-  navItems().forEach((item) => {
+  GROUPS.forEach((group) => {
+    const views = viewsIn(group.id);
     nav.append(el('button', {
       class: 'tab',
       role: 'tab',
-      id: `tab-${item.id}`,
-      text: item.label,
+      id: `tab-${group.id}`,
+      text: group.label,
       'aria-selected': 'false',
-      onclick: () => select(lastInGroup.get(item.id) || item.views[0].id),
+      onclick: () => select(lastInGroup.get(group.id) || views[0].id),
     }));
   });
 }
 
-function subTabs(tab) {
-  if (!tab.group) return null;
-  return el('div', { class: 'subtabs', role: 'tablist' }, TABS.filter((t) => t.group === tab.group).map((view) => el('button', {
+function subTabs(view) {
+  const views = viewsIn(view.group);
+  if (views.length < 2) return null;
+  return el('div', { class: 'subtabs', role: 'tablist' }, views.map((item) => el('button', {
     class: 'subtab',
     role: 'tab',
-    text: view.label,
-    'aria-selected': String(view.id === tab.id),
-    onclick: () => select(view.id),
+    text: item.label,
+    'aria-selected': String(item.id === view.id),
+    onclick: () => select(item.id),
   })));
 }
 
-async function select(id, silent = false) {
-  const tab = TABS.find((t) => t.id === id);
-  if (!tab) return;
-  state.active = id;
-  if (!silent) location.hash = id;
-  if (tab.group) lastInGroup.set(tab.group, id);
+// A view built from several artifacts gets each one, or `{ unavailable }` in
+// its place, so one missing file does not blank the others.
+function loadPayload(view) {
+  return Array.isArray(view.artifact)
+    ? Promise.all(view.artifact.map((name) => loadArtifact(name).catch((error) => ({ unavailable: error.message }))))
+    : loadArtifact(view.artifact);
+}
 
-  const navId = tab.group || id;
+// What a view module receives besides its artifact: the argument from the
+// hash, the shared artifact loader, and a way to move to another view.
+function context(view, arg) {
+  return {
+    arg,
+    loadArtifact,
+    navigate: (id, next = null) => select(id, { arg: next }),
+    setArg: (next) => {
+      // A view that changes its own subject (the ticker page's search box)
+      // records it in the hash without re-rendering itself.
+      state.arg = next;
+      history.replaceState(null, '', `#${hashFor(view.id, next)}`);
+    },
+  };
+}
+
+async function select(id, { silent = false, arg = null } = {}) {
+  const view = viewById(id);
+  if (!view) return;
+  state.active = id;
+  state.arg = view.takesArg ? arg : null;
+  const hash = hashFor(id, state.arg);
+  if (!silent && location.hash.replace('#', '') !== hash) {
+    // Setting the hash fires hashchange; the handler sees the same view and
+    // argument and returns, so this does not render twice.
+    location.hash = hash;
+  }
+  lastInGroup.set(view.group, id);
+
   document.querySelectorAll('.tab').forEach((node) => {
-    node.setAttribute('aria-selected', String(node.id === `tab-${navId}`));
+    node.setAttribute('aria-selected', String(node.id === `tab-${view.group}`));
   });
 
   const main = document.getElementById('main');
   const host = document.getElementById('subtabs');
-  host.replaceChildren(...[subTabs(tab)].filter(Boolean));
+  host.replaceChildren(...[subTabs(view)].filter(Boolean));
   disposeAll();
   main.innerHTML = '';
-  main.append(el('div', { class: 'loading', text: `Loading ${tab.label}…` }));
+  main.append(el('div', { class: 'loading', text: `Loading ${view.label}…` }));
 
   try {
-    if (tab.id === 'monitor' && !state.manifest?.panels?.includes('monitor')) {
+    if (view.id === 'monitor' && !state.manifest?.panels?.includes('monitor')) {
       throw new Error('monitor was not built for this session');
     }
-    const [payload, render] = await Promise.all([
-      loadArtifact(tab.artifact),
-      rendererFor(tab),
-    ]);
+    const [payload, render] = await Promise.all([loadPayload(view), rendererFor(view)]);
+    if (state.active !== id) return;
     main.innerHTML = '';
-    await render(main, payload, state.manifest);
+    await render(main, payload, state.manifest, context(view, state.arg));
   } catch (error) {
+    if (state.active !== id) return;
     main.innerHTML = '';
     main.append(el('div', { class: 'gap' }, [
-      `${tab.label} is unavailable: ${error.message}. `,
+      `${view.label} is unavailable: ${error.message}. `,
       'Run the refresh command to rebuild its artifact.',
     ]));
   }
@@ -248,12 +244,20 @@ export async function boot(manifest, version) {
   document.title = `${brand.title || 'Market Recap'} · ${manifest.as_of || ''}`;
   renderFooter(manifest);
 
-  const initial = location.hash.replace('#', '') || 'markets';
-  select(TABS.some((t) => t.id === initial) ? initial : 'markets', true);
+  // An old hash (#financials, #fixed-income) or a ?ticker= link is rewritten
+  // to the view it now names, so the address bar shows where the reader is.
+  const initial = parseHash(location.hash, location.search);
+  const canonical = `#${hashFor(initial.id, initial.arg)}`;
+  if (location.hash !== canonical || location.search) {
+    history.replaceState(null, '', `${location.pathname}${canonical}`);
+  }
+  select(initial.id, { silent: true, arg: initial.arg });
 
   window.addEventListener('hashchange', () => {
-    const next = location.hash.replace('#', '');
-    if (next && next !== state.active) select(next, true);
+    const next = parseHash(location.hash);
+    const canonicalNext = `#${hashFor(next.id, next.arg)}`;
+    if (location.hash !== canonicalNext) history.replaceState(null, '', canonicalNext);
+    if (next.id !== state.active || next.arg !== state.arg) select(next.id, { silent: true, arg: next.arg });
   });
   window.addEventListener('resize', () => requestAnimationFrame(resizeAll));
 }

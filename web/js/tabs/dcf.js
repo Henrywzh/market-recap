@@ -29,7 +29,7 @@ async function loadCompany(symbol) {
   return response.json();
 }
 
-export default async function renderDcf(root, data) {
+export default async function renderDcf(root, data, _manifest, ctx = {}) {
   root.append(sectionTitle('DISCOUNTED CASH FLOW', 'BUILD-YOUR-OWN MODEL · LEARNING TOOL'));
   root.append(notice(
     'For learning purposes only. This is a teaching model, not a target price or investment advice. '
@@ -42,7 +42,10 @@ export default async function renderDcf(root, data) {
     return;
   }
 
-  const tickerInput = el('input', { id: 'dcf-ticker', value: data.available[0], size: '8', list: 'dcf-list' });
+  // A ticker page links here with its ticker; one this build did not bake
+  // still opens, on the first company, with the reason in the status line.
+  const requested = ctx.arg && data.available.includes(ctx.arg) ? ctx.arg : null;
+  const tickerInput = el('input', { id: 'dcf-ticker', value: requested || data.available[0], size: '8', list: 'dcf-list' });
   const datalist = el('datalist', { id: 'dcf-list' }, data.available.map((t) => el('option', { value: t })));
   const status = el('span', { class: 'field-note', text: `${data.available.length} companies available in this build.` });
   const host = el('div', {});
@@ -64,7 +67,9 @@ export default async function renderDcf(root, data) {
       const company = await loadCompany(symbol);
       host.innerHTML = '';
       buildModel(host, company, data);
-      status.textContent = `${company.entity_name} · SEC through FY${company.fiscal_years[company.fiscal_years.length - 1]}`;
+      const missing = ctx.arg && !requested && symbol === data.available[0]
+        ? ` · ${ctx.arg} is not among the ${data.available.length} companies this build baked for the DCF` : '';
+      status.textContent = `${company.entity_name} · SEC through FY${company.fiscal_years[company.fiscal_years.length - 1]}${missing}`;
     } catch (error) {
       status.textContent = error.message;
     }

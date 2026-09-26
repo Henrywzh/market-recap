@@ -12,6 +12,27 @@ else is the static build.
 
 ## What it shows
 
+The views are grouped by the question they answer
+(`docs/information_architecture.md`; the grouping itself is `web/js/routes.js`):
+
+| Group | Views |
+|---|---|
+| **MARKET** | Overview (MARKETS below) · Heat maps · Sector rotation · Rates & macro |
+| **NAMES** | Monitor · Screen (VALUATION & QUALITY) · **Ticker** · Cross-listing |
+| **CATALYSTS** | Calendar · Earnings |
+| **TOOLS** | Technicals · ETF X-Ray · DCF |
+
+**Ticker** (`#ticker/AAPL`) is one company on one page, reached from any
+ticker link: header readings, the MONITOR research note and evidence,
+valuation against the sector median, P/E against its own ten years,
+single-ticker technicals and the filed statements. Each section is drawn by
+the panel that owns it, so nothing is computed twice. Views that take a
+ticker read it after a slash (`#dcf/MSFT`, `#technicals/NVDA`); hashes from
+before the regrouping (`#financials`, `#fixed-income`, `#macro`, `?ticker=`)
+still land on the right view.
+
+The panels, as each is built:
+
 | Tab | Contents |
 |---|---|
 | **MONITOR** | Research queue over the S&P 500 and the watchlist. A name enters at a 20% drawdown from its 1Y high or when it trails its sector peers (company excluded) by 10 pp over 1M. **TODAY** lists what changed since the previous build (entered, stabilising, evidence turned, reported, left), with weak-as-a-whole sectors grouped as one event; **QUEUE** has a price-state × evidence-state 2×2; evidence for and against (FY1 EPS revisions from Yahoo, revenue, FCF, last quarter vs consensus) is listed, never scored; candidate history persists between builds, and watch/exclude reasons live in `config/monitor_notes.toml`. See [the monitor contract](docs/monitor.md). |

@@ -218,7 +218,7 @@ function forwardCard(payload, readings, data) {
 
 // -------------------------------------------------------------------- tab
 
-export default async function renderTechnicals(root, data) {
+export default async function renderTechnicals(root, data, _manifest, ctx = {}) {
   const defaults = data.defaults;
   const available = new Set(data.available);
   root.append(sectionTitle('TECHNICALS', 'RELATIVE STRENGTH · MA SLOPE · Z-SCORE & REGIME'));
@@ -287,10 +287,18 @@ export default async function renderTechnicals(root, data) {
     macdNode,
   ]));
 
+  await loadRatio();
+  const requested = ctx.arg;
+  await renderSingleTicker(root, data, { symbol: requested || (available.has('NVDA') ? 'NVDA' : data.available[0]) });
+}
+
+// The single-ticker section on its own, so the ticker page can show the same
+// readings. `lockTicker` hides the ticker box when the page already names it.
+export async function renderSingleTicker(root, data, { symbol, lockTicker = false }) {
+  const defaults = data.defaults;
   // ---------------- Single ticker ----------------------------------------
   const stStatus = el('span', { class: 'field-note', text: '' });
-  const requestedTicker = new URLSearchParams(location.search).get('ticker')?.toUpperCase();
-  const tickerInput = el('input', { value: requestedTicker || (available.has('NVDA') ? 'NVDA' : data.available[0]), size: '8' });
+  const tickerInput = el('input', { value: symbol, size: '8' });
   const maInput = el('input', { value: defaults.ma_periods.join(','), size: '12' });
   const slopeInput = el('input', { value: String(defaults.slope_window), size: '4', type: 'number', min: '1', max: String(MAX_SLOPE_WINDOW) });
   const stPeriod = periodSelect(data.periods, defaults.single_ticker_period);
@@ -345,7 +353,7 @@ export default async function renderTechnicals(root, data) {
 
   root.append(card('SINGLE-TICKER TECHNICALS', null, [
     el('div', { class: 'field-row' }, [
-      el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), tickerInput]),
+      lockTicker ? null : el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), tickerInput]),
       el('div', { class: 'field' }, [el('label', { text: 'MA PERIODS' }), maInput]),
       el('div', { class: 'field' }, [el('label', { text: 'SLOPE WINDOW (D)' }), slopeInput]),
       el('div', { class: 'field' }, [el('label', { text: 'PERIOD' }), stPeriod]),
@@ -362,6 +370,5 @@ export default async function renderTechnicals(root, data) {
   root.append(el('div', { class: 'grid two' }, [slopeCard, card(`Z-SCORE VS ${zWindow} DMA`, null, zNode)]));
   root.append(fwdHost);
 
-  await loadRatio();
   await loadSingle();
 }
