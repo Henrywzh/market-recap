@@ -670,3 +670,33 @@ table.data.monitor-change-table td.monitor-why { min-width: 260px; }
 .live-strip { margin-bottom: 6px; }
 .live-stale .stat-value { color: var(--text-dim); }
 .live-stale .live-age { color: var(--down); }
+
+/* ---------- ROTATION ---------- */
+.rot-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 8px; font-size: 10px; letter-spacing: 0.08em; }
+.rot-controls .dim:not(:first-child) { margin-left: 8px; }
+.rot-stats { margin-bottom: 10px; }
+.rot-top { margin-bottom: 10px; }
+.rot-bottom { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+@media (max-width: 1100px) { .rot-bottom { grid-template-columns: minmax(0, 1fr); } }
+.rot-grid td, .rot-grid th { text-align: right; white-space: nowrap; }
+.rot-grid td:first-child, .rot-grid th:first-child { text-align: left; }
+.rot-grid th.active { color: var(--accent); }
+.rot-grid tbody tr { cursor: pointer; }
+.rot-grid tbody tr:hover td { filter: brightness(1.25); }
+.rot-grid tbody tr.selected td { box-shadow: inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent); }
+.rot-grid tbody tr.selected td:first-child { box-shadow: inset 2px 0 0 var(--accent), inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent); }
+.rot-cell { min-width: 48px; font-variant-numeric: tabular-nums; }
+.rot-cell.active { font-weight: 600; color: var(--text); }
+.rot-name { color: var(--text); }
+.rot-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; background: var(--text-faint); }
+.q-leading { color: var(--up); } .rot-dot.q-leading { background: var(--up); }
+.q-weakening { color: var(--accent); } .rot-dot.q-weakening { background: var(--accent); }
+.q-lagging { color: var(--down); } .rot-dot.q-lagging { background: var(--down); }
+.q-improving { color: var(--blue); } .rot-dot.q-improving { background: var(--blue); }
+.rot-quad { font-size: 10px; letter-spacing: 0.06em; }
+.rot-breadth-bar { position: relative; display: inline-block; width: 46px; height: 6px; margin-right: 6px; vertical-align: middle; background: color-mix(in srgb, var(--border-strong) 60%, transparent); }
+.rot-breadth-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); opacity: 0.7; }
+.rot-breadth-text { display: inline-block; min-width: 30px; }
+.rot-foot { font-size: 10px; margin-top: 6px; }
+.rot-summary { font-size: 11px; color: var(--text); margin-bottom: 8px; }
+.rot-chart-title { font-size: 10px; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 2px; }

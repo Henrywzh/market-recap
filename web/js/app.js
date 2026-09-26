@@ -13,7 +13,8 @@ const TABS = [
   { id: 'monitor', label: 'MONITOR', artifact: 'monitor', module: 'monitor' },
   { id: 'catalysts', label: 'CALENDAR', artifact: 'catalysts', module: 'catalysts', group: 'catalysts-earnings' },
   { id: 'earnings', label: 'EARNINGS', artifact: 'earnings', module: 'earnings', group: 'catalysts-earnings' },
-  { id: 'heatmaps', label: 'HEAT MAPS', artifact: 'heatmaps', module: 'heatmaps' },
+  { id: 'heatmaps', label: 'HEAT MAPS', artifact: 'heatmaps', module: 'heatmaps', group: 'heatmaps-rotation' },
+  { id: 'rotation', label: 'SECTOR ROTATION', artifact: 'rotation', module: 'rotation', group: 'heatmaps-rotation' },
   { id: 'fixed-income', label: 'FIXED INCOME', artifact: 'fixed_income', module: 'fixed-income', group: 'rates-macro' },
   { id: 'macro', label: 'MACRO', artifact: 'macro', module: 'macro', group: 'rates-macro' },
   { id: 'technicals', label: 'TECHNICALS', artifact: 'technicals', module: 'technicals' },
@@ -28,6 +29,7 @@ const TABS = [
 // Each view keeps its own hash, so existing links (#dcf, #fixed-income) work.
 const GROUPS = {
   'catalysts-earnings': 'CATALYSTS',
+  'heatmaps-rotation': 'HEAT MAPS & ROTATION',
   'rates-macro': 'RATES & MACRO',
   'valuation-dcf': 'VALUATION',
 };
