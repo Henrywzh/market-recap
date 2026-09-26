@@ -654,3 +654,286 @@ fed_funds_months = 12
 sofr_quarters = 8
 kalshi_series = ["KXFEDDECISION", "KXFED", "KXCPIYOY", "KXCPICOREYOY", "KXPAYROLLS", "KXU3", "KXGDP"]
 polymarket_tags = ["fed", "fed-rates"]
+
+# MARKET RISK (RISK -> RISK). One tile per series; no composite score.
+# Thresholds were written on 2026-09-26, before the page drew any of these
+# series, and are not fitted to it. risk_when: "high" or "low" is the side of
+# the threshold that reads as risk; "extreme" reads either tail of the series'
+# own full history, with threshold = the tail size in percent.
+# A section's horizon applies to all its tiles: tactical (1-4 weeks) and slow
+# (months) are never mixed in one row.
+[risk]
+cftc_start = "2006-01-01"
+put_call_sessions = 260
+vx_contracts = 8
+
+[[risk.sections]]
+key = "volatility"
+label = "VOLATILITY"
+horizon = "tactical"
+[[risk.sections]]
+key = "rates_vol"
+label = "RATES VOLATILITY"
+horizon = "tactical"
+[[risk.sections]]
+key = "credit"
+label = "CREDIT"
+horizon = "tactical"
+[[risk.sections]]
+key = "correlation"
+label = "CORRELATION & DISPERSION"
+horizon = "tactical"
+[[risk.sections]]
+key = "trend"
+label = "TREND & BREADTH"
+horizon = "slow"
+[[risk.sections]]
+key = "liquidity"
+label = "LIQUIDITY & CONDITIONS"
+horizon = "slow"
+[[risk.sections]]
+key = "positioning"
+label = "POSITIONING (READ AT EXTREMES)"
+horizon = "slow"
+
+[[risk.tiles]]
+key = "vix"
+section = "volatility"
+label = "VIX"
+unit = "pts"
+risk_when = "high"
+threshold = 25
+[[risk.tiles]]
+key = "vix_term"
+section = "volatility"
+label = "VIX / VIX3M"
+unit = "ratio"
+risk_when = "high"
+threshold = 1.0
+note = "Above 1: one-month implied vol above three-month, an inverted curve."
+[[risk.tiles]]
+key = "vix9d_term"
+section = "volatility"
+label = "VIX9D / VIX"
+unit = "ratio"
+risk_when = "high"
+threshold = 1.05
+[[risk.tiles]]
+key = "vvix"
+section = "volatility"
+label = "VVIX"
+unit = "pts"
+risk_when = "high"
+threshold = 110
+[[risk.tiles]]
+key = "skew"
+section = "volatility"
+label = "SKEW"
+unit = "pts"
+risk_when = "high"
+threshold = 150
+[[risk.tiles]]
+key = "rv20"
+section = "volatility"
+label = "SPX 20D REALISED"
+unit = "pts"
+risk_when = "high"
+threshold = 25
+[[risk.tiles]]
+key = "vrp"
+section = "volatility"
+label = "VIX − REALISED"
+unit = "pts"
+risk_when = "low"
+threshold = 0
+note = "Below 0: the market is moving more than options priced a month ago."
+[[risk.tiles]]
+key = "vx_front"
+section = "volatility"
+label = "VX FRONT − SPOT VIX"
+unit = "pts"
+risk_when = "low"
+threshold = 0
+note = "Front-month VIX future minus spot VIX; below 0 is backwardation."
+
+[[risk.tiles]]
+key = "move"
+section = "rates_vol"
+label = "MOVE"
+unit = "pts"
+risk_when = "high"
+threshold = 130
+[[risk.tiles]]
+key = "ovx"
+section = "rates_vol"
+label = "OVX (OIL VOL)"
+unit = "pts"
+risk_when = "high"
+threshold = 60
+
+[[risk.tiles]]
+key = "hyg_ief"
+section = "credit"
+label = "HYG/IEF VS 50D"
+unit = "pct"
+risk_when = "low"
+threshold = -2
+note = "High yield against Treasuries, relative to its own 50-day average."
+[[risk.tiles]]
+key = "lqd_ief"
+section = "credit"
+label = "LQD/IEF VS 50D"
+unit = "pct"
+risk_when = "low"
+threshold = -1.5
+[[risk.tiles]]
+key = "baa10y"
+section = "credit"
+label = "BAA − 10Y"
+unit = "bp"
+risk_when = "high"
+threshold = 300
+note = "Moody's Baa yield over the 10-year Treasury; history to 1986."
+[[risk.tiles]]
+key = "hy_oas"
+section = "credit"
+label = "HY OAS"
+unit = "bp"
+risk_when = "high"
+threshold = 500
+note = "ICE BofA via FRED, which serves only the last three years: percentiles span those years only."
+[[risk.tiles]]
+key = "ig_oas"
+section = "credit"
+label = "IG OAS"
+unit = "bp"
+risk_when = "high"
+threshold = 150
+note = "ICE BofA via FRED, last three years only."
+[[risk.tiles]]
+key = "ccc_oas"
+section = "credit"
+label = "CCC OAS"
+unit = "bp"
+risk_when = "high"
+threshold = 1000
+note = "ICE BofA via FRED, last three years only."
+
+[[risk.tiles]]
+key = "cor1m"
+section = "correlation"
+label = "COR1M (IMPLIED)"
+unit = "pts"
+risk_when = "high"
+threshold = 40
+[[risk.tiles]]
+key = "realised_corr"
+section = "correlation"
+label = "REALISED CORR 21D"
+unit = "corr"
+risk_when = "high"
+threshold = 0.5
+note = "Average pairwise correlation of the S&P 500 members implied by their own and the basket's 21-day volatility."
+[[risk.tiles]]
+key = "dispersion"
+section = "correlation"
+label = "DISPERSION 21D"
+unit = "pts"
+risk_when = "extreme"
+threshold = 5
+note = "How far apart the members move, in vol points; read at either tail."
+
+[[risk.tiles]]
+key = "spx_vs_200d"
+section = "trend"
+label = "SPX VS 200D"
+unit = "pct"
+risk_when = "low"
+threshold = 0
+[[risk.tiles]]
+key = "spx_drawdown"
+section = "trend"
+label = "SPX FROM 1Y HIGH"
+unit = "pct"
+risk_when = "low"
+threshold = -10
+[[risk.tiles]]
+key = "breadth_200d"
+section = "trend"
+label = "% ABOVE 200D"
+unit = "pct"
+risk_when = "low"
+threshold = 40
+note = "Share of S&P 500 members above their own 200-day average."
+
+[[risk.tiles]]
+key = "net_liquidity"
+section = "liquidity"
+label = "NET LIQUIDITY 13W Δ"
+unit = "usd_bn"
+risk_when = "low"
+threshold = -300
+note = "Fed total assets − Treasury General Account − reverse repo, change over 13 weeks."
+[[risk.tiles]]
+key = "nfci"
+section = "liquidity"
+label = "NFCI"
+unit = "index"
+risk_when = "high"
+threshold = 0
+note = "Chicago Fed National Financial Conditions Index; above 0 is tighter than average."
+[[risk.tiles]]
+key = "real_10y"
+section = "liquidity"
+label = "10Y REAL YIELD"
+unit = "pct"
+risk_when = "high"
+threshold = 2.5
+
+[[risk.tiles]]
+key = "cftc_es"
+section = "positioning"
+label = "S&P FUTURES · LEV FUNDS"
+unit = "pct_oi"
+risk_when = "extreme"
+threshold = 5
+note = "Leveraged-money net position as % of open interest, CFTC TFF."
+[[risk.tiles]]
+key = "cftc_nq"
+section = "positioning"
+label = "NASDAQ FUTURES · LEV FUNDS"
+unit = "pct_oi"
+risk_when = "extreme"
+threshold = 5
+[[risk.tiles]]
+key = "cftc_zn"
+section = "positioning"
+label = "10Y NOTE · LEV FUNDS"
+unit = "pct_oi"
+risk_when = "extreme"
+threshold = 5
+[[risk.tiles]]
+key = "cftc_vx"
+section = "positioning"
+label = "VIX FUTURES · LEV FUNDS"
+unit = "pct_oi"
+risk_when = "extreme"
+threshold = 5
+[[risk.tiles]]
+key = "put_call"
+section = "positioning"
+label = "PUT/CALL 5D (TOTAL)"
+unit = "ratio"
+risk_when = "extreme"
+threshold = 5
+note = "Cboe total put/call ratio, 5-session average; history is fetched one session at a time."
+
+# PRICED PATH (RISK -> PRICED PATH): meeting probabilities from fed funds
+# futures beside Kalshi and Polymarket. A meeting where Kalshi's expected
+# change differs from the futures' by more than disagreement_bp is flagged,
+# not averaged.
+[priced]
+fed_funds_months = 13
+sofr_quarters = 8
+disagreement_bp = 10
+releases_per_series = 2

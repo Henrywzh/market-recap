@@ -10,7 +10,9 @@ export const VIEWS = [
   { id: 'markets', label: 'OVERVIEW', group: 'market', artifact: 'markets', module: 'markets' },
   { id: 'heatmaps', label: 'HEAT MAPS', group: 'market', artifact: 'heatmaps', module: 'heatmaps' },
   { id: 'rotation', label: 'SECTORS', group: 'market', artifact: 'rotation', module: 'rotation' },
-  { id: 'rates', label: 'RATES & MACRO', group: 'market', artifact: ['fixed_income', 'macro'], module: 'rates' },
+  { id: 'risk', label: 'RISK', group: 'risk', artifact: 'risk', module: 'risk' },
+  { id: 'priced', label: 'PRICED PATH', group: 'risk', artifact: 'priced', module: 'priced' },
+  { id: 'rates', label: 'RATES & MACRO', group: 'risk', artifact: ['fixed_income', 'macro'], module: 'rates' },
   { id: 'monitor', label: 'MONITOR', group: 'names', artifact: 'monitor', module: 'monitor' },
   { id: 'valuation', label: 'SCREEN', group: 'names', artifact: 'valuation', module: 'valuation', takesArg: true },
   { id: 'ticker', label: 'TICKER', group: 'names', artifact: 'valuation', module: 'ticker', takesArg: true },
@@ -22,7 +24,9 @@ export const VIEWS = [
   { id: 'dcf', label: 'DCF', group: 'tools', artifact: 'dcf', module: 'dcf', takesArg: true },
 ];
 
+// In the order of the trading loop: how much risk, where, who, when.
 export const GROUPS = [
+  { id: 'risk', label: 'RISK' },
   { id: 'market', label: 'MARKET' },
   { id: 'names', label: 'NAMES' },
   { id: 'catalysts', label: 'CATALYSTS' },

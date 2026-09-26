@@ -706,3 +706,47 @@ a.mchip, a.cat-title { text-decoration: none; color: inherit; }
 a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .tm-tile[style*="cursor"]:hover { outline: 1px solid var(--text); outline-offset: -1px; z-index: 1; }
 .sectors-valuation { margin-bottom: 10px; }
+
+/* ---------- RISK ---------- */
+.risk-summary { margin-bottom: 10px; }
+.risk-summary .stat-note { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.risk-summary .mchip { margin: 0; }
+.risk-horizon { margin-top: 14px; }
+.risk-sections { align-items: start; }
+.risk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin-bottom: 8px; }
+.risk-tile { border: 1px solid var(--border); padding: 6px 8px 5px; min-width: 0; background: var(--panel); }
+.risk-tile.pickable { cursor: pointer; }
+.risk-tile.pickable:hover { border-color: var(--border-strong); }
+.risk-tile.selected { border-color: var(--accent); }
+.risk-tile.breach { border-color: color-mix(in srgb, var(--down) 70%, transparent); background: color-mix(in srgb, var(--down) 8%, var(--panel)); }
+.risk-tile.breach.selected { box-shadow: inset 0 0 0 1px var(--accent); }
+.risk-tile-head { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; }
+.risk-tile-label { font-size: 9.5px; letter-spacing: 0.08em; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.risk-flag { font-size: 8px; letter-spacing: 0.05em; white-space: nowrap; }
+.risk-flag.into { color: var(--down); }
+.risk-flag.out { color: var(--up); }
+.risk-tile-value { font-size: 17px; font-weight: 600; margin: 1px 0 2px; }
+.risk-tile.breach .risk-tile-value { color: var(--down); }
+.risk-tile .spark { display: block; width: 100%; height: 30px; color: var(--text-dim); }
+.spark-threshold { stroke: var(--down); stroke-dasharray: 3 3; stroke-width: 1; opacity: 0.6; vector-effect: non-scaling-stroke; }
+.risk-tile-meta { display: flex; justify-content: space-between; gap: 6px; font-size: 10px; margin-top: 2px; }
+.risk-tile-foot { font-size: 9.5px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.risk-chart-head { font-size: 10px; letter-spacing: 0.06em; margin: 4px 0 0; }
+
+/* ---------- PRICED PATH ---------- */
+.pp-top { margin: 10px 0; }
+.pp-table td { white-space: nowrap; }
+.pp-table tr.pp-disagree td { background: color-mix(in srgb, var(--down) 10%, transparent); }
+.pp-bar { display: inline-block; width: 60px; height: 7px; vertical-align: middle; background: color-mix(in srgb, var(--border-strong) 60%, transparent); position: relative; }
+.pp-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--text-dim); }
+.pp-fill.hike { background: var(--down); }
+.pp-fill.cut { background: var(--up); }
+.pp-releases { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; }
+.pp-release { border: 1px solid var(--border); padding: 6px 8px; background: var(--panel); }
+.pp-release-head { display: flex; justify-content: space-between; font-size: 10px; letter-spacing: 0.06em; color: var(--text-dim); }
+.pp-release-value { font-size: 17px; font-weight: 600; margin: 2px 0; }
+.pp-range { position: relative; height: 8px; margin: 4px 0; }
+.pp-range-band { position: absolute; left: 0; right: 0; top: 2px; height: 4px; background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.pp-range-mid { position: absolute; top: 0; width: 2px; height: 8px; background: var(--text); transform: translateX(-1px); }
+.pp-release-foot { font-size: 9.5px; }
+.pp-anchors { border: none; }

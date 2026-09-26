@@ -13,7 +13,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import catalysts, cross_listing, dcf, earnings, financials, fixed_income, heatmaps, macro, markets, monitor, rotation, valuation, xray
+from .panels import catalysts, cross_listing, dcf, earnings, financials, fixed_income, heatmaps, macro, markets, monitor, priced, risk, rotation, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -23,9 +23,11 @@ from .util import SourceRecord, describe_error, utc_now_iso, write_json
 PANELS = {
     "markets": markets.build,
     "catalysts": catalysts.build,
+    "priced": priced.build,
     "earnings": earnings.build,
     "heatmaps": heatmaps.build,
     "rotation": rotation.build,
+    "risk": risk.build,
     "fixed_income": fixed_income.build,
     "macro": macro.build,
     "technicals": technicals_panel.build,

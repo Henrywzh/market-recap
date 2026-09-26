@@ -329,6 +329,31 @@ run only from `main`, so recording starts once this is merged there.
 Each new source gets a probe and an evaluation note in the style of
 `docs/expectation_sources.md` before it reaches a page.
 
+## Phase 1 as built (2026-09-26)
+
+- **Navigation.** MARKET could not take Risk and Priced Path within the
+  four-view limit, so they have their own mode ahead of it, in the order of
+  the trading loop: BRIEF · RISK · MARKET · NAMES · CATALYSTS · TOOLS.
+  RISK holds Risk, Priced Path and Rates & Macro; MARKET holds Overview,
+  Heat maps and Sectors.
+- **RISK → RISK** (`panels/risk.py`, `compute/risk.py`): 30 series in seven
+  sections, tactical and slow kept apart. Each tile: level, 1Y and
+  full-history percentile, week change, its configured threshold
+  (`[[risk.tiles]]`) and whether it crossed that line within the week.
+  Sources and their probes: `docs/risk_sources.md`. Not included: AAII and
+  CNN Fear & Greed refuse the project's client; NAAIM has no file.
+- **RISK → PRICED PATH** (`panels/priced.py`, `compute/priced.py`):
+  meeting-by-meeting probabilities from fed funds futures by the
+  meeting-month method, beside Kalshi and Polymarket, flagged not averaged
+  when they differ by more than `[priced] disagreement_bp`; the path today,
+  a week and a month ago; the next meeting's pricing through time; the SOFR
+  path (today only until the snapshot branch has history); every open
+  Kalshi release ladder; FRED anchors.
+- **Snapshots read back.** The nightly workflow checks the `snapshots`
+  branch out read-only at `data/snapshots`; `sources/snapshot_store.py`
+  reads it and every section that needs it says "not recorded yet" when it
+  is absent.
+
 ## Phase 0 as built (2026-09-26)
 
 - **Navigation** follows `web/js/routes.js`: MARKET · NAMES · CATALYSTS ·
