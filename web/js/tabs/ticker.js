@@ -112,12 +112,10 @@ function links(symbol, { mon, dcf, pairs }) {
   return el('div', { class: 'field-note' }, nodes);
 }
 
+// Only a name with a recorded decision gets the card; an empty one is noise.
 function noteCard(mon) {
   const note = mon?.note;
-  if (!note) {
-    return card('RESEARCH NOTE', null, el('div', { class: 'note-text dim', text:
-      'No note. A watch or exclude decision, with its reason, goes in config/monitor_notes.toml.' }));
-  }
+  if (!note) return null;
   const rows = [
     ['Status', note.status.toUpperCase()],
     ['Since', note.since || DASH],
@@ -144,10 +142,8 @@ function evidenceCard(mon) {
       + ` (${pct(mon.reported.surprise_pct, 1)}), next session ${pct(mon.reported.return_1d, 1)}`
     : null;
   return card('EVIDENCE — LISTED, NOT SCORED', null, [
-    el('div', { class: 'grid two' }, [
-      el('div', {}, [el('div', { class: 'card-title', text: 'FOR' }), list(mon.evidence_for, 'up')]),
-      el('div', {}, [el('div', { class: 'card-title', text: 'AGAINST' }), list(mon.evidence_against, 'down')]),
-    ]),
+    el('div', { class: 'card-title', text: 'FOR' }), list(mon.evidence_for, 'up'),
+    el('div', { class: 'card-title', text: 'AGAINST' }), list(mon.evidence_against, 'down'),
     el('div', { class: 'note-text', text: revision }),
     reported ? el('div', { class: 'note-text', text: reported }) : null,
   ]);
@@ -167,7 +163,7 @@ function valuationCard(symbol, row, data) {
   });
   return card(`VALUATION & QUALITY — AGAINST ${row.sector?.toUpperCase() || 'SECTOR'} MEDIAN (${peers.length} COMPANIES)`, null, [
     table(['METRIC', symbol, 'SECTOR MEDIAN'], rows),
-    el('div', { class: 'field-note', text: `Trailing twelve months from the company's own filings to ${row.period_end} (filed ${row.filed}); the full table is on SCREEN.` }),
+    el('div', { class: 'field-note', text: `TTM to ${row.period_end} · filed ${row.filed} · full table on SCREEN` }),
   ]);
 }
 
@@ -212,27 +208,31 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   if (stats) root.append(stats);
   // Company sections need filings. A fund, an index or a name no index holds
   // gets its price readings and one line saying why the rest is absent.
+  // Order: the price first, then what it is worth against its own history,
+  // then against its sector and the evidence, then the filings behind it.
   const company = Boolean(row || mon);
-  if (company) {
-    root.append(el('div', { class: 'grid two' }, [noteCard(mon), valuationCard(symbol, row, valuation)]));
-    root.append(evidenceCard(mon));
-  } else {
+  const note = company ? noteCard(mon) : null;
+  if (note) root.append(note);
+  if (!company) {
     root.append(el('div', { class: 'notice', text:
       `${symbol} has baked prices but no filings in this build (a fund, an index or a non-member), so only its technicals are shown. `
       + 'A fund\'s holdings are on TOOLS → ETF X-RAY.' }));
   }
+  if (technicals?.available?.includes(symbol)) {
+    const host = el('div', {});
+    root.append(host);
+    await renderSingleTicker(host, technicals, { symbol, lockTicker: true, compact: true });
+  } else {
+    root.append(card('PRICE & TREND', null, gap(`${symbol} has no baked price history in this build.`)));
+  }
   if (row) {
-    await section(root, 'P/E AGAINST ITS OWN 10 YEARS — PRICE ÷ TTM EPS AS FILED AT THE TIME', (host) => {
+    await section(root, 'P/E AGAINST ITS OWN 10 YEARS', (host) => {
       if (!row.pe_history) throw new Error(`${symbol} has no P/E history in this build (a loss, too little history, or no EPS filed)`);
       return renderPeHistory(host, symbol, valuation);
     });
   }
-  if (technicals?.available?.includes(symbol)) {
-    const host = el('div', {});
-    root.append(host);
-    await renderSingleTicker(host, technicals, { symbol, lockTicker: true });
-  } else {
-    root.append(card('SINGLE-TICKER TECHNICALS', null, gap(`${symbol} has no baked price history in this build.`)));
+  if (company) {
+    root.append(el('div', { class: 'grid two' }, [valuationCard(symbol, row, valuation), evidenceCard(mon)]));
   }
   if (!company) return;
   await section(root, 'FINANCIALS — FILED ANNUAL STATEMENTS · SEC XBRL', (host) => {

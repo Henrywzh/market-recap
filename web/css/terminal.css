@@ -700,3 +700,9 @@ table.data.monitor-change-table td.monitor-why { min-width: 260px; }
 .rot-foot { font-size: 10px; margin-top: 6px; }
 .rot-summary { font-size: 11px; color: var(--text); margin-bottom: 8px; }
 .rot-chart-title { font-size: 10px; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 2px; }
+
+/* Tickers that open the ticker page keep their chip or title look. */
+a.mchip, a.cat-title { text-decoration: none; color: inherit; }
+a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
+.tm-tile[style*="cursor"]:hover { outline: 1px solid var(--text); outline-offset: -1px; z-index: 1; }
+.sectors-valuation { margin-bottom: 10px; }

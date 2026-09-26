@@ -9,7 +9,7 @@
 export const VIEWS = [
   { id: 'markets', label: 'OVERVIEW', group: 'market', artifact: 'markets', module: 'markets' },
   { id: 'heatmaps', label: 'HEAT MAPS', group: 'market', artifact: 'heatmaps', module: 'heatmaps' },
-  { id: 'rotation', label: 'SECTOR ROTATION', group: 'market', artifact: 'rotation', module: 'rotation' },
+  { id: 'rotation', label: 'SECTORS', group: 'market', artifact: 'rotation', module: 'rotation' },
   { id: 'rates', label: 'RATES & MACRO', group: 'market', artifact: ['fixed_income', 'macro'], module: 'rates' },
   { id: 'monitor', label: 'MONITOR', group: 'names', artifact: 'monitor', module: 'monitor' },
   { id: 'valuation', label: 'SCREEN', group: 'names', artifact: 'valuation', module: 'valuation', takesArg: true },
@@ -34,6 +34,7 @@ export const ALIASES = {
   'fixed-income': 'rates',
   macro: 'rates',
   financials: 'ticker',
+  sectors: 'rotation',
 };
 
 export const DEFAULT_VIEW = 'markets';
@@ -63,6 +64,11 @@ export function parseHash(hash, search = '') {
 
 export function hashFor(id, arg = null) {
   return arg ? `${id}/${encodeURIComponent(arg)}` : id;
+}
+
+// The one link every ticker on the site uses (principle: one entity, one page).
+export function tickerHref(symbol) {
+  return `#${hashFor('ticker', symbol)}`;
 }
 
 export function viewById(id) {

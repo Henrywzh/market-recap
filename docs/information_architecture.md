@@ -84,6 +84,7 @@ their new home so bookmarks survive.
 | MONITOR | NAMES → Monitor | unchanged; tickers link to the ticker page |
 | VALUATION & QUALITY table | NAMES → Screen | unchanged table |
 | VALUATION P/E vs own ten years | NAMES → Ticker | per-company chart moves to the ticker page |
+| VALUATION index & sector P/E vs own ten years | MARKET → Sectors | a market question, beside the rotation graph |
 | FINANCIALS | NAMES → Ticker | ten-year statements become a ticker section |
 | DCF | NAMES → Ticker (link) and TOOLS | the model opens pre-filled from the ticker page |
 | TECHNICALS single ticker | NAMES → Ticker | price, MAs, z-score band as a section |
@@ -332,14 +333,24 @@ Each new source gets a probe and an evaluation note in the style of
 
 - **Navigation** follows `web/js/routes.js`: MARKET · NAMES · CATALYSTS ·
   TOOLS. BRIEF does not exist yet, so MARKET → Overview is the landing view.
-  Until Risk and Priced Path exist, MARKET keeps Heat maps and Sector
-  rotation as their own views rather than folding them into Overview, and
+  Until Risk and Priced Path exist, MARKET keeps Heat maps and Sectors
+  (the rotation graph, then index and sector P/E against their own ten
+  years, `#rotation`; `#sectors` also opens it) as their own views rather than folding them into Overview, and
   Rates & Macro stacks the two existing panels on one page.
 - **Ticker page** is assembled from exported section renderers
   (`renderPeHistory`, `renderStatements`, `renderSingleTicker`) that the
   SCREEN, FINANCIALS and TECHNICALS code also uses. A fund or index gets its
   technicals and one line saying why the company sections are absent. The
   standalone FINANCIALS view is gone; its hash opens the ticker page.
+- **Ticker page order** is price and trend first (default windows, a
+  period switch; the inputs and the forward-return table stay on TOOLS →
+  TECHNICALS), then P/E against its own ten years (axis capped at 1.6× the
+  90th percentile when a near-zero-earnings spike would flatten it), then
+  the sector comparison beside the evidence, then filings. Method notes sit
+  in the ⓘ fold; the research note card appears only when there is a note.
+- **Links to the ticker page** (`routes.tickerHref`) from MONITOR, SCREEN,
+  HEAT MAPS tiles, SECTORS' contributor bars, EARNINGS movers and the
+  CALENDAR's earnings rows. ETF X-RAY holdings are not linked yet.
 - **Research note** shows the existing `config/monitor_notes.toml` fields
   (status, since, reason, outcome). A checkpoint list is not added yet: the
   note is part of the MONITOR ledger that cloud builds restore and validate

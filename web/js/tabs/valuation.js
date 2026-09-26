@@ -239,6 +239,23 @@ function percentileChart(node, series, selected, onPick) {
   });
 }
 
+// Index and sector P/E against their own ten years: a market question, so it
+// is drawn on MARKET → SECTORS, from this panel's artifact.
+export function renderAggregates(root, data) {
+  const agg = data?.aggregates;
+  if (!agg || !agg.series?.length) return false;
+  root.append(metaRow(`TRAILING P/E · ${agg.series.length} INDICES & SECTORS · AS OF ${data.as_of}`, [
+    `INDEX & SECTOR P/E: total market cap over total TTM diluted earnings, each company's EPS as filed at the time (split-adjusted close over the TTM EPS public that day). Losses count, as in an index's own P/E. `
+      + `Each company is held at today's share count, one listing per company: its own P/E is exact on every date, but the weights between companies are today's, and the members are today's -- a company that has left the index is not in its past. `
+      + `A week is drawn only when companies with an EPS in force hold at least ${num(agg.min_coverage * 100, 0)}% of the group's priced market cap. `
+      + `When a group's total earnings approach zero (Energy through 2016's losses, Utilities in 2019–20, most sectors on 2020's earnings in early 2021) its P/E runs into the hundreds; the chart's axis stops at ${AGGREGATE_AXIS_CAP}x the group's 90th percentile, and the range in the stats is the true one. `
+      + 'An EPS more than twice the share price either way is taken as a units error in the filing and left out. '
+      + 'This is trailing GAAP, not FactSet\'s forward operating P/E (on EARNINGS), so it runs higher and moves more around recessions. Percentile and band are over the last ten years of sessions.',
+  ]));
+  root.append(aggregateSection(data));
+  return true;
+}
+
 function aggregateSection(data) {
   const agg = data.aggregates;
   if (!agg || !agg.series?.length) return null;
@@ -368,7 +385,7 @@ export async function renderPeHistory(host, symbol, data) {
       el('div', {}, [historyNode]),
       el('div', {}, [historyStats, el('div', { class: 'card-title', text: 'TTM DILUTED EPS, TODAY\'S SHARE BASIS, BY FILING DATE' }), epsNode]),
     ]),
-    el('div', { class: 'note-text', text:
+    el('details', { class: 'method-fold' }, [el('summary', { text: 'ⓘ METHOD & DATA' }), el('div', { class: 'method-copy', text:
       `Each session's P/E is the split-adjusted close (not dividend-adjusted) over the TTM diluted EPS `
       + `public by then: every quarter is built only from filings made by the day it was first reported, `
       + `so the history never uses a number before it was published. A loss leaves a gap; an EPS with no `
@@ -377,9 +394,10 @@ export async function renderPeHistory(host, symbol, data) {
       + `${Math.round(data.pe_history.agreement_tolerance * 100)}% for ${data.pe_history.disagree.length} companies`
       + (data.pe_history.disagree.length ? ` (${data.pe_history.disagree.join(', ')}) — usually a merger or spin-off `
         + 'moving the share count, preferred dividends, or a large minority interest' : '')
-      + '.' }),
+      + `. The axis stops at ${AGGREGATE_AXIS_CAP}x the 90th percentile when a spike (earnings near zero) would flatten the rest; the table keeps the true range.` })]),
   );
-  historyChart(historyNode, history);
+  const s = history.stats;
+  historyChart(historyNode, history, { cap: s && s.max > s.p90 * AGGREGATE_AXIS_CAP ? s.p90 * AGGREGATE_AXIS_CAP : null });
   epsChart(epsNode, history);
   const row = data.rows.find((r) => r.ticker === symbol);
   return `${row?.name || symbol} · weekly, ${history.dates[0]} → ${history.dates[history.dates.length - 1]}`;
@@ -391,17 +409,7 @@ export default async function renderValuation(root, data, _manifest, ctx = {}) {
     root.append(el('div', { class: 'gap', text: 'No companies were valued in this build. Run the refresh command without --skip-sec.' }));
     return;
   }
-  const agg = data.aggregates;
-  root.append(metaRow(`AS OF ${data.as_of} · ${data.rows.length} COMPANIES FROM THEIR OWN FILINGS`, [
-    agg ? `INDEX & SECTOR P/E: total market cap over total TTM diluted earnings, each company's EPS as filed at the time (split-adjusted close over the TTM EPS public that day). Losses count, as in an index's own P/E. `
-      + `Each company is held at today's share count, one listing per company: its own P/E is exact on every date, but the weights between companies are today's, and the members are today's -- a company that has left the index is not in its past. `
-      + `A week is drawn only when companies with an EPS in force hold at least ${num(agg.min_coverage * 100, 0)}% of the group's priced market cap. `
-      + `When a group's total earnings approach zero (Energy through 2016's losses, Utilities in 2019–20, most sectors on 2020's earnings in early 2021) its P/E runs into the hundreds; the chart's axis stops at ${AGGREGATE_AXIS_CAP}x the group's 90th percentile, and the range in the stats is the true one. `
-      + 'An EPS more than twice the share price either way is taken as a units error in the filing and left out. '
-      + 'This is trailing GAAP, not FactSet\'s forward operating P/E (on EARNINGS), so it runs higher and moves more around recessions. Percentile and band are over the last ten years of sessions.' : null,
-  ]));
-  const aggregates = aggregateSection(data);
-  if (aggregates) root.append(aggregates);
+  root.append(metaRow(`AS OF ${data.as_of} · ${data.rows.length} COMPANIES FROM THEIR OWN FILINGS · INDEX & SECTOR P/E ARE ON MARKET → SECTORS`));
 
   const metrics = data.metrics;
   const valuationMetrics = metrics.filter((m) => m.group === 'valuation');

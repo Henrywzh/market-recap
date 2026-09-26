@@ -56,3 +56,13 @@ test('every view has a module, a known group, and a unique id', () => {
 test('no group offers more than four views', () => {
   for (const group of R.GROUPS) assert.ok(R.viewsIn(group.id).length <= 4, group.id);
 });
+
+test('every ticker link opens the ticker page', () => {
+  assert.equal(R.tickerHref('BRK-B'), '#ticker/BRK-B');
+  assert.deepEqual(R.parseHash(R.tickerHref('brk-b')), { id: 'ticker', arg: 'BRK-B' });
+});
+
+test('#sectors opens the rotation view, which now carries sector valuation', () => {
+  assert.deepEqual(R.parseHash('#sectors'), { id: 'rotation', arg: null });
+  assert.equal(R.viewById('rotation').label, 'SECTORS');
+});

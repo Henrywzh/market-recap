@@ -6,7 +6,7 @@
 // it was last filed, because a restated year is a different claim from the
 // original one.
 
-import { el, card, table, num, pct, notice, DASH } from '../fmt.js';
+import { el, card, table, num, pct, DASH } from '../fmt.js';
 import { render, SERIES_COLORS } from '../charts.js';
 
 const FINANCIALS_BASE = 'artifacts/financials';
@@ -139,7 +139,7 @@ export async function renderStatements(host, symbol, data) {
     host.append(card(statement.label, null, statementTable(company, statement)));
   }
   host.append(card('KEY RATIOS', null, ratioTable(company, data.ratios)));
-  host.append(notice(data.note));
+  host.append(el('details', { class: 'method-fold' }, [el('summary', { text: 'ⓘ METHOD & DATA' }), el('div', { class: 'method-copy', text: data.note })]));
   trendChart(chartNode, company);
   const last = company.columns[company.columns.length - 1];
   return `${company.columns.length} fiscal years · latest FY${last.fiscal_year} (period end ${last.period_end})`;

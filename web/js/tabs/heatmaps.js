@@ -1,6 +1,7 @@
 import { el, card, num, pct, money, aum, dirClass, periodSwitch, sectionTitle, notice, DASH } from '../fmt.js';
 import { drawTreemap, returnColor } from '../treemap.js';
 import { render, multiLine } from '../charts.js';
+import { tickerHref } from '../routes.js';
 
 const ETF_BASE = 'artifacts/etfs';
 
@@ -67,7 +68,8 @@ export default function renderHeatmaps(root, data) {
         `<div class="t-head">${row.ticker} <span class="${dirClass(row.returns[period])}">${pct(row.returns[period])}</span></div>
          <div class="t-meta">${row.name}<br>${row.sector} · ${row.sub_sector}<br>weight ${num(row.weight, 2)}% · $${num(row.price)}</div>
          <table>${rowsHtml(row.returns, periods, (v) => pct(v))}</table>`, event),
-      hideTooltip);
+      hideTooltip,
+      (row) => { hideTooltip(); location.hash = tickerHref(row.ticker); });
   };
 
   root.append(card(`S&P 500 CONSTITUENTS (${data.constituents.length} NAMES)`,

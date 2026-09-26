@@ -3,7 +3,7 @@
 // indicator is computed here by technicals-math.js on the full history and
 // then cut to the chosen period.
 
-import { el, card, table, num, pct, dirClass, sectionTitle, DASH } from '../fmt.js';
+import { el, card, table, num, pct, dirClass, sectionTitle, periodSwitch, DASH } from '../fmt.js';
 import { render, multiLine, SERIES_COLORS } from '../charts.js';
 import * as T from '../technicals-math.js';
 
@@ -294,7 +294,10 @@ export default async function renderTechnicals(root, data, _manifest, ctx = {}) 
 
 // The single-ticker section on its own, so the ticker page can show the same
 // readings. `lockTicker` hides the ticker box when the page already names it.
-export async function renderSingleTicker(root, data, { symbol, lockTicker = false }) {
+// ``compact`` is the ticker page's form: default windows, a period switch in
+// the card head instead of inputs, and no forward-return table (that and the
+// windows stay on TOOLS → TECHNICALS).
+export async function renderSingleTicker(root, data, { symbol, lockTicker = false, compact = false }) {
   const defaults = data.defaults;
   // ---------------- Single ticker ----------------------------------------
   const stStatus = el('span', { class: 'field-note', text: '' });
@@ -302,6 +305,8 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
   const maInput = el('input', { value: defaults.ma_periods.join(','), size: '12' });
   const slopeInput = el('input', { value: String(defaults.slope_window), size: '4', type: 'number', min: '1', max: String(MAX_SLOPE_WINDOW) });
   const stPeriod = periodSelect(data.periods, defaults.single_ticker_period);
+  let compactPeriod = defaults.single_ticker_period;
+  const periodValue = () => (compact ? compactPeriod : stPeriod.value);
   const summaryHost = el('div', {});
   const priceTitle = el('div', { class: 'card-title', text: '' });
   const stPriceNode = el('div', { class: 'chart tall' });
@@ -322,7 +327,7 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
       }
       const payload = await loadTicker(symbol);
       const readings = computeSingle(payload, { windows, slopeWindow, defaults });
-      const start = T.viewStart(payload.dates, data.periods[stPeriod.value]);
+      const start = T.viewStart(payload.dates, data.periods[periodValue()]);
       const dates = cut(payload.dates, start);
 
       summaryHost.replaceChildren(summaryTable(payload, readings, { zWindow, slopeWindow }));
@@ -336,7 +341,7 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
       if (readings.z.length) zChart(zNode, dates, cut(readings.z, start));
       else zNode.replaceChildren(el('div', { class: 'note-text', text: `Not available for ${symbol}: ${readings.unavailable.zscore}.` }));
 
-      fwdHost.replaceChildren(forwardCard(payload, readings, data));
+      if (!compact) fwdHost.replaceChildren(forwardCard(payload, readings, data));
       const gaps = Object.keys(readings.unavailable).length;
       stStatus.textContent = gaps
         ? `Loaded ${symbol} · ${payload.sessions} sessions since ${payload.first_session} · ${gaps} reading(s) need more history`
@@ -350,6 +355,16 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
     input.addEventListener('keydown', (event) => { if (event.key === 'Enter') loadSingle(); });
   }
   stPeriod.addEventListener('change', () => loadSingle());
+
+  if (compact) {
+    const switcher = periodSwitch(Object.keys(data.periods), compactPeriod, (label) => { compactPeriod = label; loadSingle(); });
+    root.append(card('PRICE & TREND', switcher, [priceTitle, stPriceNode, summaryHost, stStatus]));
+    const slopeCard = card('', null, slopeNode);
+    slopeCard.querySelector('.card-title').replaceWith(slopeTitle);
+    root.append(el('div', { class: 'grid two' }, [slopeCard, card(`Z-SCORE VS ${zWindow} DMA`, null, zNode)]));
+    await loadSingle();
+    return;
+  }
 
   root.append(card('SINGLE-TICKER TECHNICALS', null, [
     el('div', { class: 'field-row' }, [

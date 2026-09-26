@@ -4,6 +4,7 @@
 
 import { el, card, num, pct, sectionTitle, notice, periodSwitch, metaRow, DASH } from '../fmt.js';
 import { render, multiLine, SERIES_COLORS } from '../charts.js';
+import { tickerHref } from '../routes.js';
 
 const WINDOWS = ['7d', '30d', '60d', '90d'];
 const SECTOR_SHORT = {
@@ -198,7 +199,7 @@ function trackerCard(t) {
     const movers = p.movers_30d || { up: [], down: [] };
     moversHost.replaceChildren(
       el('span', { class: 'earn-sub', text: `MOVED THE ${p.label} AGGREGATE MOST · 30D, PP` }),
-      ...[...movers.up, ...movers.down].map((m) => el('span', { class: `mchip ${dirCls(m.pp)}`, text: `${m.symbol} ${m.pp >= 0 ? '+' : ''}${num(m.pp, 2)}` })),
+      ...[...movers.up, ...movers.down].map((m) => el('a', { class: `mchip ${dirCls(m.pp)}`, href: tickerHref(m.symbol), text: `${m.symbol} ${m.pp >= 0 ? '+' : ''}${num(m.pp, 2)}` })),
     );
   };
   const labels = periods.map((p) => p.label);
