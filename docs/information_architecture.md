@@ -329,6 +329,42 @@ run only from `main`, so recording starts once this is merged there.
 Each new source gets a probe and an evaluation note in the style of
 `docs/expectation_sources.md` before it reaches a page.
 
+## Phase 4 as built (2026-09-27)
+
+- **BRIEF → JOURNAL** (`panels/journal.py`, `compute/journal.py`): the log
+  is `config/journal.toml`, one `[[decision]]` per decision (date, ticker,
+  action, reason, horizon, exposure for overrides, checkpoints), written
+  when made and never edited. Review: an entry or add is right if the name
+  beat the index over its horizon; a trim, exit or pass if it did not; an
+  override if the exposure held instead of the anchor's added return (daily
+  exposure gap × index return, summed). Open decisions show their return so
+  far and are not counted in hit rates. Checkpoints ahead and due feed
+  BRIEF's my list and the ticker page's thesis card.
+- `config/journal.example.toml` holds illustrative entries, marked EXAMPLE,
+  for a local preview (`MARKET_RECAP_JOURNAL`); the published build reads
+  `config/journal.toml`, which ships empty.
+- **Holdings** remain deferred: the log records decisions, not positions.
+
+## Phase 3 as built (2026-09-27)
+
+- **Evidence layer** (`panels/evidence.py`, `compute/evidence.py`), in two
+  reaches. Every member: reactions to its last eight earnings releases,
+  dated by 8-K Item 2.02 acceptance times (before the open, during the
+  session or after the close) from the submissions indexes the build
+  already reads. Focus names (watchlist, journal names, the 30 largest
+  weights and up to 15 MONITOR candidates chosen by the options snapshot's
+  own rule): Form 4 insider transactions (a cluster = two or more insiders
+  buying ≥ $250k within 30 days; a single buy is listed from $1m), Nasdaq
+  short interest (listed when it moves ≥ 20% in a month) and Yahoo rating
+  changes, all as for / against lines, never scored.
+- **Options** from the snapshot branch: the implied move (ATM straddle of the
+  first expiry after the report, as a share of spot), the IV term structure
+  with 25-delta wings, and a 30-day constant-maturity IV whose percentile is
+  shown only after 60 recorded days.
+- **CATALYSTS → EARNINGS** lists names reporting in the next two weeks with
+  their average move over the last eight reports and the implied move.
+- Foreign issuers (6-K filers) have no dated earnings releases here.
+
 ## Phase 2 as built (2026-09-26)
 
 - **BRIEF is the default view** (`panels/brief.py`), assembled from this

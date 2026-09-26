@@ -13,7 +13,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, brief, catalysts, cross_listing, dcf, earnings, financials, fixed_income, heatmaps, macro, markets, monitor, priced, risk, rotation, valuation, xray
+from .panels import anchor, brief, catalysts, cross_listing, dcf, earnings, evidence, journal, financials, fixed_income, heatmaps, macro, markets, monitor, priced, risk, rotation, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -38,7 +38,9 @@ PANELS = {
     "financials": financials.build,
     "valuation": valuation.build,
     "dcf": dcf.build,
+    "evidence": evidence.build,
     "anchor": anchor.build,
+    "journal": journal.build,
     "monitor": monitor.build,
     # BRIEF reads this session's other panels and so runs last.
     "brief": brief.build,

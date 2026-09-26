@@ -861,3 +861,37 @@ def extract_fundamentals(ticker: str, cik: int, *, years: int, use_cache: bool =
         "source": "SEC XBRL company facts",
         "source_url": FACTS_URL.format(cik=cik),
     }
+
+
+ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{document}"
+
+
+def submissions_recent(cik: int, *, use_cache: bool = True) -> dict:
+    """The filer's recent-filings block (form, dates, items, documents), from
+    the same cached submissions index the statement check reads."""
+    text = cache.fetch_text(
+        f"{NAMESPACE}/submissions",
+        f"CIK{cik:010d}",
+        lambda: _get(SUBMISSIONS_URL.format(cik=cik), 45.0),
+        kind="daily_file",
+        suffix=".json",
+        use_cache=use_cache,
+        compress=True,
+    )
+    return json.loads(text).get("filings", {}).get("recent", {})
+
+
+def fetch_form4(cik: int, accession: str, primary_document: str, *, use_cache: bool = True) -> str:
+    """One Form 4's raw XML. The index names the XSL-rendered view
+    (``xslF345X06/doc.xml``); the raw document is the same file at the
+    accession's top level. A filed document never changes, so it is kept."""
+    document = primary_document.split("/")[-1]
+    folder = accession.replace("-", "")
+    return cache.fetch_text(
+        f"{NAMESPACE}/form4",
+        f"{cik}-{folder}-{document}",
+        lambda: _get(ARCHIVE_URL.format(cik=cik, accession=folder, document=document), 30.0),
+        kind="archive",
+        suffix=".xml",
+        use_cache=use_cache,
+    )

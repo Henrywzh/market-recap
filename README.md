@@ -17,15 +17,34 @@ The views are grouped by the question they answer
 
 | Group | Views |
 |---|---|
-| **MARKET** | Overview (MARKETS below) · Heat maps · Sector rotation · Rates & macro |
+| **BRIEF** | **Brief** (the default view) · **Journal** |
+| **RISK** | **Risk** · **Priced path** · Rates & macro |
+| **MARKET** | Overview (MARKETS below) · Heat maps · Sectors (rotation and index/sector P/E) |
 | **NAMES** | Monitor · Screen (VALUATION & QUALITY) · **Ticker** · Cross-listing |
 | **CATALYSTS** | Calendar · Earnings |
 | **TOOLS** | Technicals · ETF X-Ray · DCF |
 
+**Brief** is the daily read: the live strip, the **systematic anchor** (the
+frozen v1 exposure control from quantamental-lab, re-implemented and checked
+to reproduce it exactly), the next meeting's pricing, the risk tiles in a
+tactical and a slow row, what changed this week, the next three sessions and
+the watchlist with its journal checkpoints. **Risk** is 30 series, one tile
+each -- level, 1Y and full-history percentile, week change, and a threshold
+written in `config/dashboard.toml` before the page drew it; never a score
+(sources and probes: `docs/risk_sources.md`). **Priced path** computes each
+FOMC meeting's probabilities from fed funds futures beside Kalshi and
+Polymarket, the path a week and a month ago, the SOFR path and every open
+Kalshi release ladder. **Journal** reviews each decision in
+`config/journal.toml` against what happened: names against the index over
+their horizon, overrides of the anchor against the anchor.
+
 **Ticker** (`#ticker/AAPL`) is one company on one page, reached from any
-ticker link: header readings, the MONITOR research note and evidence,
-valuation against the sector median, P/E against its own ten years,
-single-ticker technicals and the filed statements. Each section is drawn by
+ticker link: header readings, its journal thesis and checkpoints, price and
+trend, P/E against its own ten years, valuation against the sector median,
+evidence (MONITOR's, plus insider buying from Form 4, short interest and
+rating changes for focus names), earnings reactions to the last eight 8-K
+releases against the options-implied move, the IV term structure, and the
+filed statements. Each section is drawn by
 the panel that owns it, so nothing is computed twice. Views that take a
 ticker read it after a slash (`#dcf/MSFT`, `#technicals/NVDA`); hashes from
 before the regrouping (`#financials`, `#fixed-income`, `#macro`, `?ticker=`)

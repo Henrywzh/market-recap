@@ -113,3 +113,33 @@ def fetch_history(symbol: str, start: str, end: str, *, asset: str, use_cache: b
     except ValueError:
         cache.path_for(NAMESPACE, name, ".json").unlink(missing_ok=True)
         raise
+
+
+SHORT_INTEREST_URL = "https://api.nasdaq.com/api/quote/{symbol}/short-interest?assetClass=stocks"
+
+
+def fetch_short_interest(symbol: str, *, use_cache: bool = True) -> list[dict]:
+    """Exchange-reported short interest, one row per settlement date (twice a
+    month), newest first: settlement date, shares short, average daily volume,
+    days to cover. FINRA publishes it about a week and a half after settlement."""
+    text = cache.fetch_text(
+        NAMESPACE, f"short-interest-{symbol}",
+        lambda: get_text(SHORT_INTEREST_URL.format(symbol=symbol.replace("-", ".")), timeout=20.0, retries=1,
+                         user_agent=USER_AGENT, headers={"Accept": "application/json"}),
+        kind="reference_data", suffix=".json", use_cache=use_cache,
+    )
+    payload = json.loads(text)
+    rows = (((payload.get("data") or {}).get("shortInterestTable") or {}).get("rows")) or []
+    out = []
+    for row in rows:
+        try:
+            month, day, year = str(row["settlementDate"]).split("/")
+            out.append({
+                "date": f"{year}-{month}-{day}",
+                "interest": float(str(row["interest"]).replace(",", "")),
+                "avg_volume": float(str(row.get("avgDailyShareVolume") or "nan").replace(",", "")),
+                "days_to_cover": float(row["daysToCover"]) if row.get("daysToCover") not in (None, "") else None,
+            })
+        except (KeyError, ValueError, TypeError):
+            continue
+    return out

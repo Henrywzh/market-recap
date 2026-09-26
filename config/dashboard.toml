@@ -944,3 +944,27 @@ releases_per_series = 2
 tactical = ["vix", "vix_term", "vrp", "move", "hyg_ief", "hy_oas", "cor1m", "realised_corr"]
 slow = ["spx_vs_200d", "spx_drawdown", "breadth_200d", "net_liquidity", "nfci", "cftc_es", "put_call"]
 top_weights = 20
+
+# Ticker evidence and options (NAMES -> TICKER, CATALYSTS -> EARNINGS).
+# Earnings reactions cover every member; insider, short-interest and rating
+# data cover the focus names only (watchlist, MONITOR queue, journal names
+# and the top_weights largest members). A short-interest change of at least
+# short_change_pct over a month is listed as evidence; an IV percentile is
+# shown only after iv_percentile_min_days of recorded snapshots.
+[evidence]
+top_weights = 30
+# MONITOR candidates in focus, chosen by the options snapshot's own rule.
+monitor_max = 15
+insider_window_days = 90
+form4_budget_seconds = 300
+short_change_pct = 20
+iv_percentile_min_days = 60
+# A cluster buy (two or more insiders within 30 days) must total at least
+# cluster_min_value; a single insider's open-market buy is listed from
+# single_buy_min_value.
+cluster_min_value = 250000
+single_buy_min_value = 1000000
+
+# Decision log review (BRIEF -> JOURNAL); entries live in config/journal.toml.
+[journal]
+default_horizon_days = 60

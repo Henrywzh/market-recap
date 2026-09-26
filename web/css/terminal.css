@@ -775,3 +775,12 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .brief-event-figure { font-size: 11px; text-align: right; }
 @media (max-width: 600px) { .brief-event { grid-template-columns: minmax(0, 1fr); gap: 0; } .brief-event-figure { text-align: left; } }
 .brief-list td { white-space: nowrap; }
+
+/* ---------- JOURNAL ---------- */
+.journal-top { margin: 10px 0; align-items: start; }
+.journal-table td { vertical-align: top; }
+.journal-action { font-size: 10px; letter-spacing: 0.08em; }
+.journal-due .brief-event-when { color: var(--accent); }
+.ticker-eo-stats { margin-bottom: 8px; }
+.thesis-points { margin: 4px 0 0; padding-left: 16px; }
+.journal-table td.wrap-cell, .journal-table th:nth-child(4) { text-align: left; }

@@ -8,6 +8,7 @@
 
 export const VIEWS = [
   { id: 'brief', label: 'BRIEF', group: 'brief', artifact: 'brief', module: 'brief' },
+  { id: 'journal', label: 'JOURNAL', group: 'brief', artifact: 'journal', module: 'journal' },
   { id: 'markets', label: 'OVERVIEW', group: 'market', artifact: 'markets', module: 'markets' },
   { id: 'heatmaps', label: 'HEAT MAPS', group: 'market', artifact: 'heatmaps', module: 'heatmaps' },
   { id: 'rotation', label: 'SECTORS', group: 'market', artifact: 'rotation', module: 'rotation' },

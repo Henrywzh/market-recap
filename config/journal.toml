@@ -1,0 +1,19 @@
+# Decision log (BRIEF -> JOURNAL). One [[decision]] per decision, written when
+# it is made -- before the outcome is known -- and never edited afterwards:
+# a later change of mind is a new entry. The page reviews each against what
+# happened (src/market_recap/compute/journal.py).
+#
+# [[decision]]
+# date = "2026-09-28"             # the day it was decided (YYYY-MM-DD)
+# ticker = "NVDA"                 # a name; "SPX" or omitted for an override
+# action = "enter"                # enter | add | trim | exit | pass | override
+# reason = "Why, in one or two sentences."
+# horizon_days = 60               # calendar days to judge it on (default [journal])
+# exposure = 0.8                  # override only: the equity exposure actually held
+# checkpoints = [
+#   { date = "2026-10-21", text = "Q3 report: what would make this wrong" },
+# ]
+#
+# entry / add is right if the name beat the index over the horizon; trim / exit
+# / pass is right if it did not; an override is right if holding `exposure`
+# instead of the systematic anchor's added return over the horizon.

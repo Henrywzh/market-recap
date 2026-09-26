@@ -1,0 +1,32 @@
+# EXAMPLE decision log for a local preview only (MARKET_RECAP_JOURNAL points
+# the build at it). These entries are illustrations, not decisions anyone made.
+
+[[decision]]
+date = "2026-06-01"
+ticker = "MSFT"
+action = "enter"
+reason = "EXAMPLE: estimates rising while the price lagged peers."
+horizon_days = 90
+checkpoints = [{ date = "2026-10-28", text = "EXAMPLE: next report -- cloud growth holds" }]
+
+[[decision]]
+date = "2026-07-15"
+ticker = "INTC"
+action = "pass"
+reason = "EXAMPLE: looked at it after the drawdown; no estimate support."
+horizon_days = 60
+
+[[decision]]
+date = "2026-08-03"
+action = "override"
+exposure = 1.0
+reason = "EXAMPLE: held full exposure while the anchor was at 50%."
+horizon_days = 45
+
+[[decision]]
+date = "2026-09-10"
+ticker = "ASML"
+action = "add"
+reason = "EXAMPLE: stabilising price, steady evidence."
+horizon_days = 60
+checkpoints = [{ date = "2026-10-14", text = "EXAMPLE: Q3 bookings" }]
