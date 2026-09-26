@@ -512,6 +512,13 @@ export default function renderMonitor(root, data, manifest) {
 
   function renderNotices() {
     noticesHost.replaceChildren();
+    // The nightly build could not rebuild MONITOR and republished the last
+    // ledger unchanged, so every other tab is a session (or more) ahead.
+    const carried = manifest?.monitor_carried;
+    if (carried) {
+      noticesHost.append(gap(`MONITOR NOT UPDATED since ${carried.since || UNKNOWN}: showing the ledger observed to ${carried.as_of || UNKNOWN} `
+        + `while the rest of the page is ${manifest.as_of || UNKNOWN}. No observation was lost; the next successful build resumes it.`));
+    }
     if (artifact.schema_version !== undefined && artifact.schema_version !== 1) {
       noticesHost.append(gap(`MONITOR artifact schema_version ${raw(artifact.schema_version)} is not supported by this renderer.`));
     }

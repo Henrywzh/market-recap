@@ -78,6 +78,10 @@ def _check_as_of(manifest: dict, panels: dict[str, dict]) -> list[Finding]:
         # are dated by their publisher, not by the equity session.
         if name in {"fixed_income", "macro"}:
             continue
+        # A carried MONITOR ledger keeps the session it last observed; the
+        # carry itself is reported by _check_monitor_carried.
+        if name == "monitor" and manifest.get("monitor_carried"):
+            continue
         if as_of != reference:
             out.append(Finding("error", "as_of", f"{name} is dated {as_of}, manifest says {reference}"))
     return out
@@ -184,6 +188,22 @@ def _check_catalysts(payload: dict | None) -> list[Finding]:
     if not payload.get("events"):
         out.append(Finding("error", "catalysts", "no upcoming event at all"))
     return out
+
+
+# The one finding a deploy may go ahead with: the rest of the page is sound
+# and only MONITOR is yesterday's, republished unchanged (build._carry_monitor).
+CARRIED_CATEGORY = "monitor_carried"
+
+
+def _check_monitor_carried(manifest: dict) -> list[Finding]:
+    carried = manifest.get("monitor_carried")
+    if not carried:
+        return []
+    return [Finding(
+        "warning", CARRIED_CATEGORY,
+        f"MONITOR was not rebuilt for {manifest.get('as_of')} ({carried.get('reason')}); the published "
+        f"ledger observed to {carried.get('as_of')} is republished unchanged, not updated since {carried.get('since')}",
+    )]
 
 
 def _check_monitor(payload: dict | None) -> list[Finding]:
@@ -319,7 +339,10 @@ def run() -> dict:
         + _check_valuation(panels.get("valuation"))
         + _check_xray(config, panels.get("xray"))
         + _check_catalysts(panels.get("catalysts"))
-        + _check_monitor(panels.get("monitor"))
+        # A carried ledger is the live one verbatim; checking it against this
+        # code is what may have failed, and would block the rest of the page.
+        + (_check_monitor(panels.get("monitor")) if not manifest.get("monitor_carried") else [])
+        + _check_monitor_carried(manifest)
         + _check_cross_listing(config, panels.get("cross_listing"))
         + _check_flow_attribution(panels.get("heatmaps"))
         + _check_sources(manifest)
@@ -328,10 +351,14 @@ def run() -> dict:
         findings.append(Finding("error", "panel", f"{name} failed: {reason}"))
 
     count = {severity: sum(f.severity == severity for f in findings) for severity in SEVERITIES}
+    blocking = [f for f in findings if f.severity in ("error", "warning") and f.check != CARRIED_CATEGORY]
     return {
         "ok": not count["error"],
         "errors": count["error"],
         "warnings": count["warning"],
         "notices": count["notice"],
+        # Whether the unattended run may publish this build even though it
+        # fails --strict: true only when the carried MONITOR is the sole reason.
+        "deployable": not blocking,
         "findings": [f.as_dict() for f in findings],
     }

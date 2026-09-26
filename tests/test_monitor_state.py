@@ -447,3 +447,71 @@ def test_published_manifest_as_of_must_match_monitor(monkeypatch):
             local_path=Path("unused.json"),
             published_base_url="https://example.test",
         )
+
+
+def _carried_manifest(as_of: str = "2026-09-24", *, state_as_of: str = AS_OF,
+                      state_generated_at: str | None = "old-build", since: str = "2026-09-24") -> str:
+    return json.dumps({
+        "as_of": as_of, "panels": ["monitor"], "monitor_schema_version": 1, "generated_at": "new-build",
+        "monitor_carried": {"as_of": state_as_of, "generated_at": state_generated_at,
+                            "since": since, "reason": "RuntimeError: x"},
+    })
+
+
+def test_a_carried_ledger_is_read_back_under_its_own_dates(monkeypatch):
+    payload = _payload()
+    payload["generated_at"] = "old-build"
+    responses = iter([_carried_manifest(), json.dumps(payload), _carried_manifest()])
+    monkeypatch.setattr(monitor_state, "get_text", lambda _url, **_kwargs: next(responses))
+    assert monitor_state.load_previous(
+        local_path=Path("unused.json"), published_base_url="https://example.test",
+    ) == payload
+
+
+def test_a_carried_ledger_must_match_the_carried_dates(monkeypatch):
+    payload = _payload()
+    payload["generated_at"] = "some-other-build"
+    responses: list[str] = []
+    for _ in range(monitor_state.PUBLISHED_READ_ATTEMPTS):
+        responses.extend([_carried_manifest(), json.dumps(payload), _carried_manifest()])
+    stream = iter(responses)
+    monkeypatch.setattr(monitor_state, "get_text", lambda _url, **_kwargs: next(stream))
+    with pytest.raises(ValueError, match="raced"):
+        monitor_state.load_previous(local_path=Path("unused.json"), published_base_url="https://example.test")
+
+
+def test_carry_returns_the_live_text_even_when_this_code_rejects_it(monkeypatch):
+    payload = _payload()
+    payload["schema_version"] = 99  # a ledger this code no longer accepts
+    payload["generated_at"] = "stamp"
+    text = json.dumps(payload)
+    manifest = _manifest(monitor_schema_version=1, generated_at="stamp")
+    responses = iter([manifest, text, manifest])
+    monkeypatch.setattr(monitor_state, "get_text", lambda _url, **_kwargs: next(responses))
+    carried, record = monitor_state.carry_published("https://example.test", today="2026-09-24", reason="why")
+    assert carried == text
+    assert record == {"as_of": AS_OF, "generated_at": "stamp", "since": "2026-09-24", "reason": "why"}
+
+
+def test_consecutive_carries_keep_the_first_missed_session(monkeypatch):
+    payload = _payload()
+    payload["generated_at"] = "old-build"
+    manifest = _carried_manifest(since="2026-09-24")
+    responses = iter([manifest, json.dumps(payload), manifest])
+    monkeypatch.setattr(monitor_state, "get_text", lambda _url, **_kwargs: next(responses))
+    _, record = monitor_state.carry_published("https://example.test", today="2026-09-25", reason="again")
+    assert record["since"] == "2026-09-24" and record["as_of"] == AS_OF
+
+
+def test_carry_refuses_a_manifest_that_lost_monitor(monkeypatch):
+    monkeypatch.setattr(monitor_state, "get_text",
+                        lambda _url, **_kwargs: _manifest(has_monitor=False, monitor_schema_version=1))
+    with pytest.raises(ValueError, match="monitor"):
+        monitor_state.carry_published("https://example.test", today="2026-09-24", reason="x")
+
+
+def test_carried_record_cannot_postdate_the_manifest(monkeypatch):
+    bad = _carried_manifest(as_of="2026-09-22", state_as_of="2026-09-23")
+    monkeypatch.setattr(monitor_state, "get_text", lambda _url, **_kwargs: bad)
+    with pytest.raises(ValueError, match="monitor_carried"):
+        monitor_state.load_previous(local_path=Path("unused.json"), published_base_url="https://example.test")

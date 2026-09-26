@@ -16,8 +16,8 @@ from .context import build_context
 from .panels import catalysts, cross_listing, dcf, earnings, financials, fixed_income, heatmaps, macro, markets, monitor, rotation, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
-from .sources.monitor_state import load_previous, validate_previous
-from .util import SourceRecord, utc_now_iso, write_json
+from .sources.monitor_state import carry_published, load_previous, validate_previous
+from .util import SourceRecord, describe_error, utc_now_iso, write_json
 
 # MONITOR consumes same-session valuation and calendar outputs, and runs last.
 PANELS = {
@@ -39,6 +39,31 @@ PANELS = {
     "monitor": monitor.build,
 }
 SEC_PANELS = {"financials", "valuation", "dcf"}
+
+
+def _carry_monitor(base_url: str, ctx, exc: Exception) -> dict | None:
+    """Republish the live MONITOR ledger unchanged after a failed rebuild.
+
+    The ledger is the one artifact a rebuild cannot recreate, so a failure
+    must never reset it -- and it must not hold every other tab hostage
+    either. Without this, one MONITOR failure blocked the whole deploy; and
+    when the cause lay in the published ledger itself, every later night hit
+    the same wall and the site froze. The build is still reported as failed
+    (validate flags the carry), so the run turns red while the page updates.
+
+    Returns the manifest record, or None when the live ledger cannot be read
+    consistently either: then nothing may be published.
+    """
+    reason = describe_error(exc)
+    try:
+        text, record = carry_published(base_url, today=ctx.as_of, reason=reason)
+    except Exception as carry_exc:
+        ctx.log.fail("monitor_carry", carry_exc)
+        return None
+    pending = ARTIFACT_DIR / "monitor.pending"
+    pending.write_text(text, encoding="utf-8")
+    pending.replace(ARTIFACT_DIR / "monitor.json")
+    return record
 
 
 def run(
@@ -75,13 +100,16 @@ def run(
         except (OSError, ValueError, AttributeError):
             return None
 
+    published_base_url = (config["monitor"]["published_base_url"]
+                          if os.environ.get("MONITOR_PUBLISHED_STATE") == "1" else None)
+    monitor_carried: dict | None = None
+
     for name in selected:
         try:
             if name == "monitor":
                 previous = load_previous(
                     local_path=ARTIFACT_DIR / "monitor.json",
-                    published_base_url=(config["monitor"]["published_base_url"]
-                                        if os.environ.get("MONITOR_PUBLISHED_STATE") == "1" else None),
+                    published_base_url=published_base_url,
                 )
                 payload = PANELS[name](ctx, valuation=optional_panel("valuation"),
                                       catalysts=optional_panel("catalysts"), previous=previous)
@@ -94,6 +122,11 @@ def run(
             else:
                 payload = PANELS[name](ctx)
         except Exception as exc:
+            if name == "monitor" and published_base_url:
+                monitor_carried = _carry_monitor(published_base_url, ctx, exc)
+                if monitor_carried is not None:
+                    written.append(name)
+                    continue
             # A panel that fails leaves a named gap. The page renders the gap
             # instead of an empty tab that looks like a quiet market.
             ctx.log.fail(name, exc)
@@ -144,6 +177,9 @@ def run(
         "session_check": ctx.session_check,
         "panels": written,
         "skipped_panels": sorted(set(selected) - set(written)),
+        # Set when MONITOR could not be rebuilt and the published ledger was
+        # republished unchanged: its dates, the first session it missed, why.
+        **({"monitor_carried": monitor_carried} if monitor_carried else {}),
         # Filers whose company facts were refetched because a newer 10-K/10-Q was accepted.
         "sec_filings": check,
         **ctx.log.to_dict(),

@@ -567,7 +567,13 @@ def _published_url(base_url: str, filename: str) -> str:
     return urljoin(base_url.rstrip("/") + "/", f"artifacts/{filename}")
 
 
-def _manifest_info(manifest: Any) -> tuple[str, bool, str | None]:
+def _manifest_info(manifest: Any) -> tuple[str, bool, str | None, tuple[str, str | None]]:
+    """The manifest's session, whether it lists MONITOR, its build stamp, and
+    the (as_of, generated_at) the published monitor.json must carry.
+
+    Those match the manifest's own, except when a build carried the previous
+    ledger forward (``monitor_carried``): the ledger then keeps its own dates.
+    """
     value = _require_mapping(manifest, "published manifest")
     as_of = _parse_date(value.get("as_of"), "published manifest.as_of")
     panels = value.get("panels")
@@ -606,10 +612,32 @@ def _manifest_info(manifest: Any) -> tuple[str, bool, str | None]:
         _require_nonempty_string(generated_at, "published manifest.generated_at")
     if as_of is None:  # for type checkers
         raise _invalid("published manifest.as_of", "required date is missing")
-    return as_of.isoformat(), has_monitor, generated_at
+
+    expected: tuple[str, str | None] = (as_of.isoformat(), generated_at)
+    carried = value.get("monitor_carried")
+    if carried is not None:
+        carried = _require_mapping(carried, "published manifest.monitor_carried")
+        if not has_monitor:
+            raise _invalid("published manifest.monitor_carried", "carries a monitor the manifest does not list")
+        carried_as_of = _parse_date(carried.get("as_of"), "published manifest.monitor_carried.as_of")
+        if carried_as_of is None or carried_as_of > as_of:
+            raise _invalid("published manifest.monitor_carried.as_of", "cannot be after the manifest as_of")
+        carried_generated = carried.get("generated_at")
+        if carried_generated is not None:
+            _require_nonempty_string(carried_generated, "published manifest.monitor_carried.generated_at")
+        expected = (carried_as_of.isoformat(), carried_generated)
+    return as_of.isoformat(), has_monitor, generated_at, expected
 
 
-def _read_published(base_url: str) -> dict[str, Any] | None:
+def _read_consistent(base_url: str, *, validate: bool) -> tuple[dict[str, Any], str, dict[str, Any]] | None:
+    """The published monitor artifact, read between two identical manifests.
+
+    Returns (state, raw text, manifest), or None for a legacy manifest that
+    predates MONITOR. ``validate=False`` returns the artifact as published,
+    parsed but not checked against this code's schema -- what carrying it
+    forward needs, since a ledger this code no longer accepts must still not
+    be lost.
+    """
     manifest_url = _published_url(base_url, MANIFEST_FILENAME)
     monitor_url = _published_url(base_url, MONITOR_FILENAME)
     last_mismatch: str | None = None
@@ -623,20 +651,17 @@ def _read_published(base_url: str) -> dict[str, Any] | None:
             get_text(manifest_url, timeout=STATE_HTTP_TIMEOUT, retries=STATE_HTTP_RETRIES),
             manifest_url,
         )
-        first_as_of, first_has_monitor, first_generated_at = _manifest_info(first_manifest)
+        first_as_of, first_has_monitor, first_generated_at, expected = _manifest_info(first_manifest)
         if not first_has_monitor:
             return None
 
         # A panel advertised by the manifest is authoritative.  Any fetch or
         # validation failure is allowed to escape; it must never reset state.
-        state = validate_previous(
-            _decode_json(
-                get_text(monitor_url, timeout=STATE_HTTP_TIMEOUT, retries=STATE_HTTP_RETRIES),
-                monitor_url,
-            )
-        )
-        state_as_of = state["as_of"]
-        state_generated_at = state.get("generated_at")
+        text = get_text(monitor_url, timeout=STATE_HTTP_TIMEOUT, retries=STATE_HTTP_RETRIES)
+        state = _decode_json(text, monitor_url)
+        if validate:
+            state = validate_previous(state)
+        observed = (state.get("as_of"), state.get("generated_at"))
 
         # Re-read the manifest after the artifact.  A Pages deploy can expose
         # files from two versions briefly; accepting that pair would either
@@ -645,28 +670,55 @@ def _read_published(base_url: str) -> dict[str, Any] | None:
             get_text(manifest_url, timeout=STATE_HTTP_TIMEOUT, retries=STATE_HTTP_RETRIES),
             manifest_url,
         )
-        second_as_of, second_has_monitor, second_generated_at = _manifest_info(second_manifest)
-        generated_at_matches = (
-            first_generated_at == second_generated_at == state_generated_at
-        )
+        second_as_of, second_has_monitor, second_generated_at, _ = _manifest_info(second_manifest)
         if (
-            first_as_of == state_as_of == second_as_of
-            and first_has_monitor
+            first_as_of == second_as_of
+            and first_generated_at == second_generated_at
             and second_has_monitor
-            and generated_at_matches
+            and observed == expected
         ):
-            return state
+            return state, text, first_manifest
 
         last_mismatch = (
-            f"manifest/state as_of values were {first_as_of!r}, {state_as_of!r}, "
-            f"and {second_as_of!r}; generated_at values were "
-            f"{first_generated_at!r}, {state_generated_at!r}, and {second_generated_at!r}"
+            f"manifest as_of {first_as_of!r} then {second_as_of!r}, generated_at "
+            f"{first_generated_at!r} then {second_generated_at!r}; monitor expected "
+            f"as_of/generated_at {expected!r}, found {observed!r}"
         )
 
     raise MonitorStateError(
         "published monitor state raced with a deployment after "
         f"{PUBLISHED_READ_ATTEMPTS} attempts ({last_mismatch or 'unknown mismatch'})"
     )
+
+
+def _read_published(base_url: str) -> dict[str, Any] | None:
+    read = _read_consistent(base_url, validate=True)
+    return read[0] if read is not None else None
+
+
+def carry_published(base_url: str, *, today: str, reason: str) -> tuple[str, dict[str, Any]]:
+    """The live monitor artifact, verbatim, for a build that could not make one.
+
+    Returns the text to publish unchanged and the manifest's
+    ``monitor_carried`` record. The ledger is not re-validated: when this
+    code rejects the published ledger, carrying it keeps every observation
+    while the rest of the site still updates; the build is still reported as
+    failed. Raises when the live artifact cannot be read consistently -- a
+    build that can neither make nor carry the ledger must not publish.
+    """
+    read = _read_consistent(base_url, validate=False)
+    if read is None:
+        raise MonitorStateError("the published manifest lists no monitor to carry forward")
+    state, text, manifest = read
+    previous = manifest.get("monitor_carried") or {}
+    record = {
+        "as_of": state.get("as_of"),
+        "generated_at": state.get("generated_at"),
+        # The first session the ledger missed, kept across consecutive carries.
+        "since": previous.get("since") or today,
+        "reason": reason,
+    }
+    return text, record
 
 
 def load_previous(*, local_path: Path, published_base_url: str | None = None) -> dict[str, Any] | None:
