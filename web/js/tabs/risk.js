@@ -145,7 +145,7 @@ function termChart(node, charts) {
   });
 }
 
-// `charts` histories are drawn side by side; a click puts that tile's history
+// `charts` histories are drawn one above the other; a click puts that tile's history
 // first and drops the oldest. Series past their line are shown first.
 function sectionCard(section, data, { charts = 1 } = {}) {
   const tiles = section.tiles;
@@ -168,7 +168,7 @@ function sectionCard(section, data, { charts = 1 } = {}) {
   };
   const chartBlocks = slots.map((slot) => el('div', {}, [el('div', { class: 'risk-chart-head' }, [slot.title]), slot.node]));
   const breached = tiles.filter((t) => t.breach).length;
-  const body = [grid, charts > 1 ? el('div', { class: 'grid two risk-charts' }, chartBlocks) : chartBlocks[0]];
+  const body = [grid, charts > 1 ? el('div', { class: 'risk-charts' }, chartBlocks) : chartBlocks[0]];
   if (section.key === 'volatility') {
     const termNode = el('div', { class: 'chart' });
     body.push(el('div', { class: 'risk-chart-head' }, [el('span', { class: 'dim', text: 'TERM STRUCTURE · today, a week and a month ago' })]), termNode);
@@ -305,7 +305,7 @@ export default function renderRisk(root, payload) {
   if (!data || data.unavailable) throw new Error(data?.unavailable || 'risk artifact missing');
   const core = data.sections.flatMap((s) => s.tiles.map((t) => ({ ...t, horizon: s.horizon }))).filter((t) => t.core);
   const total = data.sections.reduce((n, s) => n + s.tiles.length, 0);
-  root.append(metaRow(`RISK · ANCHOR AND ${core.length} CORE SERIES · AS OF ${data.as_of} · CLICK A TILE FOR ITS HISTORY (TWO SIDE BY SIDE)`, methodNotes()));
+  root.append(metaRow(`RISK · ANCHOR AND ${core.length} CORE SERIES · AS OF ${data.as_of} · CLICK A TILE FOR ITS HISTORY (TWO SHOWN)`, methodNotes()));
   root.append(summary(data, core));
   root.append(el('div', { class: 'grid risk-top' }, [
     el('div', { class: 'risk-left' }, [anchorCard(anchor), sentimentCard(data.sentiment)]),

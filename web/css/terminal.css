@@ -791,8 +791,8 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .fg-bar-fill { display: block; height: 100%; background: var(--text-dim); }
 .fg-bar-fill.up { background: var(--up); }
 .fg-bar-fill.down { background: var(--down); }
-.risk-charts { gap: 12px; }
-.risk-charts .chart { height: 240px; }
+.risk-charts { display: flex; flex-direction: column; gap: 6px; }
+.risk-charts .chart { height: 220px; }
 .risk-more { margin-top: 14px; }
 .risk-more > summary { cursor: pointer; font-size: 11px; letter-spacing: 0.08em; color: var(--text-dim); padding: 8px 0; list-style: none; }
 .risk-more > summary::-webkit-details-marker { display: none; }
