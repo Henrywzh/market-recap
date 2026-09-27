@@ -1,0 +1,127 @@
+"""Cboe's published index histories, VIX futures settlements and put/call ratios.
+
+All three are files Cboe serves from its CDN without a key (probed 2026-09-26,
+docs/risk_sources.md). The index histories are the official closes, but most
+of these indices were launched years after the first row: the earlier part is
+Cboe's own back-calculation from the option prices of the day. A reading from
+that stretch is a back-calculated history, not a record of what was published
+then, and the risk panel labels it so.
+"""
+
+from __future__ import annotations
+
+from datetime import date, timedelta
+from io import StringIO
+import json
+
+import pandas as pd
+
+from .. import cache
+from .http import FetchError, get_text
+
+NAMESPACE = "cboe"
+INDEX_URL = "https://cdn.cboe.com/api/global/us_indices/daily_prices/{symbol}_History.csv"
+VX_URL = "https://cdn.cboe.com/data/us/futures/market_statistics/historical_data/VX/VX_{expiry}.csv"
+PUT_CALL_URL = "https://cdn.cboe.com/data/us/options/market_statistics/daily/{day}_daily_options"
+HOME_URL = "https://www.cboe.com/us/indices/"
+
+
+def fetch_index(symbol: str, *, use_cache: bool = True) -> pd.Series:
+    """Daily closes of one Cboe index, oldest first.
+
+    Most files are DATE,OPEN,HIGH,LOW,CLOSE; a few (VVIX, SKEW) are DATE,VALUE.
+    """
+    text = cache.fetch_text(
+        NAMESPACE, f"index-{symbol}",
+        lambda: get_text(INDEX_URL.format(symbol=symbol), timeout=45.0),
+        kind="daily_file", suffix=".csv", use_cache=use_cache,
+    )
+    frame = pd.read_csv(StringIO(text))
+    frame.columns = [str(c).strip().upper() for c in frame.columns]
+    value = "CLOSE" if "CLOSE" in frame.columns else frame.columns[-1]
+    series = pd.Series(
+        pd.to_numeric(frame[value], errors="coerce").to_numpy(),
+        index=pd.to_datetime(frame["DATE"], format="%m/%d/%Y", errors="coerce"),
+        name=symbol,
+    )
+    series = series[series.index.notna()].dropna()
+    # A zero close is a placeholder row, not a reading.
+    return series[series > 0].sort_index()
+
+
+def _third_friday(year: int, month: int) -> date:
+    first = date(year, month, 1)
+    offset = (4 - first.weekday()) % 7
+    return first + timedelta(days=offset + 14)
+
+
+def vx_expiry(year: int, month: int) -> date:
+    """Monthly VIX future for ``month``: 30 days before the third Friday of the
+    following month (a Wednesday)."""
+    following = (year + 1, 1) if month == 12 else (year, month + 1)
+    return _third_friday(*following) - timedelta(days=30)
+
+
+def vx_expiries(today: date, count: int) -> list[date]:
+    out: list[date] = []
+    year, month = today.year, today.month
+    while len(out) < count:
+        expiry = vx_expiry(year, month)
+        if expiry >= today:
+            out.append(expiry)
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return out
+
+
+def fetch_vx(expiry: date, *, use_cache: bool = True) -> pd.DataFrame:
+    """Daily settlements of one monthly VIX future (trade_date, settle, open_interest).
+
+    An exchange holiday moves an expiry a day earlier; the day before is tried
+    when the scheduled date has no file.
+    """
+    last_error: Exception | None = None
+    for candidate in (expiry, expiry - timedelta(days=1)):
+        try:
+            text = cache.fetch_text(
+                NAMESPACE, f"vx-{candidate.isoformat()}",
+                lambda c=candidate: get_text(VX_URL.format(expiry=c.isoformat()), timeout=30.0, retries=1),
+                kind="daily_file", suffix=".csv", use_cache=use_cache,
+            )
+        except FetchError as exc:
+            last_error = exc
+            continue
+        frame = pd.read_csv(StringIO(text))
+        frame = frame.rename(columns={"Trade Date": "trade_date", "Settle": "settle", "Open Interest": "open_interest"})
+        frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce")
+        frame["settle"] = pd.to_numeric(frame["settle"], errors="coerce")
+        frame["open_interest"] = pd.to_numeric(frame.get("open_interest"), errors="coerce")
+        frame = frame.dropna(subset=["trade_date", "settle"])
+        frame = frame[frame["settle"] > 0]
+        frame["expiry"] = candidate.isoformat()
+        return frame[["trade_date", "expiry", "settle", "open_interest"]].sort_values("trade_date")
+    raise last_error or FetchError(f"no VX file for {expiry}")
+
+
+def fetch_put_call(day: date, *, today: date, use_cache: bool = True) -> dict[str, float] | None:
+    """Cboe's put/call ratios for one session, or None for a day with no file.
+
+    A past session's file never changes, so it is kept for a year; today's is
+    refetched each session.
+    """
+    kind = "daily_file" if day >= today else "archive"
+    try:
+        text = cache.fetch_text(
+            NAMESPACE, f"putcall-{day.isoformat()}",
+            lambda: get_text(PUT_CALL_URL.format(day=day.isoformat()), timeout=20.0, retries=1),
+            kind=kind, suffix=".json", use_cache=use_cache,
+        )
+        payload = json.loads(text)
+    except (FetchError, ValueError):
+        return None
+    out: dict[str, float] = {}
+    for item in payload.get("ratios") or []:
+        try:
+            out[str(item["name"]).strip().upper()] = float(item["value"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out or None

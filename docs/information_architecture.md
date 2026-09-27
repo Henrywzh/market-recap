@@ -296,6 +296,20 @@ from the day it starts. These start in phase 0, before their pages exist.
 - **Source:** Yahoo option chains via `yfinance`, subject to the same
   coverage-gap rule as prices: a missing chain is recorded as missing.
 
+### Risk-input snapshots (added 2026-09-27)
+
+- **What:** OFR's Financial Stress Index and its components, the ICE BofA
+  spreads (HY, IG, CCC, BB, B, BBB) and NFCI/ANFCI from FRED, and the Cboe
+  VIX family, VVIX, SKEW and COR1M (`[snapshots.risk]`).
+- **Why:** OFR serves only its current vintage, FRED now serves ICE spreads
+  for three years only, and Cboe back-calculates newer indices. A daily
+  record of what each served is the only way to build point-in-time history
+  for the risk research (quantamental-lab's risk re-audit names the lack of
+  it as its first blocker to promotion).
+- **Time and shape:** once each weekday at 23:17 UTC; the last 30
+  observations of every series, so a revision shows up as a difference
+  between two evenings' files. About 4 KB a day.
+
 ### Expectation snapshots
 
 Four runs a weekday (09:41, 12:41, 15:41 and 18:41 New York in summer).
