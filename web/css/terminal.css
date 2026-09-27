@@ -779,6 +779,18 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .anchor-value { font-size: 30px; font-weight: 700; color: var(--accent); line-height: 1.1; }
 .anchor-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
 .anchor-chips .mchip { margin: 0; font-size: 10px; line-height: 17px; }
+.risk-left { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.risk-left > .card { margin: 0; }
+.fg-value.up, .fg-value.down { color: inherit; }
+.fg-value.up { color: var(--up); }
+.fg-value.down { color: var(--down); }
+.fg-table td { white-space: nowrap; }
+.fg-table td.fg-label, .fg-table th:first-child { text-align: left; white-space: normal; }
+.fg-bar-cell { width: 90px; }
+.fg-bar { display: inline-block; width: 80px; height: 6px; vertical-align: middle; background: color-mix(in srgb, var(--border-strong) 50%, transparent); }
+.fg-bar-fill { display: block; height: 100%; background: var(--text-dim); }
+.fg-bar-fill.up { background: var(--up); }
+.fg-bar-fill.down { background: var(--down); }
 .risk-charts { gap: 12px; }
 .risk-charts .chart { height: 240px; }
 .risk-more { margin-top: 14px; }

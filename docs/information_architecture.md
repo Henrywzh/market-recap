@@ -350,6 +350,12 @@ The phased build put too much in front of the reader. After looking at it:
   of these (IG, CCC, Baa and the ETF credit ratios all say "credit
   spreads"). The long percentile is labelled with its start year, since
   the ICE spreads reach back three years and SPX a century.
+- **Fear & Greed, self-computed** (`compute/sentiment.py`): CNN's seven
+  components rebuilt from the site's data, each z-scored against its own
+  trailing year and mapped to 0-100 through the normal CDF, averaged
+  equally. It sits under the anchor on RISK and in OVERVIEW's risk line.
+  Strength and breadth use S&P 500 members by count (CNN: NYSE, volume);
+  CNN's feed is not read because it refuses non-browser clients.
 - **JOURNAL is removed** (panel, compute, page, config and the ticker
   page's thesis card). A static page with a log kept by hand in TOML would
   have stayed empty; it is in git history (f21d210) if wanted later.

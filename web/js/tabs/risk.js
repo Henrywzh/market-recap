@@ -217,6 +217,59 @@ function anchorCard(a) {
   ]);
 }
 
+// Self-computed after CNN's seven components (compute/sentiment.py); it
+// follows CNN's outline, not its number.
+const FG_UNITS = { momentum: '%', strength: '% of members', breadth: '', put_call: '', volatility: '%', safe_haven: 'pp', junk_bond: 'bp' };
+function fgReading(c) {
+  if (!present(c.value)) return DASH;
+  const digits = c.key === 'breadth' || c.key === 'junk_bond' ? 0 : 2;
+  const signedKeys = ['momentum', 'strength', 'volatility', 'safe_haven'];
+  const text = `${signedKeys.includes(c.key) && c.value > 0 ? '+' : ''}${num(c.value, digits)}`;
+  const unit = FG_UNITS[c.key] ?? '';
+  return unit ? `${text}${unit.startsWith('%') && unit.length > 1 ? ` ${unit}` : unit}` : text;
+}
+
+function sentimentCard(g) {
+  const head = el('span', { class: 'dim', text: 'self-computed · not CNN\'s index' });
+  if (!g || !present(g.score)) return card('FEAR & GREED', head, el('div', { class: 'gap', text: `Not computed this session${g?.error ? `: ${g.error}` : ''}.` }));
+  const tone = (v) => (!present(v) ? 'dim' : v < 45 ? 'down' : v > 55 ? 'up' : '');
+  const chartNode = el('div', { class: 'chart short' });
+  requestAnimationFrame(() => render(chartNode, (option, p) => ({
+    ...option,
+    grid: { left: 30, right: 12, top: 8, bottom: 22 },
+    tooltip: { ...option.tooltip, trigger: 'axis' },
+    xAxis: { ...option.xAxis, data: g.history.dates },
+    yAxis: { ...option.yAxis, min: 0, max: 100, interval: 25, axisLabel: { color: p.dim, fontSize: 9 } },
+    series: [{
+      name: 'fear & greed', type: 'line', data: g.history.score, showSymbol: false, lineStyle: { width: 1.3, color: p.text },
+      markArea: { silent: true, data: [
+        [{ yAxis: 0, itemStyle: { color: p.down, opacity: 0.08 } }, { yAxis: 25 }],
+        [{ yAxis: 75, itemStyle: { color: p.up, opacity: 0.08 } }, { yAxis: 100 }],
+      ] },
+      markLine: { silent: true, symbol: 'none', data: [{ yAxis: 50 }], lineStyle: { color: p.faint, type: 'dashed' }, label: { show: false } },
+    }],
+  })));
+  const rows = g.components.map((c) => el('tr', {}, [
+    el('td', { class: 'fg-label', text: c.label }),
+    el('td', { class: 'dim', text: fgReading(c) }),
+    el('td', { class: 'fg-bar-cell' }, [el('span', { class: 'fg-bar' }, [el('span', { class: `fg-bar-fill ${tone(c.score)}`, style: `width:${present(c.score) ? c.score : 0}%` })])]),
+    el('td', { class: tone(c.score), text: present(c.score) ? num(c.score, 0) : DASH }),
+  ]));
+  const ago = (label, v) => `${label} ${present(v) ? num(v, 0) : DASH}`;
+  return card('FEAR & GREED', head, [
+    el('div', { class: 'anchor-head' }, [
+      el('span', { class: `anchor-value fg-value ${tone(g.score)}`, text: num(g.score, 0) }),
+      el('span', { class: tone(g.score), text: g.rating }),
+      el('span', { class: 'dim', text: `${ago('1W', g.week_ago)} · ${ago('1M', g.month_ago)} · ${ago('1Y', g.year_ago)}${g.components_counted < g.components.length ? ` · ${g.components_counted} of ${g.components.length} components` : ''}` }),
+    ]),
+    chartNode,
+    el('div', { class: 'table-scroll' }, [el('table', { class: 'data fg-table' }, [
+      el('thead', {}, [el('tr', {}, ['COMPONENT', 'READING', '', 'SCORE'].map((h) => el('th', { text: h })))]),
+      el('tbody', {}, rows),
+    ])]),
+  ]);
+}
+
 function summary(data, core) {
   const past = core.filter((t) => t.breach);
   const others = data.sections.flatMap((s) => s.tiles).filter((t) => !t.core);
@@ -242,7 +295,8 @@ function methodNotes() {
     'Thresholds were written in config/dashboard.toml before this page drew any series, and are not fitted to it. A red tile is past its line; NEW means it was not a week ago, CLEARED that it was. Positioning and the put/call ratio are read at extremes: the tails of their own history (≤5th or ≥95th percentile).',
     'Back-calculated history: VIX3M, VIX9D, VIX6M, VIX1Y, VVIX, SKEW and COR1M were launched after the first row of their files; the earlier part is Cboe\'s back-calculation. ICE BofA spreads (HY, IG, CCC) come from FRED for the last three years only; Moody\'s Baa − 10Y runs to 1986.',
     'CFTC positions are as of Tuesday and published the following Friday. Realised correlation and dispersion come from the S&P 500 members\' own closes and today\'s SPY weights over 21 sessions.',
-    'Not included: AAII sentiment, NAAIM and CNN Fear & Greed (docs/risk_sources.md has each probe).',
+    'Fear & Greed is computed here after CNN\'s outline, not taken from CNN (whose feed refuses non-browser clients): seven components, each z-scored against its own trailing year and mapped to 0–100 through the normal distribution (flipped where a high reading is fear), then averaged equally. Where the data differs from CNN\'s: strength counts S&P 500 members at 52-week highs and lows rather than the NYSE; breadth is a McClellan summation of S&P 500 advances and declines by count rather than NYSE volume; junk bond demand is the ICE BofA HY less IG spread; safe-haven demand is the S&P 500\'s 20-day return less IEF\'s. Bands: below 25 extreme fear, 25–45 fear, 45–55 neutral, 55–75 greed, above 75 extreme greed. It will sit near CNN\'s number, not on it.',
+    'Not included: AAII sentiment and NAAIM (docs/risk_sources.md has each probe).',
   ];
 }
 
@@ -254,7 +308,7 @@ export default function renderRisk(root, payload) {
   root.append(metaRow(`RISK · ANCHOR AND ${core.length} CORE SERIES · AS OF ${data.as_of} · CLICK A TILE FOR ITS HISTORY (TWO SIDE BY SIDE)`, methodNotes()));
   root.append(summary(data, core));
   root.append(el('div', { class: 'grid risk-top' }, [
-    anchorCard(anchor),
+    el('div', { class: 'risk-left' }, [anchorCard(anchor), sentimentCard(data.sentiment)]),
     sectionCard({ key: 'core', label: 'CORE SERIES', tiles: core }, data, { charts: 2 }),
   ]));
 

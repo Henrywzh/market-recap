@@ -151,6 +151,10 @@ function riskLine(risk) {
     el('span', { text: past.length
       ? `${past.length} of ${risk.core} core series past its line: ${past.map((p) => `${p.label} ${formatValue(p.value, p.unit)}`).join(' · ')}`
       : `none of the ${risk.core} core series is past its line` }),
+    risk.fear_greed ? el('span', { class: 'ov-fg' }, [
+      el('span', { class: 'dim', text: ' · Fear & Greed (self-computed) ' }),
+      el('span', { class: risk.fear_greed.score < 45 ? 'down' : risk.fear_greed.score > 55 ? 'up' : '', text: `${num(risk.fear_greed.score, 0)} ${risk.fear_greed.rating}` }),
+    ]) : null,
     el('span', { class: 'dim', text: ' →' }),
   ]);
 }

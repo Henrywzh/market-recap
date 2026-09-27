@@ -247,9 +247,11 @@ def risk_line(risk: dict | None) -> dict | None:
     if not risk:
         return None
     core = [t for s in risk["sections"] for t in s["tiles"] if t.get("core")]
+    sentiment = risk.get("sentiment") or {}
     return {
         "core": len(core),
         "past": [{"label": t["label"], "value": t["value"], "unit": t["unit"]} for t in core if t.get("breach")],
+        "fear_greed": {"score": sentiment.get("score"), "rating": sentiment.get("rating")} if sentiment.get("score") is not None else None,
     }
 
 

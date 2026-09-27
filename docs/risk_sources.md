@@ -28,7 +28,7 @@ fetched with a browser's identity.
 |---|---|
 | AAII sentiment survey (`aaii.com/files/surveys/sentiment.xls`) | HTTP 403 to the project's client (serves a browser). Left out rather than fetched as a browser. |
 | NAAIM exposure index | The page loads its data by script; no downloadable file. |
-| CNN Fear & Greed | A composite score (the page shows no composites), and its endpoint refuses non-browser clients. |
+| CNN Fear & Greed | Its endpoint refuses non-browser clients, so CNN's number is not read. RISK shows a self-computed gauge after CNN's seven components instead (`compute/sentiment.py`), labelled as such. |
 
 ## Thresholds
 

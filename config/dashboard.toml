@@ -664,7 +664,8 @@ polymarket_tags = ["fed", "fed-rates"]
 # (months) are never mixed in one row.
 [risk]
 cftc_start = "2006-01-01"
-put_call_sessions = 260
+# 400 sessions: the Fear & Greed gauge z-scores put/call over a trailing year.
+put_call_sessions = 400
 vx_contracts = 8
 
 [[risk.sections]]

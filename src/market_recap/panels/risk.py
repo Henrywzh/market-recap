@@ -16,6 +16,7 @@ import pandas as pd
 
 from ..compute import anchor as A
 from ..compute import risk as R
+from ..compute import sentiment as S
 from ..sources import cboe, cftc, fred, yahoo
 from ..util import SourceRecord, describe_error, to_iso_date
 
@@ -275,6 +276,27 @@ WEEKLY_TILES = {"net_liquidity", "nfci", "cftc_es", "cftc_nq", "cftc_zn", "cftc_
 DIGITS = {"ratio": 3, "corr": 2, "pct_oi": 1, "bp": 0, "usd_bn": 0}
 
 
+def _sentiment(inputs: _Inputs) -> dict:
+    """The self-computed Fear & Greed gauge (compute.sentiment)."""
+    ctx = inputs.ctx
+    members = ctx.priced(ctx.primary.key)
+    symbols = [s for s in members["yahoo_symbol"].drop_duplicates() if s in ctx.closes.columns] if not members.empty else []
+    closes = ctx.closes[symbols]
+    spx = inputs.spx()
+    raw = {
+        "momentum": S.momentum(spx),
+        "strength": S.strength(closes) if symbols else pd.Series(dtype=float),
+        "breadth": S.mcclellan_summation(closes) if symbols else pd.Series(dtype=float),
+        "put_call": R.smoothed(inputs.put_call, R.PUT_CALL_SMOOTHING) if not inputs.put_call.empty else pd.Series(dtype=float),
+        "volatility": S.vs_average(inputs.cboe.get("VIX", pd.Series(dtype=float))),
+        "safe_haven": S.safe_haven(spx, inputs.yahoo_close("IEF")),
+        "junk_bond": S.junk_spread(inputs.fred.get("BAMLH0A0HYM2", pd.Series(dtype=float)),
+                                   inputs.fred.get("BAMLC0A0CM", pd.Series(dtype=float))),
+    }
+    calendar = spx.index[spx.index > spx.index[-1] - pd.Timedelta(days=3 * 365)]
+    return S.gauge(raw, calendar)
+
+
 def build(ctx) -> dict:
     settings = ctx.config.get("risk", {})
     inputs = _Inputs(ctx)
@@ -327,9 +349,14 @@ def build(ctx) -> dict:
          "value": t["value"], "unit": t["unit"], "crossed": t["crossed"]}
         for s in sections for t in s["tiles"] if t.get("crossed")
     ]
+    try:
+        sentiment = _sentiment(inputs)
+    except Exception as exc:
+        sentiment = {"score": None, "error": describe_error(exc), "components": [], "history": {"dates": [], "score": []}}
     return {
         "as_of": ctx.as_of,
         "sections": sections,
+        "sentiment": sentiment,
         "charts": charts,
         "breaches": breaches,
         "crossed": crossed,

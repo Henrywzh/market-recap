@@ -33,7 +33,8 @@ latest macro prints; and the next three sessions. Each row carries six
 months of line. **Indices** is the former MARKETS page (charts, movers,
 sector tables). **Risk** opens with the **systematic anchor** (the frozen v1
 exposure control from quantamental-lab, re-implemented and checked to
-reproduce it exactly) and ten core series -- trend, breadth, VIX and its
+reproduce it exactly), a self-computed Fear & Greed gauge after CNN's
+seven components, and ten core series -- trend, breadth, VIX and its
 term structure, HY spread, real yield, the dollar, copper/oil and NFCI --
 each a tile with level, 1Y and full-history percentile, week change and a
 threshold written in `config/dashboard.toml` before the page drew it; never
