@@ -753,7 +753,6 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 
 /* ---------- OVERVIEW ---------- */
 .ov-live { margin-bottom: 8px; }
-.ov-row { margin-bottom: 10px; align-items: start; }
 .ov-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: start; }
 .ov-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .ov-col > .card { margin: 0; }
@@ -777,7 +776,7 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .ov-ud { font-variant-numeric: tabular-nums; }
 .ov-bar { display: inline-block; width: 44px; height: 5px; margin-left: 8px; vertical-align: middle; background: color-mix(in srgb, var(--down) 55%, transparent); }
 .ov-bar-up { display: block; height: 100%; background: var(--up); }
-.ov-contrib, .ov-eqcap { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.ov-contrib { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .ov-contrib-head { font-size: 10px; letter-spacing: 0.06em; margin-bottom: 5px; }
 .ov-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .ov-chips .mchip { margin: 0; font-size: 10.5px; line-height: 18px; padding: 0 6px; }

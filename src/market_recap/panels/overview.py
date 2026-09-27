@@ -127,14 +127,6 @@ def breadth(closes: pd.DataFrame) -> dict:
         out["new_lows"] = int(((last <= window.min()) & valid).sum())
     else:
         out["new_highs"] = out["new_lows"] = None
-    # The share above the 50-day average over the last half year, for the line.
-    if closes.shape[0] >= 50 + SPARK_SESSIONS:
-        sma = closes.rolling(50, min_periods=50).mean()
-        counted = closes.notna() & sma.notna()
-        share = ((closes > sma) & counted).sum(axis=1) / counted.sum(axis=1).replace(0, np.nan) * 100
-        out["above_50d_spark"] = _spark(share)
-    else:
-        out["above_50d_spark"] = []
     return out
 
 
@@ -179,24 +171,18 @@ def cross_row(symbol: str, label: str, unit: str, series: pd.Series) -> dict:
     return row
 
 
-def equal_vs_cap(equal: pd.Series, cap: pd.Series, sessions: int = HIGH_WINDOW) -> dict | None:
-    """RSP against SPY: the ratio rebased to 100 a year ago, and the return
-    gap over 1M, 3M and YTD in percentage points."""
+def equal_vs_cap(equal: pd.Series, cap: pd.Series) -> dict | None:
+    """RSP less SPY: the return gap over 1M, 3M and YTD in percentage points
+    (both total return, so dividends do not tilt it)."""
     pair = pd.concat([equal, cap], axis=1, keys=["eq", "cap"]).dropna()
     if len(pair) < 30:
         return None
-    ratio = (pair["eq"] / pair["cap"]).tail(sessions + 1)
-    rebased = ratio / ratio.iloc[0] * 100
     gaps = {}
     for label in ("1M", "3M", "YTD"):
         eq = R.period_returns(pair["eq"], [label]).get(label)
         cap = R.period_returns(pair["cap"], [label]).get(label)
         gaps[label] = None if eq is None or cap is None else clean_float(eq - cap, 2)
-    return {
-        "dates": [to_iso_date(d) for d in rebased.index],
-        "ratio": [clean_float(v, 2) for v in rebased],
-        "gap_pp": gaps,
-    }
+    return {"gap_pp": gaps}
 
 
 def contributions(closes: pd.DataFrame, members: pd.DataFrame, count: int = CONTRIBUTORS) -> dict | None:
@@ -225,10 +211,12 @@ def contributions(closes: pd.DataFrame, members: pd.DataFrame, count: int = CONT
 def performance(series: dict[str, pd.Series], sessions: int = HIGH_WINDOW + 10) -> dict | None:
     """Closes of each line on a shared calendar over the last year, for a
     chart the page rebases to 100 at whichever start the reader picks."""
-    frame = pd.concat({k: v.dropna() for k, v in series.items() if not v.dropna().empty}, axis=1)
+    present = {k: v.dropna() for k, v in series.items() if not v.dropna().empty}
+    if not present:
+        return None
+    frame = pd.concat(present, axis=1).ffill(limit=3).dropna().tail(sessions)
     if frame.empty:
         return None
-    frame = frame.ffill(limit=3).dropna().tail(sessions)
     return {"dates": [to_iso_date(d) for d in frame.index],
             "series": {k: [clean_float(v, 4) for v in frame[k]] for k in frame.columns}}
 
@@ -264,10 +252,10 @@ def breadth_history(closes: pd.DataFrame, sessions: int = HIGH_WINDOW) -> dict |
 
 def rates_history(lines: dict[str, pd.Series], sessions: int = HIGH_WINDOW) -> dict | None:
     """The 2Y, 10Y and 10Y real yield over the last year, on the curve's calendar."""
-    frame = pd.concat({k: v.dropna() for k, v in lines.items() if not v.dropna().empty}, axis=1)
-    if frame.empty:
+    present = {k: v.dropna() for k, v in lines.items() if not v.dropna().empty}
+    if not present:
         return None
-    frame = frame.ffill(limit=3).tail(sessions)
+    frame = pd.concat(present, axis=1).ffill(limit=3).tail(sessions)
     return {"dates": [to_iso_date(d) for d in frame.index],
             "series": {k: [clean_float(v, 3) for v in frame[k]] for k in frame.columns}}
 
@@ -400,7 +388,7 @@ def build(ctx, *, inputs: dict[str, dict | None]) -> dict:
     prints = [print_row(sid, label, how, unit, fred_series(sid)) for sid, label, how, unit in PRINTS]
     got = sum(r.get("value") is not None for r in rates + prints if r.get("source") != "Treasury")
     ctx.log.add(SourceRecord(
-        "fred_overview", "FRED: Treasury yields, credit spreads and the latest macro prints", "https://fred.stlouisfed.org",
+        "fred_overview", "FRED: real yield, credit spreads and the latest macro prints", "https://fred.stlouisfed.org",
         max((r["date"] for r in rates if r.get("date") and r.get("source") == "FRED"), default=None), rows=got, policy="weekly_release",
         status="ok" if got == len(FRED_RATES) + len(PRINTS) else ("partial" if got else "error"),
     ))
@@ -420,6 +408,15 @@ def build(ctx, *, inputs: dict[str, dict | None]) -> dict:
     ))
 
     etf = lambda symbol: ctx.etf_closes[symbol] if symbol in ctx.etf_closes.columns else pd.Series(dtype=float)
+
+    def section(name: str, build_section):
+        """A chart or line the page can do without: a failure is named in
+        ``failed`` and leaves that card empty instead of failing the page."""
+        try:
+            return build_section()
+        except Exception as exc:
+            failed[name] = describe_error(exc)
+            return None
     primary = ctx.priced(ctx.primary.key)
     members = [s for s in primary["yahoo_symbol"].drop_duplicates() if s in ctx.closes.columns] if not primary.empty else []
 
@@ -430,18 +427,16 @@ def build(ctx, *, inputs: dict[str, dict | None]) -> dict:
         "as_of": ctx.as_of,
         "missing": sorted(name for name in INPUTS if inputs.get(name) is None),
         "stocks": stocks,
-        "equal_vs_cap": equal_vs_cap(etf("RSP"), etf("SPY")),
-        "performance": performance({
-            "S&P 500": ctx.index_closes[specs["SPX"].symbol] if "SPX" in specs and specs["SPX"].symbol in ctx.index_closes.columns else pd.Series(dtype=float),
-            "Nasdaq 100": ctx.index_closes[specs["NDX"].symbol] if "NDX" in specs and specs["NDX"].symbol in ctx.index_closes.columns else pd.Series(dtype=float),
-            "Russell 2000": etf("IWM"),
-            "Equal-weight S&P": etf("RSP"),
-        }),
-        "sectors": sector_returns(ctx.etf_closes, ctx.sector_etfs, primary),
-        "breadth_history": breadth_history(ctx.closes[members]) if members else None,
-        "rates_history": rates_history({"UST 2Y": tenor("2Y"), "UST 10Y": tenor("10Y"),
-                                        "10Y real": fred_series("DFII10")}),
-        "contributions": contributions(ctx.closes[members], primary) if members else None,
+        "equal_vs_cap": section("equal vs cap weight", lambda: equal_vs_cap(etf("RSP"), etf("SPY"))),
+        # ETFs, all four on Yahoo's dividend-adjusted closes: an index level
+        # beside an adjusted ETF would credit the ETF with its dividends.
+        "performance": section("performance", lambda: performance({
+            "SPY": etf("SPY"), "QQQ": etf("QQQ"), "IWM": etf("IWM"), "RSP": etf("RSP")})),
+        "sectors": section("sectors", lambda: sector_returns(ctx.etf_closes, ctx.sector_etfs, primary)) or [],
+        "breadth_history": section("breadth history", lambda: breadth_history(ctx.closes[members]) if members else None),
+        "rates_history": section("rates history", lambda: rates_history(
+            {"UST 2Y": tenor("2Y"), "UST 10Y": tenor("10Y"), "10Y real": fred_series("DFII10")})),
+        "contributions": section("contributions", lambda: contributions(ctx.closes[members], primary) if members else None),
         "breadth": breadth_blocks,
         "rates": rates,
         "cross_asset": cross,

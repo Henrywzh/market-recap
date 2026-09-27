@@ -46,7 +46,8 @@ COMPONENTS = [
 ]
 BANDS = [(25, "EXTREME FEAR"), (45, "FEAR"), (55, "NEUTRAL"), (75, "GREED"), (100.1, "EXTREME GREED")]
 
-_cdf = np.vectorize(lambda z: 0.5 * (1.0 + erf(z / sqrt(2.0))) if np.isfinite(z) else np.nan)
+# otypes: a component too short to score gives an empty array, not an error.
+_cdf = np.vectorize(lambda z: 0.5 * (1.0 + erf(z / sqrt(2.0))) if np.isfinite(z) else np.nan, otypes=[float])
 
 
 def _clean(series: pd.Series) -> pd.Series:

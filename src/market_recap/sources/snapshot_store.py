@@ -24,24 +24,35 @@ def available() -> bool:
     return any((root() / kind).exists() for kind in ("expectations", "options", "risk"))
 
 
+def _risk_rows() -> pd.DataFrame:
+    """Every row the risk snapshots wrote, read once per build."""
+    key = str(root())
+    if key not in _RISK_ROWS:
+        base = root() / "risk"
+        files = sorted(base.glob("baseline/*.csv.gz")) + sorted(base.glob("[0-9][0-9][0-9][0-9]/*.csv.gz"))
+        frames = []
+        for path in files:
+            try:
+                frames.append(pd.read_csv(path, compression="gzip"))
+            except (OSError, ValueError):
+                continue
+        _RISK_ROWS[key] = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["fetched_at", "source", "series", "date", "value"])
+    return _RISK_ROWS[key]
+
+
+_RISK_ROWS: dict[str, pd.DataFrame] = {}
+
+
 def risk_archive(source: str, series: str) -> pd.Series:
     """Every value the risk snapshots recorded for one series: the baseline
     (current-vintage history at the time it was written) and each evening's
     tail. Where two files give a date, the later fetch wins. Empty when
     nothing was recorded."""
-    base = root() / "risk"
-    files = sorted(base.glob("baseline/*.csv.gz")) + sorted(base.glob("[0-9][0-9][0-9][0-9]/*.csv.gz"))
-    frames = []
-    for path in files:
-        try:
-            frame = pd.read_csv(path, compression="gzip")
-        except (OSError, ValueError):
-            continue
-        frames.append(frame[(frame["source"] == source) & (frame["series"] == series)])
-    if not frames:
+    rows = _risk_rows()
+    rows = rows[(rows["source"] == source) & (rows["series"] == series)]
+    if rows.empty:
         return pd.Series(dtype=float)
-    rows = pd.concat(frames).sort_values(["date", "fetched_at"])
-    rows = rows.drop_duplicates("date", keep="last")
+    rows = rows.sort_values(["date", "fetched_at"]).drop_duplicates("date", keep="last")
     return pd.Series(rows["value"].to_numpy(dtype=float), index=pd.to_datetime(rows["date"]), name=series)
 
 

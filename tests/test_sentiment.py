@@ -58,3 +58,13 @@ def test_gauge_needs_six_components_and_reports_each():
 def test_junk_spread_is_hy_less_ig_in_bp():
     idx = pd.bdate_range("2026-01-01", periods=3)
     assert S.junk_spread(pd.Series([3.0, 3.1, 3.2], index=idx), pd.Series([0.8, 0.8, 0.9], index=idx)).iloc[-1] == pytest.approx(230.0)
+
+
+def test_a_component_too_short_to_score_drops_out_instead_of_failing_the_gauge():
+    idx = pd.bdate_range("2023-01-02", periods=400)
+    rng = np.random.default_rng(2)
+    raw = {key: pd.Series(rng.normal(0, 1, 400).cumsum(), index=idx) for key, _, _ in S.COMPONENTS}
+    raw["put_call"] = raw["put_call"].tail(60)   # a cold cache: fewer than MIN_PERIODS sessions
+    out = S.gauge(raw, idx)
+    assert out["score"] is not None and out["components_counted"] == 6
+    assert next(c for c in out["components"] if c["key"] == "put_call")["score"] is None

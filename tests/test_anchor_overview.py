@@ -127,13 +127,17 @@ def test_contributions_are_weight_times_return_and_sum_by_sector():
     assert out["sectors"][0] == {"sector": "Tech", "contribution_pp": pytest.approx(0.52)}
 
 
-def test_equal_vs_cap_rebases_the_ratio_and_reports_the_gap():
+def test_equal_vs_cap_reports_the_return_gap():
     idx = pd.bdate_range("2025-09-01", periods=300)
     cap = pd.Series(np.linspace(100, 130, 300), index=idx)
     equal = pd.Series(np.linspace(100, 110, 300), index=idx)
-    out = overview.equal_vs_cap(equal, cap)
-    assert out["ratio"][0] == pytest.approx(100.0) and out["ratio"][-1] < 100
-    assert out["gap_pp"]["1M"] < 0
+    assert overview.equal_vs_cap(equal, cap)["gap_pp"]["1M"] < 0
+
+
+def test_charts_with_no_source_return_nothing_rather_than_raise():
+    empty = pd.Series(dtype=float)
+    assert overview.performance({"SPY": empty}) is None
+    assert overview.rates_history({"UST 2Y": empty}) is None
 
 
 def test_sector_returns_are_ordered_by_index_weight():

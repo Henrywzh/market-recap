@@ -97,7 +97,7 @@ function performanceCard(perf, eqcap) {
     ...['1M', '3M', 'YTD'].flatMap((k, i) => [i ? el('span', { class: 'dim', text: ' · ' }) : null,
       el('span', { class: dirClass(eqcap.gap_pp[k]), text: `${k} ${signed(eqcap.gap_pp[k], 1, 'pp')}` })]).filter(Boolean),
   ]) : null;
-  return card('PERFORMANCE', periodSwitch(Object.keys(PERF_PERIODS), '3M', draw), [node, gap]);
+  return card('PERFORMANCE · SPY QQQ IWM RSP', periodSwitch(Object.keys(PERF_PERIODS), '3M', draw), [node, gap]);
 }
 
 // One tile per sector ETF, coloured by the period's return. Tiles are equal
@@ -287,7 +287,8 @@ export default function renderOverview(root, data) {
   const failed = Object.keys(data.failed || {});
   root.append(metaRow(`OVERVIEW · SESSION ${data.as_of}${missing.length ? ` · NOT BUILT THIS SESSION: ${missing.join(', ').toUpperCase()}` : ''}${failed.length ? ` · ${failed.length} SOURCE(S) FAILED` : ''}`, [
     'Closing figures of the session above; the live strip is the only thing that moves during the day. Lines are the last six months.',
-    'Stocks: the S&P 500 and Nasdaq 100 are the index levels; the Russell 2000 and the equal-weighted S&P 500 are read through IWM and RSP. From 52W high is the drawdown from the highest close of the last 252 sessions.',
+    'Stocks: the S&P 500 and Nasdaq 100 rows are index levels (price only); the Russell 2000 and equal-weighted S&P 500 rows are IWM and RSP on dividend-adjusted closes. Off 52W high is the drawdown from the highest close of the last 252 sessions.',
+    'Performance draws SPY, QQQ, IWM and RSP, all on dividend-adjusted closes so none is credited with dividends the others lack, rebased to 100 at the start of the period chosen.',
     'What moved the S&P 500: each member\'s published weight times its return on the day, in percentage points of the index; the members\' sum differs slightly from the index\'s own change. Equal weight vs cap weight: RSP against SPY, the gap in percentage points of return over 1M, 3M and YTD; a falling line means the average stock is lagging the largest ones.',
     'Breadth counts each index\'s members by their own closes: how many rose and fell over a day, a week (5 sessions) and a month (21 sessions), the share above their 50- and 200-day averages, and how many closed at a 52-week high or low.',
     'Rates and credit: a rising yield or a widening spread is red (bond prices fall, conditions tighten), a falling one green; the 10Y − 2Y slope stays grey. The 2Y and 10Y are Treasury\'s daily par yields, published the evening of the session; the 10-year TIPS yield and the ICE BofA spreads are FRED\'s, a day behind. Macro prints are the latest published value with the one before it; GDPNow is the Atlanta Fed\'s running estimate for the current quarter.',
