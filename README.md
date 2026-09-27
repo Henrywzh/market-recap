@@ -12,6 +12,51 @@ else is the static build.
 
 ## What it shows
 
+The views are grouped by the question they answer
+(`docs/information_architecture.md`; the grouping itself is `web/js/routes.js`):
+
+| Group | Views |
+|---|---|
+| **MARKET** | **Overview** (the default view) · Indices · Heat maps · Sectors (rotation and index/sector P/E) |
+| **RISK** | **Risk** · Rates & macro · **Priced path** |
+| **NAMES** | Monitor · Screen (VALUATION & QUALITY) · **Ticker** · Cross-listing |
+| **CATALYSTS** | Calendar · Earnings |
+| **TOOLS** | Technicals · ETF X-Ray · DCF |
+
+**Overview** is the one-glance read: the live strip; stocks (S&P 500,
+Nasdaq 100, Russell 2000, equal-weight S&P) with 1D/1W/1M/YTD and the
+distance from the 52-week high; breadth (members up and down over a day, a
+week and a month, the share above the 50- and 200-day averages, new highs
+and lows); rates and credit (2Y, 10Y, 2s10s, real 10Y, HY and IG spreads)
+with the next FOMC's pricing; the dollar, crude, copper, gold and VIX; the
+latest macro prints; and the next three sessions. Each row carries six
+months of line. **Indices** is the former MARKETS page (charts, movers,
+sector tables). **Risk** opens with the **systematic anchor** (the frozen v1
+exposure control from quantamental-lab, re-implemented and checked to
+reproduce it exactly), a self-computed Fear & Greed gauge after CNN's
+seven components, and ten core series -- trend, breadth, VIX and its
+term structure, HY spread, real yield, the dollar, copper/oil and NFCI --
+each a tile with level, 1Y and full-history percentile, week change and a
+threshold written in `config/dashboard.toml` before the page drew it; never
+a score. The other series are folded beneath (sources and probes:
+`docs/risk_sources.md`). **Priced path** computes each FOMC meeting's
+probabilities from fed funds futures beside Kalshi and Polymarket, the path
+a week and a month ago, the SOFR path and every open Kalshi release ladder.
+
+**Ticker** (`#ticker/AAPL`) is one company on one page, reached from any
+ticker link: header readings, price and
+trend, P/E against its own ten years, valuation against the sector median,
+evidence (MONITOR's, plus insider buying from Form 4, short interest and
+rating changes for focus names), earnings reactions to the last eight 8-K
+releases against the options-implied move, the IV term structure, and the
+filed statements. Each section is drawn by
+the panel that owns it, so nothing is computed twice. Views that take a
+ticker read it after a slash (`#dcf/MSFT`, `#technicals/NVDA`); hashes from
+before the regrouping (`#financials`, `#fixed-income`, `#macro`, `?ticker=`)
+still land on the right view.
+
+The panels, as each is built:
+
 | Tab | Contents |
 |---|---|
 | **MONITOR** | Research queue over the S&P 500 and the watchlist. A name enters at a 20% drawdown from its 1Y high or when it trails its sector peers (company excluded) by 10 pp over 1M. **TODAY** lists what changed since the previous build (entered, stabilising, evidence turned, reported, left), with weak-as-a-whole sectors grouped as one event; **QUEUE** has a price-state × evidence-state 2×2; evidence for and against (FY1 EPS revisions from Yahoo, revenue, FCF, last quarter vs consensus) is listed, never scored; candidate history persists between builds, and watch/exclude reasons live in `config/monitor_notes.toml`. See [the monitor contract](docs/monitor.md). |

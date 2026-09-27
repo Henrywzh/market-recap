@@ -68,6 +68,18 @@ jobs:
           key: data-cache-${{ hashFiles('requirements.lock') }}-${{ github.run_id }}
           restore-keys: data-cache-${{ hashFiles('requirements.lock') }}-
 
+      # Recorded rates and options pricing, read by PRICED PATH and the ticker
+      # page. Read-only and optional: a missing branch leaves those sections
+      # saying "not recorded yet".
+      - name: Check out recorded snapshots
+        continue-on-error: true
+        env:
+          REMOTE: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+        run: |
+          if git ls-remote --exit-code --heads "$REMOTE" snapshots >/dev/null; then
+            git clone -q --depth 1 --branch snapshots --single-branch "$REMOTE" data/snapshots
+          fi
+
       - name: Refresh
         id: refresh
         # A failed build is judged by the gate below, then fails the run at the end.

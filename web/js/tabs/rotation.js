@@ -2,8 +2,10 @@
 // sector sits on the rotation graph and how its relative strength has moved --
 // then one sector at a time: its sub-industries and the names that moved it.
 
-import { el, card, num, metaRow, periodSwitch, DASH } from '../fmt.js';
+import { el, card, num, metaRow, periodSwitch, sectionTitle, DASH } from '../fmt.js';
 import { render, SERIES_COLORS } from '../charts.js';
+import { renderAggregates } from './valuation.js';
+import { tickerHref } from '../routes.js';
 
 const WINDOWS = ['1M', '3M', '6M', '12M'];
 // Weekly points drawn on the rotation graph for each window. Past a quarter
@@ -231,7 +233,7 @@ function heatGrid(ranked, view, benchmark, onPick) {
 
 function hbars(node, items, p0 = {}) {
   node.style.height = `${Math.max(150, items.length * 20 + 30)}px`;
-  render(node, (option, p) => ({
+  const chart = render(node, (option, p) => ({
     ...option,
     grid: { left: p0.left || 150, right: 46, top: 4, bottom: 20 },
     tooltip: { ...option.tooltip, trigger: 'item', axisPointer: undefined, formatter: (q) => items[q.dataIndex].tip },
@@ -240,7 +242,7 @@ function hbars(node, items, p0 = {}) {
       splitLine: { lineStyle: { color: p.border, opacity: 0.4 } },
     },
     yAxis: {
-      type: 'category', inverse: true, data: items.map((i) => i.label),
+      type: 'category', inverse: true, data: items.map((i) => i.label), triggerEvent: Boolean(p0.onPick),
       axisLabel: { color: p.dim, fontSize: 10, width: (p0.left || 150) - 10, overflow: 'truncate' },
       axisLine: { show: false }, axisTick: { show: false },
     },
@@ -251,6 +253,12 @@ function hbars(node, items, p0 = {}) {
       markLine: { silent: true, symbol: 'none', data: [{ xAxis: 0 }], lineStyle: { color: p.faint }, label: { show: false } },
     }],
   }));
+  if (p0.onPick) {
+    chart?.on('click', (q) => {
+      const index = q.componentType === 'yAxis' ? items.findIndex((i) => i.label === q.value) : q.dataIndex;
+      if (items[index]) p0.onPick(items[index]);
+    });
+  }
 }
 
 function drillDown(data, view) {
@@ -277,7 +285,7 @@ function drillDown(data, view) {
       label: m.ticker,
       value: m.contribution[view.scheme][view.window],
       tip: `<b>${m.ticker}</b> ${m.name}<br>${m.sub_sector}<br>${view.window} return ${signed(m.returns[view.window], 1, '%')} · adds ${signed(m.contribution[view.scheme][view.window], 2)} pp to the sector`,
-    })), { left: 56 });
+    })), { left: 56, onPick: (item) => { location.hash = tickerHref(item.label); } });
   });
   const excess = s.windows[view.window].excess;
   const top = members[0];
@@ -290,7 +298,7 @@ function drillDown(data, view) {
     el('div', { class: 'rot-summary', text: summary }),
     el('div', { class: 'grid two' }, [
       el('div', {}, [el('div', { class: 'rot-chart-title', text: `SUB-INDUSTRIES · pp vs S&P 500 · ≥ ${data.min_sub_members} names` }), subs.length ? subNode : el('div', { class: 'dim', text: 'No sub-industry with enough names.' })]),
-      el('div', {}, [el('div', { class: 'rot-chart-title', text: 'WHO MOVED IT · contribution to the sector\'s pp, top and bottom 6' }), memberNode]),
+      el('div', {}, [el('div', { class: 'rot-chart-title', text: 'WHO MOVED IT · contribution to the sector\'s pp, top and bottom 6 · click a name for its page' }), memberNode]),
     ]),
   ]);
 }
@@ -306,7 +314,20 @@ function methodNotes(data) {
   ];
 }
 
-export default function renderRotation(root, data) {
+// SECTORS: where money is rotating (this panel), then how expensive each
+// index and sector is against its own ten years (VALUATION's aggregates).
+export default async function renderRotation(root, data, _manifest, ctx = {}) {
+  root.append(sectionTitle('ROTATION', 'RELATIVE STRENGTH VS THE S&P 500'));
+  renderRotationSection(root, data);
+  const valuation = await ctx.loadArtifact?.('valuation').catch(() => null);
+  const host = el('div', { class: 'sectors-valuation' });
+  root.append(sectionTitle('VALUATION', 'P/E AGAINST OWN 10 YEARS'), host);
+  if (!renderAggregates(host, valuation)) {
+    host.append(el('div', { class: 'gap', text: 'Index and sector P/E were not built for this session.' }));
+  }
+}
+
+function renderRotationSection(root, data) {
   const groups = data.groups || [];
   if (!groups.length) {
     root.append(el('div', { class: 'gap', text: 'No sector baskets were built for this session.' }));

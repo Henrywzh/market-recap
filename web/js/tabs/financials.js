@@ -1,11 +1,12 @@
-// FINANCIALS: ten fiscal years of filed statements for any index member.
+// FINANCIALS: ten fiscal years of filed statements for any index member,
+// drawn as a section of the ticker page (tabs/ticker.js).
 //
 // Every number is the company's own XBRL fact as most recently filed. A blank
 // is a line the filer did not tag -- never a zero -- and each column says when
 // it was last filed, because a restated year is a different claim from the
 // original one.
 
-import { el, card, table, num, pct, sectionTitle, notice, gap, DASH } from '../fmt.js';
+import { el, card, table, num, pct, DASH } from '../fmt.js';
 import { render, SERIES_COLORS } from '../charts.js';
 
 const FINANCIALS_BASE = 'artifacts/financials';
@@ -124,70 +125,22 @@ function companyHeader(company) {
   ]);
 }
 
-export default async function renderFinancials(root, data) {
-  root.append(sectionTitle('FINANCIALS', 'FILED ANNUAL STATEMENTS · SEC XBRL'));
-
-  if (!data.available || !data.available.length) {
-    root.append(gap('No statements were extracted in this build. Run the refresh command without --skip-sec.'));
-    return;
-  }
-
-  const names = new Map(data.available.map((c) => [c.ticker, c.name]));
-  const requestedTicker = new URLSearchParams(location.search).get('ticker')?.toUpperCase();
-  const tickerInput = el('input', { id: 'fin-ticker', value: requestedTicker || (names.has('AAPL') ? 'AAPL' : data.available[0].ticker), size: '8', list: 'fin-list' });
-  const datalist = el('datalist', { id: 'fin-list' },
-    data.available.map((c) => el('option', { value: c.ticker, text: c.name || '' })));
-  const skippedCount = Object.keys(data.skipped || {}).length;
-  const status = el('span', { class: 'field-note', text: '' });
-  const host = el('div', {});
-
-  const coverage = `${data.available.length} of ${data.universe} members of ${data.indices.join(' + ')} extracted`;
-  const skippedList = skippedCount
-    ? el('details', { class: 'field-note' }, [
-      el('summary', { text: `${skippedCount} not extracted — why` }),
-      table(['TICKER', 'REASON'], Object.entries(data.skipped).map(([t, reason]) => el('tr', {}, [
-        el('td', { text: t }), el('td', { class: 'wrap-cell', text: reason }),
-      ]))),
-    ])
-    : null;
-
-  root.append(card('COMPANY', null, [
-    el('div', { class: 'field-row' }, [
-      el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), tickerInput]),
-      el('button', { class: 'action', text: 'LOAD', onclick: () => load() }),
-      status,
-      datalist,
-    ]),
-    el('div', { class: 'field-note', text: coverage }),
-    skippedList,
+// One company's statements into `host`. Returns a one-line status; throws
+// when the company has no statements in this build.
+export async function renderStatements(host, symbol, data) {
+  const company = await loadCompany(symbol);
+  host.innerHTML = '';
+  const chartNode = el('div', { class: 'chart' });
+  host.append(card(`${symbol} — REVENUE, OPERATING INCOME, FREE CASH FLOW ($B) & OPERATING MARGIN`, null, [
+    companyHeader(company),
+    chartNode,
   ]));
-  root.append(host);
-
-  async function load() {
-    const symbol = tickerInput.value.trim().toUpperCase();
-    status.textContent = `Loading ${symbol}…`;
-    try {
-      const company = await loadCompany(symbol);
-      host.innerHTML = '';
-      const chartNode = el('div', { class: 'chart' });
-      host.append(card(`${symbol} — REVENUE, OPERATING INCOME, FREE CASH FLOW ($B) & OPERATING MARGIN`, null, [
-        companyHeader(company),
-        chartNode,
-      ]));
-      for (const statement of Object.values(data.statements)) {
-        host.append(card(statement.label, null, statementTable(company, statement)));
-      }
-      host.append(card('KEY RATIOS', null, ratioTable(company, data.ratios)));
-      host.append(notice(data.note));
-      trendChart(chartNode, company);
-      const last = company.columns[company.columns.length - 1];
-      status.textContent = `${company.columns.length} fiscal years · latest FY${last.fiscal_year} (period end ${last.period_end})`;
-    } catch (error) {
-      host.innerHTML = '';
-      status.textContent = error.message;
-    }
+  for (const statement of Object.values(data.statements)) {
+    host.append(card(statement.label, null, statementTable(company, statement)));
   }
-
-  tickerInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') load(); });
-  await load();
+  host.append(card('KEY RATIOS', null, ratioTable(company, data.ratios)));
+  host.append(el('details', { class: 'method-fold' }, [el('summary', { text: 'ⓘ METHOD & DATA' }), el('div', { class: 'method-copy', text: data.note })]));
+  trendChart(chartNode, company);
+  const last = company.columns[company.columns.length - 1];
+  return `${company.columns.length} fiscal years · latest FY${last.fiscal_year} (period end ${last.period_end})`;
 }

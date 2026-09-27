@@ -7,6 +7,7 @@
 // releases that matter; every event keeps its full detail one click down.
 
 import { el, card, table, num, pct, dirClass, sectionTitle, gap, metaRow, DASH } from '../fmt.js';
+import { tickerHref } from '../routes.js';
 
 const NEW_YORK = 'America/New_York';
 const IMPORTANCE_RANK = { high: 0, medium: 1, low: 2 };
@@ -260,7 +261,7 @@ function earningsRow(event) {
     timeCell(event),
     el('span', { class: 'cat-name' }, [
       importanceDot(event.importance),
-      el('span', { class: 'cat-title', text: event.symbol }),
+      el('a', { class: 'cat-title', href: tickerHref(event.symbol), text: event.symbol }),
       el('span', { class: 'dim cat-company', text: ` ${event.name || ''}` }),
       event.watchlist ? el('span', { class: 'cat-tag', text: 'WATCHLIST' }) : null,
     ]),

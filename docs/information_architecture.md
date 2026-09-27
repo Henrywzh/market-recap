@@ -84,6 +84,7 @@ their new home so bookmarks survive.
 | MONITOR | NAMES → Monitor | unchanged; tickers link to the ticker page |
 | VALUATION & QUALITY table | NAMES → Screen | unchanged table |
 | VALUATION P/E vs own ten years | NAMES → Ticker | per-company chart moves to the ticker page |
+| VALUATION index & sector P/E vs own ten years | MARKET → Sectors | a market question, beside the rotation graph |
 | FINANCIALS | NAMES → Ticker | ten-year statements become a ticker section |
 | DCF | NAMES → Ticker (link) and TOOLS | the model opens pre-filled from the ticker page |
 | TECHNICALS single ticker | NAMES → Ticker | price, MAs, z-score band as a section |
@@ -341,6 +342,154 @@ run only from `main`, so recording starts once this is merged there.
 
 Each new source gets a probe and an evaluation note in the style of
 `docs/expectation_sources.md` before it reaches a page.
+
+## Revision after the first review (2026-09-27)
+
+The phased build put too much in front of the reader. After looking at it:
+
+- **OVERVIEW replaces BRIEF as the landing page** (`panels/overview.py`).
+  It answers four questions at a glance -- how stocks have done and how far
+  they sit from their high, how broad the move is, where rates and credit
+  are, what the dollar, commodities, volatility and the latest macro prints
+  say -- then the Fed's pricing and the next three sessions. No percentiles
+  or thresholds on it; one line points to RISK when a core series is past
+  its line. The former MARKETS page stays as MARKET → Indices.
+- **Navigation:** MARKET · RISK · NAMES · CATALYSTS · TOOLS. The market
+  comes before how much risk it carries.
+- **RISK leads with the anchor and ten core series** (`core = true` in
+  `[[risk.tiles]]`): SPX against its 200-day average and 1-year high, the
+  share of members above their 200-day average, VIX, VIX/VIX3M, HY OAS, the
+  10-year real yield, the dollar's 3-month change, copper/oil (the anchor's
+  own gate input) and NFCI. The other series fold beneath: most restate one
+  of these (IG, CCC, Baa and the ETF credit ratios all say "credit
+  spreads"). The long percentile is labelled with its start year, since
+  the ICE spreads reach back three years and SPX a century.
+- **Fear & Greed, self-computed** (`compute/sentiment.py`): CNN's seven
+  components rebuilt from the site's data, each z-scored against its own
+  trailing year and mapped to 0-100 through the normal CDF, averaged
+  equally. It sits under the anchor on RISK and in OVERVIEW's risk line.
+  Strength and breadth use S&P 500 members by count (CNN: NYSE, volume);
+  CNN's feed is not read because it refuses non-browser clients.
+- **OVERVIEW additions:** the 2Y and 10Y come from Treasury's par curve
+  (the same evening as the session) rather than FRED (a day later); the
+  stocks card says what moved the S&P 500 (weight × return by member and by
+  sector) and draws RSP / SPY for a year with the equal- less cap-weight gap.
+- **JOURNAL is removed** (panel, compute, page, config and the ticker
+  page's thesis card). A static page with a log kept by hand in TOML would
+  have stayed empty; it is in git history (f21d210) if wanted later.
+
+## Phase 4 as built (2026-09-27)
+
+- **BRIEF → JOURNAL** (`panels/journal.py`, `compute/journal.py`): the log
+  is `config/journal.toml`, one `[[decision]]` per decision (date, ticker,
+  action, reason, horizon, exposure for overrides, checkpoints), written
+  when made and never edited. Review: an entry or add is right if the name
+  beat the index over its horizon; a trim, exit or pass if it did not; an
+  override if the exposure held instead of the anchor's added return (daily
+  exposure gap × index return, summed). Open decisions show their return so
+  far and are not counted in hit rates. Checkpoints ahead and due feed
+  BRIEF's my list and the ticker page's thesis card.
+- `config/journal.example.toml` holds illustrative entries, marked EXAMPLE,
+  for a local preview (`MARKET_RECAP_JOURNAL`); the published build reads
+  `config/journal.toml`, which ships empty.
+- **Holdings** remain deferred: the log records decisions, not positions.
+
+## Phase 3 as built (2026-09-27)
+
+- **Evidence layer** (`panels/evidence.py`, `compute/evidence.py`), in two
+  reaches. Every member: reactions to its last eight earnings releases,
+  dated by 8-K Item 2.02 acceptance times (before the open, during the
+  session or after the close) from the submissions indexes the build
+  already reads. Focus names (watchlist, journal names, the 30 largest
+  weights and up to 15 MONITOR candidates chosen by the options snapshot's
+  own rule): Form 4 insider transactions (a cluster = two or more insiders
+  buying ≥ $250k within 30 days; a single buy is listed from $1m), Nasdaq
+  short interest (listed when it moves ≥ 20% in a month) and Yahoo rating
+  changes, all as for / against lines, never scored.
+- **Options** from the snapshot branch: the implied move (ATM straddle of the
+  first expiry after the report, as a share of spot), the IV term structure
+  with 25-delta wings, and a 30-day constant-maturity IV whose percentile is
+  shown only after 60 recorded days.
+- **CATALYSTS → EARNINGS** lists names reporting in the next two weeks with
+  their average move over the last eight reports and the implied move.
+- Foreign issuers (6-K filers) have no dated earnings releases here.
+
+## Phase 2 as built (2026-09-26)
+
+- **BRIEF is the default view** (`panels/brief.py`), assembled from this
+  session's RISK, PRICED PATH, CATALYSTS, MONITOR, anchor and journal
+  artifacts; one that did not build is named at the top and its line stays
+  empty. Lines: live strip; systematic anchor; priced strip (next FOMC with
+  its 1D / 1W change, priced to year end, next CPI's Kalshi median, VIX
+  against 20-day realised); risk strip in a tactical and a slow row
+  (`[brief]` names the tiles); what changed (risk lines crossed this week,
+  MONITOR entries and exits, post-earnings moves ≥ 5%); the next three
+  sessions (high- and medium-importance releases, not speeches; earnings of
+  watchlist names and the 20 largest weights); my list (watchlist names and
+  names with an open journal checkpoint).
+- **Systematic anchor** (`compute/anchor.py`, `panels/anchor.py`): the
+  frozen v1 friend-plus-joint control re-implemented from quantamental-lab,
+  checked on 2026-09-26 to reproduce that repository's daily exposure and
+  NAV exactly over 8,472 sessions (1993-01-29 to 2026-09-25). The recession
+  gate is that repository's model output and is not ported; it is neutral,
+  the frozen rule's own policy for a missing input. Its five-year daily
+  history is kept for the journal.
+- **Not done:** "revision breadth that turned" (needs the tracker's history
+  as a series) and the implied move beside each earnings name (phase 3).
+
+## Phase 1 as built (2026-09-26)
+
+- **Navigation.** MARKET could not take Risk and Priced Path within the
+  four-view limit, so they have their own mode ahead of it, in the order of
+  the trading loop: BRIEF · RISK · MARKET · NAMES · CATALYSTS · TOOLS.
+  RISK holds Risk, Priced Path and Rates & Macro; MARKET holds Overview,
+  Heat maps and Sectors.
+- **RISK → RISK** (`panels/risk.py`, `compute/risk.py`): 30 series in seven
+  sections, tactical and slow kept apart. Each tile: level, 1Y and
+  full-history percentile, week change, its configured threshold
+  (`[[risk.tiles]]`) and whether it crossed that line within the week.
+  Sources and their probes: `docs/risk_sources.md`. Not included: AAII and
+  CNN Fear & Greed refuse the project's client; NAAIM has no file.
+- **RISK → PRICED PATH** (`panels/priced.py`, `compute/priced.py`):
+  meeting-by-meeting probabilities from fed funds futures by the
+  meeting-month method, beside Kalshi and Polymarket, flagged not averaged
+  when they differ by more than `[priced] disagreement_bp`; the path today,
+  a week and a month ago; the next meeting's pricing through time; the SOFR
+  path (today only until the snapshot branch has history); every open
+  Kalshi release ladder; FRED anchors.
+- **Snapshots read back.** The nightly workflow checks the `snapshots`
+  branch out read-only at `data/snapshots`; `sources/snapshot_store.py`
+  reads it and every section that needs it says "not recorded yet" when it
+  is absent.
+
+## Phase 0 as built (2026-09-26)
+
+- **Navigation** follows `web/js/routes.js`: MARKET · NAMES · CATALYSTS ·
+  TOOLS. BRIEF does not exist yet, so MARKET → Overview is the landing view.
+  Until Risk and Priced Path exist, MARKET keeps Heat maps and Sectors
+  (the rotation graph, then index and sector P/E against their own ten
+  years, `#rotation`; `#sectors` also opens it) as their own views rather than folding them into Overview, and
+  Rates & Macro stacks the two existing panels on one page.
+- **Ticker page** is assembled from exported section renderers
+  (`renderPeHistory`, `renderStatements`, `renderSingleTicker`) that the
+  SCREEN, FINANCIALS and TECHNICALS code also uses. A fund or index gets its
+  technicals and one line saying why the company sections are absent. The
+  standalone FINANCIALS view is gone; its hash opens the ticker page.
+- **Ticker page order** is price and trend first (default windows, a
+  period switch; the inputs and the forward-return table stay on TOOLS →
+  TECHNICALS), then P/E against its own ten years (axis capped at 1.6× the
+  90th percentile when a near-zero-earnings spike would flatten it), then
+  the sector comparison beside the evidence, then filings. Method notes sit
+  in the ⓘ fold; the research note card appears only when there is a note.
+- **Links to the ticker page** (`routes.tickerHref`) from MONITOR, SCREEN,
+  HEAT MAPS tiles, SECTORS' contributor bars, EARNINGS movers and the
+  CALENDAR's earnings rows. ETF X-RAY holdings are not linked yet.
+- **Research note** shows the existing `config/monitor_notes.toml` fields
+  (status, since, reason, outcome). A checkpoint list is not added yet: the
+  note is part of the MONITOR ledger that cloud builds restore and validate
+  (`sources/monitor_state.py`), so changing its shape is its own change.
+- **Snapshots** are recorded as described above; they start when the
+  workflow reaches `main`.
 
 ## Deferred
 

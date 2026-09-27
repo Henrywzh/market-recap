@@ -4,6 +4,7 @@
 
 import { el, card, num, pct, sectionTitle, notice, periodSwitch, metaRow, DASH } from '../fmt.js';
 import { render, multiLine, SERIES_COLORS } from '../charts.js';
+import { tickerHref } from '../routes.js';
 
 const WINDOWS = ['7d', '30d', '60d', '90d'];
 const SECTOR_SHORT = {
@@ -198,7 +199,7 @@ function trackerCard(t) {
     const movers = p.movers_30d || { up: [], down: [] };
     moversHost.replaceChildren(
       el('span', { class: 'earn-sub', text: `MOVED THE ${p.label} AGGREGATE MOST · 30D, PP` }),
-      ...[...movers.up, ...movers.down].map((m) => el('span', { class: `mchip ${dirCls(m.pp)}`, text: `${m.symbol} ${m.pp >= 0 ? '+' : ''}${num(m.pp, 2)}` })),
+      ...[...movers.up, ...movers.down].map((m) => el('a', { class: `mchip ${dirCls(m.pp)}`, href: tickerHref(m.symbol), text: `${m.symbol} ${m.pp >= 0 ? '+' : ''}${num(m.pp, 2)}` })),
     );
   };
   const labels = periods.map((p) => p.label);
@@ -285,11 +286,46 @@ function methodNotes(data) {
   ];
 }
 
-export default function renderEarnings(root, data) {
+// Names reporting in the next two weeks: how far they moved on their last
+// eight reports, and what the options snapshot prices now (phase 3).
+function reportersCard(evidence, asOf) {
+  const names = evidence?.names || {};
+  const horizon = new Date(`${asOf}T00:00:00Z`);
+  horizon.setUTCDate(horizon.getUTCDate() + 14);
+  const end = horizon.toISOString().slice(0, 10);
+  const rows = Object.entries(names)
+    .filter(([, n]) => n.next && n.next.date > asOf && n.next.date <= end && (n.mean_abs_move || n.options?.implied_move))
+    .sort((a, b) => a[1].next.date.localeCompare(b[1].next.date) || (b[1].mean_abs_move || 0) - (a[1].mean_abs_move || 0));
+  if (!rows.length) return null;
+  const body = rows.map(([symbol, n]) => {
+    const implied = n.options?.implied_move?.straddle_pct;
+    const ratio = implied && n.mean_abs_move ? implied / n.mean_abs_move : null;
+    return el('tr', {}, [
+      el('td', {}, [el('a', { href: tickerHref(symbol), text: symbol })]),
+      el('td', { text: `${n.next.date} ${(n.next.timing || '').toUpperCase()}` }),
+      el('td', { text: n.mean_abs_move ? `±${num(n.mean_abs_move, 1)}%` : DASH }),
+      el('td', { text: n.reactions?.length ? n.reactions.slice(0, 4).map((r) => pct(r.move_pct, 1)).join(' · ') : DASH, class: 'dim' }),
+      el('td', { text: implied ? `±${num(implied, 1)}%` : DASH, title: implied ? `ATM straddle to ${n.options.implied_move.expiry}` : 'not in the options snapshot' }),
+      el('td', { class: ratio ? (ratio > 1.2 ? 'down' : ratio < 0.8 ? 'up' : '') : 'dim', text: ratio ? `${num(ratio, 2)}×` : DASH }),
+    ]);
+  });
+  return card('REPORTING IN THE NEXT TWO WEEKS · IMPLIED VS REALISED', el('span', { class: 'dim', text: `implied from the options snapshot ${evidence.options_snapshot || '— not recorded yet'}` }), [
+    el('div', { class: 'table-scroll' }, [el('table', { class: 'data' }, [
+      el('thead', {}, [el('tr', {}, ['NAME', 'REPORT', 'AVG |MOVE| LAST 8', 'LAST 4 MOVES', 'IMPLIED', 'IMPLIED / REALISED'].map((h) => el('th', { text: h })))]),
+      el('tbody', {}, body),
+    ])]),
+    el('div', { class: 'field-note', text: 'Realised: close-to-close move over the session that first traded on each 8-K Item 2.02 release. Implied: the ATM straddle of the first expiry on or after that session, as a share of spot -- it prices the whole period to expiry, not the report alone. Above 1.2× the options price more than the name has moved; below 0.8× less.' }),
+  ]);
+}
+
+export default async function renderEarnings(root, data, _manifest, ctx = {}) {
   root.append(sectionTitle('EARNINGS', 'S&P 500 ESTIMATES AND THE REPORTING SEASON'));
   root.append(metaRow(`AS OF ${data.as_of || DASH} · ${data.index || 'S&P 500'} · HOLDINGS ${data.holdings_as_of || DASH}`, methodNotes(data)));
   (data.notices || []).forEach((message) => root.append(notice(message)));
   if (data.factset) root.append(factsetCard(data.factset));
   if (data.tracker) root.append(trackerCard(data.tracker));
   if (data.season) root.append(seasonCard(data.season));
+  const evidence = await ctx.loadArtifact?.('evidence').catch(() => null);
+  const reporters = reportersCard(evidence, data.as_of);
+  if (reporters) root.append(reporters);
 }

@@ -98,6 +98,8 @@ FRESHNESS = {
     "monthly_holdings": {"stale_after_calendar_days": 60},
     # FactSet's Earnings Insight: weekly in season, less often between them.
     "weekly_article": {"stale_after_calendar_days": 45},
+    # Weekly series (Fed H.4.1, NFCI, CFTC positions): one missed release is late, two is stale.
+    "weekly_release": {"stale_after_calendar_days": 16},
 }
 DEFAULT_FRESHNESS_POLICY = "daily_close"
 

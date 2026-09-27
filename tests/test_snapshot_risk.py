@@ -47,3 +47,16 @@ def test_the_first_run_writes_a_full_history_baseline_and_later_runs_do_not(tmp_
     assert "Not point-in-time" in json.loads((tmp_path / "risk" / "baseline" / "2026-09-25.json").read_text())["note"]
     second = snap.run(root=tmp_path, now=datetime(2026, 9, 28, 23, 17, tzinfo=timezone.utc), **kwargs)
     assert second["baseline"] is None
+
+
+def test_the_archive_reads_back_with_the_later_fetch_winning(tmp_path, monkeypatch):
+    from market_recap.sources import snapshot_store
+
+    monkeypatch.setattr(snapshot_store, "root", lambda: tmp_path)
+    old = _series([1.0, 2.0, 3.0], start="2026-09-21")
+    revised = _series([3.5, 4.0], start="2026-09-23")
+    common = dict(fetch_ofr=lambda: pd.DataFrame(), fetch_cboe=lambda s: pd.Series(dtype=float))
+    snap.run(root=tmp_path, now=datetime(2026, 9, 23, 23, 17, tzinfo=timezone.utc), fetch_fred=lambda s: old, **common)
+    snap.run(root=tmp_path, now=datetime(2026, 9, 24, 23, 17, tzinfo=timezone.utc), fetch_fred=lambda s: revised, **common)
+    series = snapshot_store.risk_archive("fred", "BAMLH0A0HYM2")
+    assert series.tolist() == [1.0, 2.0, 3.5, 4.0]

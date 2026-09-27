@@ -265,12 +265,8 @@ function modeButton(mode, label, state, onPick) {
   return button;
 }
 
-function linkTo(tab, ticker) {
-  const query = new URLSearchParams({ ticker });
-  return el('a', {
-    href: `?${query.toString()}#${tab}`,
-    text: tab.toUpperCase(),
-  });
+function linkTo(tab, ticker, label = tab.toUpperCase()) {
+  return el('a', { href: `#${tab}/${encodeURIComponent(ticker)}`, text: label });
 }
 
 export default function renderMonitor(root, data, manifest) {
@@ -1139,7 +1135,7 @@ export default function renderMonitor(root, data, manifest) {
         el('div', { class: 'monitor-detail-name', text: `${row.name || UNKNOWN} · ${row.sector || UNKNOWN}` }),
       ]),
       el('div', { class: 'monitor-detail-actions' }, [
-        el('span', { class: 'monitor-detail-links' }, [linkTo('technicals', ticker), ' · ', linkTo('valuation', ticker), ' · ', linkTo('financials', ticker)]),
+        el('span', { class: 'monitor-detail-links' }, [linkTo('ticker', ticker, 'TICKER PAGE'), ' · ', linkTo('technicals', ticker), ' · ', linkTo('valuation', ticker, 'P/E HISTORY')]),
         followButton(ticker),
         el('button', { type: 'button', class: 'monitor-tool', text: 'CLOSE', onclick: () => { state.selected = null; renderData(); } }),
       ]),

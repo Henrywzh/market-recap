@@ -59,7 +59,7 @@ export function flowColor(value, cap) {
  * @param {Array<{group:string, items:Array<{key:string,value:number,color:string,label:string,sublabel:string,payload:object}>}>} groups
  * @param {(payload:object, event:MouseEvent)=>void} onHover
  */
-export function drawTreemap(host, groups, onHover, onLeave) {
+export function drawTreemap(host, groups, onHover, onLeave, onClick = null) {
   host.innerHTML = '';
   const width = host.clientWidth;
   const height = host.clientHeight;
@@ -99,6 +99,10 @@ export function drawTreemap(host, groups, onHover, onLeave) {
       }
       node.addEventListener('mousemove', (event) => onHover(tile.payload, event));
       node.addEventListener('mouseleave', onLeave);
+      if (onClick) {
+        node.style.cursor = 'pointer';
+        node.addEventListener('click', () => onClick(tile.payload));
+      }
       wrapper.append(node);
     });
     host.append(wrapper);
