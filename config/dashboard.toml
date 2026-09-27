@@ -817,7 +817,7 @@ label = "HY OAS"
 unit = "bp"
 risk_when = "high"
 threshold = 500
-note = "ICE BofA via FRED, which serves only the last three years: percentiles span those years only."
+note = "ICE BofA via FRED, which serves only the last three years; earlier dates come from the site's own archive of what FRED served, once it holds any. Percentiles span what is available."
 [[risk.tiles]]
 key = "ig_oas"
 section = "credit"
@@ -825,7 +825,7 @@ label = "IG OAS"
 unit = "bp"
 risk_when = "high"
 threshold = 150
-note = "ICE BofA via FRED, last three years only."
+note = "ICE BofA via FRED (last three years), extended by the site's own archive as it grows."
 [[risk.tiles]]
 key = "ccc_oas"
 section = "credit"
@@ -833,7 +833,7 @@ label = "CCC OAS"
 unit = "bp"
 risk_when = "high"
 threshold = 1000
-note = "ICE BofA via FRED, last three years only."
+note = "ICE BofA via FRED (last three years), extended by the site's own archive as it grows."
 
 [[risk.tiles]]
 key = "cor1m"

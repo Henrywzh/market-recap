@@ -21,7 +21,28 @@ def root() -> Path:
 
 
 def available() -> bool:
-    return (root() / "expectations").exists() or (root() / "options").exists()
+    return any((root() / kind).exists() for kind in ("expectations", "options", "risk"))
+
+
+def risk_archive(source: str, series: str) -> pd.Series:
+    """Every value the risk snapshots recorded for one series: the baseline
+    (current-vintage history at the time it was written) and each evening's
+    tail. Where two files give a date, the later fetch wins. Empty when
+    nothing was recorded."""
+    base = root() / "risk"
+    files = sorted(base.glob("baseline/*.csv.gz")) + sorted(base.glob("[0-9][0-9][0-9][0-9]/*.csv.gz"))
+    frames = []
+    for path in files:
+        try:
+            frame = pd.read_csv(path, compression="gzip")
+        except (OSError, ValueError):
+            continue
+        frames.append(frame[(frame["source"] == source) & (frame["series"] == series)])
+    if not frames:
+        return pd.Series(dtype=float)
+    rows = pd.concat(frames).sort_values(["date", "fetched_at"])
+    rows = rows.drop_duplicates("date", keep="last")
+    return pd.Series(rows["value"].to_numpy(dtype=float), index=pd.to_datetime(rows["date"]), name=series)
 
 
 def expectation_runs(since: date, until: date) -> list[Path]:

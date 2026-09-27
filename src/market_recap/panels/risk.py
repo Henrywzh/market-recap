@@ -17,7 +17,7 @@ import pandas as pd
 from ..compute import anchor as A
 from ..compute import risk as R
 from ..compute import sentiment as S
-from ..sources import cboe, cftc, fred, yahoo
+from ..sources import cboe, cftc, fred, snapshot_store, yahoo
 from ..util import SourceRecord, describe_error, to_iso_date
 
 CBOE_INDICES = ("VIX", "VIX9D", "VIX3M", "VIX6M", "VIX1Y", "VVIX", "SKEW", "COR1M")
@@ -36,6 +36,7 @@ FRED_SERIES = {
     "DFII10": "10-year TIPS real yield",
     "OVXCLS": "Cboe crude oil volatility (OVX)",
 }
+ARCHIVED_ICE = ("BAMLH0A0HYM2", "BAMLC0A0CM", "BAMLH0A3HYC")
 YAHOO_SYMBOLS = ("^MOVE", "HYG", "IEF", "LQD", "^GSPC", "DX-Y.NYB", "HG=F", "CL=F")
 DOLLAR_WINDOW = 63
 CFTC_CODES = {"cftc_es": "13874A", "cftc_nq": "209742", "cftc_zn": "043602", "cftc_vx": "1170E1"}
@@ -75,6 +76,17 @@ class _Inputs:
                 self.fred[series_id] = frame.set_index("date")["value"]
             except Exception as exc:
                 self.failed[f"fred {series_id}"] = describe_error(exc)
+        # FRED serves the ICE spreads for three years only; the site's own
+        # archive (snapshots/risk.py) keeps what it served before, and
+        # supplies the dates FRED no longer does. FRED wins where both exist.
+        for series_id in ARCHIVED_ICE:
+            older = snapshot_store.risk_archive("fred", series_id)
+            current = self.fred.get(series_id, pd.Series(dtype=float))
+            if older.empty:
+                continue
+            if not current.empty:
+                older = older[older.index < pd.to_datetime(current.index).min()]
+            self.fred[series_id] = pd.concat([older, current]).sort_index()
         self._log("fred_risk", "FRED: credit spreads, Fed balance sheet, NFCI, real yield, OVX",
                   "https://fred.stlouisfed.org", [s.index[-1] for s in self.fred.values() if not s.empty],
                   len(self.fred), len(FRED_SERIES), policy="weekly_release")

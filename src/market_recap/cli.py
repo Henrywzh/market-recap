@@ -58,6 +58,10 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true",
         help="options: snapshot even outside the configured New York window.",
     )
+    snapshot.add_argument(
+        "--baseline", action="store_true",
+        help="risk: also write a new full-history (current-vintage) baseline.",
+    )
 
     prune = sub.add_parser("prune", help="Delete expired cache entries.")
     prune.add_argument("--all", action="store_true", help="Delete every cache entry, not just expired ones.")
@@ -93,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
             result = snap.run(root=args.root, force=args.force)
         elif args.kind == "risk":
             from .snapshots import risk as snap
-            result = snap.run(root=args.root)
+            result = snap.run(root=args.root, baseline=True if args.baseline else None)
         else:
             from .snapshots import expectations as snap
             result = snap.run(root=args.root)
