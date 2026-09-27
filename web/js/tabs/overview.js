@@ -5,6 +5,7 @@
 // sessions.
 
 import { el, card, num, pct, dirClass, metaRow, DASH } from '../fmt.js';
+import { render } from '../charts.js';
 import { mountLive } from '../live.js';
 import { tickerHref } from '../routes.js';
 import { spark } from '../spark.js';
@@ -28,7 +29,42 @@ function grid(headers, rows, cls = '') {
   ])]);
 }
 
-function stocksCard(rows) {
+function contributionLine(c) {
+  if (!c) return null;
+  const chip = (x) => el('a', { href: tickerHref(x.ticker), class: `mchip ${x.contribution_pp >= 0 ? 'up' : 'down'}`,
+    title: `${x.ticker} ${pct(x.return_pct)} on the day`, text: `${x.ticker} ${signed(x.contribution_pp, 2)}` });
+  const sectors = c.sectors.filter((x) => Math.abs(x.contribution_pp) >= 0.005);
+  const top = [...sectors.slice(0, 3), ...sectors.slice(-2).filter((x) => x.contribution_pp < 0 && !sectors.slice(0, 3).includes(x))];
+  return el('div', { class: 'ov-contrib' }, [
+    el('div', { class: 'ov-contrib-head dim', text: `WHAT MOVED THE S&P 500 · ${c.date} · members' contributions sum to ${signed(c.total_pp, 2)} pp` }),
+    el('div', { class: 'ov-chips' }, [...c.leaders.map(chip), ...c.laggards.map(chip)]),
+    el('div', { class: 'ov-chips-sectors dim', text: top.map((x) => `${x.sector} ${signed(x.contribution_pp, 2)}`).join(' · ') }),
+  ]);
+}
+
+function equalVsCap(e) {
+  if (!e) return null;
+  const node = el('div', { class: 'chart ov-mini' });
+  requestAnimationFrame(() => render(node, (option, p) => ({
+    ...option,
+    grid: { left: 36, right: 10, top: 8, bottom: 20 },
+    tooltip: { ...option.tooltip, trigger: 'axis', valueFormatter: (v) => num(v, 1) },
+    xAxis: { ...option.xAxis, data: e.dates },
+    yAxis: { ...option.yAxis, scale: true, axisLabel: { color: p.dim, fontSize: 9 } },
+    series: [{ name: 'RSP / SPY', type: 'line', data: e.ratio, showSymbol: false, lineStyle: { width: 1.3, color: p.accent },
+      markLine: { silent: true, symbol: 'none', data: [{ yAxis: 100 }], lineStyle: { color: p.faint, type: 'dashed' }, label: { show: false } } }],
+  })));
+  const gap = (k) => el('span', { class: dirClass(e.gap_pp[k]), text: `${k} ${signed(e.gap_pp[k], 1, 'pp')}` });
+  return el('div', { class: 'ov-eqcap' }, [
+    el('div', { class: 'ov-contrib-head' }, [
+      el('span', { class: 'dim', text: 'EQUAL WEIGHT VS CAP WEIGHT · RSP / SPY, a year ago = 100 · ' }),
+      gap('1M'), el('span', { class: 'dim', text: ' · ' }), gap('3M'), el('span', { class: 'dim', text: ' · ' }), gap('YTD'),
+    ]),
+    node,
+  ]);
+}
+
+function stocksCard(rows, contrib, eqcap) {
   const body = rows.map((r) => el('tr', {}, [
     el('td', { class: 'ov-name', text: r.label }),
     el('td', { text: present(r.last) ? num(r.last) : DASH }),
@@ -38,8 +74,11 @@ function stocksCard(rows) {
       text: present(r.from_high_pct) ? (r.from_high_pct > -0.05 ? 'AT HIGH' : pct(r.from_high_pct, 1)) : DASH }),
     line(r.spark),
   ]));
-  return card('STOCKS', el('a', { href: '#markets', class: 'dim', text: 'indices ↗' }),
-    grid(['', 'LAST', '1D', '1W', '1M', 'YTD', 'OFF 52W HIGH', '6M'], body));
+  return card('STOCKS', el('a', { href: '#markets', class: 'dim', text: 'indices ↗' }), [
+    grid(['', 'LAST', '1D', '1W', '1M', 'YTD', 'OFF 52W HIGH', '6M'], body),
+    contributionLine(contrib),
+    equalVsCap(eqcap),
+  ]);
 }
 
 function upDown(pair, members) {
@@ -73,13 +112,13 @@ function breadthCard(blocks) {
 // Rising yields and wider spreads are red (bond prices fall, conditions
 // tighten); the curve's slope has no good or bad direction and stays grey.
 function rateClass(row, change) {
-  if (!present(change) || change === 0 || row.key === 'T10Y2Y') return 'dim';
+  if (!present(change) || change === 0 || row.key === '2s10s') return 'dim';
   return change > 0 ? 'down' : 'up';
 }
 
 function ratesCard(rows, fed) {
   const level = (r) => (!present(r.value) ? DASH : r.unit === 'bp' ? `${num(r.value, 0)}bp` : `${num(r.value, 2)}%`);
-  const body = rows.map((r) => el('tr', {}, [
+  const body = rows.map((r) => el('tr', { title: r.date ? `${r.source}, ${r.date}` : '' }, [
     el('td', { class: 'ov-name', text: r.label }),
     el('td', { text: level(r) }),
     ...['change_1d_bp', 'change_1w_bp', 'change_1m_bp'].map((k) => el('td', { class: rateClass(r, r[k]), text: signed(r[k], 0) })),
@@ -90,8 +129,11 @@ function ratesCard(rows, fed) {
     el('span', { text: ` priced ${signed(fed.change_bp, 1, 'bp')}` }),
     el('span', { class: 'dim', text: ` · P(${fed.step.direction === 'hold' ? 'hold' : fed.step.direction}) ${pctOf(fed.step.whole_steps ? 1 : fed.step.p_next_step)} · Kalshi ${pctOf(fed.kalshi_p_hike)} · Polymarket ${pctOf(fed.polymarket_p_hike)} hike · by ${shortDate(fed.year_end.date)} ${signed(fed.year_end.cumulative_bp, 0, 'bp')}` }),
   ]) : el('div', { class: 'ov-fed dim', text: 'Fed pricing was not built for this session.' });
+  const dates = [...new Set(rows.filter((r) => r.date).map((r) => `${r.source} ${r.date}`))];
   return card('RATES & CREDIT', el('a', { href: '#rates', class: 'dim', text: 'rates & macro ↗' }), [
-    grid(['', 'LEVEL', '1D bp', '1W bp', '1M bp', '6M'], body), foot,
+    grid(['', 'LEVEL', '1D bp', '1W bp', '1M bp', '6M'], body),
+    el('div', { class: 'note-text', text: `As of: ${dates.join(' · ')}. Yields from Treasury's par curve, published the evening of the session; the TIPS yield and ICE spreads from FRED, a day later.` }),
+    foot,
   ]);
 }
 
@@ -165,14 +207,15 @@ export default function renderOverview(root, data) {
   root.append(metaRow(`OVERVIEW · SESSION ${data.as_of}${missing.length ? ` · NOT BUILT THIS SESSION: ${missing.join(', ').toUpperCase()}` : ''}${failed.length ? ` · ${failed.length} SOURCE(S) FAILED` : ''}`, [
     'Closing figures of the session above; the live strip is the only thing that moves during the day. Lines are the last six months.',
     'Stocks: the S&P 500 and Nasdaq 100 are the index levels; the Russell 2000 and the equal-weighted S&P 500 are read through IWM and RSP. From 52W high is the drawdown from the highest close of the last 252 sessions.',
+    'What moved the S&P 500: each member\'s published weight times its return on the day, in percentage points of the index; the members\' sum differs slightly from the index\'s own change. Equal weight vs cap weight: RSP against SPY, the gap in percentage points of return over 1M, 3M and YTD; a falling line means the average stock is lagging the largest ones.',
     'Breadth counts each index\'s members by their own closes: how many rose and fell over a day, a week (5 sessions) and a month (21 sessions), the share above their 50- and 200-day averages, and how many closed at a 52-week high or low.',
-    'Rates and credit: a rising yield or a widening spread is red (bond prices fall, conditions tighten), a falling one green; the 10Y − 2Y slope stays grey. They are FRED\'s daily series (Treasury constant-maturity yields, the 10-year TIPS yield, ICE BofA option-adjusted spreads), a day behind the equity close. Macro prints are the latest published value with the one before it; GDPNow is the Atlanta Fed\'s running estimate for the current quarter.',
+    'Rates and credit: a rising yield or a widening spread is red (bond prices fall, conditions tighten), a falling one green; the 10Y − 2Y slope stays grey. The 2Y and 10Y are Treasury\'s daily par yields, published the evening of the session; the 10-year TIPS yield and the ICE BofA spreads are FRED\'s, a day behind. Macro prints are the latest published value with the one before it; GDPNow is the Atlanta Fed\'s running estimate for the current quarter.',
     ...failed.map((k) => `${k}: ${data.failed[k]}`),
   ]));
   root.append(el('div', { class: 'ov-live' }, [mountLive()]));
   const risk = riskLine(data.risk);
   if (risk) root.append(risk);
-  root.append(el('div', { class: 'grid two ov-row' }, [stocksCard(data.stocks), breadthCard(data.breadth)]));
+  root.append(el('div', { class: 'grid two ov-row' }, [stocksCard(data.stocks, data.contributions, data.equal_vs_cap), breadthCard(data.breadth)]));
   root.append(el('div', { class: 'grid two ov-row' }, [ratesCard(data.rates, data.fed), crossCard(data.cross_asset)]));
   root.append(el('div', { class: 'grid two ov-row' }, [printsCard(data.prints), aheadCard(data.ahead)]));
 }

@@ -114,3 +114,23 @@ def test_risk_line_lists_only_core_series_past_their_line():
     ]}]}
     line = overview.risk_line(risk)
     assert line["core"] == 2 and [p["label"] for p in line["past"]] == ["10Y REAL"]
+
+
+def test_contributions_are_weight_times_return_and_sum_by_sector():
+    idx = pd.bdate_range("2026-09-24", periods=2)
+    closes = pd.DataFrame({"A": [100, 110], "B": [50, 49], "C": [10, 10.1]}, index=idx)
+    members = pd.DataFrame({"yahoo_symbol": ["A", "B", "C"], "weight": [5.0, 3.0, 2.0], "sector": ["Tech", "Energy", "Tech"]})
+    out = overview.contributions(closes, members)
+    # A: 5% x 10% = 0.5pp; B: 3% x -2% = -0.06pp; C: 2% x 1% = 0.02pp
+    assert out["total_pp"] == pytest.approx(0.46)
+    assert [r["ticker"] for r in out["leaders"]] == ["A", "C"] and out["laggards"][0]["ticker"] == "B"
+    assert out["sectors"][0] == {"sector": "Tech", "contribution_pp": pytest.approx(0.52)}
+
+
+def test_equal_vs_cap_rebases_the_ratio_and_reports_the_gap():
+    idx = pd.bdate_range("2025-09-01", periods=300)
+    cap = pd.Series(np.linspace(100, 130, 300), index=idx)
+    equal = pd.Series(np.linspace(100, 110, 300), index=idx)
+    out = overview.equal_vs_cap(equal, cap)
+    assert out["ratio"][0] == pytest.approx(100.0) and out["ratio"][-1] < 100
+    assert out["gap_pp"]["1M"] < 0

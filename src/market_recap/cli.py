@@ -51,8 +51,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("validate", help="Re-check the artifacts already on disk.")
     sub.add_parser("site", help="Assemble dist/ from the artifacts already on disk.")
 
-    snapshot = sub.add_parser("snapshot", help="Record option chains or market expectations (see snapshots/).")
-    snapshot.add_argument("kind", choices=("options", "expectations"))
+    snapshot = sub.add_parser("snapshot", help="Record option chains, market expectations or risk inputs as published (see snapshots/).")
+    snapshot.add_argument("kind", choices=("options", "expectations", "risk"))
     snapshot.add_argument("--root", help="Directory to write under (default: [snapshots] root).")
     snapshot.add_argument(
         "--force", action="store_true",
@@ -91,6 +91,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.kind == "options":
             from .snapshots import options as snap
             result = snap.run(root=args.root, force=args.force)
+        elif args.kind == "risk":
+            from .snapshots import risk as snap
+            result = snap.run(root=args.root)
         else:
             from .snapshots import expectations as snap
             result = snap.run(root=args.root)

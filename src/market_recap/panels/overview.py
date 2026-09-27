@@ -6,8 +6,10 @@ from their high), how broad the move is, where rates and credit are, and
 what the dollar, commodities, volatility and the latest macro prints say.
 Beneath them, the next three sessions and what the Fed is priced to do.
 
-Stocks and breadth come from the build's own closes; rates, spreads and
-macro prints from FRED; the cross-asset rows from Yahoo. The Fed line and
+Stocks and breadth come from the build's own closes; nominal yields from
+Treasury's daily par curve (published the same evening, so they match the
+session); the real yield, credit spreads and macro prints from FRED, a day
+later; the cross-asset rows from Yahoo. The Fed line and
 the calendar are read from this session's PRICED PATH and CATALYSTS
 artifacts; a panel that did not build leaves its line empty rather than
 showing another session's numbers.
@@ -22,7 +24,7 @@ import pandas as pd
 
 from ..compute import periods as P
 from ..compute import returns as R
-from ..sources import fred, yahoo
+from ..sources import fred, treasury, yahoo
 from ..util import SourceRecord, clean_float, describe_error, to_iso_date
 
 # Panels OVERVIEW reads, all required to be from this session.
@@ -41,16 +43,19 @@ STOCKS = [
     ("etf", "IWM", "Russell 2000 (IWM)"),
     ("etf", "RSP", "S&P 500 equal wt (RSP)"),
 ]
-# Rates and credit, from FRED. ``unit`` is the display unit of the level;
-# changes are always in basis points.
-RATES = [
-    ("DGS2", "UST 2Y", "pct"),
-    ("DGS10", "UST 10Y", "pct"),
-    ("T10Y2Y", "10Y − 2Y", "bp"),
+# Rates and credit. ``unit`` is the display unit of the level; changes are
+# always in basis points. Nominal yields come from Treasury's par curve,
+# which is published the evening of the session; the rest from FRED.
+TREASURY_RATES = [
+    ("2Y", "UST 2Y", "pct"),
+    ("10Y", "UST 10Y", "pct"),
+]
+FRED_RATES = [
     ("DFII10", "10Y real (TIPS)", "pct"),
     ("BAMLH0A0HYM2", "High yield OAS", "bp"),
     ("BAMLC0A0CM", "Investment grade OAS", "bp"),
 ]
+CONTRIBUTORS = 5
 CROSS_ASSET = [
     ("DX-Y.NYB", "US dollar (DXY)", "pct"),
     ("CL=F", "WTI crude", "pct"),
@@ -133,10 +138,10 @@ def breadth(closes: pd.DataFrame) -> dict:
     return out
 
 
-def rate_row(series_id: str, label: str, unit: str, series: pd.Series) -> dict:
+def rate_row(series_id: str, label: str, unit: str, series: pd.Series, source: str = "FRED") -> dict:
     clean = series.dropna()
     if clean.empty:
-        return {"key": series_id, "label": label, "unit": unit, "value": None}
+        return {"key": series_id, "label": label, "unit": unit, "value": None, "source": source}
     # FRED serves yields and spreads in percent; the page shows spreads in bp.
     scale = 100.0 if unit == "bp" else 1.0
     value = float(clean.iloc[-1])
@@ -146,7 +151,7 @@ def rate_row(series_id: str, label: str, unit: str, series: pd.Series) -> dict:
         return None if prior is None else clean_float((value - prior) * 100.0, 1)
 
     return {
-        "key": series_id, "label": label, "unit": unit,
+        "key": series_id, "label": label, "unit": unit, "source": source,
         "value": clean_float(value * scale, 2),
         "date": to_iso_date(clean.index[-1]),
         "change_1d_bp": clean_float((value - float(clean.iloc[-2])) * 100.0, 1) if len(clean) >= 2 else None,
@@ -172,6 +177,49 @@ def cross_row(symbol: str, label: str, unit: str, series: pd.Series) -> dict:
     else:
         row |= {k: clean_float(v, 2) for k, v in R.period_returns(clean, PERIODS).items()}
     return row
+
+
+def equal_vs_cap(equal: pd.Series, cap: pd.Series, sessions: int = HIGH_WINDOW) -> dict | None:
+    """RSP against SPY: the ratio rebased to 100 a year ago, and the return
+    gap over 1M, 3M and YTD in percentage points."""
+    pair = pd.concat([equal, cap], axis=1, keys=["eq", "cap"]).dropna()
+    if len(pair) < 30:
+        return None
+    ratio = (pair["eq"] / pair["cap"]).tail(sessions + 1)
+    rebased = ratio / ratio.iloc[0] * 100
+    gaps = {}
+    for label in ("1M", "3M", "YTD"):
+        eq = R.period_returns(pair["eq"], [label]).get(label)
+        cap = R.period_returns(pair["cap"], [label]).get(label)
+        gaps[label] = None if eq is None or cap is None else clean_float(eq - cap, 2)
+    return {
+        "dates": [to_iso_date(d) for d in rebased.index],
+        "ratio": [clean_float(v, 2) for v in rebased],
+        "gap_pp": gaps,
+    }
+
+
+def contributions(closes: pd.DataFrame, members: pd.DataFrame, count: int = CONTRIBUTORS) -> dict | None:
+    """Each member's share of the index's last move: weight x its 1-day
+    return, in percentage points of the index, and the same by sector."""
+    if closes.shape[0] < 2 or members.empty:
+        return None
+    meta = members.drop_duplicates("yahoo_symbol").set_index("yahoo_symbol")
+    symbols = [s for s in meta.index if s in closes.columns]
+    change = (closes[symbols].iloc[-1] / closes[symbols].iloc[-2] - 1) * 100
+    contrib = (meta.loc[symbols, "weight"].astype(float) / 100 * change).dropna()
+    if contrib.empty:
+        return None
+    by_sector = contrib.groupby(meta.loc[contrib.index, "sector"]).sum().sort_values(ascending=False)
+    ranked = contrib.sort_values(ascending=False)
+    row = lambda s: {"ticker": s, "contribution_pp": clean_float(contrib[s], 3), "return_pct": clean_float(change[s], 2)}
+    return {
+        "date": to_iso_date(closes.index[-1]),
+        "total_pp": clean_float(contrib.sum(), 3),
+        "leaders": [row(s) for s in ranked.index[:count] if contrib[s] > 0],
+        "laggards": [row(s) for s in ranked.index[::-1][:count] if contrib[s] < 0],
+        "sectors": [{"sector": k, "contribution_pp": clean_float(v, 3)} for k, v in by_sector.items()],
+    }
 
 
 def print_row(series_id: str, label: str, how: str, unit: str, series: pd.Series) -> dict:
@@ -286,13 +334,25 @@ def build(ctx, *, inputs: dict[str, dict | None]) -> dict:
             failed[f"fred {series_id}"] = describe_error(exc)
             return pd.Series(dtype=float)
 
-    rates = [rate_row(sid, label, unit, fred_series(sid)) for sid, label, unit in RATES]
+    try:
+        curve, _ = treasury.fetch_par_yield_curve()
+        wide = curve.pivot(index="date", columns="tenor", values="yield_pct")
+        wide.index = pd.to_datetime(wide.index)
+        wide = wide.sort_index().loc[:as_of]
+    except Exception as exc:
+        failed["treasury par curve"] = describe_error(exc)
+        wide = pd.DataFrame()
+    tenor = lambda t: wide[t] if t in wide.columns else pd.Series(dtype=float)
+    rates = [rate_row(t, label, unit, tenor(t), "Treasury") for t, label, unit in TREASURY_RATES]
+    # The slope from the same curve, so it agrees with the two rows above it.
+    rates.append(rate_row("2s10s", "10Y − 2Y", "bp", tenor("10Y") - tenor("2Y"), "Treasury"))
+    rates += [rate_row(sid, label, unit, fred_series(sid)) for sid, label, unit in FRED_RATES]
     prints = [print_row(sid, label, how, unit, fred_series(sid)) for sid, label, how, unit in PRINTS]
-    got = sum(r.get("value") is not None for r in rates + prints)
+    got = sum(r.get("value") is not None for r in rates + prints if r.get("source") != "Treasury")
     ctx.log.add(SourceRecord(
         "fred_overview", "FRED: Treasury yields, credit spreads and the latest macro prints", "https://fred.stlouisfed.org",
-        max((r["date"] for r in rates if r.get("date")), default=None), rows=got, policy="weekly_release",
-        status="ok" if got == len(rates) + len(prints) else ("partial" if got else "error"),
+        max((r["date"] for r in rates if r.get("date") and r.get("source") == "FRED"), default=None), rows=got, policy="weekly_release",
+        status="ok" if got == len(FRED_RATES) + len(PRINTS) else ("partial" if got else "error"),
     ))
 
     try:
@@ -309,6 +369,10 @@ def build(ctx, *, inputs: dict[str, dict | None]) -> dict:
         status="ok" if closes.shape[1] == len(CROSS_ASSET) else ("partial" if not closes.empty else "error"),
     ))
 
+    etf = lambda symbol: ctx.etf_closes[symbol] if symbol in ctx.etf_closes.columns else pd.Series(dtype=float)
+    primary = ctx.priced(ctx.primary.key)
+    members = [s for s in primary["yahoo_symbol"].drop_duplicates() if s in ctx.closes.columns] if not primary.empty else []
+
     holdings = ctx.holdings
     top = set(holdings.sort_values("weight", ascending=False)["yahoo_symbol"].head(int(settings.get("top_weights", 20)))) \
         if not holdings.empty else set()
@@ -316,6 +380,8 @@ def build(ctx, *, inputs: dict[str, dict | None]) -> dict:
         "as_of": ctx.as_of,
         "missing": sorted(name for name in INPUTS if inputs.get(name) is None),
         "stocks": stocks,
+        "equal_vs_cap": equal_vs_cap(etf("RSP"), etf("SPY")),
+        "contributions": contributions(ctx.closes[members], primary) if members else None,
         "breadth": breadth_blocks,
         "rates": rates,
         "cross_asset": cross,

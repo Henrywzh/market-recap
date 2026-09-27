@@ -655,6 +655,14 @@ sofr_quarters = 8
 kalshi_series = ["KXFEDDECISION", "KXFED", "KXCPIYOY", "KXCPICOREYOY", "KXPAYROLLS", "KXU3", "KXGDP"]
 polymarket_tags = ["fed", "fed-rates"]
 
+# Risk inputs as each publisher served them that evening (snapshots/risk.py):
+# the last ``tail`` observations of each series, so revisions show up as a
+# difference between two evenings' files.
+[snapshots.risk]
+tail = 30
+fred = ["BAMLH0A0HYM2", "BAMLC0A0CM", "BAMLH0A3HYC", "BAMLH0A1HYBB", "BAMLH0A2HYB", "BAMLC0A4CBBB", "NFCI", "ANFCI"]
+cboe = ["VIX", "VIX9D", "VIX3M", "VIX6M", "VIX1Y", "VVIX", "SKEW", "COR1M"]
+
 # MARKET RISK (RISK -> RISK). One tile per series; no composite score.
 # Thresholds were written on 2026-09-26, before the page drew any of these
 # series, and are not fitted to it. risk_when: "high" or "low" is the side of

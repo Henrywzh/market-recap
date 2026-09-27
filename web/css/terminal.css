@@ -762,6 +762,12 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .ov-ud { font-variant-numeric: tabular-nums; }
 .ov-bar { display: inline-block; width: 44px; height: 5px; margin-left: 8px; vertical-align: middle; background: color-mix(in srgb, var(--down) 55%, transparent); }
 .ov-bar-up { display: block; height: 100%; background: var(--up); }
+.ov-contrib, .ov-eqcap { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.ov-contrib-head { font-size: 10px; letter-spacing: 0.06em; margin-bottom: 5px; }
+.ov-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ov-chips .mchip { margin: 0; font-size: 10.5px; line-height: 18px; padding: 0 6px; }
+.ov-chips-sectors { font-size: 11px; margin-top: 5px; }
+.chart.ov-mini { height: 130px; }
 .ov-fed { font-size: 11.5px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); line-height: 1.5; }
 .ov-risk { display: flex; gap: 8px; align-items: baseline; font-size: 11.5px; padding: 6px 10px; margin-bottom: 10px; border: 1px solid var(--border); background: var(--panel); text-decoration: none; color: inherit; }
 .ov-risk.down { border-color: color-mix(in srgb, var(--down) 60%, transparent); }

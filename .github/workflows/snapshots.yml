@@ -1,7 +1,8 @@
 # Record what cannot be downloaded later (src/market_recap/snapshots): one
-# option-chain snapshot late in each session, and the rates / event-market
-# pricing a few times a day. Each run commits what it wrote to the orphan
-# `snapshots` branch, which holds data only; the site does not read it yet.
+# option-chain snapshot late in each session, the rates / event-market
+# pricing a few times a day, and the risk inputs as published each evening.
+# Each run commits what it wrote to the orphan `snapshots` branch, which
+# holds data only; the site does not read it yet.
 #
 # It touches no build, cache or deploy, and a failed snapshot does not affect
 # the nightly refresh.
@@ -16,12 +17,15 @@ on:
     - cron: "25 20 * * 1-5"
     # Expectations: four times a weekday, from the open to after the close.
     - cron: "41 13,16,19,22 * * 1-5"
+    # Risk inputs as published: once each weekday evening, after FRED, OFR
+    # and Cboe have posted the session.
+    - cron: "17 23 * * 1-5"
   workflow_dispatch:
     inputs:
       kind:
         description: "What to record"
         type: choice
-        options: [options, expectations]
+        options: [options, expectations, risk]
         default: expectations
       force:
         description: "options: record even outside the New York window"
@@ -51,6 +55,8 @@ jobs:
             echo "kind=${{ inputs.kind }}" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event.schedule }}" = "41 13,16,19,22 * * 1-5" ]; then
             echo "kind=expectations" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "17 23 * * 1-5" ]; then
+            echo "kind=risk" >> "$GITHUB_OUTPUT"
           else
             echo "kind=options" >> "$GITHUB_OUTPUT"
           fi
