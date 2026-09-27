@@ -169,7 +169,41 @@ function upDown(pair, members) {
   ]);
 }
 
-function breadthCard(blocks, history) {
+// How many S&P 500 members rose and fell by how much: losses to the left,
+// gains to the right, the largest moves on the top row. Bars share one scale
+// so the two sides compare directly.
+function distributionBlock(dist) {
+  const periods = ['1D', '1W', '1M'].filter((k) => dist?.[k]);
+  if (!periods.length) return null;
+  const body = el('div', { class: 'ov-dist' });
+  const summary = el('div', { class: 'ov-dist-summary dim' });
+  const draw = (period) => {
+    const d = dist[period];
+    const labels = [`0–${d.edges[0]}%`, ...d.edges.slice(0, -1).map((e, i) => `${e}–${d.edges[i + 1]}%`), `≥${d.edges[d.edges.length - 1]}%`];
+    const max = Math.max(1, ...d.up, ...d.down);
+    const bar = (n, side) => el('div', { class: `ov-dist-side ${side}` }, [
+      side === 'down' ? el('span', { class: 'ov-dist-n', text: n }) : null,
+      el('span', { class: `ov-dist-bar ${side}`, style: `width:${(n / max) * 82}%` }),
+      side === 'up' ? el('span', { class: 'ov-dist-n', text: n }) : null,
+    ]);
+    body.replaceChildren(...labels.map((label, i) => i).reverse().map((i) => el('div', { class: 'ov-dist-row' }, [
+      bar(d.down[i], 'down'), el('span', { class: 'ov-dist-label dim', text: labels[i] }), bar(d.up[i], 'up'),
+    ])));
+    const up = d.up.reduce((a, b) => a + b, 0);
+    const down = d.down.reduce((a, b) => a + b, 0);
+    summary.replaceChildren(
+      el('span', { class: 'down', text: `${down} fell` }), el('span', { text: ' · ' }),
+      el('span', { class: 'up', text: `${up} rose` }), el('span', { text: ` · ${d.flat} unchanged · ${d.members} members` }),
+    );
+  };
+  draw(periods[0]);
+  return el('div', { class: 'ov-sub' }, [
+    el('div', { class: 'ov-dist-head' }, [el('span', { class: 'ov-contrib-head dim', text: 'S&P 500 MEMBERS BY SIZE OF MOVE' }), periodSwitch(periods, periods[0], draw)]),
+    body, summary,
+  ]);
+}
+
+function breadthCard(blocks, history, dist) {
   if (!blocks.length) return card('BREADTH', null, el('div', { class: 'gap', text: 'No member closes in this build.' }));
   const row = (label, cell) => el('tr', {}, [el('td', { class: 'ov-name', text: label }), ...blocks.map(cell)]);
   const share = (v) => el('td', { class: present(v) ? (v >= 50 ? 'up' : 'down') : 'dim', text: present(v) ? `${num(v, 0)}%` : DASH });
@@ -185,6 +219,7 @@ function breadthCard(blocks, history) {
   ];
   return card('BREADTH', el('span', { class: 'dim', text: 'index members, counted by their own closes' }), [
     grid(['', ...blocks.map((b) => `${b.key} · ${b.members}`)], body, 'ov-breadth'),
+    distributionBlock(dist),
     breadthChart(history),
   ]);
 }
@@ -290,6 +325,7 @@ export default function renderOverview(root, data) {
     'Stocks: the S&P 500 and Nasdaq 100 rows are index levels (price only); the Russell 2000 and equal-weighted S&P 500 rows are IWM and RSP on dividend-adjusted closes. Off 52W high is the drawdown from the highest close of the last 252 sessions.',
     'Performance draws SPY, QQQ, IWM and RSP, all on dividend-adjusted closes so none is credited with dividends the others lack, rebased to 100 at the start of the period chosen.',
     'What moved the S&P 500: each member\'s published weight times its return on the day, in percentage points of the index; the members\' sum differs slightly from the index\'s own change. Equal weight vs cap weight: RSP against SPY, the gap in percentage points of return over 1M, 3M and YTD; a falling line means the average stock is lagging the largest ones.',
+    'Size of move: each S&P 500 member\'s return over the day, week (5 sessions) or month (21 sessions), counted into buckets whose edges widen with the window (1D 1/2/4%, 1W 2/5/10%, 1M 5/10/20%); a bucket includes its lower edge.',
     'Breadth counts each index\'s members by their own closes: how many rose and fell over a day, a week (5 sessions) and a month (21 sessions), the share above their 50- and 200-day averages, and how many closed at a 52-week high or low.',
     'Rates and credit: a rising yield or a widening spread is red (bond prices fall, conditions tighten), a falling one green; the 10Y − 2Y slope stays grey. The 2Y and 10Y are Treasury\'s daily par yields, published the evening of the session; the 10-year TIPS yield and the ICE BofA spreads are FRED\'s, a day behind. Macro prints are the latest published value with the one before it; GDPNow is the Atlanta Fed\'s running estimate for the current quarter.',
     ...failed.map((k) => `${k}: ${data.failed[k]}`),
@@ -309,7 +345,7 @@ export default function renderOverview(root, data) {
     ].filter(Boolean)),
     el('div', { class: 'ov-col' }, [
       performanceCard(data.performance, data.equal_vs_cap),
-      breadthCard(data.breadth, data.breadth_history),
+      breadthCard(data.breadth, data.breadth_history, data.distribution),
       crossCard(data.cross_asset),
       aheadCard(data.ahead),
     ].filter(Boolean)),

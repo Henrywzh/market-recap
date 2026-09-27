@@ -761,6 +761,18 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .chart.ov-mid { height: 190px; }
 .ov-sub { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .ov-note { font-size: 11px; margin-top: 6px; }
+.ov-dist-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.ov-dist-head .ov-contrib-head { margin: 0; }
+.ov-dist-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px minmax(0, 1fr); align-items: center; gap: 6px; height: 20px; }
+.ov-dist-side { display: flex; align-items: center; gap: 5px; min-width: 0; height: 100%; }
+.ov-dist-side.down { justify-content: flex-end; }
+.ov-dist-bar { display: block; height: 12px; min-width: 1px; }
+.ov-dist-bar.down { background: var(--down); opacity: 0.85; }
+.ov-dist-bar.up { background: var(--up); opacity: 0.85; }
+.ov-dist-n { font-size: 10.5px; font-variant-numeric: tabular-nums; color: var(--text-dim); min-width: 26px; }
+.ov-dist-side.down .ov-dist-n { text-align: right; }
+.ov-dist-label { font-size: 10px; text-align: center; white-space: nowrap; }
+.ov-dist-summary { font-size: 11px; margin-top: 6px; text-align: center; }
 .ov-heat { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 3px; }
 @media (max-width: 600px) { .ov-heat { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .ov-heat-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 64px; padding: 4px; text-decoration: none; color: var(--text); border: 1px solid var(--border); }

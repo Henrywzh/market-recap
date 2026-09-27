@@ -146,3 +146,15 @@ def test_sector_returns_are_ordered_by_index_weight():
     members = pd.DataFrame({"sector": ["Energy", "Information Technology"], "weight": [3.0, 30.0]})
     rows = overview.sector_returns(etfs, {"Energy": "XLE", "Information Technology": "XLK"}, members)
     assert [r["etf"] for r in rows] == ["XLK", "XLE"] and rows[0]["1M"] > 0 > rows[1]["1M"]
+
+
+def test_return_distribution_counts_each_member_once_in_half_open_buckets():
+    idx = pd.bdate_range("2026-09-01", periods=30)
+    last = {"A": 0.5, "B": 1.0, "C": 3.0, "D": 9.0, "E": -1.5, "F": -4.0, "G": 0.0}
+    closes = pd.DataFrame({k: [100.0] * 29 + [100.0 * (1 + v / 100)] for k, v in last.items()}, index=idx)
+    day = overview.return_distribution(closes)["1D"]
+    assert day["edges"] == [1, 2, 4]
+    assert day["up"] == [1, 1, 1, 1]        # 0.5 | 1.0 | 3.0 | 9.0
+    assert day["down"] == [0, 1, 0, 1]      # 1.5 in [1, 2); 4.0 in [4, inf)
+    assert day["flat"] == 1 and day["members"] == 7
+    assert sum(day["up"]) + sum(day["down"]) + day["flat"] == day["members"]

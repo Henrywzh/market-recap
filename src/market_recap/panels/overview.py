@@ -34,6 +34,10 @@ SPARK_SESSIONS = 126
 SPARK_POINTS = 60
 HIGH_WINDOW = 252
 BREADTH_WINDOWS = {"1D": 1, "1W": 5, "1M": 21}
+# Bucket edges (percent) for the distribution of member returns, per window:
+# a month's moves are wider than a day's, so one set of edges would put
+# nearly every name in the first bucket or the last.
+DISTRIBUTION_EDGES = {"1D": [1, 2, 4], "1W": [2, 5, 10], "1M": [5, 10, 20]}
 TIERS = {"high": 0, "medium": 1, "low": 2}
 
 # Stock rows: index levels from the build's index closes, the rest from ETFs.
@@ -127,6 +131,25 @@ def breadth(closes: pd.DataFrame) -> dict:
         out["new_lows"] = int(((last <= window.min()) & valid).sum())
     else:
         out["new_highs"] = out["new_lows"] = None
+    return out
+
+
+def return_distribution(closes: pd.DataFrame) -> dict:
+    """How many members rose and fell by how much, per window: counts in
+    buckets bounded by DISTRIBUTION_EDGES (absolute percent, lower edge
+    inclusive), mirrored for gains and losses; unchanged names apart."""
+    out = {}
+    for label, edges in DISTRIBUTION_EDGES.items():
+        sessions = BREADTH_WINDOWS[label]
+        if closes.shape[0] <= sessions:
+            continue
+        change = ((closes.iloc[-1] / closes.iloc[-1 - sessions] - 1) * 100).replace([np.inf, -np.inf], np.nan).dropna()
+        bounds = [0.0, *edges, np.inf]
+        # [lo, hi): the gains and losses passed in are already strictly positive.
+        count = lambda values: [int(((values >= lo) & (values < hi)).sum()) for lo, hi in zip(bounds[:-1], bounds[1:])]
+        up, down = change[change > 0], -change[change < 0]
+        out[label] = {"edges": edges, "up": count(up), "down": count(down), "flat": int((change == 0).sum()),
+                      "members": int(change.size)}
     return out
 
 
@@ -438,6 +461,7 @@ def build(ctx, *, inputs: dict[str, dict | None]) -> dict:
             {"UST 2Y": tenor("2Y"), "UST 10Y": tenor("10Y"), "10Y real": fred_series("DFII10")})),
         "contributions": section("contributions", lambda: contributions(ctx.closes[members], primary) if members else None),
         "breadth": breadth_blocks,
+        "distribution": section("return distribution", lambda: return_distribution(ctx.closes[members]) if members else None),
         "rates": rates,
         "cross_asset": cross,
         "prints": prints,
