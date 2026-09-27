@@ -70,12 +70,19 @@ function breadthCard(blocks) {
     grid(['', ...blocks.map((b) => `${b.key} · ${b.members}`)], body, 'ov-breadth'));
 }
 
+// Rising yields and wider spreads are red (bond prices fall, conditions
+// tighten); the curve's slope has no good or bad direction and stays grey.
+function rateClass(row, change) {
+  if (!present(change) || change === 0 || row.key === 'T10Y2Y') return 'dim';
+  return change > 0 ? 'down' : 'up';
+}
+
 function ratesCard(rows, fed) {
   const level = (r) => (!present(r.value) ? DASH : r.unit === 'bp' ? `${num(r.value, 0)}bp` : `${num(r.value, 2)}%`);
   const body = rows.map((r) => el('tr', {}, [
     el('td', { class: 'ov-name', text: r.label }),
     el('td', { text: level(r) }),
-    ...['change_1d_bp', 'change_1w_bp', 'change_1m_bp'].map((k) => el('td', { class: 'dim', text: signed(r[k], 0) })),
+    ...['change_1d_bp', 'change_1w_bp', 'change_1m_bp'].map((k) => el('td', { class: rateClass(r, r[k]), text: signed(r[k], 0) })),
     line(r.spark),
   ]));
   const foot = fed ? el('div', { class: 'ov-fed' }, [
@@ -155,7 +162,7 @@ export default function renderOverview(root, data) {
     'Closing figures of the session above; the live strip is the only thing that moves during the day. Lines are the last six months.',
     'Stocks: the S&P 500 and Nasdaq 100 are the index levels; the Russell 2000 and the equal-weighted S&P 500 are read through IWM and RSP. From 52W high is the drawdown from the highest close of the last 252 sessions.',
     'Breadth counts each index\'s members by their own closes: how many rose and fell over a day, a week (5 sessions) and a month (21 sessions), the share above their 50- and 200-day averages, and how many closed at a 52-week high or low.',
-    'Rates and credit are FRED\'s daily series (Treasury constant-maturity yields, the 10-year TIPS yield, ICE BofA option-adjusted spreads), a day behind the equity close. Macro prints are the latest published value with the one before it; GDPNow is the Atlanta Fed\'s running estimate for the current quarter.',
+    'Rates and credit: a rising yield or a widening spread is red (bond prices fall, conditions tighten), a falling one green; the 10Y − 2Y slope stays grey. They are FRED\'s daily series (Treasury constant-maturity yields, the 10-year TIPS yield, ICE BofA option-adjusted spreads), a day behind the equity close. Macro prints are the latest published value with the one before it; GDPNow is the Atlanta Fed\'s running estimate for the current quarter.',
     ...failed.map((k) => `${k}: ${data.failed[k]}`),
   ]));
   root.append(el('div', { class: 'ov-live' }, [mountLive()]));

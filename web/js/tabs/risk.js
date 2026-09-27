@@ -145,22 +145,30 @@ function termChart(node, charts) {
   });
 }
 
-function sectionCard(section, data) {
+// `charts` histories are drawn side by side; a click puts that tile's history
+// first and drops the oldest. Series past their line are shown first.
+function sectionCard(section, data, { charts = 1 } = {}) {
   const tiles = section.tiles;
-  let selected = tiles.find((t) => t.breach)?.key || tiles[0]?.key;
+  let selected = [...tiles.filter((t) => t.breach), ...tiles.filter((t) => !t.breach)].slice(0, charts).map((t) => t.key);
   const grid = el('div', { class: 'risk-grid' });
-  const chartNode = el('div', { class: 'chart' });
-  const chartTitle = el('span', { class: 'dim' });
-  const draw = () => {
-    grid.replaceChildren(...tiles.map((t) => tileNode(t, { asOf: data.as_of, onPick: (key) => { selected = key; draw(); }, selected: t.key === selected })));
-    const tile = tiles.find((t) => t.key === selected);
-    if (tile) {
-      chartTitle.textContent = `${tile.label} · weekly · 10 years or since ${tile.since}`;
-      historyChart(chartNode, tile);
-    }
+  const slots = selected.map(() => ({ node: el('div', { class: 'chart' }), title: el('span', { class: 'dim' }) }));
+  const pick = (key) => {
+    if (selected.includes(key)) return;
+    selected = [key, ...selected].slice(0, charts);
+    draw();
   };
+  const draw = () => {
+    grid.replaceChildren(...tiles.map((t) => tileNode(t, { asOf: data.as_of, onPick: pick, selected: selected.includes(t.key) })));
+    selected.forEach((key, i) => {
+      const tile = tiles.find((t) => t.key === key);
+      if (!tile) return;
+      slots[i].title.textContent = `${tile.label} · weekly · 10 years or since ${tile.since}`;
+      historyChart(slots[i].node, tile);
+    });
+  };
+  const chartBlocks = slots.map((slot) => el('div', {}, [el('div', { class: 'risk-chart-head' }, [slot.title]), slot.node]));
   const breached = tiles.filter((t) => t.breach).length;
-  const body = [grid, el('div', { class: 'risk-chart-head' }, [chartTitle]), chartNode];
+  const body = [grid, charts > 1 ? el('div', { class: 'grid two risk-charts' }, chartBlocks) : chartBlocks[0]];
   if (section.key === 'volatility') {
     const termNode = el('div', { class: 'chart' });
     body.push(el('div', { class: 'risk-chart-head' }, [el('span', { class: 'dim', text: 'TERM STRUCTURE · today, a week and a month ago' })]), termNode);
@@ -243,11 +251,11 @@ export default function renderRisk(root, payload) {
   if (!data || data.unavailable) throw new Error(data?.unavailable || 'risk artifact missing');
   const core = data.sections.flatMap((s) => s.tiles.map((t) => ({ ...t, horizon: s.horizon }))).filter((t) => t.core);
   const total = data.sections.reduce((n, s) => n + s.tiles.length, 0);
-  root.append(metaRow(`RISK · ANCHOR AND ${core.length} CORE SERIES · AS OF ${data.as_of} · CLICK A TILE FOR ITS HISTORY`, methodNotes()));
+  root.append(metaRow(`RISK · ANCHOR AND ${core.length} CORE SERIES · AS OF ${data.as_of} · CLICK A TILE FOR ITS HISTORY (TWO SIDE BY SIDE)`, methodNotes()));
   root.append(summary(data, core));
   root.append(el('div', { class: 'grid risk-top' }, [
     anchorCard(anchor),
-    sectionCard({ key: 'core', label: 'CORE SERIES', tiles: core }, data),
+    sectionCard({ key: 'core', label: 'CORE SERIES', tiles: core }, data, { charts: 2 }),
   ]));
 
   // Everything else, drawn only when opened: a chart laid out while folded
