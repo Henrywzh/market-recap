@@ -4,8 +4,8 @@
 // recent changes and six months of line -- then the Fed and the next three
 // sessions.
 
-import { el, card, num, pct, dirClass, metaRow, DASH } from '../fmt.js';
-import { render } from '../charts.js';
+import { el, card, num, pct, dirClass, metaRow, periodSwitch, DASH } from '../fmt.js';
+import { render, SERIES_COLORS } from '../charts.js';
 import { mountLive } from '../live.js';
 import { tickerHref } from '../routes.js';
 import { spark } from '../spark.js';
@@ -42,29 +42,7 @@ function contributionLine(c) {
   ]);
 }
 
-function equalVsCap(e) {
-  if (!e) return null;
-  const node = el('div', { class: 'chart ov-mini' });
-  requestAnimationFrame(() => render(node, (option, p) => ({
-    ...option,
-    grid: { left: 36, right: 10, top: 8, bottom: 20 },
-    tooltip: { ...option.tooltip, trigger: 'axis', valueFormatter: (v) => num(v, 1) },
-    xAxis: { ...option.xAxis, data: e.dates },
-    yAxis: { ...option.yAxis, scale: true, axisLabel: { color: p.dim, fontSize: 9 } },
-    series: [{ name: 'RSP / SPY', type: 'line', data: e.ratio, showSymbol: false, lineStyle: { width: 1.3, color: p.accent },
-      markLine: { silent: true, symbol: 'none', data: [{ yAxis: 100 }], lineStyle: { color: p.faint, type: 'dashed' }, label: { show: false } } }],
-  })));
-  const gap = (k) => el('span', { class: dirClass(e.gap_pp[k]), text: `${k} ${signed(e.gap_pp[k], 1, 'pp')}` });
-  return el('div', { class: 'ov-eqcap' }, [
-    el('div', { class: 'ov-contrib-head' }, [
-      el('span', { class: 'dim', text: 'EQUAL WEIGHT VS CAP WEIGHT · RSP / SPY, a year ago = 100 · ' }),
-      gap('1M'), el('span', { class: 'dim', text: ' · ' }), gap('3M'), el('span', { class: 'dim', text: ' · ' }), gap('YTD'),
-    ]),
-    node,
-  ]);
-}
-
-function stocksCard(rows, contrib, eqcap) {
+function stocksCard(rows, contrib) {
   const body = rows.map((r) => el('tr', {}, [
     el('td', { class: 'ov-name', text: r.label }),
     el('td', { text: present(r.last) ? num(r.last) : DASH }),
@@ -77,8 +55,109 @@ function stocksCard(rows, contrib, eqcap) {
   return card('STOCKS', el('a', { href: '#markets', class: 'dim', text: 'indices ↗' }), [
     grid(['', 'LAST', '1D', '1W', '1M', 'YTD', 'OFF 52W HIGH', '6M'], body),
     contributionLine(contrib),
-    equalVsCap(eqcap),
   ]);
+}
+
+// Index lines rebased to 100 at the start of the period the reader picks.
+const PERF_PERIODS = { '1M': 21, '3M': 63, YTD: null, '1Y': 252 };
+function performanceCard(perf, eqcap) {
+  if (!perf) return card('PERFORMANCE', null, el('div', { class: 'gap', text: 'No index history in this build.' }));
+  const node = el('div', { class: 'chart ov-perf' });
+  const draw = (period) => {
+    const n = perf.dates.length;
+    const sessions = PERF_PERIODS[period];
+    let start = sessions === null ? perf.dates.findIndex((d) => d.slice(0, 4) === perf.dates[n - 1].slice(0, 4)) - 1 : n - 1 - sessions;
+    start = Math.max(0, start);
+    const dates = perf.dates.slice(start);
+    const names = Object.keys(perf.series);
+    render(node, (option, p) => ({
+      ...option,
+      grid: { left: 40, right: 64, top: 10, bottom: 40 },
+      legend: { bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9 },
+      tooltip: { ...option.tooltip, valueFormatter: (v) => `${v >= 100 ? '+' : ''}${num(v - 100, 1)}%` },
+      xAxis: { ...option.xAxis, data: dates },
+      yAxis: { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 9, formatter: (v) => `${v >= 100 ? '+' : ''}${Math.round(v - 100)}%` } },
+      series: names.map((name, i) => {
+        const values = perf.series[name].slice(start);
+        const base = values[0];
+        const color = SERIES_COLORS[i % SERIES_COLORS.length];
+        const last = values[values.length - 1] / base * 100;
+        return {
+          name, type: 'line', showSymbol: false, data: values.map((v) => (v && base ? +(v / base * 100).toFixed(2) : null)),
+          lineStyle: { width: i === 0 ? 1.8 : 1.2, color }, itemStyle: { color },
+          endLabel: { show: true, color, fontSize: 10, formatter: () => `${last >= 100 ? '+' : ''}${num(last - 100, 1)}%` },
+          markLine: i === 0 ? { silent: true, symbol: 'none', data: [{ yAxis: 100 }], lineStyle: { color: p.faint, type: 'dashed' }, label: { show: false } } : undefined,
+        };
+      }),
+    }));
+  };
+  requestAnimationFrame(() => draw('3M'));
+  const gap = eqcap ? el('div', { class: 'ov-note' }, [
+    el('span', { class: 'dim', text: 'Equal weight vs cap weight (RSP − SPY): ' }),
+    ...['1M', '3M', 'YTD'].flatMap((k, i) => [i ? el('span', { class: 'dim', text: ' · ' }) : null,
+      el('span', { class: dirClass(eqcap.gap_pp[k]), text: `${k} ${signed(eqcap.gap_pp[k], 1, 'pp')}` })]).filter(Boolean),
+  ]) : null;
+  return card('PERFORMANCE', periodSwitch(Object.keys(PERF_PERIODS), '3M', draw), [node, gap]);
+}
+
+// One tile per sector ETF, coloured by the period's return. Tiles are equal
+// in size so small sectors stay readable; the weight is written on each.
+function sectorHeatCard(rows) {
+  if (!rows?.length) return null;
+  const grid = el('div', { class: 'ov-heat' });
+  const draw = (period) => {
+    const values = rows.map((r) => r[period]).filter(present);
+    const scale = Math.max(0.5, ...values.map((v) => Math.abs(v)));
+    grid.replaceChildren(...rows.map((r) => {
+      const v = r[period];
+      const share = present(v) ? Math.round(Math.min(1, Math.abs(v) / scale) * 70) + 8 : 0;
+      const colour = present(v) ? `color-mix(in srgb, var(${v >= 0 ? '--up' : '--down'}) ${share}%, var(--panel))` : 'var(--panel)';
+      return el('a', { class: 'ov-heat-tile', href: '#rotation', style: `background:${colour}`, title: `${r.sector} (${r.etf}) · ${num(r.weight_pct, 1)}% of the S&P 500` }, [
+        el('span', { class: 'ov-heat-name', text: r.etf }),
+        el('span', { class: 'ov-heat-value', text: pct(v, 1) }),
+        el('span', { class: 'ov-heat-sector', text: r.sector.replace('Information Technology', 'Info Tech').replace('Communication Services', 'Comm Services').replace('Consumer Discretionary', 'Cons Discretionary') }),
+      ]);
+    }));
+  };
+  draw('1D');
+  return card('SECTORS', periodSwitch(['1D', '1W', '1M', 'YTD'], '1D', draw), [grid,
+    el('div', { class: 'ov-note dim', text: 'Sector SPDR ETFs, ordered by index weight; colour scaled to the period\'s largest move. Click for SECTORS.' })]);
+}
+
+function breadthChart(h) {
+  if (!h) return null;
+  const node = el('div', { class: 'chart ov-mid' });
+  requestAnimationFrame(() => render(node, (option, p) => ({
+    ...option,
+    grid: { left: 34, right: 12, top: 10, bottom: 38 },
+    legend: { bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9 },
+    tooltip: { ...option.tooltip, valueFormatter: (v) => `${num(v, 0)}%` },
+    xAxis: { ...option.xAxis, data: h.dates },
+    yAxis: { ...option.yAxis, min: 0, max: 100, interval: 25, axisLabel: { color: p.dim, fontSize: 9, formatter: (v) => `${v}%` } },
+    series: [
+      { name: '% above 50-day', type: 'line', data: h.above_50d, showSymbol: false, lineStyle: { width: 1.2, color: SERIES_COLORS[1] }, itemStyle: { color: SERIES_COLORS[1] },
+        markLine: { silent: true, symbol: 'none', data: [{ yAxis: 50 }], lineStyle: { color: p.faint, type: 'dashed' }, label: { show: false } } },
+      { name: '% above 200-day', type: 'line', data: h.above_200d, showSymbol: false, lineStyle: { width: 1.6, color: SERIES_COLORS[0] }, itemStyle: { color: SERIES_COLORS[0] } },
+    ],
+  })));
+  return el('div', { class: 'ov-sub' }, [el('div', { class: 'ov-contrib-head dim', text: 'S&P 500 MEMBERS ABOVE THEIR AVERAGES · 1 YEAR' }), node]);
+}
+
+function ratesChart(h) {
+  if (!h) return null;
+  const node = el('div', { class: 'chart ov-mid' });
+  const names = Object.keys(h.series);
+  requestAnimationFrame(() => render(node, (option, p) => ({
+    ...option,
+    grid: { left: 38, right: 12, top: 10, bottom: 38 },
+    legend: { bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9 },
+    tooltip: { ...option.tooltip, valueFormatter: (v) => `${num(v, 2)}%` },
+    xAxis: { ...option.xAxis, data: h.dates },
+    yAxis: { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 9, formatter: (v) => `${num(v, 1)}%` } },
+    series: names.map((name, i) => ({ name, type: 'line', data: h.series[name], showSymbol: false, connectNulls: true,
+      lineStyle: { width: 1.3, color: SERIES_COLORS[(i + 2) % SERIES_COLORS.length] }, itemStyle: { color: SERIES_COLORS[(i + 2) % SERIES_COLORS.length] } })),
+  })));
+  return el('div', { class: 'ov-sub' }, [el('div', { class: 'ov-contrib-head dim', text: 'YIELDS · 1 YEAR' }), node]);
 }
 
 function upDown(pair, members) {
@@ -90,7 +169,7 @@ function upDown(pair, members) {
   ]);
 }
 
-function breadthCard(blocks) {
+function breadthCard(blocks, history) {
   if (!blocks.length) return card('BREADTH', null, el('div', { class: 'gap', text: 'No member closes in this build.' }));
   const row = (label, cell) => el('tr', {}, [el('td', { class: 'ov-name', text: label }), ...blocks.map(cell)]);
   const share = (v) => el('td', { class: present(v) ? (v >= 50 ? 'up' : 'down') : 'dim', text: present(v) ? `${num(v, 0)}%` : DASH });
@@ -103,10 +182,11 @@ function breadthCard(blocks) {
     row('New 52-week highs / lows', (b) => el('td', {}, [
       el('span', { class: 'up', text: b.new_highs ?? DASH }), el('span', { class: 'dim', text: ' / ' }), el('span', { class: 'down', text: b.new_lows ?? DASH }),
     ])),
-    row('% above 50-day · 6M', (b) => line(b.above_50d_spark)),
   ];
-  return card('BREADTH', el('span', { class: 'dim', text: 'index members, counted by their own closes' }),
-    grid(['', ...blocks.map((b) => `${b.key} · ${b.members}`)], body, 'ov-breadth'));
+  return card('BREADTH', el('span', { class: 'dim', text: 'index members, counted by their own closes' }), [
+    grid(['', ...blocks.map((b) => `${b.key} · ${b.members}`)], body, 'ov-breadth'),
+    breadthChart(history),
+  ]);
 }
 
 // Rising yields and wider spreads are red (bond prices fall, conditions
@@ -116,7 +196,7 @@ function rateClass(row, change) {
   return change > 0 ? 'down' : 'up';
 }
 
-function ratesCard(rows, fed) {
+function ratesCard(rows, fed, history) {
   const level = (r) => (!present(r.value) ? DASH : r.unit === 'bp' ? `${num(r.value, 0)}bp` : `${num(r.value, 2)}%`);
   const body = rows.map((r) => el('tr', { title: r.date ? `${r.source}, ${r.date}` : '' }, [
     el('td', { class: 'ov-name', text: r.label }),
@@ -132,6 +212,7 @@ function ratesCard(rows, fed) {
   const dates = [...new Set(rows.filter((r) => r.date).map((r) => `${r.source} ${r.date}`))];
   return card('RATES & CREDIT', el('a', { href: '#rates', class: 'dim', text: 'rates & macro ↗' }), [
     grid(['', 'LEVEL', '1D bp', '1W bp', '1M bp', '6M'], body),
+    ratesChart(history),
     el('div', { class: 'note-text', text: `As of: ${dates.join(' · ')}. Yields from Treasury's par curve, published the evening of the session; the TIPS yield and ICE spreads from FRED, a day later.` }),
     foot,
   ]);
@@ -215,7 +296,21 @@ export default function renderOverview(root, data) {
   root.append(el('div', { class: 'ov-live' }, [mountLive()]));
   const risk = riskLine(data.risk);
   if (risk) root.append(risk);
-  root.append(el('div', { class: 'grid two ov-row' }, [stocksCard(data.stocks, data.contributions, data.equal_vs_cap), breadthCard(data.breadth)]));
-  root.append(el('div', { class: 'grid two ov-row' }, [ratesCard(data.rates, data.fed), crossCard(data.cross_asset)]));
-  root.append(el('div', { class: 'grid two ov-row' }, [printsCard(data.prints), aheadCard(data.ahead)]));
+  // Two columns that stack independently, so a short card never leaves a
+  // hole beside a tall one. Read top to bottom: how stocks did and why,
+  // where rates are, then breadth, the rest of the market and what is next.
+  root.append(el('div', { class: 'ov-columns' }, [
+    el('div', { class: 'ov-col' }, [
+      stocksCard(data.stocks, data.contributions),
+      sectorHeatCard(data.sectors),
+      ratesCard(data.rates, data.fed, data.rates_history),
+      printsCard(data.prints),
+    ].filter(Boolean)),
+    el('div', { class: 'ov-col' }, [
+      performanceCard(data.performance, data.equal_vs_cap),
+      breadthCard(data.breadth, data.breadth_history),
+      crossCard(data.cross_asset),
+      aheadCard(data.ahead),
+    ].filter(Boolean)),
+  ]));
 }

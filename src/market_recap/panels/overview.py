@@ -222,6 +222,56 @@ def contributions(closes: pd.DataFrame, members: pd.DataFrame, count: int = CONT
     }
 
 
+def performance(series: dict[str, pd.Series], sessions: int = HIGH_WINDOW + 10) -> dict | None:
+    """Closes of each line on a shared calendar over the last year, for a
+    chart the page rebases to 100 at whichever start the reader picks."""
+    frame = pd.concat({k: v.dropna() for k, v in series.items() if not v.dropna().empty}, axis=1)
+    if frame.empty:
+        return None
+    frame = frame.ffill(limit=3).dropna().tail(sessions)
+    return {"dates": [to_iso_date(d) for d in frame.index],
+            "series": {k: [clean_float(v, 4) for v in frame[k]] for k in frame.columns}}
+
+
+def sector_returns(etf_closes: pd.DataFrame, sector_etfs: dict[str, str], members: pd.DataFrame) -> list[dict]:
+    """Each sector ETF's return over 1D/1W/1M/YTD, with the sector's index weight."""
+    weights = members.groupby("sector")["weight"].sum() if not members.empty else pd.Series(dtype=float)
+    out = []
+    for sector, symbol in sector_etfs.items():
+        if symbol not in etf_closes.columns:
+            continue
+        returns = R.period_returns(etf_closes[symbol].dropna(), PERIODS)
+        out.append({"sector": sector, "etf": symbol, "weight_pct": clean_float(weights.get(sector), 1),
+                    **{k: clean_float(v, 2) for k, v in returns.items()}})
+    return sorted(out, key=lambda r: -(r["weight_pct"] or 0))
+
+
+def breadth_history(closes: pd.DataFrame, sessions: int = HIGH_WINDOW) -> dict | None:
+    """Share of members above their 50- and 200-day averages, last year."""
+    if closes.shape[0] < 200 + 20:
+        return None
+    out = {}
+    for window in (50, 200):
+        sma = closes.rolling(window, min_periods=window).mean()
+        counted = closes.notna() & sma.notna()
+        share = ((closes > sma) & counted).sum(axis=1) / counted.sum(axis=1).replace(0, np.nan) * 100
+        out[window] = share.dropna().tail(sessions)
+    frame = pd.concat(out, axis=1).dropna()
+    return {"dates": [to_iso_date(d) for d in frame.index],
+            "above_50d": [clean_float(v, 1) for v in frame[50]],
+            "above_200d": [clean_float(v, 1) for v in frame[200]]}
+
+
+def rates_history(lines: dict[str, pd.Series], sessions: int = HIGH_WINDOW) -> dict | None:
+    """The 2Y, 10Y and 10Y real yield over the last year, on the curve's calendar."""
+    frame = pd.concat({k: v.dropna() for k, v in lines.items() if not v.dropna().empty}, axis=1)
+    if frame.empty:
+        return None
+    frame = frame.ffill(limit=3).tail(sessions)
+    return {"dates": [to_iso_date(d) for d in frame.index],
+            "series": {k: [clean_float(v, 3) for v in frame[k]] for k in frame.columns}}
+
+
 def print_row(series_id: str, label: str, how: str, unit: str, series: pd.Series) -> dict:
     clean = series.dropna().sort_index()
     shown = {"yoy": lambda s: P.transform(s, "yoy"), "diff": lambda s: s.diff(), "level": lambda s: s}[how](clean).dropna()
@@ -381,6 +431,16 @@ def build(ctx, *, inputs: dict[str, dict | None]) -> dict:
         "missing": sorted(name for name in INPUTS if inputs.get(name) is None),
         "stocks": stocks,
         "equal_vs_cap": equal_vs_cap(etf("RSP"), etf("SPY")),
+        "performance": performance({
+            "S&P 500": ctx.index_closes[specs["SPX"].symbol] if "SPX" in specs and specs["SPX"].symbol in ctx.index_closes.columns else pd.Series(dtype=float),
+            "Nasdaq 100": ctx.index_closes[specs["NDX"].symbol] if "NDX" in specs and specs["NDX"].symbol in ctx.index_closes.columns else pd.Series(dtype=float),
+            "Russell 2000": etf("IWM"),
+            "Equal-weight S&P": etf("RSP"),
+        }),
+        "sectors": sector_returns(ctx.etf_closes, ctx.sector_etfs, primary),
+        "breadth_history": breadth_history(ctx.closes[members]) if members else None,
+        "rates_history": rates_history({"UST 2Y": tenor("2Y"), "UST 10Y": tenor("10Y"),
+                                        "10Y real": fred_series("DFII10")}),
         "contributions": contributions(ctx.closes[members], primary) if members else None,
         "breadth": breadth_blocks,
         "rates": rates,

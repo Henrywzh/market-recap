@@ -134,3 +134,11 @@ def test_equal_vs_cap_rebases_the_ratio_and_reports_the_gap():
     out = overview.equal_vs_cap(equal, cap)
     assert out["ratio"][0] == pytest.approx(100.0) and out["ratio"][-1] < 100
     assert out["gap_pp"]["1M"] < 0
+
+
+def test_sector_returns_are_ordered_by_index_weight():
+    idx = pd.bdate_range("2026-01-01", periods=60)
+    etfs = pd.DataFrame({"XLK": np.linspace(100, 110, 60), "XLE": np.linspace(100, 95, 60)}, index=idx)
+    members = pd.DataFrame({"sector": ["Energy", "Information Technology"], "weight": [3.0, 30.0]})
+    rows = overview.sector_returns(etfs, {"Energy": "XLE", "Information Technology": "XLK"}, members)
+    assert [r["etf"] for r in rows] == ["XLK", "XLE"] and rows[0]["1M"] > 0 > rows[1]["1M"]

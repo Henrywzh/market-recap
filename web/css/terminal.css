@@ -754,6 +754,21 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 /* ---------- OVERVIEW ---------- */
 .ov-live { margin-bottom: 8px; }
 .ov-row { margin-bottom: 10px; align-items: start; }
+.ov-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: start; }
+.ov-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ov-col > .card { margin: 0; }
+@media (max-width: 1100px) { .ov-columns { grid-template-columns: minmax(0, 1fr); } }
+.chart.ov-perf { height: 300px; }
+.chart.ov-mid { height: 190px; }
+.ov-sub { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.ov-note { font-size: 11px; margin-top: 6px; }
+.ov-heat { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 3px; }
+@media (max-width: 600px) { .ov-heat { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.ov-heat-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 64px; padding: 4px; text-decoration: none; color: var(--text); border: 1px solid var(--border); }
+.ov-heat-tile:hover { outline: 1px solid var(--text); outline-offset: -1px; text-decoration: none; }
+.ov-heat-name { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
+.ov-heat-value { font-size: 13px; font-weight: 600; }
+.ov-heat-sector { font-size: 9px; color: var(--text); opacity: 0.75; text-align: center; line-height: 1.2; margin-top: 1px; }
 .ov-table td, .ov-table th { white-space: nowrap; }
 .ov-table td.ov-name, .ov-table th:first-child { text-align: left; }
 .ov-table td.ov-name { color: var(--text); }
@@ -767,7 +782,6 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .ov-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .ov-chips .mchip { margin: 0; font-size: 10.5px; line-height: 18px; padding: 0 6px; }
 .ov-chips-sectors { font-size: 11px; margin-top: 5px; }
-.chart.ov-mini { height: 130px; }
 .ov-fed { font-size: 11.5px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); line-height: 1.5; }
 .ov-risk { display: flex; gap: 8px; align-items: baseline; font-size: 11.5px; padding: 6px 10px; margin-bottom: 10px; border: 1px solid var(--border); background: var(--panel); text-decoration: none; color: inherit; }
 .ov-risk.down { border-color: color-mix(in srgb, var(--down) 60%, transparent); }
