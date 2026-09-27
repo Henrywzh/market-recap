@@ -128,6 +128,12 @@ def change_over(series: pd.Series, periods: int) -> pd.Series:
     return (clean - clean.shift(periods)).dropna()
 
 
+def pct_change_over(series: pd.Series, periods: int) -> pd.Series:
+    """Percent change over ``periods`` observations."""
+    clean = _clean(series)
+    return ((clean / clean.shift(periods) - 1) * 100).dropna()
+
+
 def smoothed(series: pd.Series, window: int) -> pd.Series:
     return _clean(series).rolling(window, min_periods=window).mean().dropna()
 

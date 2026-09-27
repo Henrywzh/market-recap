@@ -17,29 +17,33 @@ The views are grouped by the question they answer
 
 | Group | Views |
 |---|---|
-| **BRIEF** | **Brief** (the default view) · **Journal** |
-| **RISK** | **Risk** · **Priced path** · Rates & macro |
-| **MARKET** | Overview (MARKETS below) · Heat maps · Sectors (rotation and index/sector P/E) |
+| **MARKET** | **Overview** (the default view) · Indices · Heat maps · Sectors (rotation and index/sector P/E) |
+| **RISK** | **Risk** · Rates & macro · **Priced path** |
 | **NAMES** | Monitor · Screen (VALUATION & QUALITY) · **Ticker** · Cross-listing |
 | **CATALYSTS** | Calendar · Earnings |
 | **TOOLS** | Technicals · ETF X-Ray · DCF |
 
-**Brief** is the daily read: the live strip, the **systematic anchor** (the
-frozen v1 exposure control from quantamental-lab, re-implemented and checked
-to reproduce it exactly), the next meeting's pricing, the risk tiles in a
-tactical and a slow row, what changed this week, the next three sessions and
-the watchlist with its journal checkpoints. **Risk** is 30 series, one tile
-each -- level, 1Y and full-history percentile, week change, and a threshold
-written in `config/dashboard.toml` before the page drew it; never a score
-(sources and probes: `docs/risk_sources.md`). **Priced path** computes each
-FOMC meeting's probabilities from fed funds futures beside Kalshi and
-Polymarket, the path a week and a month ago, the SOFR path and every open
-Kalshi release ladder. **Journal** reviews each decision in
-`config/journal.toml` against what happened: names against the index over
-their horizon, overrides of the anchor against the anchor.
+**Overview** is the one-glance read: the live strip; stocks (S&P 500,
+Nasdaq 100, Russell 2000, equal-weight S&P) with 1D/1W/1M/YTD and the
+distance from the 52-week high; breadth (members up and down over a day, a
+week and a month, the share above the 50- and 200-day averages, new highs
+and lows); rates and credit (2Y, 10Y, 2s10s, real 10Y, HY and IG spreads)
+with the next FOMC's pricing; the dollar, crude, copper, gold and VIX; the
+latest macro prints; and the next three sessions. Each row carries six
+months of line. **Indices** is the former MARKETS page (charts, movers,
+sector tables). **Risk** opens with the **systematic anchor** (the frozen v1
+exposure control from quantamental-lab, re-implemented and checked to
+reproduce it exactly) and ten core series -- trend, breadth, VIX and its
+term structure, HY spread, real yield, the dollar, copper/oil and NFCI --
+each a tile with level, 1Y and full-history percentile, week change and a
+threshold written in `config/dashboard.toml` before the page drew it; never
+a score. The other series are folded beneath (sources and probes:
+`docs/risk_sources.md`). **Priced path** computes each FOMC meeting's
+probabilities from fed funds futures beside Kalshi and Polymarket, the path
+a week and a month ago, the SOFR path and every open Kalshi release ladder.
 
 **Ticker** (`#ticker/AAPL`) is one company on one page, reached from any
-ticker link: header readings, its journal thesis and checkpoints, price and
+ticker link: header readings, price and
 trend, P/E against its own ten years, valuation against the sector median,
 evidence (MONITOR's, plus insider buying from Form 4, short interest and
 rating changes for focus names), earnings reactions to the last eight 8-K

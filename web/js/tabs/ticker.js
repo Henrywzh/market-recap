@@ -144,24 +144,6 @@ function factsLine(ev) {
   return parts.length ? el('div', { class: 'note-text', text: parts.join(' · ') }) : null;
 }
 
-// The journal's decisions on this name: why it is followed and what would
-// falsify it (the checkpoints), newest first.
-function thesisCard(symbol, journal) {
-  const decisions = (journal?.decisions || []).filter((d) => d.ticker === symbol);
-  if (!decisions.length) return null;
-  const rows = decisions.map((d) => {
-    const r = d.review;
-    const status = r.matured ? (r.right === true ? 'RIGHT' : r.right === false ? 'WRONG' : '—') : `open → ${r.horizon_end}`;
-    return el('div', { class: 'thesis-entry' }, [
-      el('div', {}, [el('b', { text: `${d.date} · ${d.action.toUpperCase()}` }),
-        el('span', { class: 'dim', text: ` · ${r.excess_pct !== null && r.excess_pct !== undefined ? `${r.excess_pct > 0 ? '+' : ''}${num(r.excess_pct, 1)} pp vs index` : ''} · ${status}` })]),
-      el('div', { class: 'note-text', text: d.reason || '' }),
-      d.checkpoints?.length ? el('ul', { class: 'thesis-points' }, d.checkpoints.map((c) => el('li', { text: `${c.date} — ${c.text}` }))) : null,
-    ]);
-  });
-  return card('THESIS & CHECKPOINTS', el('a', { href: '#journal', class: 'dim', text: `${journal.example ? 'EXAMPLE LOG · ' : ''}journal ↗` }), rows);
-}
-
 function evidenceCard(mon, ev) {
   if (!mon && !(ev && ev.focus)) return card('EVIDENCE', null, gap('MONITOR does not cover this ticker in this build.'));
   const list = (items, cls) => (items && items.length
@@ -288,8 +270,8 @@ async function section(root, title, draw) {
 }
 
 export default async function renderTicker(root, valuation, _manifest, ctx) {
-  const [monitor, technicals, financials, dcf, crossListing, evidence, journal] = await Promise.all(
-    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'journal'].map((name) => optional(ctx, name)),
+  const [monitor, technicals, financials, dcf, crossListing, evidence] = await Promise.all(
+    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence'].map((name) => optional(ctx, name)),
   );
   const rows = valuation?.rows || [];
   const universe = new Map(rows.map((r) => [r.ticker, r.name]));
@@ -320,8 +302,6 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   const company = Boolean(row || mon);
   const note = company ? noteCard(mon) : null;
   if (note) root.append(note);
-  const thesis = thesisCard(symbol, journal);
-  if (thesis) root.append(thesis);
   if (!company) {
     root.append(el('div', { class: 'notice', text:
       `${symbol} has baked prices but no filings in this build (a fund, an index or a non-member), so only its technicals are shown. `

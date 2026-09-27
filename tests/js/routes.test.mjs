@@ -66,3 +66,10 @@ test('#sectors opens the rotation view, which now carries sector valuation', () 
   assert.deepEqual(R.parseHash('#sectors'), { id: 'rotation', arg: null });
   assert.equal(R.viewById('rotation').label, 'SECTORS');
 });
+
+test('the overview is the landing page, and MARKET comes before RISK', () => {
+  assert.equal(R.DEFAULT_VIEW, 'overview');
+  assert.deepEqual(R.GROUPS.map((g) => g.id).slice(0, 2), ['market', 'risk']);
+  assert.deepEqual(R.parseHash('#brief'), { id: 'overview', arg: null });
+  assert.deepEqual(R.parseHash('#journal'), { id: 'overview', arg: null });
+});

@@ -13,7 +13,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, brief, catalysts, cross_listing, dcf, earnings, evidence, journal, financials, fixed_income, heatmaps, macro, markets, monitor, priced, risk, rotation, valuation, xray
+from .panels import anchor, catalysts, cross_listing, dcf, earnings, evidence, financials, fixed_income, heatmaps, macro, markets, monitor, overview, priced, risk, rotation, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -40,10 +40,9 @@ PANELS = {
     "dcf": dcf.build,
     "evidence": evidence.build,
     "anchor": anchor.build,
-    "journal": journal.build,
     "monitor": monitor.build,
-    # BRIEF reads this session's other panels and so runs last.
-    "brief": brief.build,
+    # OVERVIEW reads this session's other panels and so runs last.
+    "overview": overview.build,
 }
 SEC_PANELS = {"financials", "valuation", "dcf"}
 
@@ -92,8 +91,8 @@ def run(
     # Also honor dependency order when the user passes --panels monitor valuation.
     if "monitor" in selected:
         selected = [name for name in selected if name != "monitor"] + ["monitor"]
-    if "brief" in selected:
-        selected = [name for name in selected if name != "brief"] + ["brief"]
+    if "overview" in selected:
+        selected = [name for name in selected if name != "overview"] + ["overview"]
 
     written: list[str] = []
     built: dict[str, dict] = {}
@@ -128,8 +127,8 @@ def run(
                 pending = ARTIFACT_DIR / "monitor.pending"
                 write_json(pending, payload)
                 pending.replace(ARTIFACT_DIR / "monitor.json")
-            elif name == "brief":
-                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in brief.INPUTS})
+            elif name == "overview":
+                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in overview.INPUTS})
             else:
                 payload = PANELS[name](ctx)
         except Exception as exc:

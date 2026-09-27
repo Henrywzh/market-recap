@@ -7,14 +7,13 @@
 // a link in a note never lands on an empty page.
 
 export const VIEWS = [
-  { id: 'brief', label: 'BRIEF', group: 'brief', artifact: 'brief', module: 'brief' },
-  { id: 'journal', label: 'JOURNAL', group: 'brief', artifact: 'journal', module: 'journal' },
-  { id: 'markets', label: 'OVERVIEW', group: 'market', artifact: 'markets', module: 'markets' },
+  { id: 'overview', label: 'OVERVIEW', group: 'market', artifact: 'overview', module: 'overview' },
+  { id: 'markets', label: 'INDICES', group: 'market', artifact: 'markets', module: 'markets' },
   { id: 'heatmaps', label: 'HEAT MAPS', group: 'market', artifact: 'heatmaps', module: 'heatmaps' },
   { id: 'rotation', label: 'SECTORS', group: 'market', artifact: 'rotation', module: 'rotation' },
-  { id: 'risk', label: 'RISK', group: 'risk', artifact: 'risk', module: 'risk' },
-  { id: 'priced', label: 'PRICED PATH', group: 'risk', artifact: 'priced', module: 'priced' },
+  { id: 'risk', label: 'RISK', group: 'risk', artifact: ['risk', 'anchor'], module: 'risk' },
   { id: 'rates', label: 'RATES & MACRO', group: 'risk', artifact: ['fixed_income', 'macro'], module: 'rates' },
+  { id: 'priced', label: 'PRICED PATH', group: 'risk', artifact: 'priced', module: 'priced' },
   { id: 'monitor', label: 'MONITOR', group: 'names', artifact: 'monitor', module: 'monitor' },
   { id: 'valuation', label: 'SCREEN', group: 'names', artifact: 'valuation', module: 'valuation', takesArg: true },
   { id: 'ticker', label: 'TICKER', group: 'names', artifact: 'valuation', module: 'ticker', takesArg: true },
@@ -26,11 +25,10 @@ export const VIEWS = [
   { id: 'dcf', label: 'DCF', group: 'tools', artifact: 'dcf', module: 'dcf', takesArg: true },
 ];
 
-// In the order of the trading loop: how much risk, where, who, when.
+// The market first, then how much risk it carries, then names and dates.
 export const GROUPS = [
-  { id: 'brief', label: 'BRIEF' },
-  { id: 'risk', label: 'RISK' },
   { id: 'market', label: 'MARKET' },
+  { id: 'risk', label: 'RISK' },
   { id: 'names', label: 'NAMES' },
   { id: 'catalysts', label: 'CATALYSTS' },
   { id: 'tools', label: 'TOOLS' },
@@ -42,9 +40,11 @@ export const ALIASES = {
   macro: 'rates',
   financials: 'ticker',
   sectors: 'rotation',
+  brief: 'overview',
+  journal: 'overview',
 };
 
-export const DEFAULT_VIEW = 'brief';
+export const DEFAULT_VIEW = 'overview';
 
 const TICKER_PATTERN = /^[A-Z0-9^][A-Z0-9.\-=]{0,14}$/;
 

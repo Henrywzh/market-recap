@@ -4,7 +4,6 @@ import pandas as pd
 import pytest
 
 from market_recap.compute import evidence as V
-from market_recap.compute import journal as J
 
 
 def _closes(values, start="2026-07-27"):
@@ -85,35 +84,3 @@ def test_short_and_ratings_become_evidence_lines_by_the_configured_rule():
     assert (ratings["upgrades"], ratings["downgrades"], ratings["target_cuts"]) == (0, 2, 1)
     for_, against = V.evidence_lines(None, short, ratings, {"short_change_pct": 20})
     assert for_ == [] and len(against) == 2
-
-
-def test_name_decisions_are_judged_against_the_index_over_the_horizon():
-    idx = _closes([100] * 60)
-    up = _closes([100] * 10 + [110] * 50)
-    entry = {"date": "2026-07-27", "ticker": "X", "action": "enter", "reason": "r", "horizon_days": 30}
-    review = J.review_name(entry, up, idx, date(2026, 9, 25), 60)
-    assert review["matured"] and review["excess_pct"] == pytest.approx(10.0) and review["right"] is True
-    passed = J.review_name({**entry, "action": "pass"}, up, idx, date(2026, 9, 25), 60)
-    assert passed["right"] is False
-    still_open = J.review_name({**entry, "horizon_days": 365}, up, idx, date(2026, 9, 25), 60)
-    assert still_open["matured"] is False and still_open["right"] is None
-
-
-def test_override_value_is_the_exposure_gap_times_the_index_return():
-    idx = _closes([100, 110, 121])       # +10% then +10%
-    anchor = _closes([0.5, 0.5, 0.5])
-    entry = {"date": "2026-07-27", "action": "override", "exposure": 1.0, "reason": "r", "horizon_days": 7}
-    review = J.review_override(entry, idx, anchor, date(2026, 9, 25), 60)
-    # (1.0 - 0.5) x (10% + 10%) = 10% = 1000 bp
-    assert review["value_bp"] == pytest.approx(1000.0) and review["right"] is True
-    assert review["anchor_exposure"] == 0.5
-
-
-def test_validation_and_checkpoints():
-    assert J.validate({"date": "2026-09-01", "action": "buy", "reason": "x"}, 0)
-    assert J.validate({"date": "2026-09-01", "action": "override", "reason": "x"}, 0)
-    assert J.validate({"date": "2026-09-01", "action": "enter", "ticker": "X", "reason": "x"}, 0) == []
-    points = J.checkpoints([{"date": "2026-09-01", "ticker": "X", "action": "enter", "checkpoints": [
-        {"date": "2026-09-20", "text": "due"}, {"date": "2026-10-20", "text": "ahead"}, {"date": "2026-08-01", "text": "old"}]}],
-        date(2026, 9, 25))
-    assert [(p["text"], p["due"]) for p in points] == [("due", True), ("ahead", False)]

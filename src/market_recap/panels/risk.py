@@ -14,6 +14,7 @@ from typing import Callable
 
 import pandas as pd
 
+from ..compute import anchor as A
 from ..compute import risk as R
 from ..sources import cboe, cftc, fred, yahoo
 from ..util import SourceRecord, describe_error, to_iso_date
@@ -34,7 +35,8 @@ FRED_SERIES = {
     "DFII10": "10-year TIPS real yield",
     "OVXCLS": "Cboe crude oil volatility (OVX)",
 }
-YAHOO_SYMBOLS = ("^MOVE", "HYG", "IEF", "LQD", "^GSPC")
+YAHOO_SYMBOLS = ("^MOVE", "HYG", "IEF", "LQD", "^GSPC", "DX-Y.NYB", "HG=F", "CL=F")
+DOLLAR_WINDOW = 63
 CFTC_CODES = {"cftc_es": "13874A", "cftc_nq": "209742", "cftc_zn": "043602", "cftc_vx": "1170E1"}
 PUT_CALL_FIELD = "TOTAL PUT/CALL RATIO"
 PUT_CALL_BUDGET_SECONDS = 240
@@ -86,7 +88,7 @@ class _Inputs:
         missing = [s for s in YAHOO_SYMBOLS if s not in self.yahoo.columns]
         for symbol in missing:
             self.failed[f"yahoo {symbol}"] = "no closes returned"
-        self._log("yahoo_risk", "Yahoo: MOVE, HYG, IEF, LQD, S&P 500 closes", "https://finance.yahoo.com",
+        self._log("yahoo_risk", "Yahoo: MOVE, HYG, IEF, LQD, S&P 500, dollar index, copper and crude closes", "https://finance.yahoo.com",
                   [self.yahoo.index[-1]] if not self.yahoo.empty else [], len(YAHOO_SYMBOLS) - len(missing), len(YAHOO_SYMBOLS))
 
         try:
@@ -240,7 +242,17 @@ def _builders(inputs: _Inputs) -> dict[str, Callable[[], pd.Series]]:
         "real_10y": lambda: get(f, "DFII10"),
         **{key: (lambda code=code: inputs.cftc_net(code)) for key, code in CFTC_CODES.items()},
         "put_call": lambda: R.smoothed(inputs.put_call, R.PUT_CALL_SMOOTHING),
+        "dxy_3m": lambda: R.pct_change_over(inputs.yahoo_close("DX-Y.NYB"), DOLLAR_WINDOW),
+        # The anchor's own gate input, so the tile and the anchor cannot disagree.
+        "copper_oil": lambda: copper_oil_z(inputs.yahoo_close("HG=F"), inputs.yahoo_close("CL=F")),
     }
+
+
+def copper_oil_z(copper: pd.Series, oil: pd.Series) -> pd.Series:
+    both = pd.concat([copper, oil], axis=1).dropna()
+    if both.empty:
+        return pd.Series(dtype=float)
+    return A.copper_oil(both.iloc[:, 0], both.iloc[:, 1], both.index, lag=0)["z"].dropna()
 
 
 # Which raw inputs each tile rests on, for its source line and back-calculation note.
@@ -256,6 +268,7 @@ TILE_SOURCES = {
     "net_liquidity": ["FRED WALCL, WTREGEN, RRPONTSYD"], "nfci": ["FRED NFCI"], "real_10y": ["FRED DFII10"],
     "cftc_es": ["CFTC TFF 13874A"], "cftc_nq": ["CFTC TFF 209742"], "cftc_zn": ["CFTC TFF 043602"],
     "cftc_vx": ["CFTC TFF 1170E1"], "put_call": ["Cboe daily put/call"],
+    "dxy_3m": ["Yahoo DX-Y.NYB"], "copper_oil": ["Yahoo HG=F, CL=F"],
 }
 TILE_BACKCALC = {"vix_term": "VIX3M", "vix9d_term": "VIX9D", "vvix": "VVIX", "skew": "SKEW", "cor1m": "COR1M"}
 WEEKLY_TILES = {"net_liquidity", "nfci", "cftc_es", "cftc_nq", "cftc_zn", "cftc_vx"}
@@ -284,6 +297,7 @@ def build(ctx) -> dict:
             backcalc = TILE_BACKCALC.get(key)
             tiles.append({
                 "key": key,
+                "core": bool(spec.get("core")),
                 "label": spec["label"],
                 "unit": spec.get("unit"),
                 "risk_when": spec["risk_when"],

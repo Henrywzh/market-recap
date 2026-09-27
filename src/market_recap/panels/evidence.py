@@ -5,8 +5,8 @@ Two reaches, because the sources cost differently:
 - every index member: past earnings reactions, from the SEC submissions
   indexes the build already reads (8-K Item 2.02 acceptance times) and the
   members' own closes -- no extra requests;
-- focus names (the watchlist, the MONITOR queue, names in the journal and the
-  largest index weights): insider transactions (Form 4), short interest and
+- focus names (the watchlist, the MONITOR queue and the largest index
+  weights): insider transactions (Form 4), short interest and
   rating changes, which cost a request or more per name, and the implied
   move and IV from the options snapshot, which records about 50 names.
 
@@ -23,7 +23,7 @@ import time
 import pandas as pd
 
 from ..compute import evidence as V
-from ..config import ARTIFACT_DIR, REPO_ROOT
+from ..config import ARTIFACT_DIR
 from ..snapshots.options import build_universe as snapshot_universe
 from ..sources import nasdaq, ratings, sec, snapshot_store
 from ..util import SourceRecord, describe_error
@@ -33,7 +33,7 @@ REACTIONS = 8
 
 
 def _focus(ctx, settings: dict) -> list[str]:
-    """Watchlist, journal names, the largest weights, and MONITOR candidates
+    """Watchlist, the largest weights, and MONITOR candidates
     chosen by the options snapshot's own rule (reporting soon first, then the
     furthest behind peers, up to ``monitor_max``) so the two universes agree."""
     names = {str(s["ticker"]).upper() for s in ctx.config.get("watchlist") or []}
@@ -45,13 +45,6 @@ def _focus(ctx, settings: dict) -> list[str]:
                                       monitor.get("rows") or [], date.fromisoformat(ctx.as_of))
         names |= set(chosen)
     except (OSError, ValueError):
-        pass
-    try:
-        import tomllib
-
-        journal = tomllib.loads((REPO_ROOT / "config" / "journal.toml").read_text())
-        names |= {str(e["ticker"]).upper() for e in journal.get("decision") or [] if e.get("ticker") and e["ticker"] != "SPX"}
-    except (OSError, ValueError, KeyError):
         pass
     holdings = ctx.holdings
     if not holdings.empty:
@@ -192,7 +185,7 @@ def build(ctx) -> dict:
     return {
         "as_of": ctx.as_of,
         "focus": sorted(focus),
-        "focus_rule": f"watchlist, MONITOR queue, journal names and the {int(settings.get('top_weights', 30))} largest index weights",
+        "focus_rule": f"watchlist, MONITOR queue and the {int(settings.get('top_weights', 30))} largest index weights",
         "options_snapshot": snapshot[0].isoformat() if snapshot else None,
         "iv_percentile_min_days": min_days,
         "names": names,

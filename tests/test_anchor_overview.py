@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from market_recap.compute import anchor as A
-from market_recap.panels import brief
+from market_recap.panels import overview
 
 
 def _close(values, start="2020-01-01"):
@@ -59,7 +59,7 @@ def test_simulation_applies_the_ladder_from_the_prior_close():
     assert path["exposure"].iloc[1] == pytest.approx(1.0)
 
 
-def test_next_72h_keeps_releases_and_relevant_earnings_only():
+def test_ahead_keeps_releases_and_relevant_earnings_only():
     catalysts = {"events": [
         {"lane": "macro", "date": "2026-09-29", "title": "JOLTS", "importance": "medium", "event_type": "economic_release"},
         {"lane": "macro", "date": "2026-09-29", "title": "Speech", "importance": "medium", "event_type": "central_bank"},
@@ -68,20 +68,49 @@ def test_next_72h_keeps_releases_and_relevant_earnings_only():
         {"lane": "single_name", "date": "2026-09-30", "symbol": "SMALL", "name": "Small Co", "watchlist": False},
         {"lane": "single_name", "date": "2026-09-30", "symbol": "WATCH", "name": "Watched", "watchlist": True},
     ]}
-    items = brief._next_72h(catalysts, watch=set(), top={"MU"}, as_of="2026-09-25")
+    items = overview.ahead(catalysts, top={"MU"}, as_of="2026-09-25")
     titles = [i.get("title") if i["kind"] == "macro" else i["symbol"] for i in items]
     assert titles == ["JOLTS", "MU", "WATCH"]
 
 
-def test_brief_marks_inputs_that_did_not_build_this_session():
-    class Ctx:
-        config = {"brief": {"tactical": ["vix"], "slow": []}}
-        as_of = "2026-09-25"
-        holdings = pd.DataFrame(columns=["yahoo_symbol", "weight"])
+def test_stock_row_reads_returns_and_distance_from_the_52_week_high():
+    close = _close(list(np.linspace(100, 120, 300)) + [114.0])
+    row = overview.stock_row("S&P 500", "SPX", close)
+    assert row["from_high_pct"] == pytest.approx(-5.0)
+    assert row["1D"] == pytest.approx(-5.0)
+    assert row["sessions_since_high"] == 1
+    assert 2 <= len(row["spark"]) <= overview.SPARK_POINTS
 
-    risk = {"sections": [{"key": "volatility", "horizon": "tactical", "tiles": [{"key": "vix", "label": "VIX", "value": 15.0}]}],
-            "breaches": [], "crossed": []}
-    out = brief.build(Ctx(), inputs={"risk": risk})
-    assert "priced" in out["missing"] and "risk" not in out["missing"]
-    assert out["risk"]["tactical"][0]["value"] == 15.0
-    assert out["priced"] is None and out["anchor"] is None
+
+def test_breadth_counts_up_and_down_names_and_new_highs():
+    idx = pd.bdate_range("2025-01-01", periods=300)
+    rising = np.linspace(50, 100, 300)
+    closes = pd.DataFrame({
+        "UP": rising,                                          # at a 52-week high
+        "DOWN": rising[::-1],                                  # at a 52-week low
+        "FLATUP": np.r_[np.full(299, 80.0), 81.0],             # up today only
+    }, index=idx)
+    out = overview.breadth(closes)
+    assert out["1D"] == {"up": 2, "down": 1}
+    assert out["1M"] == {"up": 2, "down": 1}
+    assert (out["new_highs"], out["new_lows"]) == (2, 1)
+    assert out["above_200d"] == pytest.approx(200 / 3, abs=0.1)
+
+
+def test_rates_change_in_basis_points_and_spreads_show_in_bp():
+    idx = pd.bdate_range("2026-08-01", periods=40)
+    hy = pd.Series(np.r_[np.full(39, 3.00), 3.10], index=idx)       # FRED serves percent
+    row = overview.rate_row("BAMLH0A0HYM2", "High yield OAS", "bp", hy)
+    assert row["value"] == pytest.approx(310.0)
+    assert row["change_1d_bp"] == pytest.approx(10.0)
+    assert row["change_1m_bp"] == pytest.approx(10.0)
+
+
+def test_risk_line_lists_only_core_series_past_their_line():
+    risk = {"sections": [{"key": "credit", "horizon": "tactical", "tiles": [
+        {"key": "hy_oas", "label": "HY OAS", "core": True, "breach": False, "value": 280, "unit": "bp"},
+        {"key": "ccc_oas", "label": "CCC OAS", "core": False, "breach": True, "value": 1112, "unit": "bp"},
+        {"key": "real_10y", "label": "10Y REAL", "core": True, "breach": True, "value": 2.6, "unit": "pct"},
+    ]}]}
+    line = overview.risk_line(risk)
+    assert line["core"] == 2 and [p["label"] for p in line["past"]] == ["10Y REAL"]

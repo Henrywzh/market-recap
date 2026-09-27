@@ -751,36 +751,37 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .pp-release-foot { font-size: 9.5px; }
 .pp-anchors { border: none; }
 
-/* ---------- BRIEF ---------- */
-.brief-live { margin-bottom: 10px; }
-.brief-top { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); margin-bottom: 10px; }
-@media (max-width: 1100px) { .brief-top { grid-template-columns: minmax(0, 1fr); } }
-.brief-anchor { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
-.brief-anchor-value { font-size: 30px; font-weight: 700; color: var(--accent); line-height: 1.1; }
-.brief-anchor-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.brief-anchor-chips .mchip { margin: 0; font-size: 10px; line-height: 17px; }
-.brief-priced { border: none; }
-.stat-link { text-decoration: none; color: inherit; display: block; }
-.stat-link:hover { background: color-mix(in srgb, var(--border) 40%, transparent); text-decoration: none; }
-.brief-risk-row { margin-bottom: 6px; }
-.brief-risk-label { font-size: 10px; letter-spacing: 0.1em; color: var(--text-dim); margin: 2px 0 4px; }
-.brief-risk-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); margin-bottom: 4px; }
-.brief-bottom { margin: 10px 0; align-items: start; }
-.brief-block { margin-bottom: 10px; }
-.brief-block-title { font-size: 10px; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 4px; }
-.brief-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.brief-chips .mchip { margin: 0; font-size: 10.5px; line-height: 18px; padding: 0 6px; }
-.brief-event { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; align-items: baseline; }
-.brief-event:last-child { border-bottom: none; }
-.brief-event-figure { font-size: 11px; text-align: right; }
-@media (max-width: 600px) { .brief-event { grid-template-columns: minmax(0, 1fr); gap: 0; } .brief-event-figure { text-align: left; } }
-.brief-list td { white-space: nowrap; }
+/* ---------- OVERVIEW ---------- */
+.ov-live { margin-bottom: 8px; }
+.ov-row { margin-bottom: 10px; align-items: start; }
+.ov-table td, .ov-table th { white-space: nowrap; }
+.ov-table td.ov-name, .ov-table th:first-child { text-align: left; }
+.ov-table td.ov-name { color: var(--text); }
+.ov-spark { width: 84px; padding-top: 2px; padding-bottom: 0; }
+.ov-spark .spark { display: block; width: 80px; height: 22px; color: var(--text-dim); margin-left: auto; }
+.ov-ud { font-variant-numeric: tabular-nums; }
+.ov-bar { display: inline-block; width: 44px; height: 5px; margin-left: 8px; vertical-align: middle; background: color-mix(in srgb, var(--down) 55%, transparent); }
+.ov-bar-up { display: block; height: 100%; background: var(--up); }
+.ov-fed { font-size: 11.5px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); line-height: 1.5; }
+.ov-risk { display: flex; gap: 8px; align-items: baseline; font-size: 11.5px; padding: 6px 10px; margin-bottom: 10px; border: 1px solid var(--border); background: var(--panel); text-decoration: none; color: inherit; }
+.ov-risk.down { border-color: color-mix(in srgb, var(--down) 60%, transparent); }
+.ov-risk:hover { border-color: var(--border-strong); text-decoration: none; }
+.ov-risk-label { font-size: 10px; letter-spacing: 0.1em; color: var(--text-dim); }
+.ov-event { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; align-items: baseline; }
+.ov-event:last-child { border-bottom: none; }
+.ov-event-figure { font-size: 11px; text-align: right; }
+@media (max-width: 600px) { .ov-event { grid-template-columns: minmax(0, 1fr); gap: 0; } .ov-event-figure { text-align: left; } }
 
-/* ---------- JOURNAL ---------- */
-.journal-top { margin: 10px 0; align-items: start; }
-.journal-table td { vertical-align: top; }
-.journal-action { font-size: 10px; letter-spacing: 0.08em; }
-.journal-due .brief-event-when { color: var(--accent); }
+/* RISK: the systematic anchor and the folded full list. */
+.risk-top { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); margin-bottom: 10px; align-items: start; }
+@media (max-width: 1100px) { .risk-top { grid-template-columns: minmax(0, 1fr); } }
+.anchor-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.anchor-value { font-size: 30px; font-weight: 700; color: var(--accent); line-height: 1.1; }
+.anchor-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.anchor-chips .mchip { margin: 0; font-size: 10px; line-height: 17px; }
+.risk-more { margin-top: 14px; }
+.risk-more > summary { cursor: pointer; font-size: 11px; letter-spacing: 0.08em; color: var(--text-dim); padding: 8px 0; list-style: none; }
+.risk-more > summary::-webkit-details-marker { display: none; }
+.risk-more > summary::before { content: '▸ '; }
+.risk-more[open] > summary::before { content: '▾ '; }
 .ticker-eo-stats { margin-bottom: 8px; }
-.thesis-points { margin: 4px 0 0; padding-left: 16px; }
-.journal-table td.wrap-cell, .journal-table th:nth-child(4) { text-align: left; }

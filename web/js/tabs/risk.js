@@ -1,7 +1,8 @@
-// RISK: how much risk the market is pricing. One tile per series -- level,
-// where it sits in its year and in its whole history, the week's change, and
-// whether it is past the line written in config beforehand. No score. Tactical
-// (1-4 weeks) and slow (months) sections are kept apart.
+// RISK: how much risk the market is pricing. The systematic anchor and ten
+// core series first; every other series folded beneath, by group. One tile
+// per series -- level, where it sits in its year and in its whole history,
+// the week's change, and whether it is past the line written in config
+// beforehand. No score.
 
 import { el, card, num, metaRow, DASH } from '../fmt.js';
 import { render } from '../charts.js';
@@ -32,6 +33,12 @@ function formatChange(value, unit) {
   const sign = value > 0 ? '+' : '';
   const digits = unit === 'bp' || unit === 'usd_bn' ? 0 : unit === 'ratio' || unit === 'corr' || unit === 'index' ? 2 : 1;
   return `${sign}${num(value, digits)}`;
+}
+
+// The long percentile names its span: ICE spreads reach back three years,
+// SPX a century, and "ALL" alone read the same for both.
+function sinceLabel(tile) {
+  return tile.since ? `${tile.since.slice(0, 4)}–` : 'ALL';
 }
 
 function ordinal(n) {
@@ -66,8 +73,8 @@ export function tileNode(tile, { asOf, onPick = null, selected = false, compact 
       threshold: tile.risk_when === 'extreme' ? null : tile.threshold,
       color: state === 'breach' ? 'var(--down)' : 'var(--text-dim)',
     }),
-    el('div', { class: 'risk-tile-meta', title: '1Y = percentile over the last year; ALL = over all history the source serves' }, [
-      el('span', { text: `1Y ${ordinal(tile.pct_1y)} · ALL ${ordinal(tile.pct_long)}` }),
+    el('div', { class: 'risk-tile-meta', title: 'Percentile over the last year, and over all the history the source serves' }, [
+      el('span', { text: `1Y ${ordinal(tile.pct_1y)} · ${sinceLabel(tile)} ${ordinal(tile.pct_long)}` }),
     ]),
     el('div', { class: 'risk-tile-meta dim' }, [el('span', { text: `1W ${formatChange(tile.change_1w, tile.unit)}` })]),
     compact ? null : el('div', { class: 'risk-tile-foot dim' }, [
@@ -163,44 +170,99 @@ function sectionCard(section, data) {
   return card(section.label, el('span', { class: breached ? 'down' : 'dim', text: breached ? `${breached} of ${tiles.length} past threshold` : `${tiles.length} series · none past threshold` }), body);
 }
 
-function summary(data) {
-  const chips = (items, cls) => items.map((b) => el('span', { class: `mchip ${cls}`, text: `${b.label} ${formatValue(b.value, b.unit)}` }));
-  const byHorizon = (h) => data.breaches.filter((b) => b.horizon === h);
+const pctOf = (v) => (present(v) ? `${Math.round(v * 100)}%` : DASH);
+
+function anchorCard(a) {
+  if (!a || a.unavailable) return card('SYSTEMATIC ANCHOR', null, el('div', { class: 'gap', text: 'The anchor was not built for this session.' }));
+  const c = a.components;
+  const chip = (text, cls = '') => el('span', { class: `mchip ${cls}`, text });
+  const chartNode = el('div', { class: 'chart short' });
+  const keep = 252;
+  const h = { dates: a.history.dates.slice(-keep), exposure: a.history.exposure.slice(-keep), spy: a.history.spy.slice(-keep) };
+  requestAnimationFrame(() => render(chartNode, (option, p) => ({
+    ...option,
+    grid: { left: 36, right: 40, top: 8, bottom: 22 },
+    tooltip: { ...option.tooltip, trigger: 'axis' },
+    xAxis: { ...option.xAxis, data: h.dates },
+    yAxis: [
+      { ...option.yAxis, min: 0, max: 1, axisLabel: { color: p.dim, fontSize: 9, formatter: (v) => `${Math.round(v * 100)}%` } },
+      { ...option.yAxis, position: 'right', splitLine: { show: false }, axisLabel: { color: p.faint, fontSize: 9 } },
+    ],
+    series: [
+      { name: 'anchor exposure', type: 'line', step: 'end', data: h.exposure, showSymbol: false, areaStyle: { opacity: 0.12 }, lineStyle: { width: 1.4, color: p.accent }, itemStyle: { color: p.accent } },
+      { name: 'SPY', type: 'line', yAxisIndex: 1, data: h.spy, showSymbol: false, lineStyle: { width: 1, color: p.faint } },
+    ],
+  })));
+  const last = a.changes[a.changes.length - 1];
+  return card('SYSTEMATIC ANCHOR · EQUITY EXPOSURE', el('span', { class: 'dim', text: 'quantamental-lab frozen v1' }), [
+    el('div', { class: 'anchor-head' }, [
+      el('span', { class: 'anchor-value', text: pctOf(a.held) }),
+      el('span', { class: 'dim', text: `held · next session ${pctOf(a.next)}${last ? ` · since ${last.date}` : ''}` }),
+    ]),
+    el('div', { class: 'anchor-chips' }, [
+      chip(`VOL ${present(c.realised_vol) ? num(c.realised_vol * 100, 1) : DASH}% → ×${num(c.vol_scaled, 2)}`),
+      chip(`TREND ${c.trend_on ? 'ON · SPY > 200D' : 'OFF · cap 50%'}`, c.trend_on ? 'up' : 'down'),
+      chip(`COPPER/OIL ${c.copper_oil_on === false ? `OFF · z ${num(c.copper_oil_z, 2)} · cap 50%` : c.copper_oil_on ? `ON · z ${num(c.copper_oil_z, 2)}` : DASH}`, c.copper_oil_on === false ? 'down' : 'up'),
+      chip(`DRAWDOWN LADDER ×${num(c.ladder, 1)}`, c.ladder < 1 ? 'down' : ''),
+    ]),
+    chartNode,
+  ]);
+}
+
+function summary(data, core) {
+  const past = core.filter((t) => t.breach);
+  const others = data.sections.flatMap((s) => s.tiles).filter((t) => !t.core);
   const stat = (label, value, note, cls = '') => el('div', { class: 'stat' }, [
     el('div', { class: 'stat-label', text: label }),
     el('div', { class: `stat-value ${cls}`, text: value }),
     note ? el('div', { class: 'stat-note' }, note) : null,
   ]);
-  const total = data.sections.reduce((n, s) => n + s.tiles.length, 0);
+  const changed = data.crossed.filter((b) => core.some((t) => t.key === b.key));
   return el('div', { class: 'stat-strip risk-summary' }, [
-    stat('PAST THRESHOLD · TACTICAL', String(byHorizon('tactical').length), chips(byHorizon('tactical'), 'down'), byHorizon('tactical').length ? 'down' : ''),
-    stat('PAST THRESHOLD · SLOW', String(byHorizon('slow').length), chips(byHorizon('slow'), 'down'), byHorizon('slow').length ? 'down' : ''),
-    stat('CHANGED THIS WEEK', String(data.crossed.length),
-      data.crossed.map((b) => el('span', { class: `mchip ${b.crossed === 'into' ? 'down' : 'up'}`, text: `${b.label} ${b.crossed === 'into' ? '↑ in' : '↓ out'}` }))),
-    stat('SERIES', String(total), [`${Object.keys(data.failed || {}).length} source(s) failed`]),
+    stat('CORE PAST THEIR LINE', `${past.length} of ${core.length}`, past.map((t) => el('span', { class: 'mchip down', text: `${t.label} ${formatValue(t.value, t.unit)}` })), past.length ? 'down' : ''),
+    stat('CHANGED THIS WEEK', String(changed.length),
+      changed.map((b) => el('span', { class: `mchip ${b.crossed === 'into' ? 'down' : 'up'}`, text: `${b.label} ${b.crossed === 'into' ? '↑ in' : '↓ out'}` }))),
+    stat('OTHER SERIES', `${others.filter((t) => t.breach).length} of ${others.length}`, ['past their line · listed below']),
   ]);
 }
 
 function methodNotes() {
   return [
-    'Each tile is one series. Level; 1Y = its percentile over the last 365 days; ALL = its percentile over all the history the source serves (the start is in the chart title); 1W = change over a week. Nothing is combined into a score.',
-    'Thresholds were written in config/dashboard.toml on 2026-09-26, before this page drew any series, and are not fitted to it. A red tile is past its line; NEW means it was not a week ago, CLEARED that it was. Positioning and the put/call ratio are read at extremes: the tails of their own history (≤5th or ≥95th percentile), not a level.',
-    'Back-calculated history: VIX3M, VIX9D, VIX6M, VIX1Y, VVIX, SKEW and COR1M were launched after the first row of their files; the earlier part is Cboe\'s back-calculation from the option prices of the day, not a value published then. Their ALL percentiles lean on that stretch; each tile says so on hover.',
-    'Credit: FRED now serves ICE BofA spreads (HY, IG, CCC) for the last three years only, so their ALL percentile spans those years. Moody\'s Baa − 10Y runs to 1986 and is the long credit series.',
-    'CFTC positions are as of Tuesday and published the following Friday; a tile\'s date is the position date. Leveraged-money net is long − short as a share of open interest; contract codes are used so the history runs through CFTC\'s 2022 renaming.',
-    'Realised correlation and dispersion come from the S&P 500 members\' own closes and today\'s SPY weights over 21 sessions: correlation = (σI² − Σw²σ²) / ((Σwσ)² − Σw²σ²), dispersion = √(Σwσ² − σI²), annualised. Members are today\'s.',
-    'Not included: AAII sentiment (the file refuses non-browser clients), NAAIM (no machine-readable file), CNN Fear & Greed (a composite score, and the endpoint refuses non-browser clients). docs/risk_sources.md has each probe.',
+    'The anchor is quantamental-lab\'s frozen v1 control, re-implemented here and checked to reproduce its daily exposure exactly over 1993–2026: vol-targeted to 12% on 63-day realised volatility, capped at 50% while SPY is not above its 200-day average or while the copper/oil gate is off (z below −0.25, back on above +0.25), and stepped down to ×0.6 / ×0.3 when its own drawdown passes −8% / −12%. Its recession gate is that repository\'s model output and is not ported (treated as neutral). A reference, not a recommendation.',
+    'Core series: trend and breadth (SPX against its 200-day average and its 1-year high, the share of members above their 200-day average), volatility (VIX and VIX/VIX3M), credit (high-yield OAS), rates (10-year real yield), the dollar, copper/oil and financial conditions (NFCI). Everything else is folded under ALL SERIES: most of it restates one of these.',
+    'Each tile is one series. 1Y = its percentile over the last 365 days; 1990– = over all the history the source serves, from the year shown; 1W = change over a week. Nothing is combined into a score.',
+    'Thresholds were written in config/dashboard.toml before this page drew any series, and are not fitted to it. A red tile is past its line; NEW means it was not a week ago, CLEARED that it was. Positioning and the put/call ratio are read at extremes: the tails of their own history (≤5th or ≥95th percentile).',
+    'Back-calculated history: VIX3M, VIX9D, VIX6M, VIX1Y, VVIX, SKEW and COR1M were launched after the first row of their files; the earlier part is Cboe\'s back-calculation. ICE BofA spreads (HY, IG, CCC) come from FRED for the last three years only; Moody\'s Baa − 10Y runs to 1986.',
+    'CFTC positions are as of Tuesday and published the following Friday. Realised correlation and dispersion come from the S&P 500 members\' own closes and today\'s SPY weights over 21 sessions.',
+    'Not included: AAII sentiment, NAAIM and CNN Fear & Greed (docs/risk_sources.md has each probe).',
   ];
 }
 
-export default function renderRisk(root, data) {
-  root.append(metaRow(`RISK · ${data.sections.reduce((n, s) => n + s.tiles.length, 0)} SERIES · AS OF ${data.as_of} · CLICK A TILE FOR ITS HISTORY`, methodNotes()));
-  root.append(summary(data));
-  for (const [horizon, label] of HORIZONS) {
-    const sections = data.sections.filter((s) => s.horizon === horizon);
-    if (!sections.length) continue;
-    root.append(el('h2', { class: 'section-title risk-horizon', text: label }));
-    const wrap = el('div', { class: 'grid two risk-sections' }, sections.map((s) => sectionCard(s, data)));
-    root.append(wrap);
-  }
+export default function renderRisk(root, payload) {
+  const [data, anchor] = Array.isArray(payload) ? payload : [payload, null];
+  if (!data || data.unavailable) throw new Error(data?.unavailable || 'risk artifact missing');
+  const core = data.sections.flatMap((s) => s.tiles.map((t) => ({ ...t, horizon: s.horizon }))).filter((t) => t.core);
+  const total = data.sections.reduce((n, s) => n + s.tiles.length, 0);
+  root.append(metaRow(`RISK · ANCHOR AND ${core.length} CORE SERIES · AS OF ${data.as_of} · CLICK A TILE FOR ITS HISTORY`, methodNotes()));
+  root.append(summary(data, core));
+  root.append(el('div', { class: 'grid risk-top' }, [
+    anchorCard(anchor),
+    sectionCard({ key: 'core', label: 'CORE SERIES', tiles: core }, data),
+  ]));
+
+  // Everything else, drawn only when opened: a chart laid out while folded
+  // has no width.
+  const more = el('details', { class: 'risk-more' }, [el('summary', { text: `ALL ${total} SERIES BY GROUP` })]);
+  let drawn = false;
+  more.addEventListener('toggle', () => {
+    if (!more.open || drawn) return;
+    drawn = true;
+    for (const [horizon, label] of HORIZONS) {
+      const sections = data.sections.filter((s) => s.horizon === horizon);
+      if (!sections.length) continue;
+      more.append(el('h2', { class: 'section-title risk-horizon', text: label }));
+      more.append(el('div', { class: 'grid two risk-sections' }, sections.map((s) => sectionCard(s, data))));
+    }
+  });
+  root.append(more);
 }

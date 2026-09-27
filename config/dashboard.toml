@@ -692,12 +692,17 @@ key = "liquidity"
 label = "LIQUIDITY & CONDITIONS"
 horizon = "slow"
 [[risk.sections]]
+key = "growth"
+label = "GROWTH & DOLLAR"
+horizon = "slow"
+[[risk.sections]]
 key = "positioning"
 label = "POSITIONING (READ AT EXTREMES)"
 horizon = "slow"
 
 [[risk.tiles]]
 key = "vix"
+core = true
 section = "volatility"
 label = "VIX"
 unit = "pts"
@@ -705,6 +710,7 @@ risk_when = "high"
 threshold = 25
 [[risk.tiles]]
 key = "vix_term"
+core = true
 section = "volatility"
 label = "VIX / VIX3M"
 unit = "ratio"
@@ -796,6 +802,7 @@ threshold = 300
 note = "Moody's Baa yield over the 10-year Treasury; history to 1986."
 [[risk.tiles]]
 key = "hy_oas"
+core = true
 section = "credit"
 label = "HY OAS"
 unit = "bp"
@@ -845,6 +852,7 @@ note = "How far apart the members move, in vol points; read at either tail."
 
 [[risk.tiles]]
 key = "spx_vs_200d"
+core = true
 section = "trend"
 label = "SPX VS 200D"
 unit = "pct"
@@ -852,6 +860,7 @@ risk_when = "low"
 threshold = 0
 [[risk.tiles]]
 key = "spx_drawdown"
+core = true
 section = "trend"
 label = "SPX FROM 1Y HIGH"
 unit = "pct"
@@ -859,6 +868,7 @@ risk_when = "low"
 threshold = -10
 [[risk.tiles]]
 key = "breadth_200d"
+core = true
 section = "trend"
 label = "% ABOVE 200D"
 unit = "pct"
@@ -876,6 +886,7 @@ threshold = -300
 note = "Fed total assets − Treasury General Account − reverse repo, change over 13 weeks."
 [[risk.tiles]]
 key = "nfci"
+core = true
 section = "liquidity"
 label = "NFCI"
 unit = "index"
@@ -884,11 +895,31 @@ threshold = 0
 note = "Chicago Fed National Financial Conditions Index; above 0 is tighter than average."
 [[risk.tiles]]
 key = "real_10y"
+core = true
 section = "liquidity"
 label = "10Y REAL YIELD"
 unit = "pct"
 risk_when = "high"
 threshold = 2.5
+
+[[risk.tiles]]
+key = "copper_oil"
+core = true
+section = "growth"
+label = "COPPER/OIL Z (1Y)"
+unit = "index"
+risk_when = "low"
+threshold = -0.25
+note = "Z-score of log(copper/oil) against its prior 252 sessions: the frozen v1 anchor's gate, which turns off below −0.25 and back on only above +0.25."
+[[risk.tiles]]
+key = "dxy_3m"
+core = true
+section = "growth"
+label = "DOLLAR (DXY) 3M"
+unit = "pct"
+risk_when = "high"
+threshold = 5
+note = "Change in the dollar index over 63 sessions; a fast rise tightens conditions for the rest of the world."
 
 [[risk.tiles]]
 key = "cftc_es"
@@ -938,17 +969,15 @@ sofr_quarters = 8
 disagreement_bp = 10
 releases_per_series = 2
 
-# BRIEF: the risk tiles shown on the landing page, tactical and slow kept in
-# separate rows. Keys are [[risk.tiles]] keys.
-[brief]
-tactical = ["vix", "vix_term", "vrp", "move", "hyg_ief", "hy_oas", "cor1m", "realised_corr"]
-slow = ["spx_vs_200d", "spx_drawdown", "breadth_200d", "net_liquidity", "nfci", "cftc_es", "put_call"]
+# OVERVIEW: earnings in the next three sessions are listed for watchlist
+# names and the top_weights largest index members.
+[overview]
 top_weights = 20
 
 # Ticker evidence and options (NAMES -> TICKER, CATALYSTS -> EARNINGS).
 # Earnings reactions cover every member; insider, short-interest and rating
-# data cover the focus names only (watchlist, MONITOR queue, journal names
-# and the top_weights largest members). A short-interest change of at least
+# data cover the focus names only (watchlist, MONITOR queue and the
+# top_weights largest members). A short-interest change of at least
 # short_change_pct over a month is listed as evidence; an IV percentile is
 # shown only after iv_percentile_min_days of recorded snapshots.
 [evidence]
@@ -964,7 +993,3 @@ iv_percentile_min_days = 60
 # single_buy_min_value.
 cluster_min_value = 250000
 single_buy_min_value = 1000000
-
-# Decision log review (BRIEF -> JOURNAL); entries live in config/journal.toml.
-[journal]
-default_horizon_days = 60

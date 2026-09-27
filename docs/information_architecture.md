@@ -329,6 +329,31 @@ run only from `main`, so recording starts once this is merged there.
 Each new source gets a probe and an evaluation note in the style of
 `docs/expectation_sources.md` before it reaches a page.
 
+## Revision after the first review (2026-09-27)
+
+The phased build put too much in front of the reader. After looking at it:
+
+- **OVERVIEW replaces BRIEF as the landing page** (`panels/overview.py`).
+  It answers four questions at a glance -- how stocks have done and how far
+  they sit from their high, how broad the move is, where rates and credit
+  are, what the dollar, commodities, volatility and the latest macro prints
+  say -- then the Fed's pricing and the next three sessions. No percentiles
+  or thresholds on it; one line points to RISK when a core series is past
+  its line. The former MARKETS page stays as MARKET → Indices.
+- **Navigation:** MARKET · RISK · NAMES · CATALYSTS · TOOLS. The market
+  comes before how much risk it carries.
+- **RISK leads with the anchor and ten core series** (`core = true` in
+  `[[risk.tiles]]`): SPX against its 200-day average and 1-year high, the
+  share of members above their 200-day average, VIX, VIX/VIX3M, HY OAS, the
+  10-year real yield, the dollar's 3-month change, copper/oil (the anchor's
+  own gate input) and NFCI. The other series fold beneath: most restate one
+  of these (IG, CCC, Baa and the ETF credit ratios all say "credit
+  spreads"). The long percentile is labelled with its start year, since
+  the ICE spreads reach back three years and SPX a century.
+- **JOURNAL is removed** (panel, compute, page, config and the ticker
+  page's thesis card). A static page with a log kept by hand in TOML would
+  have stayed empty; it is in git history (f21d210) if wanted later.
+
 ## Phase 4 as built (2026-09-27)
 
 - **BRIEF → JOURNAL** (`panels/journal.py`, `compute/journal.py`): the log
