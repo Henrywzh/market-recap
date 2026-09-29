@@ -3,7 +3,7 @@
 // indicator is computed here by technicals-math.js on the full history and
 // then cut to the chosen period.
 
-import { el, card, table, num, pct, dirClass, sectionTitle, periodSwitch, DASH } from '../fmt.js';
+import { el, card, table, num, pct, dirClass, sectionTitle, periodSwitch, tag, DASH } from '../fmt.js';
 import { render, multiLine, SERIES_COLORS } from '../charts.js';
 import * as T from '../technicals-math.js';
 
@@ -189,7 +189,9 @@ function summaryTable(payload, readings, { zWindow, slopeWindow }) {
   return table(['METRIC', 'VALUE', ''], rows.map(([label, value, note]) => el('tr', {}, [
     el('td', { class: 'dim', text: label }),
     el('td', { text: value }),
-    el('td', { class: noteClass(note), text: note || '' }),
+    // A verdict is a state and reads as a tag; a gap message stays prose.
+    /^[A-Z][A-Z \-]+$/.test(note || '') ? el('td', {}, [tag(note, { up: 'up', down: 'down' }[noteClass(note)] || 'dim')])
+      : el('td', { class: noteClass(note), text: note || '' }),
   ])));
 }
 

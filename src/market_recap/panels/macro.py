@@ -7,12 +7,13 @@ import pandas as pd
 from ..compute import periods as P
 from ..compute import returns as R
 from ..sources import fred, yahoo
-from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, to_iso_date
+from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, history_payload, to_iso_date
 
 
 def build(ctx) -> dict:
     config = ctx.config
     releases = int(config["macro"]["releases"])
+    history_years = int(config["macro"].get("history_years", 10))
     periods = list(config["periods"]["commodities"])
     history = config["periods"]["commodity_history"]
 
@@ -45,6 +46,7 @@ def build(ctx) -> dict:
             "status": "ok",
         }
         row |= {k: clean_float(v, 2) for k, v in R.period_returns(series, periods).items()}
+        row["history"] = history_payload(series, years=history_years, digits=2)
         commodity_rows.append(row)
 
     # --- Inflation: the last twelve monthly prints -------------------------
@@ -104,6 +106,8 @@ def build(ctx) -> dict:
                 continue
             aligned = series.reindex(axis)
             row["values"] = [clean_float(v, 2) for v in aligned.to_numpy()]
+            # Monthly already: nothing to thin, so the daily window covers it all.
+            row["history"] = history_payload(series, years=history_years, digits=2, daily_days=366 * history_years)
             # A series that has not printed the latest month says so, instead
             # of borrowing the month above it.
             row["latest_month"] = series.index[-1].strftime("%Y-%m") if len(series) else None

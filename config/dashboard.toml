@@ -56,9 +56,10 @@ sector_rebased = ["1M", "3M", "6M", "1Y", "3Y"]
 technicals_chart = ["6M", "1Y", "2Y", "3Y", "5Y", "10Y"]
 # Sessions of chart history baked into each per-ticker artifact.
 chart_window = "2Y"
-# yfinance history length for the commodity table. It has to cover the longest
-# window the table offers or that column is silently always blank.
-commodity_history = "2y"
+# yfinance history length for the commodity table and its chart. It has to
+# cover the longest window the table offers or that column is silently always
+# blank; the chart shows all of it (daily for the last year, weekly before).
+commodity_history = "10y"
 
 # Rolling windows for the breadth and trend tables on MARKETS.
 [breadth]
@@ -591,6 +592,8 @@ beta_min_weeks = 52
 [macro]
 # Monthly prints shown in the inflation table.
 releases = 12
+# Years of each inflation series carried for its chart.
+history_years = 10
 
 [fixed_income]
 # Calendar days back for each curve comparison. Calendar, not trading days:
@@ -605,6 +608,15 @@ spreads = [
   { label = "10Y - 2Y", long = "10Y", short = "2Y" },
   { label = "10Y - 3M", long = "10Y", short = "3M" },
 ]
+# The yields-over-time chart: FRED's constant-maturity series (the same
+# Treasury yields, one file each), daily for the last year, weekly before.
+history_years = 10
+history_series = [
+  { label = "2Y", series_id = "DGS2" },
+  { label = "10Y", series_id = "DGS10" },
+  { label = "30Y", series_id = "DGS30" },
+]
+history_spread = { label = "10Y − 2Y", long = "10Y", short = "2Y" }
 
 [cross_listing_diagnostics]
 # A premium series whose day-to-day changes carry less memory than this is

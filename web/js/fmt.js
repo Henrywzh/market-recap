@@ -94,6 +94,12 @@ export function periodSwitch(periods, active, onPick) {
   return wrap;
 }
 
+// A state label that reads at a glance: filled, coloured by what it means.
+// Tones: up (good / risk on), down (bad / risk off), warn, info, dim.
+export function tag(text, tone = 'dim', title = null) {
+  return el('span', { class: `tag tag-${tone}`, text, title });
+}
+
 export function table(headers, rows, options = {}) {
   const thead = el('thead', {}, [el('tr', {}, headers.map((h) => el('th', { text: h })))]);
   const tbody = el('tbody', {}, rows);

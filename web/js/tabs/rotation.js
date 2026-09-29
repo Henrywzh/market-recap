@@ -2,7 +2,7 @@
 // sector sits on the rotation graph and how its relative strength has moved --
 // then one sector at a time: its sub-industries and the names that moved it.
 
-import { el, card, num, metaRow, periodSwitch, sectionTitle, DASH } from '../fmt.js';
+import { el, card, num, metaRow, periodSwitch, sectionTitle, tag, DASH } from '../fmt.js';
 import { render, SERIES_COLORS } from '../charts.js';
 import { renderAggregates } from './valuation.js';
 import { tickerHref } from '../routes.js';
@@ -15,10 +15,10 @@ const TAIL_WEEKS = { '1M': 5, '3M': 13, '6M': 13, '12M': 13 };
 const OTHER_TAIL = 5;
 const SCHEMES = { cap: 'CAP-WTD', equal: 'EQUAL-WTD' };
 const QUADRANTS = {
-  leading: { label: 'LEADING', color: (p) => p.up },
-  weakening: { label: 'WEAKENING', color: (p) => p.accent },
-  lagging: { label: 'LAGGING', color: (p) => p.down },
-  improving: { label: 'IMPROVING', color: (p) => p.blue },
+  leading: { label: 'LEADING', color: (p) => p.up, tone: 'up' },
+  weakening: { label: 'WEAKENING', color: (p) => p.accent, tone: 'warn' },
+  lagging: { label: 'LAGGING', color: (p) => p.down, tone: 'down' },
+  improving: { label: 'IMPROVING', color: (p) => p.blue, tone: 'info' },
 };
 const SECTOR_SHORT = {
   'Communication Services': 'Comm Services',
@@ -216,7 +216,7 @@ function heatGrid(ranked, view, benchmark, onPick) {
         ]),
         el('span', { class: 'rot-breadth-text', text: present(breadth) ? `${num(breadth, 0)}%` : DASH }),
       ]),
-      el('td', { class: `rot-quad q-${s.quadrant || 'none'}`, text: quad ? quad.label : DASH }),
+      el('td', { class: 'rot-quad' }, [quad ? tag(quad.label, quad.tone) : DASH]),
     ]);
   });
   const head = el('tr', {}, [
