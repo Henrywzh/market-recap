@@ -9,12 +9,13 @@ page footer says what that means.
 from __future__ import annotations
 
 import contextlib
-from datetime import date
+from datetime import date, datetime, time as clock_time
 import io
 from pathlib import Path
 import threading
 import time
 from typing import Iterable, Sequence
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -84,6 +85,10 @@ ADJUSTED_FIELD = "Adj Close"
 PRICE_FIELD = "Close"
 SPLITS_FIELD = "Stock Splits"
 FIELDS = {"closes": ADJUSTED_FIELD, "prices": PRICE_FIELD, "splits": SPLITS_FIELD}
+# Optional companions from the *same* batch response. Only the technicals
+# artifact requests these; other consumers do not re-download their history.
+OHLCV_FIELDS = {"open": "Open", "high": "High", "low": "Low", "volume": "Volume"}
+OHLCV_REQUIRED = ("open", "high", "low")
 
 
 def _download_chunk(chunk: Sequence[str], period: str) -> dict[str, pd.DataFrame] | None:
@@ -92,7 +97,7 @@ def _download_chunk(chunk: Sequence[str], period: str) -> dict[str, pd.DataFrame
     if raw is None or raw.empty:
         return None
     out = {}
-    for kind, field in FIELDS.items():
+    for kind, field in {**FIELDS, **OHLCV_FIELDS}.items():
         if isinstance(raw.columns, pd.MultiIndex):
             present = field in raw.columns.get_level_values(0)
             out[kind] = raw[field] if present else pd.DataFrame(index=raw.index)
@@ -113,8 +118,16 @@ def _cache_path(period: str, kind: str = "closes") -> Path:
     return cache.path_for(NAMESPACE, f"{kind}-{period}", ".parquet")
 
 
-def _read(path: Path) -> pd.DataFrame:
+def _read(path: Path, *, now: datetime | None = None) -> pd.DataFrame:
     if not cache.is_fresh(path, "daily_file"):
+        return pd.DataFrame()
+    # The general cache rolls over at 18:30 ET, but this feed's intraday
+    # "daily" bar must not be reused as a completed close at 16:15 ET.
+    ny = ZoneInfo("America/New_York")
+    now = (now or datetime.now(ny)).astimezone(ny)
+    stamp = cache.modified(path)
+    if now.weekday() < 5 and now.time() >= clock_time(16, 15) and stamp \
+            and stamp.astimezone(ny) < datetime.combine(now.date(), clock_time(16, 15), tzinfo=ny):
         return pd.DataFrame()
     try:
         return pd.read_parquet(path)
@@ -156,6 +169,11 @@ def fetch_prices(period: str) -> pd.DataFrame:
     return frame
 
 
+def fetch_ohlcv_cache(period: str) -> dict[str, pd.DataFrame]:
+    """OHLCV companions of the existing close download; never a new fetch."""
+    return {kind: _read(_cache_path(period, kind)) for kind in OHLCV_FIELDS}
+
+
 def fetch_closes(
     symbols: Iterable[str],
     *,
@@ -163,6 +181,7 @@ def fetch_closes(
     retries: int = 3,
     use_cache: bool = True,
     retry_budget_seconds: float = 180.0,
+    need_ohlcv: bool = False,
 ) -> pd.DataFrame:
     """Wide adjusted-close frame indexed by date, one column per symbol.
 
@@ -175,15 +194,22 @@ def fetch_closes(
     """
     wanted = sorted({s for s in symbols if s})
     collected: dict[str, pd.Series] = {}
-    companions: dict[str, dict[str, pd.Series]] = {"prices": {}, "splits": {}}
+    companions: dict[str, dict[str, pd.Series]] = {kind: {} for kind in FIELDS if kind != "closes"}
+    companions.update({kind: {} for kind in OHLCV_FIELDS})
+    ohlcv_ready: set[str] = set()
 
     if use_cache:
         cached = _load_cache(period)
         for symbol in wanted:
             if symbol in cached.columns and not cached[symbol].dropna().empty:
                 collected[symbol] = cached[symbol]
+        if need_ohlcv:
+            extra = fetch_ohlcv_cache(period)
+            ohlcv_ready = {symbol for symbol in wanted if all(
+                symbol in extra[kind].columns and not extra[kind][symbol].dropna().empty
+                for kind in OHLCV_REQUIRED)}
 
-    pending = [s for s in wanted if s not in collected]
+    pending = [s for s in wanted if s not in collected or (need_ohlcv and s not in ohlcv_ready)]
     deadline = time.monotonic() + retry_budget_seconds
     for attempt in range(retries + 1):
         if not pending or time.monotonic() > deadline:
@@ -201,14 +227,17 @@ def fetch_closes(
             for column in closes.columns:
                 series = closes[column].dropna()
                 if not series.empty:
-                    collected[str(column)] = closes[column]
-                    prices, splits = result["prices"], result["splits"]
-                    if column in prices.columns:
-                        companions["prices"][str(column)] = prices[column]
-                    if column in splits.columns:
-                        companions["splits"][str(column)] = splits[column].where(splits[column] > 0)
+                    previous = collected.get(str(column))
+                    collected[str(column)] = closes[column] if previous is None else closes[column].combine_first(previous)
+                    for kind, frame in result.items():
+                        if kind != "closes" and column in frame.columns:
+                            companions[kind][str(column)] = (frame[column].where(frame[column] > 0)
+                                                           if kind == "splits" else frame[column])
+                    if all(column in result[kind].columns and not result[kind][column].dropna().empty
+                           for kind in OHLCV_REQUIRED):
+                        ohlcv_ready.add(str(column))
             time.sleep(CHUNK_PAUSE_SECONDS)
-        pending = [s for s in wanted if s not in collected]
+        pending = [s for s in wanted if s not in collected or (need_ohlcv and s not in ohlcv_ready)]
 
     if not collected:
         return pd.DataFrame()

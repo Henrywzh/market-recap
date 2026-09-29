@@ -134,8 +134,8 @@ function factsLine(ev) {
   const ins = ev.insiders;
   if (ins) {
     parts.push(ins.buys.length
-      ? `Insiders ${ins.window_days}d: bought $${num(ins.buy_value / 1e6, 1)}m (${ins.buys.length} trades), sold $${num(ins.sell_value / 1e6, 1)}m (${ins.sellers} sellers)`
-      : `Insiders ${ins.window_days}d: no open-market buys; sold $${num(ins.sell_value / 1e6, 1)}m (${ins.sellers} sellers)`);
+      ? `Reported Form 4 P purchases ${ins.window_days}d (broad, may include private/indirect): $${num(ins.buy_value / 1e6, 1)}m (${ins.buys.length} displayed trades); S sales $${num(ins.sell_value / 1e6, 1)}m (${ins.sellers} sellers)`
+      : `Reported Form 4 P purchases ${ins.window_days}d: none read; S sales $${num(ins.sell_value / 1e6, 1)}m (${ins.sellers} sellers)`);
   }
   const sh = ev.short;
   if (sh) parts.push(`Short interest ${num(sh.interest / 1e6, 1)}m shares, ${num(sh.days_to_cover, 1)} days to cover (${sh.date})${sh.change_1m_pct !== null && sh.change_1m_pct !== undefined ? `, ${sh.change_1m_pct > 0 ? '+' : ''}${num(sh.change_1m_pct, 0)}% in a month` : ''}`);

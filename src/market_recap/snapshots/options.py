@@ -174,6 +174,18 @@ def run(*, root=None, now: datetime | None = None, force: bool = False) -> dict:
     if not force and not store.in_window(now, window):
         return {"status": "skipped", "reason": f"{local:%a %H:%M} New York is outside {window[0]}-{window[1]} on a weekday"}
 
+    # GitHub's schedule is best effort. A second in-window attempt should
+    # repair a thin first capture, but not refetch a sufficiently broad one.
+    saved = store.root_dir(root) / "options" / f"{today:%Y}" / f"{today}-meta.json"
+    if not force and saved.exists():
+        try:
+            prior = json.loads(saved.read_text())
+            floor = max(1, math.ceil(0.8 * len(settings.get("fixed", []))))
+            if int(prior.get("usable_underlyings", 0)) >= floor:
+                return {"status": "skipped", "reason": f"{today} already has {prior['usable_underlyings']} underlyings with priced straddles (floor {floor})"}
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+
     base_url = config.get("monitor", {}).get("published_base_url")
     problems: dict[str, str] = {}
     monitor_rows = None
@@ -210,11 +222,15 @@ def run(*, root=None, now: datetime | None = None, force: bool = False) -> dict:
     # A holiday still answers with the last session's chain. The snapshot is
     # for today's session only, so if no underlying traded today, keep nothing.
     traded_today = [t for t in market_times if datetime.fromtimestamp(t, timezone.utc).astimezone(store.NEW_YORK).date() == today]
+    usable_underlyings = len({row["underlying"] for row in summaries
+                              if row.get("straddle_pct") is not None and math.isfinite(float(row["straddle_pct"]))
+                              and float(row["straddle_pct"]) > 0})
     meta = {
         "session": today.isoformat(), "fetched_at": fetched_at, "window": window, "forced": force,
         "universe": universe, "left_out": left_out, "failed": failed, "problems": problems,
         "rate": {"symbol": rate_symbol, "continuous": rate, "quoted_at": rate_time},
         "underlyings_ok": len({row["underlying"] for row in summaries}), "summary_rows": len(summaries),
+        "usable_underlyings": usable_underlyings,
         "contract_rows": len(contracts), "seconds": round(time.monotonic() - started, 1),
     }
     if not traded_today:
@@ -225,5 +241,6 @@ def run(*, root=None, now: datetime | None = None, force: bool = False) -> dict:
     store.write_csv(prefix.with_name(f"{today}-summary.csv"), summaries, SUMMARY_COLUMNS)
     store.write_csv(prefix.with_name(f"{today}-contracts.csv.gz"), contracts, CONTRACT_COLUMNS, compress=True)
     prefix.with_name(f"{today}-meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True, default=str) + "\n")
-    status = "ok" if not failed else "partial"
+    floor = max(1, math.ceil(0.8 * len(settings.get("fixed", []))))
+    status = "ok" if not failed and usable_underlyings >= floor else "partial"
     return {"status": status, **meta}

@@ -143,24 +143,45 @@ def build(ctx) -> dict:
                 entry["options"] = {**options, "snapshot_day": snapshot[0].isoformat()}
             # Form 4s in the window, newest first, within the build's time budget.
             transactions = []
+            strict_buys = []
+            form4_expected = 0
+            form4_read = 0
             if recent:
                 window_start = (as_of - timedelta(days=int(settings.get("insider_window_days", 90)))).isoformat()
                 forms = recent.get("form") or []
                 for i, form in enumerate(forms):
-                    if form != "4" or recent["filingDate"][i] < window_start:
+                    if form != "4" or not window_start <= recent["filingDate"][i] <= ctx.as_of:
                         continue
+                    form4_expected += 1
                     if time.monotonic() - started > budget:
                         form4_skipped += 1
                         continue
                     try:
                         xml = sec.fetch_form4(cik, recent["accessionNumber"][i], recent["primaryDocument"][i])
                         form4_fetched += 1
+                        form4_read += 1
                     except Exception:
                         form4_skipped += 1
                         continue
                     transactions.extend(V.parse_form4(xml))
+                    accession = recent["accessionNumber"][i].replace("-", "")
+                    url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{recent['primaryDocument'][i]}"
+                    strict_buys.extend(V.strict_form4_buys(xml, issuer_cik=cik,
+                                                            filed=recent["filingDate"][i], filing_url=url))
             entry["insiders"] = V.insider_summary(transactions, as_of, window_days=int(settings.get("insider_window_days", 90)),
                                                   min_value=float(settings.get("cluster_min_value", 250_000)))
+            entry["insiders"]["strict_cluster"] = V.strict_buy_cluster(
+                strict_buys, index_close.dropna().index,
+                min_value=float(settings.get("cluster_min_value", 250_000))) if recent else None
+            # Keep the inspectable filings behind the summary. The 90-day
+            # window is bounded; this is not a historical market-wide panel.
+            entry["insiders"]["strict_purchases"] = sorted(
+                strict_buys, key=lambda r: (r["filed"], r["date"]), reverse=True)[:30]
+            entry["insiders"]["form4_coverage"] = {
+                "expected": form4_expected if recent else None,
+                "read": form4_read,
+                "complete": recent is not None and form4_read == form4_expected,
+            }
             try:
                 entry["short"] = V.short_summary(nasdaq.fetch_short_interest(symbol))
             except Exception as exc:

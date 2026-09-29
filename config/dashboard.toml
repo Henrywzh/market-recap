@@ -76,6 +76,20 @@ refresh_seconds = 60        # automatic refresh while the session is open and th
 closed_refresh_seconds = 300  # how often a closed session checks whether it has opened
 server_cache_seconds = 15   # repeated clicks and readers share one fetch per window
 stale_after_seconds = 1200  # during the session, an older price is marked STALE
+# Overnight board; these are Yahoo chart symbols, never proxies for cash SPX/NDX.
+overnight = [
+  { symbol = "ES=F", label = "S&P 500 futures", region = "US" },
+  { symbol = "NQ=F", label = "Nasdaq 100 futures", region = "US" },
+  { symbol = "^N225", label = "Nikkei 225", region = "Asia" },
+  { symbol = "^HSI", label = "Hang Seng", region = "Asia" },
+  { symbol = "^FTSE", label = "FTSE 100", region = "Europe" },
+  { symbol = "^GDAXI", label = "DAX", region = "Europe" },
+]
+# Bounded scan: top current SPX names by issuer weight from the existing heat-map
+# artifact, plus the watchlist. These names are fallback if that artifact is
+# unavailable during a partial build. Not a full-US-market mover screen.
+premarket_top_weight_names = 30
+premarket_movers = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "TSLA", "JPM", "LLY"]
 rates = [
   { symbol = "US2Y", label = "UST 2Y" },
   { symbol = "US10Y", label = "UST 10Y" },

@@ -28,6 +28,9 @@ def _trend(ctx, spec, settings) -> dict | None:
         return None
     score = P.trend_score(close)
     now = float(score.iloc[-1])
+    scorecard_start = close.index[-1] - pd.DateOffset(years=int(settings.get("history_years", 10)))
+    scorecard_close = close[close.index > scorecard_start]
+    scorecard_score = score.reindex(scorecard_close.index)
     return {
         "key": spec.key, "label": spec.label, "symbol": spec.symbol,
         "as_of": to_iso_date(close.index[-1]),
@@ -39,6 +42,13 @@ def _trend(ctx, spec, settings) -> dict | None:
         "history": {
             "score": history_payload(score, years=int(settings.get("history_years", 10)), digits=2),
             "close": history_payload(close, years=int(settings.get("history_years", 10)), digits=2),
+        },
+        # Chart history above intentionally thins older observations to
+        # weekly. Forward outcomes need actual consecutive trading sessions.
+        "scorecard_history": {
+            "dates": [d.strftime("%Y-%m-%d") for d in scorecard_close.index],
+            "score": [clean_float(v, 2) for v in scorecard_score],
+            "close": [clean_float(v, 2) for v in scorecard_close],
         },
     }
 

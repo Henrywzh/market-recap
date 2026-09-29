@@ -14,6 +14,8 @@ Nasdaq-only names in the S&P 500's breadth.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -26,7 +28,7 @@ from .util import BuildLog, SourceRecord, to_iso_date
 YAHOO_URL = "https://finance.yahoo.com"
 
 
-def completed_sessions(closes: pd.DataFrame) -> pd.DataFrame:
+def completed_sessions(closes: pd.DataFrame, *, now: datetime | None = None) -> pd.DataFrame:
     """Drop trailing rows that are not a finished session for the whole panel.
 
     This is not cosmetic. A frame whose last row holds fifteen of five hundred
@@ -36,6 +38,13 @@ def completed_sessions(closes: pd.DataFrame) -> pd.DataFrame:
     that has not closed. A post-market recap describes the last completed
     session, so that is what the context hands the panels.
     """
+    if closes.empty:
+        return closes
+    # Yahoo may return a fully populated *intraday* daily row at 09:33 ET.
+    # Cross-sectional coverage alone cannot call that a completed session.
+    ny = (now or datetime.now(ZoneInfo("America/New_York"))).astimezone(ZoneInfo("America/New_York"))
+    last_allowed = ny.date() if ny.time() >= time(16, 15) else ny.date() - timedelta(days=1)
+    closes = closes.loc[pd.to_datetime(closes.index).date <= last_allowed]
     if closes.empty:
         return closes
     coverage = closes.notna().sum(axis=1) / closes.shape[1]
@@ -102,6 +111,7 @@ class IndexSpec:
 class MarketContext:
     config: dict
     log: BuildLog
+    history_period: str = "3y"
     indices: list[IndexSpec] = field(default_factory=list)
     members: dict[str, pd.DataFrame] = field(default_factory=dict)
     holdings_dates: dict[str, str | None] = field(default_factory=dict)
@@ -194,7 +204,7 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
     config = load_config()
     log = BuildLog()
     specs = [IndexSpec.from_config(s) for s in config["universe"]["indices"]]
-    ctx = MarketContext(config=config, log=log, indices=specs)
+    ctx = MarketContext(config=config, log=log, indices=specs, history_period=history_period)
 
     # 1. Current GICS labels for the primary basket. Descriptive metadata,
     #    refreshed weekly, and the label source every other index inherits.
@@ -240,7 +250,8 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
             *(set(frame["yahoo_symbol"]) for frame in ctx.members.values())
         )
     )
-    ctx.closes = mark_missing_sessions(completed_sessions(yahoo.fetch_closes(symbols, period=history_period)))
+    ctx.closes = mark_missing_sessions(completed_sessions(
+        yahoo.fetch_closes(symbols, period=history_period, need_ohlcv=True)))
     if ctx.closes.empty:
         raise RuntimeError("no constituent prices were fetched; the page has no session to describe")
     ctx.splits = _through(yahoo.fetch_splits(history_period), ctx.closes.index[-1])
@@ -285,7 +296,7 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
         | set(_preset_symbols(config))
     )
     ctx.etf_closes = mark_missing_sessions(
-        _through(yahoo.fetch_closes(etf_symbols, period=history_period), ctx.closes.index[-1]))
+        _through(yahoo.fetch_closes(etf_symbols, period=history_period, need_ohlcv=True), ctx.closes.index[-1]))
     ctx.etf_closes, _, filled = gapfill.fill(ctx.etf_closes, ctx.prices, label="etfs", replace=suspect,
                                              classes=("etf", "stocks"))
     ctx.filled_sessions.update({f"{day} etfs": r for day, r in filled.items()})

@@ -90,9 +90,10 @@ To decide:
 
 ## 3. Trading layer
 
-The site answers what the market did, how much risk is on, what is coming
-and which names to look at. For trading it does not yet answer what is held,
-where to get in or out, or when to look. In priority order, free data only:
+Scope chosen 2026-09-29: US stocks and index ETFs, overnight to weeks. Items
+1–3 are deliberately deferred at the user's request; Trade Desk has no
+account connection, messages or trade journal. Items 4–9 are implemented
+within the free-source coverage limits below.
 
 First, the workflow gaps:
 
@@ -110,31 +111,32 @@ First, the workflow gaps:
 
 Second, entries and exits:
 
-4. **Levels and expected range.** For SPX/NDX and holdings: distance to the
-   20/50/200-day averages, prior highs and lows, gaps. The week's
-   option-implied range (from VIX or the ATM straddle), so a move can be read
-   against what was priced.
-5. **Pre-market and overnight.** ES/NQ, the biggest pre-market movers in the
-   universe, Asia and Europe overnight. Existing Yahoo endpoints.
-6. **Position-size calculator** (TOOLS). Account risk and stop to shares via
-   ATR, with average daily value traded and spread beside it.
+4. **Levels and expected range.** Trade Desk: 20/50/200-session averages and
+   distance, 20/60/252-session close extrema, latest opening gap, ATR. The
+   ATM-straddle range is gated on a same-session usable option snapshot;
+   none has been captured yet, so no observed range can currently appear.
+5. **Pre-market and overnight.** ES/NQ, Asia/Europe, and an abs-move-ranked
+   live scan of the current top 30 SPX names by weight plus watchlist. It is
+   not a full-universe or full-market mover feed.
+6. **Position-size calculator.** Account/stop risk, notional and 20-day
+   average-dollar-volume participation caps, with a 2× ATR stop shortcut.
+   Stock bid–ask is not in the free quote source; spread is an explicitly
+   manual input, not a fabricated observation.
 
 Third, flows and positioning:
 
-7. **Who is forced to trade.** Built 2026-09-29 as RISK → POSITIONING: FINRA
-   short interest and the trend-follower flip levels. Still open: the
-   buyback blackout calendar.
-8. **Insider cluster buys** from SEC Form 4, limited to the universe;
-   quantamental-lab already has the insider event study.
-9. **Signal scorecard.** Historical hit rate and average forward return next
-   to each signal (Fear & Greed extremes, the anchor's cuts, the implied-move
-   gap), so it is clear which ones deserve weight.
-
-To decide: holding period (intraday, swing, longer), instruments (stocks,
-index ETFs, options), and where holdings and trade records may live
-(behind Cloudflare Access, or local only). Suggested start: 1, 2 and 4.
-The user has said the third group (7–9, flows and positioning) is the most
-interesting of these.
+7. **Flows/positioning.** FINRA short interest and trend-follower flip levels
+   remain on POSITIONING. Trade Desk has a 45-day earnings-proximity watch
+   queue with SPX weights. It is not a verified company repurchase blackout
+   calendar; company-specific start/end dates remain unknown.
+8. **Insider cluster buys.** Strict SEC Form 4 direct P subset, filing links,
+   and read-coverage for the focus names (not all US issuers). The related
+   quantamental-lab cross-universe promotion gate is blocked, so no alpha
+   claim is made.
+9. **Signal scorecard.** Descriptive next-close, non-overlapping 5/20/60-session
+   forward SPY/index returns for the anchor, trend proxy and Fear & Greed
+   extremes. Implied-range, Form 4 and buyback scores require causal archived
+   signal panels and remain explicitly unavailable.
 
 ## 4. From the reference dashboard (2026-09-29)
 

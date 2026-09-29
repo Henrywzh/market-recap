@@ -17,14 +17,18 @@ from __future__ import annotations
 import pandas as pd
 
 from ..config import PERIOD_TRADING_DAYS, TICKER_ARTIFACT_DIR
+from ..sources import yahoo
 from ..util import clean_float, prune_stale, write_json
 
 # Decimal places kept on a baked close: enough for a sub-dollar ETF, and every
 # extra digit is paid for once per session per ticker.
 CLOSE_DIGITS = 4
+OHLCV_SESSIONS = 260
 
 
-def bake_ticker(symbol: str, closes: pd.Series, *, min_sessions: int) -> dict | None:
+def bake_ticker(symbol: str, closes: pd.Series, *, min_sessions: int,
+                ohlcv: dict[str, pd.DataFrame] | None = None,
+                raw_prices: pd.DataFrame | None = None) -> dict | None:
     """Write one ticker's close history; return its index entry.
 
     A ticker below ``min_sessions`` carries no technical reading at all. Above
@@ -42,6 +46,19 @@ def bake_ticker(symbol: str, closes: pd.Series, *, min_sessions: int) -> dict | 
         "dates": [d.strftime("%Y-%m-%d") for d in clean.index],
         "close": [clean_float(v, CLOSE_DIGITS) for v in clean.to_numpy()],
     }
+    # Same Yahoo batch and dates as the total-return close artifact. Keep
+    # tradeable OHLC on Yahoo's split-adjusted (not dividend-adjusted) price
+    # basis; the ATR and dollar-volume estimates must not use a total-return
+    # price that was never traded. Missing bars remain null.
+    if ohlcv and raw_prices is not None and symbol in raw_prices.columns:
+        dates = clean.index[-OHLCV_SESSIONS:]
+        raw = raw_prices[symbol].reindex(dates)
+        vectors = {"close": [clean_float(v, CLOSE_DIGITS) for v in raw.to_numpy()]}
+        for kind in ("open", "high", "low", "volume"):
+            frame = ohlcv.get(kind, pd.DataFrame())
+            values = frame[symbol].reindex(dates) if symbol in frame.columns else pd.Series(index=dates, dtype=float)
+            vectors[kind] = [clean_float(v, CLOSE_DIGITS if kind != "volume" else 0) for v in values.to_numpy()]
+        payload["ohlcv"] = {"dates": [d.strftime("%Y-%m-%d") for d in dates], **vectors}
     write_json(TICKER_ARTIFACT_DIR / f"{symbol}.json", payload)
     return {"ticker": symbol, "sessions": payload["sessions"]}
 
@@ -55,11 +72,14 @@ def build(ctx) -> dict:
 
     all_closes = pd.concat([ctx.closes, ctx.etf_closes, ctx.index_closes], axis=1)
     all_closes = all_closes.loc[:, ~all_closes.columns.duplicated()]
+    companions = yahoo.fetch_ohlcv_cache(ctx.history_period)
+    raw_prices = yahoo.fetch_prices(ctx.history_period)
 
     baked = []
     for symbol in all_closes.columns:
         try:
-            entry = bake_ticker(str(symbol), all_closes[symbol], min_sessions=int(settings["min_sessions"]))
+            entry = bake_ticker(str(symbol), all_closes[symbol], min_sessions=int(settings["min_sessions"]),
+                                ohlcv=companions, raw_prices=raw_prices)
         except Exception as exc:
             ctx.log.fail(f"technicals:{symbol}", exc)
             continue

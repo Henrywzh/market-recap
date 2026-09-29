@@ -69,6 +69,40 @@ def test_form4_parse_and_cluster_needs_two_different_buyers():
     assert V.parse_form4("not xml") == []
 
 
+def test_strict_form4_cluster_excludes_indirect_and_planned_buys():
+    def filing(owner, day, direct="D", plan="0"):
+        return f"""<ownershipDocument><documentType>4</documentType>
+        <issuer><issuerCik>123</issuerCik></issuer><aff10b5One>{plan}</aff10b5One>
+        <reportingOwner><reportingOwnerId><rptOwnerCik>{owner}</rptOwnerCik><rptOwnerName>Owner {owner}</rptOwnerName></reportingOwnerId></reportingOwner>
+        <nonDerivativeTable><nonDerivativeTransaction><transactionDate><value>{day}</value></transactionDate>
+        <transactionCoding><transactionCode>P</transactionCode><equitySwapInvolved>0</equitySwapInvolved></transactionCoding>
+        <transactionAmounts><transactionShares><value>1000</value></transactionShares>
+        <transactionPricePerShare><value>150</value></transactionPricePerShare>
+        <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode></transactionAmounts>
+        <ownershipNature><directOrIndirectOwnership><value>{direct}</value></directOrIndirectOwnership></ownershipNature>
+        </nonDerivativeTransaction></nonDerivativeTable></ownershipDocument>"""
+
+    one = V.strict_form4_buys(filing(1, "2026-09-21"), issuer_cik=123, filed="2026-09-22")
+    two = V.strict_form4_buys(filing(2, "2026-09-24"), issuer_cik=123, filed="2026-09-25")
+    assert V.strict_form4_buys(filing(3, "2026-09-24", direct="I"), issuer_cik=123, filed="2026-09-25") == []
+    assert V.strict_form4_buys(filing(3, "2026-09-24", plan="1"), issuer_cik=123, filed="2026-09-25") == []
+    assert V.strict_form4_buys(filing(3, "2026-09-24"), issuer_cik=124, filed="2026-09-25") == []
+    cluster = V.strict_buy_cluster(one + two, pd.bdate_range("2026-09-21", periods=10))
+    assert cluster["count"] == 2 and cluster["value"] == 300_000
+    assert cluster["available"] == "2026-09-25"
+
+
+def test_strict_form4_cluster_window_has_five_sessions_including_the_first():
+    sessions = pd.bdate_range("2026-09-21", periods=10)
+    first = {"date": "2026-09-21", "filed": "2026-09-22", "owner_id": "1",
+             "owner": "First", "value": 150_000}
+    fifth = {"date": "2026-09-25", "filed": "2026-09-28", "owner_id": "2",
+             "owner": "Second", "value": 150_000}
+    sixth = {**fifth, "date": "2026-09-28", "filed": "2026-09-29"}
+    assert V.strict_buy_cluster([first, fifth], sessions) is not None
+    assert V.strict_buy_cluster([first, sixth], sessions) is None
+
+
 def test_short_and_ratings_become_evidence_lines_by_the_configured_rule():
     short = V.short_summary([
         {"date": "2026-08-15", "interest": 100.0, "days_to_cover": 2.0},

@@ -7,14 +7,16 @@
 - Implied move: the ATM straddle, as a share of spot, of the first expiry on
   or after the reaction session, from the options snapshot. It prices the
   whole period to expiry, not the report alone, and is labelled so.
-- Insiders: open-market purchases (Form 4 code P) and sales (S). A cluster is
-  two or more different insiders buying within 30 days.
+- Insiders: Form 4 code P includes open-market *or private* purchases. The
+  stricter direct-purchase cluster is computed separately from the broad
+  30-calendar-day descriptive summary.
 - Short interest and rating changes as their sources report them.
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+from bisect import bisect_left
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
@@ -168,9 +170,85 @@ def parse_form4(xml: str) -> list[dict]:
     return out
 
 
+def strict_form4_buys(xml: str, *, issuer_cik: int, filed: str, filing_url: str | None = None) -> list[dict]:
+    """Research-grade subset of P purchases; exclude plans and indirect holdings.
+
+    Code P alone means open-market *or private* purchase. These extra fields
+    follow quantamental-lab's primary transaction contract; an absent field
+    fails closed rather than silently becoming a direct discretionary buy.
+    """
+    try:
+        root = ET.fromstring(xml)
+        actual_cik = int(_text(root, "issuer/issuerCik") or "0")
+    except (ET.ParseError, ValueError):
+        return []
+    if actual_cik != issuer_cik or _text(root, "documentType") != "4":
+        return []
+    if (_text(root, "aff10b5One") or "").lower() not in ("0", "false", "no"):
+        return []
+    owners = root.findall("reportingOwner")
+    if len(owners) != 1:
+        return []  # Joint/chain ownership cannot count as distinct buyers.
+    owner = owners[0]
+    owner_id = _text(owner, "reportingOwnerId/rptOwnerCik")
+    if not owner_id:
+        return []
+    name = _text(owner, "reportingOwnerId/rptOwnerName")
+    out = []
+    for tx in root.findall("nonDerivativeTable/nonDerivativeTransaction"):
+        coding = _text(tx, "transactionCoding/transactionCode")
+        acquire = _text(tx, "transactionAmounts/transactionAcquiredDisposedCode")
+        direct = _text(tx, "ownershipNature/directOrIndirectOwnership")
+        swap = (_text(tx, "transactionCoding/equitySwapInvolved") or "").lower()
+        if coding != "P" or acquire != "A" or direct != "D" or swap not in ("0", "false", "no"):
+            continue
+        if tx.find("deemedExecutionDate") is not None or (_text(tx, "transactionCoding/aff10b5One") or "").lower() in ("1", "true", "yes"):
+            continue
+        try:
+            shares = float(_text(tx, "transactionAmounts/transactionShares") or "nan")
+            price = float(_text(tx, "transactionAmounts/transactionPricePerShare") or "nan")
+        except ValueError:
+            continue
+        if not np.isfinite(shares) or not np.isfinite(price) or shares <= 0 or price <= 0:
+            continue
+        when = _text(tx, "transactionDate")
+        if not when:
+            continue
+        out.append({"date": when[:10], "filed": filed[:10], "owner_id": owner_id, "owner": name,
+                    "value": round(shares * price, 2), "filing_url": filing_url})
+    return out
+
+
+def strict_buy_cluster(transactions: list[dict], sessions: pd.DatetimeIndex, *, max_sessions: int = 5,
+                       min_value: float = 250_000) -> dict | None:
+    """Latest non-overstated cluster: >=2 owner CIKs within five SPX sessions."""
+    if not transactions or sessions.empty:
+        return None
+    dates = sorted(pd.Timestamp(d).normalize() for d in sessions)
+    eligible = sorted((t for t in transactions if t.get("date") and t.get("owner_id") and t.get("filed")),
+                      key=lambda t: t["date"])
+    candidates = []
+    for first in eligible:
+        start = bisect_left(dates, pd.Timestamp(first["date"]))
+        if start >= len(dates):
+            continue
+        end = dates[min(start + max_sessions - 1, len(dates) - 1)]
+        group = [t for t in eligible if first["date"] <= t["date"] <= end.strftime("%Y-%m-%d")]
+        owners = {t["owner_id"] for t in group}
+        value = sum(t["value"] for t in group)
+        if len(owners) >= 2 and value >= min_value:
+            candidates.append({"from": first["date"], "to": group[-1]["date"],
+                               "available": max(t["filed"] for t in group), "count": len(owners),
+                               "transactions": len(group), "value": round(value, 0),
+                               "owners": sorted({t["owner"] for t in group if t.get("owner")}),
+                               "filing_urls": sorted({t["filing_url"] for t in group if t.get("filing_url")})})
+    return max(candidates, key=lambda c: (c["available"], c["to"], c["value"])) if candidates else None
+
+
 def insider_summary(transactions: list[dict], as_of: date, *, window_days: int = 90,
                     cluster_days: int = 30, min_insiders: int = 2, min_value: float = 0.0) -> dict:
-    recent = [t for t in transactions if t.get("date") and date.fromisoformat(t["date"][:10]) >= as_of - timedelta(days=window_days)]
+    recent = [t for t in transactions if t.get("date")
+              and as_of - timedelta(days=window_days) <= date.fromisoformat(t["date"][:10]) <= as_of]
     buys = sorted((t for t in recent if t["code"] == "P"), key=lambda t: t["date"])
     sells = [t for t in recent if t["code"] == "S"]
     cluster = None
@@ -207,7 +285,8 @@ def short_summary(rows: list[dict]) -> dict | None:
 
 
 def ratings_summary(changes: list[dict], as_of: date, *, window_days: int = 90) -> dict:
-    recent = [c for c in changes if c.get("date") and date.fromisoformat(c["date"][:10]) >= as_of - timedelta(days=window_days)]
+    recent = [c for c in changes if c.get("date")
+              and as_of - timedelta(days=window_days) <= date.fromisoformat(c["date"][:10]) <= as_of]
     recent.sort(key=lambda c: c["date"], reverse=True)
     action = lambda c: str(c.get("Action") or "").lower()
     raised = [c for c in recent if (c.get("currentPriceTarget") or 0) > (c.get("priorPriceTarget") or 0) > 0]
@@ -229,14 +308,12 @@ def evidence_lines(insiders: dict | None, short: dict | None, ratings: dict | No
     """The phase-3 facts as for / against lines, by rules in [evidence]."""
     for_, against = [], []
     plural = lambda n, word: f"{n} {word}{'' if n == 1 else 's'}"
-    if insiders and insiders.get("cluster"):
-        c = insiders["cluster"]
-        for_.append(f"Insider cluster buy: {c['count']} insiders bought ${c['value'] / 1e6:,.1f}m on the open market, {c['from']} → {c['to']}")
-    elif insiders:
-        large = [b for b in insiders.get("buys") or [] if (b.get("value") or 0) >= float(settings.get("single_buy_min_value", 1_000_000))]
-        if large:
-            biggest = max(large, key=lambda b: b["value"])
-            for_.append(f"Open-market insider buy: {biggest['owner']} ({biggest.get('role') or 'insider'}) ${biggest['value'] / 1e6:,.1f}m on {biggest['date'][:10]}")
+    if insiders and insiders.get("strict_cluster"):
+        c = insiders["strict_cluster"]
+        coverage = insiders.get("form4_coverage") or {}
+        suffix = " (partial filing coverage)" if not coverage.get("complete") else ""
+        for_.append(f"Direct Form 4 P purchase cluster: {c['count']} owners, ${c['value'] / 1e6:,.1f}m, "
+                    f"{c['from']} → {c['to']}; observable by {c['available']}{suffix}")
     if short and short.get("change_1m_pct") is not None:
         move = short["change_1m_pct"]
         threshold = float(settings.get("short_change_pct", 20))

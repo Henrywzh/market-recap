@@ -21,7 +21,7 @@ The views are grouped by the question they answer
 | **RISK** | **Risk** · Rates & macro · **Priced path** |
 | **NAMES** | Monitor · Screen (VALUATION & QUALITY) · **Ticker** · Cross-listing |
 | **CATALYSTS** | Calendar · Earnings |
-| **TOOLS** | Technicals · ETF X-Ray · DCF |
+| **TOOLS** | Technicals · Trade Desk · ETF X-Ray · DCF |
 
 **Overview** is the one-glance read: the live strip; stocks (S&P 500,
 Nasdaq 100, Russell 2000, equal-weight S&P) with 1D/1W/1M/YTD and the
@@ -54,6 +54,26 @@ the panel that owns it, so nothing is computed twice. Views that take a
 ticker read it after a slash (`#dcf/MSFT`, `#technicals/NVDA`); hashes from
 before the regrouping (`#financials`, `#fixed-income`, `#macro`, `?ticker=`)
 still land on the right view.
+
+**Trade Desk** (`#trade/SPY`) serves US stocks and index ETFs held overnight
+to weeks. Setups reuse the existing Yahoo batch download for 20/60/252-session
+close levels, 20/50/200-session averages, daily-bar opening gaps, 14-session
+Wilder ATR and 20-session average dollar volume. The nearest expiry's
+ATM-straddle range appears only with a same-session usable option snapshot;
+no snapshot means no range. The local long/short sizing calculator caps by
+stop risk, account notional and (when volume is available) a selected share
+of average dollar volume; the spread is *manually entered*, not a live quote.
+The separate live quote scope shows ES/NQ, Asia/Europe indices and a bounded
+US pre/post-market scan of the current top 30 SPX weights plus watchlist,
+with quote ages. The capital section reuses Nasdaq earnings dates as a
+*possible* buyback-window proximity watch queue (not company policy) and
+displays strict SEC Form 4 direct-purchase clusters and inspectable filings
+for evidence focus names. Anchor, Fear & Greed extremes and trend-proxy
+scorecards use next-close entry, non-overlapping forward windows, and
+direction-specific hit rates; they are descriptive current-vintage histories,
+not strategy P&L or validated alpha. Other signals remain unscored until
+causal snapshot histories exist. Futu holdings, alerts and journaling are not
+on this page.
 
 The panels, as each is built:
 

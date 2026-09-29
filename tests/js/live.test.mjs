@@ -27,6 +27,19 @@ test('no previous close leaves the change null, never zero', () => {
   assert.equal(q.change_pct, null);
 });
 
+test('extended-hours close comes from chart timestamps inside the named session', () => {
+  const payload = yahoo({ regularMarketPrice: 100, regularMarketTime: 50,
+    currentTradingPeriod: { pre: { start: 100, end: 200 }, regular: { start: 200, end: 300 },
+      post: { start: 300, end: 400 } } });
+  payload.chart.result[0].timestamp = [99, 120, 180, 250, 310];
+  payload.chart.result[0].indicators = { quote: [{ close: [101, null, 102, 103, 104] }] };
+  const quote = parseYahooChart(payload);
+  assert.equal(quote.pre_price, 102);
+  assert.equal(quote.pre_time, 180);
+  assert.equal(quote.post_price, 104);
+  assert.equal(quote.post_time, 310);
+});
+
 test('a Yahoo error or a missing price is an error, not a number', () => {
   assert.equal(parseYahooChart({ chart: { result: null, error: { description: 'No data found' } } }).error, 'No data found');
   assert.ok(parseYahooChart(yahoo({})).error);
@@ -82,6 +95,26 @@ test('a failed source leaves its own rows as errors and the rest priced', async 
     assert.equal(body.session.open, true);
   } finally {
     globalThis.fetch = real;
+  }
+});
+
+test('trade scope fetches its bounded list without slowing the main live strip', async () => {
+  const original = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url) => {
+    seen.push(String(url));
+    return new Response(JSON.stringify(yahoo({ regularMarketPrice: 10, previousClose: 9 })), { status: 200 });
+  };
+  try {
+    const contract = { equities: [{ symbol: 'SPY', kind: 'etf' }],
+      overnight: [{ symbol: 'ES=F', kind: 'overnight' }], premarket_movers: [{ symbol: 'AAPL', kind: 'premarket' }] };
+    const regular = await buildBody(contract, 1000);
+    assert.deepEqual(regular.quotes.map((q) => q.symbol), ['SPY']);
+    const trade = await buildBody(contract, 1000, 'trade');
+    assert.deepEqual(trade.quotes.map((q) => q.symbol), ['ES=F', 'AAPL']);
+    assert.ok(seen[2].includes('interval=1m&range=1d&includePrePost=true'));
+  } finally {
+    globalThis.fetch = original;
   }
 });
 

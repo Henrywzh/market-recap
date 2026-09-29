@@ -80,6 +80,17 @@ def test_a_fully_priced_session_is_kept():
     assert context.completed_sessions(frame).index[-1] == index[-1]
 
 
+def test_intraday_daily_bar_is_not_a_completed_session_even_at_full_coverage():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    index = pd.to_datetime(["2026-09-28", "2026-09-29"])
+    frame = pd.DataFrame({"AAPL": [100.0, 101.0], "MSFT": [200.0, 201.0]}, index=index)
+    ny = ZoneInfo("America/New_York")
+    assert context.completed_sessions(frame, now=datetime(2026, 9, 29, 9, 33, tzinfo=ny)).index[-1] == index[0]
+    assert context.completed_sessions(frame, now=datetime(2026, 9, 29, 16, 20, tzinfo=ny)).index[-1] == index[1]
+
+
 # --- Cache ------------------------------------------------------------------
 
 def test_cache_kinds_are_named_not_guessed():

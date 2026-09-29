@@ -2,7 +2,7 @@
 # option-chain snapshot late in each session, the rates / event-market
 # pricing a few times a day, and the risk inputs as published each evening.
 # Each run commits what it wrote to the orphan `snapshots` branch, which
-# holds data only; the site does not read it yet.
+# holds data only; the nightly refresh reads it when a usable snapshot exists.
 #
 # It touches no build, cache or deploy, and a failed snapshot does not affect
 # the nightly refresh.
@@ -10,11 +10,10 @@ name: snapshots
 
 on:
   schedule:
-    # Options: one of these two falls at 15:25 New York whatever the season
-    # (19:25 UTC in EDT, 20:25 UTC in EST); the other is outside the window and
-    # exits without writing. The window check lives in the code, not here.
-    - cron: "25 19 * * 1-5"
-    - cron: "25 20 * * 1-5"
+    # Two chances inside 15:10-16:00 New York in either DST season. GitHub
+    # schedules can start late; an idempotence guard skips a second good copy.
+    - cron: "10,30 19 * * 1-5"
+    - cron: "10,30 20 * * 1-5"
     # Expectations: four times a weekday, from the open to after the close.
     - cron: "41 13,16,19,22 * * 1-5"
     # Risk inputs as published: once each weekday evening, after FRED, OFR
