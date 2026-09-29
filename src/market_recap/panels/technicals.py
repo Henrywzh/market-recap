@@ -23,7 +23,9 @@ from ..util import clean_float, prune_stale, write_json
 # Decimal places kept on a baked close: enough for a sub-dollar ETF, and every
 # extra digit is paid for once per session per ticker.
 CLOSE_DIGITS = 4
-OHLCV_SESSIONS = 260
+# Two years of traded bars: a 200-session average then spans the Trade Desk's
+# whole one-year chart, and the 252-session extremes have room.
+OHLCV_SESSIONS = 520
 
 
 def bake_ticker(symbol: str, closes: pd.Series, *, min_sessions: int,

@@ -55,25 +55,19 @@ ticker read it after a slash (`#dcf/MSFT`, `#technicals/NVDA`); hashes from
 before the regrouping (`#financials`, `#fixed-income`, `#macro`, `?ticker=`)
 still land on the right view.
 
-**Trade Desk** (`#trade/SPY`) serves US stocks and index ETFs held overnight
-to weeks. Setups reuse the existing Yahoo batch download for 20/60/252-session
-close levels, 20/50/200-session averages, daily-bar opening gaps, 14-session
-Wilder ATR and 20-session average dollar volume. The nearest expiry's
-ATM-straddle range appears only with a same-session usable option snapshot;
-no snapshot means no range. The local long/short sizing calculator caps by
-stop risk, account notional and (when volume is available) a selected share
-of average dollar volume; the spread is *manually entered*, not a live quote.
-The separate live quote scope shows ES/NQ, Asia/Europe indices and a bounded
-US pre/post-market scan of the current top 30 SPX weights plus watchlist,
-with quote ages. The capital section reuses Nasdaq earnings dates as a
-*possible* buyback-window proximity watch queue (not company policy) and
-displays strict SEC Form 4 direct-purchase clusters and inspectable filings
-for evidence focus names. Anchor, Fear & Greed extremes and trend-proxy
-scorecards use next-close entry, non-overlapping forward windows, and
-direction-specific hit rates; they are descriptive current-vintage histories,
-not strategy P&L or validated alpha. Other signals remain unscored until
-causal snapshot histories exist. Futu holdings, alerts and journaling are not
-on this page.
+**Trade Desk** (`#trade/SPY`) is for US stocks and index ETFs held overnight
+to weeks. SETUPS & SIZE: a price chart on traded (split-adjusted, not
+dividend-adjusted) closes with the 20/50/200-day averages and the prior
+20-session and 52-week closing extremes; a price ladder of every level above
+and below the close; ATR, 20-day dollar volume, the latest opening gap and,
+with a same-session option snapshot, the ATM-straddle range; and a sizing
+calculator capped by stop risk, position size and a share of dollar volume
+(the spread is an assumption you enter). OVERNIGHT: ES/NQ, Asia and Europe,
+and pre/post-market prints for the top 30 S&P 500 weights plus the
+watchlist, polled only while that tab is visible. SCORECARD: forward returns
+after the anchor's states (daily since 1993), Fear & Greed extremes and the
+trend proxy, against any day -- descriptive and in-sample. Buyback blackout
+and insider buying are on RISK → POSITIONING.
 
 The panels, as each is built:
 

@@ -16,7 +16,7 @@ function dollars(v) {
   if (!present(v)) return DASH;
   const a = Math.abs(v);
   if (a >= 1e9) return `$${num(v / 1e9, 1)}bn`;
-  if (a >= 1e6) return `$${num(v / 1e6, 0)}m`;
+  if (a >= 1e6) return `$${num(v / 1e6, a >= 1e7 ? 0 : 1)}m`;
   return `$${num(v, 0)}`;
 }
 
@@ -142,12 +142,121 @@ function shortSection(si) {
   return wrap;
 }
 
+// ------------------------------------------------------------ buyback blackout
+
+function blackoutSection(b) {
+  if (!b || b.unavailable) {
+    return card('BUYBACK BLACKOUT', null, el('div', { class: 'gap', text: `Not built this session${b?.unavailable ? `: ${b.unavailable}` : ''}.` }));
+  }
+  const node = el('div', { class: 'chart' });
+  const today = b.dates.indexOf(b.as_of);
+  requestAnimationFrame(() => render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, left: 48, bottom: 44 },
+    legend: { bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9 },
+    tooltip: { ...option.tooltip, valueFormatter: (v) => (present(v) ? `${num(v, 0)}% of S&P 500 weight` : DASH) },
+    xAxis: { ...option.xAxis, data: b.dates },
+    yAxis: { ...option.yAxis, min: 0, max: 100, axisLabel: { ...option.yAxis.axisLabel, formatter: (v) => `${v}%` } },
+    series: [
+      {
+        name: 'in blackout (report dates known)', type: 'line', showSymbol: false, step: 'end',
+        data: b.share_pct.map((v, i) => (i <= today ? v : null)),
+        lineStyle: { width: 1.4, color: p.accent }, areaStyle: { color: p.accent, opacity: 0.12 },
+        markLine: { silent: true, symbol: 'none', data: [{ xAxis: b.as_of }, { yAxis: 50 }],
+          lineStyle: { color: p.faint, type: 'dashed' }, label: { color: p.dim, fontSize: 9, formatter: (m) => (m.value === 50 ? '50%' : 'today') } },
+      },
+      {
+        name: 'ahead (calendar + projected dates)', type: 'line', showSymbol: false, step: 'end',
+        data: b.share_pct.map((v, i) => (i >= today ? v : null)),
+        lineStyle: { width: 1.4, color: p.blue, type: 'dashed' }, areaStyle: { color: p.blue, opacity: 0.08 },
+      },
+    ],
+  })));
+  const tone = b.now_pct >= 50 ? 'down' : b.now_pct >= 25 ? 'warn' : 'up';
+  return el('div', {}, [
+    el('div', { class: 'stat-strip' }, [
+      stat('IN BLACKOUT NOW', [tag(`${num(b.now_pct, 0)}%`, tone)], 'of S&P 500 weight'),
+      stat('PEAK AHEAD', b.peak_pct === null ? DASH : `${num(b.peak_pct, 0)}%`, b.peak_date ? `on ${b.peak_date}` : ''),
+      stat('NEXT DATES', `${b.scheduled} scheduled`, `${b.projected} projected · ${b.missing} unknown`),
+      stat('WINDOW', `−${b.before_days}d → +${b.after_days}d`, 'around each report'),
+    ]),
+    card('S&P 500 WEIGHT IN AN ESTIMATED BUYBACK BLACKOUT', el('span', { class: 'dim', text: 'a year back, 60 days ahead' }), [node,
+      el('div', { class: 'note-text', text: `Companies usually stop discretionary buybacks from a few weeks before earnings until just after them, so the index loses its steadiest buyer when this share is high. Each member counts from ${b.before_days} days before each report to ${b.after_days} days after, weighted by today's S&P 500 weight. Report dates: past releases from the member's own filings, the next one from the earnings calendar, or projected from its usual gap (${b.projected} names). A convention, not any company's policy: 10b5-1 plans can keep buying through a blackout.` })]),
+  ]);
+}
+
+// ------------------------------------------------------------ insider buying
+
+function insiderSection(ins) {
+  if (!ins || ins.unavailable) {
+    return card('INSIDER BUYING', null, el('div', { class: 'gap', text: `Not built this session${ins?.unavailable ? `: ${ins.unavailable}` : ''}.` }));
+  }
+  const cover = ins.coverage || {};
+  const recent = ins.largest || [];
+  const weeklyNode = el('div', { class: 'chart short' });
+  requestAnimationFrame(() => render(weeklyNode, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, left: 56, right: 40, bottom: 44 },
+    legend: { bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9 },
+    xAxis: { ...option.xAxis, boundaryGap: true, data: ins.weekly.map((w) => w.week) },
+    yAxis: [
+      { ...option.yAxis, axisLabel: { ...option.yAxis.axisLabel, formatter: (v) => `$${num(v / 1e6, 0)}m` } },
+      { ...option.yAxis, position: 'right', splitLine: { show: false }, minInterval: 1 },
+    ],
+    series: [
+      { name: 'strict purchases, $ (week filed)', type: 'bar', barMaxWidth: 14, data: ins.weekly.map((w) => w.value), itemStyle: { color: p.up, opacity: 0.75 } },
+      { name: 'companies (right)', type: 'line', yAxisIndex: 1, data: ins.weekly.map((w) => w.companies), showSymbol: true, symbolSize: 4, lineStyle: { color: p.blue, width: 1.2 }, itemStyle: { color: p.blue } },
+    ],
+  })));
+  const link = (url, text) => (url ? el('a', { href: url, target: '_blank', rel: 'noopener noreferrer', text }) : text);
+  const clusterRows = (ins.clusters || []).map((c) => el('tr', {}, [
+    el('td', {}, [el('a', { href: tickerHref(c.ticker), text: c.ticker }), el('span', { class: 'sub', text: c.name || '' })]),
+    el('td', {}, [tag(`${c.count} INSIDERS`, 'up')]),
+    el('td', { text: dollars(c.value) }),
+    el('td', { class: 'dim', text: `${c.from} → ${c.to}` }),
+    el('td', {}, [link(c.filing_urls?.[0], c.available)]),
+    el('td', { class: 'dim', text: present(c.spx_weight) ? `${num(c.spx_weight, 2)}%` : '—' }),
+  ]));
+  const buyRows = recent.map((b) => el('tr', {}, [
+    el('td', {}, [el('a', { href: tickerHref(b.ticker), text: b.ticker }), el('span', { class: 'sub', text: b.name || '' })]),
+    el('td', { text: b.owner || '—' }),
+    el('td', { text: dollars(b.value) }),
+    el('td', { class: 'dim', text: b.date }),
+    el('td', {}, [link(b.filing_url, b.filed)]),
+  ]));
+  const companies = new Set(recent.map((b) => b.ticker)).size;
+  return el('div', {}, [
+    el('div', { class: 'stat-strip' }, [
+      stat('CLUSTERS', String((ins.clusters || []).length), `≥2 insiders within 5 sessions · ${ins.window_days} days`, (ins.clusters || []).length ? 'up' : ''),
+      stat('LARGEST BUY', recent[0] ? dollars(recent[0].value) : DASH, recent[0] ? `${recent[0].ticker} · ${recent[0].filed}` : ''),
+      stat('COMPANIES BUYING', String(companies), 'in the largest-buys list below'),
+      stat('COVERAGE', cover.complete ? [tag('COMPLETE', 'up')] : [tag(`${cover.days_complete}/${cover.days} DAYS`, 'warn')],
+        `${num(cover.filings_read, 0)} of ${num(cover.filings_expected, 0)} filings · read through ${cover.read_through || DASH}`),
+    ]),
+    el('div', { class: 'grid two' }, [
+      card('INSIDER BUYING BY WEEK', el('span', { class: 'dim', text: `${cover.members} S&P 500 / Nasdaq-100 issuers` }), [weeklyNode]),
+      card('CLUSTER BUYS', el('span', { class: 'dim', text: 'newest first' }), clusterRows.length
+        ? el('div', { class: 'table-scroll' }, [el('table', { class: 'data pos-table' }, [
+          el('thead', {}, [el('tr', {}, ['NAME', 'BUYERS', 'VALUE', 'TRADED', 'FILED', 'SPX WT'].map((h) => el('th', { text: h })))]),
+          el('tbody', {}, clusterRows)])])
+        : el('div', { class: 'gap', text: 'No cluster in the filings read so far.' })),
+    ]),
+    card('LARGEST INSIDER PURCHASES · LAST 30 DAYS', null, buyRows.length
+      ? el('div', { class: 'table-scroll' }, [el('table', { class: 'data pos-table' }, [
+        el('thead', {}, [el('tr', {}, ['NAME', 'INSIDER', 'VALUE', 'TRADED', 'FILED'].map((h) => el('th', { text: h })))]),
+        el('tbody', {}, buyRows)])])
+      : el('div', { class: 'gap', text: 'No strict purchase filed in the last 30 days among the filings read.' })),
+    el('div', { class: 'note-text', text: `Strict Form 4 purchases only: transaction code P, acquired, held directly, a positive price, no 10b5-1 plan, no swap, one reporting owner per filing. Code P can still include a private purchase. Read from EDGAR's daily index for every Form 4 about an index member, newest day first; each build reads at most a fixed number of new filings, so the window fills over a few nights and the coverage figure says how far it has got. Filing date is when the market could first see it. Evidence of conviction, not a validated signal.` }),
+  ]);
+}
+
 function methodNotes(data) {
   const lb = Object.entries(data.lookbacks || {}).map(([k, n]) => `${k} (${n} sessions)`).join(', ');
   return [
     `Trend followers: a public stand-in for systematic trend books, whose models are private. Each lookback — ${lb} — votes long if the index is above its close that many sessions ago and short if below; the score is the average vote, from −1 (all short) to +1 (all long). LONG or SHORT needs three of four votes to agree. A vote flips tomorrow if tomorrow's close crosses the close it will be compared with, so each flip level is a known price, not a forecast. Levels within 2% are shown in red. The 50/100/200-day averages are the other lines trend rules watch.`,
     'Short interest: FINRA consolidated short interest, reported by member firms as of two settlement dates a month (mid-month and month-end) and published about seven business days later. Days to cover is FINRA\'s own figure: shares short over average daily volume. Short value prices the shares at the settlement-date close. Change is against the previous round. A red CHANGE is shorts added.',
-    'Neither reading is a signal on its own. They say where forced buying or selling would come from if price moves: a trend book near its flip level, or a crowded short with many days to cover.',
+    'Buyback blackout: an estimate from each member\'s report dates and a fixed window around them; insider buying: strict Form 4 purchases from EDGAR. Both are explained under their charts.',
+    'None of these readings is a signal on its own. They say where forced buying or selling would come from if price moves: a trend book near its flip level, or a crowded short with many days to cover.',
   ];
 }
 
@@ -164,10 +273,18 @@ export default function renderPositioning(root, data) {
     ...data.trend.map((t) => stat(`${t.label.toUpperCase()} TREND`, [tag(t.state || DASH, STATE_TONE[t.state] || 'dim')], `score ${signed(t.score, 2)}`)),
     stat('S&P 500 SHORT VALUE', last ? `$${num(last.short_value_bn, 0)}bn` : DASH, change === null ? '' : `${signed(change, 1, '%')} vs prior round`, change > 0 ? 'down' : change < 0 ? 'up' : ''),
     stat('MEDIAN DAYS TO COVER', last ? num(last.median_days_to_cover, 1) : DASH, last ? `${last.names} members · ${last.date}` : ''),
+    stat('BUYBACK BLACKOUT', present(data.blackout?.now_pct) ? `${num(data.blackout.now_pct, 0)}%` : DASH, 'of S&P 500 weight, estimated',
+      data.blackout?.now_pct >= 50 ? 'down' : ''),
+    stat('INSIDER CLUSTERS', data.insiders?.clusters ? String(data.insiders.clusters.length) : DASH,
+      data.insiders?.coverage ? `${data.insiders.window_days} days · ${data.insiders.coverage.complete ? 'all filings read' : 'filling in'}` : ''),
   ]));
 
   root.append(el('h2', { class: 'section-title', text: 'TREND FOLLOWERS' }));
   root.append(el('div', { class: 'grid two' }, data.trend.map(trendCard)));
   root.append(el('h2', { class: 'section-title', text: 'SHORT INTEREST' }));
   root.append(shortSection(si));
+  root.append(el('h2', { class: 'section-title', text: 'BUYBACK BLACKOUT' }));
+  root.append(blackoutSection(data.blackout));
+  root.append(el('h2', { class: 'section-title', text: 'INSIDER BUYING' }));
+  root.append(insiderSection(data.insiders));
 }

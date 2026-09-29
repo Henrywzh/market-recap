@@ -9,17 +9,31 @@ Two readings, each from its own public source:
   index members, the watchlist and the broad ETFs -- days to cover, the
   change since the last round, and the members' total short value over a
   year of rounds.
+- Buyback blackout: the share of S&P 500 weight whose issuers are likely in
+  their earnings blackout, from each member's report dates. An estimate of a
+  convention, not of any company's actual policy.
+- Insider buying: strict SEC Form 4 open-market purchases by the members'
+  insiders, read from EDGAR's daily index, and clusters of them.
 """
 
 from __future__ import annotations
 
-from datetime import date
+from collections import defaultdict
+from datetime import date, timedelta
+import json
+import statistics
+import time
 
 import pandas as pd
 
+from .. import cache
+from ..compute import evidence as V
 from ..compute import positioning as P
-from ..sources import finra
+from ..sources import finra, sec
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, history_payload, to_iso_date
+
+# Same-session artifacts this panel reads (build.optional_panel).
+INPUTS = ("catalysts", "evidence")
 
 
 def _trend(ctx, spec, settings) -> dict | None:
@@ -148,7 +162,172 @@ def _short_interest(ctx, settings) -> dict:
     }
 
 
-def build(ctx) -> dict:
+def _report_dates(symbol: str, catalysts: dict | None, evidence: dict | None) -> tuple[list[date], bool]:
+    """A member's known report dates, and whether its next one is scheduled."""
+    past = [date.fromisoformat(r["date"][:10]) for r in ((evidence or {}).get("names", {}).get(symbol, {}).get("reactions") or [])
+            if r.get("date")]
+    upcoming = [date.fromisoformat(e["date"]) for e in ((catalysts or {}).get("events") or [])
+                if e.get("event_type") == "earnings" and e.get("symbol") == symbol and e.get("date")]
+    return sorted(set(past + upcoming)), bool(upcoming)
+
+
+def _blackout(ctx, settings, catalysts, evidence) -> dict:
+    """Share of S&P 500 weight likely inside an earnings buyback blackout.
+
+    Convention, not policy: a window opens ``before`` calendar days ahead of
+    each report and closes ``after`` days behind it. Where a member's next
+    report is not yet on the calendar it is projected from its own median
+    gap between reports, and the page draws that stretch as projected.
+    """
+    before = int(settings.get("blackout_days_before", 30))
+    after = int(settings.get("blackout_days_after", 2))
+    back = int(settings.get("blackout_history_days", 365))
+    ahead = int(settings.get("blackout_days_ahead", 60))
+    as_of = date.fromisoformat(ctx.as_of)
+    members = ctx.priced(ctx.primary.key)
+    windows, scheduled, projected, missing, total = [], 0, 0, 0, 0.0
+    for row in members.itertuples():
+        weight = float(row.weight or 0)
+        total += weight
+        dates, has_next = _report_dates(row.yahoo_symbol, catalysts, evidence)
+        if not dates:
+            missing += 1
+            continue
+        if has_next:
+            scheduled += 1
+        elif len(dates) >= 2:
+            gap = statistics.median((b - a).days for a, b in zip(dates, dates[1:]))
+            nxt = dates[-1] + timedelta(days=int(min(max(gap, 80), 100)))
+            while nxt < as_of:
+                nxt += timedelta(days=int(min(max(gap, 80), 100)))
+            dates.append(nxt)
+            projected += 1
+        windows.append((weight, [(d - timedelta(days=before), d + timedelta(days=after)) for d in dates]))
+    days = [as_of + timedelta(days=n) for n in range(-back, ahead + 1)]
+    share = []
+    for day in days:
+        inside = sum(w for w, spans in windows if any(a <= day <= b for a, b in spans))
+        share.append(round(100 * inside / total, 1) if total else None)
+    series = pd.Series(share, index=pd.to_datetime(days))
+    now = float(series.loc[pd.Timestamp(as_of)])
+    future = series[series.index > pd.Timestamp(as_of)]
+    peak_day = future.idxmax() if not future.empty else None
+    return {
+        "as_of": ctx.as_of, "before_days": before, "after_days": after,
+        "dates": [d.isoformat() for d in days], "share_pct": share,
+        "now_pct": now,
+        "peak_pct": clean_float(future.max(), 1) if peak_day is not None else None,
+        "peak_date": to_iso_date(peak_day),
+        "members": int(len(members)), "scheduled": scheduled, "projected": projected, "missing": missing,
+        "weight_covered_pct": clean_float(100 * sum(w for w, _ in windows) / total, 1) if total else None,
+    }
+
+
+def _filing_link(path: str, cik: int) -> str:
+    accession = path.rsplit("/", 1)[-1].removesuffix(".txt")
+    return f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession.replace('-', '')}/{accession}-index.htm"
+
+
+def _insiders(ctx, settings) -> dict:
+    """Strict Form 4 purchases by members' insiders over the window, read from
+    EDGAR's daily index newest day first. Each filing's parse is kept for
+    good, so a build reads only what is new, within a filing and time budget;
+    coverage says how much of the window has been read so far."""
+    window = int(settings.get("insider_window_days", 90))
+    max_new = int(settings.get("insider_max_new_filings", 1500))
+    budget = float(settings.get("insider_budget_seconds", 420))
+    min_value = float(settings.get("insider_cluster_min_value", 250_000))
+    as_of = date.fromisoformat(ctx.as_of)
+    cik_map = sec.fetch_ticker_cik_map()
+    weights = {r.yahoo_symbol: float(r.weight or 0) for r in ctx.priced(ctx.primary.key).itertuples()}
+    members: dict[int, dict] = {}
+    for spec in ctx.indices:
+        for row in ctx.priced(spec.key).itertuples():
+            cik = cik_map.get(row.yahoo_symbol.upper()) or cik_map.get(row.yahoo_symbol.upper().replace("-", "."))
+            if cik:
+                members.setdefault(cik, {"ticker": row.yahoo_symbol, "name": str(row.name).title(),
+                                         "sector": getattr(row, "sector", None), "spx_weight": weights.get(row.yahoo_symbol)})
+    started, fetched = time.monotonic(), 0
+    buys: dict[int, list[dict]] = defaultdict(list)
+    days_seen = days_complete = expected = read = 0
+    read_through, contiguous = None, True
+    for n in range(window + 1):
+        day = as_of - timedelta(days=n)
+        if day.weekday() >= 5:
+            continue
+        try:
+            rows = sec.daily_form_index(day)
+        except Exception:
+            continue
+        if rows is None:
+            continue
+        days_seen += 1
+        filings = {r["path"]: r for r in rows if r["cik"] in members}
+        complete = True
+        for path, r in filings.items():
+            expected += 1
+            name = f"{r['cik']}-{path.rsplit('/', 1)[-1].removesuffix('.txt')}"
+            target = cache.path_for(f"{sec.NAMESPACE}/form4-strict", name, ".json")
+            if not cache.is_fresh(target, "archive") and (fetched >= max_new or time.monotonic() - started > budget):
+                complete = False
+                continue
+
+            def parse(path=path, r=r) -> str:
+                xml = sec.ownership_xml(path)
+                return json.dumps(V.strict_form4_buys(xml, issuer_cik=r["cik"], filed=r["filed"],
+                                                      filing_url=_filing_link(path, r["cik"])) if xml else [])
+
+            try:
+                if not cache.is_fresh(target, "archive"):
+                    fetched += 1
+                parsed = json.loads(cache.fetch_text(f"{sec.NAMESPACE}/form4-strict", name, parse, kind="archive", suffix=".json"))
+            except Exception:
+                complete = False
+                continue
+            read += 1
+            buys[r["cik"]].extend(parsed)
+        if complete:
+            days_complete += 1
+        # The oldest day back to which every filing day has been read in full.
+        contiguous = contiguous and complete
+        if contiguous:
+            read_through = day.isoformat()
+    sessions = ctx.index_closes[ctx.primary.symbol].dropna().index
+    clusters, purchases = [], []
+    for cik, rows in buys.items():
+        info = members[cik]
+        rows = [t for t in rows if t.get("date") and t["date"] <= ctx.as_of]
+        for t in rows:
+            purchases.append({**info, **t})
+        cluster = V.strict_buy_cluster(rows, sessions, min_value=min_value)
+        if cluster:
+            clusters.append({**info, **cluster})
+    clusters.sort(key=lambda c: (c["available"], c["value"]), reverse=True)
+    recent_cut = (as_of - timedelta(days=int(settings.get("insider_recent_days", 30)))).isoformat()
+    largest = sorted((p for p in purchases if p["filed"] >= recent_cut), key=lambda p: p["value"], reverse=True)
+    # Weeks older than the read-through day are only partly read; drawing them
+    # would show missing filings as quiet weeks.
+    weekly: dict[str, dict] = {}
+    for p in (purchases if read_through is None else [p for p in purchases if p["filed"] >= read_through]):
+        week = (date.fromisoformat(p["filed"]) - timedelta(days=date.fromisoformat(p["filed"]).weekday())).isoformat()
+        entry = weekly.setdefault(week, {"week": week, "value": 0.0, "companies": set()})
+        entry["value"] += p["value"]
+        entry["companies"].add(p["ticker"])
+    return {
+        "window_days": window,
+        "clusters": clusters,
+        "largest": largest[: int(settings.get("insider_top", 20))],
+        "weekly": [{"week": w["week"], "value": round(w["value"], 0), "companies": len(w["companies"])}
+                   for w in sorted(weekly.values(), key=lambda w: w["week"])],
+        "coverage": {"members": len(members), "days": days_seen, "days_complete": days_complete,
+                     "complete": days_complete == days_seen and days_seen > 0,
+                     "read_through": read_through, "filings_expected": expected, "filings_read": read,
+                     "fetched_this_build": fetched},
+    }
+
+
+def build(ctx, *, inputs: dict | None = None) -> dict:
+    inputs = inputs or {}
     settings = dict(ctx.config.get("positioning", {}))
     trends = [t for spec in ctx.indices if (t := _trend(ctx, spec, settings))]
     try:
@@ -159,9 +338,28 @@ def build(ctx) -> dict:
         shorts = {"unavailable": str(exc)[:ERROR_DETAIL_CHARS]}
         ctx.log.add(SourceRecord("finra_short_interest", "FINRA consolidated short interest", finra.HOME_URL,
                                  status="error", error=str(exc)[:ERROR_DETAIL_CHARS]))
+    try:
+        blackout = _blackout(ctx, settings, inputs.get("catalysts"), inputs.get("evidence"))
+    except Exception as exc:
+        blackout = {"unavailable": str(exc)[:ERROR_DETAIL_CHARS]}
+    try:
+        insiders = _insiders(ctx, settings)
+        cover = insiders["coverage"]
+        ctx.log.add(SourceRecord("sec_form4_daily", "SEC Form 4 filings for index members (EDGAR daily index)",
+                                 "https://www.sec.gov/Archives/edgar/daily-index/", ctx.as_of, rows=cover["filings_read"],
+                                 policy="filings", status="ok" if cover["complete"] else "partial",
+                                 error=None if cover["complete"] else
+                                 f"{cover['days_complete']} of {cover['days']} days fully read; the rest fill in on later builds"))
+    except Exception as exc:
+        insiders = {"unavailable": str(exc)[:ERROR_DETAIL_CHARS]}
+        ctx.log.add(SourceRecord("sec_form4_daily", "SEC Form 4 filings for index members (EDGAR daily index)",
+                                 "https://www.sec.gov/Archives/edgar/daily-index/", status="error",
+                                 error=str(exc)[:ERROR_DETAIL_CHARS]))
     return {
         "as_of": ctx.as_of,
         "trend": trends,
         "short_interest": shorts,
+        "blackout": blackout,
+        "insiders": insiders,
         "lookbacks": P.LOOKBACKS,
     }

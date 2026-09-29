@@ -22,7 +22,7 @@ export const VIEWS = [
   { id: 'catalysts', label: 'CALENDAR', group: 'catalysts', artifact: 'catalysts', module: 'catalysts' },
   { id: 'earnings', label: 'EARNINGS', group: 'catalysts', artifact: 'earnings', module: 'earnings' },
   { id: 'technicals', label: 'TECHNICALS', group: 'tools', artifact: 'technicals', module: 'technicals', takesArg: true },
-  { id: 'trade', label: 'TRADE DESK', group: 'tools', artifact: ['technicals', 'evidence', 'catalysts', 'anchor', 'positioning', 'risk'], module: 'trade', takesArg: true },
+  { id: 'trade', label: 'TRADE DESK', group: 'tools', artifact: 'technicals', module: 'trade', takesArg: true },
   { id: 'xray', label: 'ETF X-RAY', group: 'tools', artifact: 'xray', module: 'xray' },
   { id: 'dcf', label: 'DCF', group: 'tools', artifact: 'dcf', module: 'dcf', takesArg: true },
 ];

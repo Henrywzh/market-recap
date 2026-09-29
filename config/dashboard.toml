@@ -194,6 +194,22 @@ short_interest_rounds = 24
 short_interest_top = 15
 short_interest_etfs = ["SPY", "QQQ", "IWM", "DIA", "RSP", "XLK", "XLF", "XLE", "XLV", "HYG", "LQD", "TLT"]
 history_years = 10
+# Buyback blackout: a window of ``before`` calendar days ahead of each report
+# to ``after`` days behind it -- the common sell-side convention, not any
+# company's policy. Charted from ``history_days`` back to ``days_ahead``.
+blackout_days_before = 30
+blackout_days_after = 2
+blackout_history_days = 365
+blackout_days_ahead = 60
+# Insider buying: strict Form 4 purchases (evidence.strict_form4_buys) over
+# ``window_days``; each build reads at most ``max_new_filings`` filings it has
+# not parsed before, newest day first, within ``budget_seconds``.
+insider_window_days = 90
+insider_max_new_filings = 1500
+insider_budget_seconds = 420
+insider_cluster_min_value = 250000
+insider_recent_days = 30
+insider_top = 20
 
 [etf_detail]
 # ETF PRICE & PUBLISHED FLOWS: funds listed first in the picker (the first is

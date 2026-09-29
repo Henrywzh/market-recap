@@ -190,9 +190,11 @@ function anchorCard(a) {
   if (!a || a.unavailable) return card('SYSTEMATIC ANCHOR', null, el('div', { class: 'gap', text: 'The anchor was not built for this session.' }));
   const c = a.components;
   const chartNode = el('div', { class: 'chart short' });
-  let range = initialRange(a.history.dates, '1Y');
+  // The whole daily path where the build carries it (since 2001), else five years.
+  const series = a.full?.dates?.length ? a.full : a.history;
+  let range = initialRange(series.dates, '1Y');
   const draw = () => {
-    const h = sliceRange(a.history.dates, { exposure: a.history.exposure, spy: a.history.spy }, range);
+    const h = sliceRange(series.dates, { exposure: series.exposure, spy: series.spy }, range);
     render(chartNode, (option, p) => ({
       ...option,
       grid: { left: 36, right: 40, top: 8, bottom: 22 },
@@ -221,7 +223,7 @@ function anchorCard(a) {
       tag(`COPPER/OIL ${c.copper_oil_on === false ? `OFF · z ${num(c.copper_oil_z, 2)} · cap 50%` : c.copper_oil_on ? `ON · z ${num(c.copper_oil_z, 2)}` : DASH}`, c.copper_oil_on === false ? 'down' : c.copper_oil_on ? 'up' : 'dim'),
       tag(`DRAWDOWN LADDER ×${num(c.ladder, 1)}`, c.ladder < 1 ? 'down' : 'dim'),
     ]),
-    el('div', { class: 'chart-head' }, [el('span', { class: 'dim', text: 'EXPOSURE · SPY on the right axis' }), rangeSwitch(a.history.dates, range, (label) => { range = label; draw(); })]),
+    el('div', { class: 'chart-head' }, [el('span', { class: 'dim', text: 'EXPOSURE · SPY on the right axis' }), rangeSwitch(series.dates, range, (label) => { range = label; draw(); })]),
     chartNode,
   ]);
 }

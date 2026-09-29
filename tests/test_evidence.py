@@ -70,11 +70,12 @@ def test_form4_parse_and_cluster_needs_two_different_buyers():
 
 
 def test_strict_form4_cluster_excludes_indirect_and_planned_buys():
-    def filing(owner, day, direct="D", plan="0"):
+    def filing(owner, day, direct="D", plan="0", deemed=None):
         return f"""<ownershipDocument><documentType>4</documentType>
         <issuer><issuerCik>123</issuerCik></issuer><aff10b5One>{plan}</aff10b5One>
         <reportingOwner><reportingOwnerId><rptOwnerCik>{owner}</rptOwnerCik><rptOwnerName>Owner {owner}</rptOwnerName></reportingOwnerId></reportingOwner>
         <nonDerivativeTable><nonDerivativeTransaction><transactionDate><value>{day}</value></transactionDate>
+        {"" if deemed is None else f"<deemedExecutionDate>{deemed}</deemedExecutionDate>"}
         <transactionCoding><transactionCode>P</transactionCode><equitySwapInvolved>0</equitySwapInvolved></transactionCoding>
         <transactionAmounts><transactionShares><value>1000</value></transactionShares>
         <transactionPricePerShare><value>150</value></transactionPricePerShare>
@@ -87,6 +88,10 @@ def test_strict_form4_cluster_excludes_indirect_and_planned_buys():
     assert V.strict_form4_buys(filing(3, "2026-09-24", direct="I"), issuer_cik=123, filed="2026-09-25") == []
     assert V.strict_form4_buys(filing(3, "2026-09-24", plan="1"), issuer_cik=123, filed="2026-09-25") == []
     assert V.strict_form4_buys(filing(3, "2026-09-24"), issuer_cik=124, filed="2026-09-25") == []
+    # An empty deemed-execution element is common boilerplate; only a dated one excludes.
+    assert len(V.strict_form4_buys(filing(3, "2026-09-24", deemed=""), issuer_cik=123, filed="2026-09-25")) == 1
+    assert V.strict_form4_buys(filing(3, "2026-09-24", deemed="<value>2026-09-20</value>"),
+                               issuer_cik=123, filed="2026-09-25") == []
     cluster = V.strict_buy_cluster(one + two, pd.bdate_range("2026-09-21", periods=10))
     assert cluster["count"] == 2 and cluster["value"] == 300_000
     assert cluster["available"] == "2026-09-25"

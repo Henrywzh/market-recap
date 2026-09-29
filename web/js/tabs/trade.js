@@ -1,31 +1,113 @@
-// Trading research for US stocks and index ETFs, overnight to several weeks.
-// No account connection or trade execution: the first workflow group is out
-// of scope. All inputs here are public artifacts or the existing live proxy.
+// TRADE DESK: entries, exits and size for US stocks and index ETFs held
+// overnight to weeks. No account connection or execution. Buyback blackout
+// and insider buying live on RISK -> POSITIONING with the other positioning
+// reads; this page keeps what a single trade needs.
 
-import { card, DASH, dirClass, el, metaRow, num, pct, periodSwitch, sectionTitle, table, tag } from '../fmt.js';
+import { card, DASH, dirClass, el, metaRow, num, pct, periodSwitch, table, tag } from '../fmt.js';
+import { render } from '../charts.js';
+import { rangeSwitch, sliceRange, initialRange } from '../range.js';
 import { tickerHref } from '../routes.js';
 import { ageSeconds, ageText } from '../live-model.js';
-import { anchorScorecard, closeLevels, earningsProximity, optionRange, sentimentScorecard, sizePosition, trendScorecard } from '../trade-math.js';
+import { anchorScorecard, closeLevels, optionRange, priceLadder, sentimentScorecard, sizePosition, trendScorecard } from '../trade-math.js';
 
 const valid = (v) => typeof v === 'number' && Number.isFinite(v);
-const money = (v) => valid(v) ? `$${num(v, 2)}` : DASH;
+const usd = (v, digits = 2) => (valid(v) ? `$${num(v, digits)}` : DASH);
 const field = (label, input) => el('div', { class: 'field' }, [el('label', { text: label }), input]);
-const cell = (value, cls = '') => el('td', { class: cls, text: value });
-const row = (...values) => el('tr', {}, values.map((v) => v?.nodeType ? v : cell(v)));
 const info = (message) => el('div', { class: 'note-text', text: message });
+const signed = (v, digits = 2) => (valid(v) ? pct(v, digits) : DASH);
 
-function setups(root, technicals, evidence, ctx) {
-  root.append(sectionTitle('PRICE LEVELS & IMPLIED RANGE', 'DAILY PRICE BARS · SNAPSHOT-DATED'));
+function compactUsd(v) {
+  if (!valid(v)) return DASH;
+  const a = Math.abs(v);
+  if (a >= 1e9) return `$${num(v / 1e9, 1)}bn`;
+  if (a >= 1e6) return `$${num(v / 1e6, a >= 1e7 ? 0 : 1)}m`;
+  return `$${num(v, 0)}`;
+}
+
+function stat(label, value, note = null, cls = '') {
+  return el('div', { class: 'stat' }, [
+    el('div', { class: 'stat-label', text: label }),
+    el('div', { class: `stat-value ${cls}` }, [].concat(value)),
+    note ? el('div', { class: 'stat-note' }, [].concat(note)) : null,
+  ]);
+}
+
+const KIND_TONE = { range: 'info', average: 'warn', atr: 'dim', implied: 'up' };
+const KIND_LABEL = { range: 'RANGE', average: 'AVG', atr: 'ATR', implied: 'OPTIONS' };
+
+// ------------------------------------------------------------ setups & size
+
+function levelChart(node, payload, levels, range, span) {
+  const o = payload.ohlcv?.dates?.length ? payload.ohlcv : { dates: payload.dates, close: payload.close };
+  const cut = sliceRange(o.dates, { close: o.close }, span);
+  // Averages on the traded closes, over the whole companion so the first
+  // point shown is already a full window.
+  const avg = (n) => o.close.map((_, i) => (i + 1 >= n && o.close.slice(i + 1 - n, i + 1).every(valid)
+    ? o.close.slice(i + 1 - n, i + 1).reduce((a, b) => a + b, 0) / n : null)).slice(o.dates.length - cut.dates.length);
+  render(node, (option, p) => {
+    const lines = [
+      ['20D HIGH', levels.twenty?.high, p.blue], ['20D LOW', levels.twenty?.low, p.blue],
+      ['52W HIGH', levels.year?.high, p.faint], ['52W LOW', levels.year?.low, p.faint],
+    ].filter(([, y]) => valid(y));
+    return {
+      ...option,
+      grid: { ...option.grid, left: 58, right: 70, bottom: 44 },
+      legend: { bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9 },
+      tooltip: { ...option.tooltip, valueFormatter: (v) => (valid(v) ? num(v, 2) : DASH) },
+      xAxis: { ...option.xAxis, data: cut.dates },
+      yAxis: { ...option.yAxis, axisLabel: { ...option.yAxis.axisLabel, formatter: (v) => num(v, 0) } },
+      series: [
+        {
+          name: payload.ticker, type: 'line', data: cut.close, showSymbol: false, lineStyle: { width: 1.5, color: p.text },
+          markLine: {
+            silent: true, symbol: 'none',
+            data: lines.map(([label, y, color]) => ({ yAxis: y, lineStyle: { color, type: 'dashed', width: 1 },
+              label: { formatter: `${label} ${num(y, 2)}`, color, fontSize: 9, position: 'end' } })),
+          },
+          markArea: range ? {
+            silent: true,
+            data: [[{ yAxis: range.lower, itemStyle: { color: p.up, opacity: 0.08 } }, { yAxis: range.upper }]],
+          } : undefined,
+        },
+        { name: '20D avg', type: 'line', data: avg(20), showSymbol: false, lineStyle: { width: 1, color: p.accent } },
+        { name: '50D avg', type: 'line', data: avg(50), showSymbol: false, lineStyle: { width: 1, color: p.purple } },
+        { name: '200D avg', type: 'line', data: avg(200), showSymbol: false, lineStyle: { width: 1, color: p.down, type: 'dashed' } },
+      ],
+    };
+  });
+}
+
+function ladderTable(ladder, close) {
+  const above = ladder.filter((r) => r.price > close);
+  const below = ladder.filter((r) => r.price <= close);
+  const line = (r) => el('tr', {}, [
+    el('td', {}, [tag(KIND_LABEL[r.kind], KIND_TONE[r.kind])]),
+    el('td', { text: r.label }),
+    el('td', { text: num(r.price, 2) }),
+    el('td', { class: Math.abs(r.distance_pct) < 1 ? 'down' : 'dim', text: signed(r.distance_pct, 1) }),
+  ]);
+  return el('div', { class: 'table-scroll' }, [el('table', { class: 'data trade-ladder' }, [
+    el('thead', {}, [el('tr', {}, ['', 'LEVEL', 'PRICE', 'DISTANCE'].map((h) => el('th', { text: h })))]),
+    el('tbody', {}, [
+      ...above.map(line),
+      el('tr', { class: 'trade-ladder-now' }, [el('td', {}), el('td', { text: 'LAST CLOSE' }), el('td', { text: num(close, 2) }), el('td', { text: '' })]),
+      ...below.map(line),
+    ]),
+  ])]);
+}
+
+function setups(root, technicals, ctx, state) {
   const available = technicals?.available || [];
   const ticker = el('input', { value: ctx.arg || (available.includes('SPY') ? 'SPY' : available[0] || ''),
-    list: 'trade-tickers', placeholder: 'ticker', size: '12' });
+    list: 'trade-tickers', placeholder: 'ticker', size: '10' });
   const list = el('datalist', { id: 'trade-tickers' }, available.map((t) => el('option', { value: t })));
   const host = el('div', {});
-  let reference = null;
+  const evidence = ctx.loadArtifact('evidence').catch(() => null);
+
   const load = async () => {
     const symbol = ticker.value.trim().toUpperCase();
     if (!available.includes(symbol)) {
-      host.replaceChildren(info(`${symbol || 'Ticker'} has no baked close history in this build.`));
+      host.replaceChildren(info(`${symbol || 'Ticker'} has no baked price history in this build.`));
       return;
     }
     ctx.setArg(symbol);
@@ -34,278 +116,275 @@ function setups(root, technicals, evidence, ctx) {
       if (!response.ok) throw new Error(`price history HTTP ${response.status}`);
       const payload = await response.json();
       const levels = closeLevels(payload.close, payload.ohlcv, payload.dates);
-      reference = { price: levels.close, atr14: levels.atr14, adv20: levels.adv20, symbol };
-      const options = evidence?.names?.[symbol]?.options;
-      const range = optionRange(options, levels?.close, payload.as_of);
-      const levelRows = [
-        ['LAST CLOSE', money(levels.close), payload.as_of],
-        ['PRIOR CLOSE', money(levels.previous), levels.previous ? pct(100 * (levels.close / levels.previous - 1)) : DASH],
-        ['PRIOR 20-SESSION CLOSE LOW / HIGH', levels.twenty ? `${money(levels.twenty.low)} / ${money(levels.twenty.high)}` : DASH,
-          levels.twenty ? 'Excludes latest close; not intraday support/resistance' : 'Needs 21 sessions'],
-        ['PRIOR 60-SESSION CLOSE LOW / HIGH', levels.sixty ? `${money(levels.sixty.low)} / ${money(levels.sixty.high)}` : DASH,
-          levels.sixty ? 'Excludes latest close; not intraday support/resistance' : 'Needs 61 sessions'],
-        ['PRIOR 252-SESSION CLOSE LOW / HIGH', levels.year ? `${money(levels.year.low)} / ${money(levels.year.high)}` : DASH,
-          levels.year ? 'Excludes latest close; not intraday extremes' : 'Needs 253 sessions'],
-        ...[20, 50, 200].map((n) => [`${n}-SESSION SMA / DISTANCE`, valid(levels.moving[n]) ? money(levels.moving[n]) : DASH,
-          valid(levels.moving[n]) ? pct(100 * (levels.close / levels.moving[n] - 1), 2) : `Needs ${n} sessions`]),
-        ['LATEST OPENING GAP', levels.gap ? pct(levels.gap.pct, 2) : DASH,
-          levels.gap ? `${levels.gap.day} · ${levels.gap.filled_intraday ? 'crossed prior close intraday' : 'did not cross prior close intraday'}`
-            : 'OHLC companion unavailable'],
-        ['14-SESSION ATR', valid(levels.atr14) ? money(levels.atr14) : DASH,
-          'Wilder average true range from split-adjusted Yahoo OHLC, not a forecast'],
-        ['20-SESSION AVG $ VOLUME', valid(levels.adv20) ? money(levels.adv20) : DASH,
-          'Average split-adjusted close × reported daily volume; liquidity proxy'],
-      ];
-      host.replaceChildren(card(`${symbol} · CLOSE LEVELS`, el('a', { href: tickerHref(symbol), text: 'OPEN TICKER' }), [
-        table(['READING', 'LEVEL', 'SOURCE / QUALIFIER'], levelRows.map((r) => row(...r))),
-      ]), card('THIS EXPIRY · OPTIONS-IMPLIED RANGE', null, [
-        range ? el('div', { class: 'stat-strip' }, [
-          el('div', { class: 'stat' }, [el('div', { class: 'stat-label', text: 'LOWER / UPPER' }),
-            el('div', { class: 'stat-value', text: `${money(range.lower)} – ${money(range.upper)}` })]),
-          el('div', { class: 'stat' }, [el('div', { class: 'stat-label', text: 'ATM STRADDLE' }),
-            el('div', { class: 'stat-value', text: `±${num(range.move_pct, 2)}%` })]),
-        ]) : info('No same-session usable options snapshot for this ticker. Range is unavailable, not zero.'),
-        info(range ? `Snapshot ${range.snapshot_day}; nearest usable expiry ${range.expiry} (${range.days} calendar days). Close ± ATM straddle mid; not a probability band or a price target.`
-          : `Options coverage: ${evidence?.options_snapshot || 'no snapshot in this build'}. The trade desk never substitutes historical volatility for option prices.`),
-      ]));
+      if (!levels) throw new Error('no closes in the artifact');
+      const range = optionRange((await evidence)?.names?.[symbol]?.options, levels.close, payload.as_of);
+      state.reference = { price: levels.close, atr14: levels.atr14, adv20: levels.adv20, symbol };
+      state.onReference?.();
+
+      const vs = (n) => (valid(levels.moving[n]) ? 100 * (levels.close / levels.moving[n] - 1) : null);
+      const trendTag = (n) => (valid(vs(n)) ? tag(`${vs(n) >= 0 ? 'ABOVE' : 'BELOW'} ${n}D`, vs(n) >= 0 ? 'up' : 'down') : DASH);
+      const day = valid(levels.previous) ? 100 * (levels.close / levels.previous - 1) : null;
+      const gap = levels.gap;
+      const strip = el('div', { class: 'stat-strip' }, [
+        stat(`${symbol} · ${payload.as_of}`, usd(levels.close), signed(day), dirClass(day)),
+        stat('TREND', el('span', { class: 'tag-row' }, [trendTag(50), trendTag(200)]), `${signed(vs(50), 1)} / ${signed(vs(200), 1)} from the averages`),
+        stat('ATR 14', usd(levels.atr14), valid(levels.atr14) ? `${num(100 * levels.atr14 / levels.close, 1)}% of price` : 'no OHLC in this build'),
+        stat('20D AVG $ VOLUME', compactUsd(levels.adv20), 'traded close × volume'),
+        stat('LATEST GAP', gap ? [tag(`${gap.pct >= 0 ? 'UP' : 'DOWN'} ${num(Math.abs(gap.pct), 1)}%`, gap.pct >= 0 ? 'up' : 'down')] : DASH,
+          gap ? `${gap.day} · ${gap.filled_intraday ? 'filled intraday' : 'not filled'}` : null),
+        stat('OPTIONS-IMPLIED', range ? `±${num(range.move_pct, 1)}%` : DASH,
+          range ? `${usd(range.lower)} – ${usd(range.upper)} · ${range.expiry}` : 'no same-day option snapshot'),
+      ]);
+
+      const chartNode = el('div', { class: 'chart tall' });
+      const dates = payload.ohlcv?.dates?.length ? payload.ohlcv.dates : payload.dates;
+      let span = initialRange(dates, '6M');
+      const draw = () => levelChart(chartNode, payload, levels, range, span);
+      requestAnimationFrame(draw);
+      host.replaceChildren(
+        strip,
+        el('div', { class: 'grid trade-top' }, [
+          card(`${symbol} · PRICE, AVERAGES AND LEVELS`, rangeSwitch(dates, span, (label) => { span = label; draw(); }), [
+            chartNode,
+            info(`Traded (split-adjusted) closes${levels.basis === 'traded' ? '' : ' unavailable: levels fall back to the dividend-adjusted series'}. Dashed: prior 20-session and 52-week closing extremes. ${range ? 'Green band: close ± the nearest expiry\'s ATM straddle.' : ''}`),
+          ]),
+          card('PRICE LADDER', el('a', { href: tickerHref(symbol), text: 'OPEN TICKER →' }), [
+            ladderTable(priceLadder(levels, range), levels.close),
+            info('Closing levels, not intraday highs and lows. ±2 ATR is a stop distance, not a forecast. Red distance: within 1%.'),
+          ]),
+        ]),
+      );
     } catch (error) {
       host.replaceChildren(info(`Unable to load ${symbol}: ${error.message}`));
     }
   };
   ticker.addEventListener('keydown', (event) => { if (event.key === 'Enter') load(); });
-  root.append(card('SELECT STOCK OR ETF', null, [el('div', { class: 'field-row' }, [field('SYMBOL', ticker),
-    el('button', { class: 'action', text: 'LOAD', onclick: load }), list]),
-    info('Daily Yahoo price history, current vintage. Intraday support/resistance and live bid–ask are not inferred from daily bars.')]), host);
+  root.append(el('div', { class: 'field-row trade-pick' }, [field('STOCK OR ETF', ticker),
+    el('button', { class: 'action', text: 'LOAD', onclick: load }), list]), host);
   load();
+}
 
-  root.append(sectionTitle('POSITION SIZING', 'LOCAL CALCULATION · NO ACCOUNT DATA SAVED'));
+function sizing(root, state) {
   const side = el('select', {}, [el('option', { value: 'long', text: 'LONG' }), el('option', { value: 'short', text: 'SHORT' })]);
   const inputs = [
-    ['ACCOUNT EQUITY ($)', 'account'], ['MAX RISK (%)', 'riskPct'], ['ENTRY ($)', 'entry'],
-    ['STOP ($)', 'stop'], ['MAX NOTIONAL (% OF EQUITY)', 'maxPct'],
-    ['MAX % OF 20D AVG $ VOLUME', 'participationPct'], ['MANUAL SPREAD (BPS)', 'spreadBps'],
-  ].map(([label, key]) => [key, field(label, el('input', { type: 'number', min: '0', step: 'any',
-    value: key === 'riskPct' || key === 'participationPct' ? '1' : key === 'maxPct' ? '20' : '' }))]);
+    ['ACCOUNT ($)', 'account', ''], ['RISK PER TRADE (%)', 'riskPct', '1'], ['ENTRY ($)', 'entry', ''],
+    ['STOP ($)', 'stop', ''], ['MAX POSITION (% OF ACCOUNT)', 'maxPct', '20'],
+    ['MAX % OF 20D $ VOLUME', 'participationPct', '1'], ['SPREAD ASSUMPTION (BPS)', 'spreadBps', ''],
+  ].map(([label, key, value]) => [key, field(label, el('input', { type: 'number', min: '0', step: 'any', value }))]);
   const byKey = Object.fromEntries(inputs.map(([key, node]) => [key, node.querySelector('input')]));
-  const sizing = el('div', { class: 'note-text' });
+  const out = el('div', {});
   const calculate = () => {
-    const result = sizePosition({ ...Object.fromEntries(Object.entries(byKey).map(([key, node]) => [key, node.value])),
-      side: side.value, advUsd: reference?.adv20 });
-    sizing.textContent = result
-      ? `${num(result.shares, 0)} whole shares · notional ${money(result.notional)} · planned stop loss ${money(result.plannedLoss)} `
-        + `of ${money(result.riskBudget)} risk budget · capped by ${{ risk: 'stop risk', notional: 'notional limit', liquidity: 'ADV participation' }[result.cappedBy]}`
-        + `${valid(result.spreadCost) ? ` · manually entered one-way spread cost ${money(result.spreadCost)}` : ''}.`
-      : `Enter equity, risk %, entry and a stop ${side.value === 'long' ? 'below' : 'above'} entry. No order is sent.`;
+    const r = sizePosition({ ...Object.fromEntries(Object.entries(byKey).map(([key, node]) => [key, node.value])),
+      side: side.value, advUsd: state.reference?.adv20 });
+    if (!r) {
+      out.replaceChildren(info(`Enter the account, risk %, entry and a stop ${side.value === 'long' ? 'below' : 'above'} the entry. Nothing is saved or sent.`));
+      return;
+    }
+    const capped = { risk: ['STOP RISK', 'up'], notional: ['POSITION LIMIT', 'warn'], liquidity: ['VOLUME LIMIT', 'down'] }[r.cappedBy];
+    out.replaceChildren(el('div', { class: 'stat-strip' }, [
+      stat('SHARES', num(r.shares, 0), `${side.value.toUpperCase()} · whole shares`),
+      stat('POSITION', usd(r.notional, 0), valid(Number(byKey.account.value)) && Number(byKey.account.value) > 0
+        ? `${num(100 * r.notional / Number(byKey.account.value), 1)}% of account` : null),
+      stat('LOSS AT STOP', usd(r.plannedLoss, 0), `budget ${usd(r.riskBudget, 0)} · ${usd(r.perShareRisk)} a share`, 'down'),
+      stat('SIZED BY', [tag(capped[0], capped[1])], valid(r.spreadCost) ? `spread cost ${usd(r.spreadCost)} one way` : null),
+    ]));
   };
   Object.values(byKey).forEach((node) => node.addEventListener('input', calculate));
   side.addEventListener('change', calculate);
-  calculate();
-  const useClose = el('button', { class: 'action', text: 'USE SELECTED CLOSE', onclick: () => {
-    if (!reference) return;
-    byKey.entry.value = String(reference.price);
+  state.onReference = () => {
+    if (!byKey.entry.value && state.reference) byKey.entry.value = String(state.reference.price);
+    calculate();
+  };
+  const useClose = el('button', { class: 'action', text: 'ENTRY = LAST CLOSE', onclick: () => {
+    if (!state.reference) return;
+    byKey.entry.value = String(state.reference.price);
     calculate();
   } });
-  const useAtr = el('button', { class: 'action', text: 'SET 2× ATR STOP', onclick: () => {
-    if (!reference || !valid(reference.atr14)) return;
-    const entry = Number(byKey.entry.value) || reference.price;
+  const useAtr = el('button', { class: 'action', text: 'STOP = 2× ATR', onclick: () => {
+    if (!state.reference || !valid(state.reference.atr14)) return;
+    const entry = Number(byKey.entry.value) || state.reference.price;
     byKey.entry.value = String(entry);
-    byKey.stop.value = String(Number((entry + (side.value === 'long' ? -2 : 2) * reference.atr14).toFixed(2)));
+    byKey.stop.value = String(Number((entry + (side.value === 'long' ? -2 : 2) * state.reference.atr14).toFixed(2)));
     calculate();
   } });
-  root.append(card('STOCK / ETF · WHOLE SHARES', null, [
+  calculate();
+  root.append(card('POSITION SIZE', el('span', { class: 'dim', text: 'computed in the browser · nothing saved' }), [
     el('div', { class: 'field-row' }, [field('SIDE', side), ...inputs.map(([, node]) => node)]),
-    el('div', { class: 'field-row' }, [useClose, useAtr]), sizing,
-    info('ADV cap applies only when this build has 20 valid sessions of volume. The free daily feed has no reliable live stock bid–ask; spread is a manual assumption, not a sourced quote. Gap-through-stop, slippage, commissions, borrow fees and FX can make loss exceed this estimate; short losses are uncapped.'),
+    el('div', { class: 'field-row' }, [useClose, useAtr]),
+    out,
+    info('Shares = the smallest of: risk budget ÷ distance to stop, the position limit, and the share of 20-day dollar volume. The free feed has no live stock bid–ask, so spread is your assumption. A gap through the stop, slippage, fees and borrow can make the loss larger; a short\'s loss is unbounded.'),
   ]));
 }
 
-function quoteBlock(quotes, kinds, { extendedOnly = false } = {}) {
-  let readings = quotes.filter((q) => kinds.includes(q.kind)).map((q) => {
+// ------------------------------------------------------------ overnight
+
+function readings(quotes, kinds) {
+  return quotes.filter((q) => kinds.includes(q.kind)).map((q) => {
+    const now = Date.now() / 1000;
     const isPre = q.kind === 'premarket' && valid(q.pre_price) && valid(q.pre_time)
-      && q.pre_time > (q.time || 0) && q.pre_time >= (q.post_time || 0)
-      && Date.now() / 1000 - q.pre_time < 12 * 3600;
+      && q.pre_time > (q.time || 0) && q.pre_time >= (q.post_time || 0) && now - q.pre_time < 12 * 3600;
     const isPost = q.kind === 'premarket' && !isPre && valid(q.post_price) && valid(q.post_time)
-      && q.post_time > (q.time || 0) && Date.now() / 1000 - q.post_time < 12 * 3600;
+      && q.post_time > (q.time || 0) && now - q.post_time < 12 * 3600;
     const price = isPre ? q.pre_price : isPost ? q.post_price : q.price;
     const stamp = isPre ? q.pre_time : isPost ? q.post_time : q.time;
-    // During extended hours Yahoo's chartPreviousClose is *two* sessions ago;
-    // regularMarketPrice is the just-completed session's close.
+    // In extended hours Yahoo's chartPreviousClose is two sessions back; the
+    // regular-market price is the session that just closed.
     const reference = (isPre || isPost) ? q.price : q.previous_close;
-    const change = valid(price) && valid(reference) && reference > 0
-      ? 100 * (price / reference - 1) : null;
-    return { q, price, stamp, change, extended: isPre || isPost, label: isPre ? ' PRE' : isPost ? ' POST' : '' };
+    const change = valid(price) && valid(reference) && reference > 0 ? 100 * (price / reference - 1) : null;
+    return { q, price, stamp, change, session: isPre ? 'PRE' : isPost ? 'POST' : null };
   });
-  if (extendedOnly) readings = readings.filter((r) => r.extended);
-  if (!readings.length) return info(extendedOnly
-    ? 'No current PRE/POST prints in this scan. Regular-session moves are not labelled as premarket movers.'
-    : 'No quote answered for this group.');
-  if (kinds.includes('premarket')) readings.sort((a, b) => Number(b.extended) - Number(a.extended)
-    || Math.abs(b.change || 0) - Math.abs(a.change || 0));
-  return table(['MARKET', 'LAST / EXTENDED', 'VS PRIOR CLOSE', 'QUOTE AGE'], readings.map(({ q, price, stamp, change, label }) => row(
-    `${q.label}${q.region ? ` · ${q.region}` : ''}`, q.error ? DASH : valid(price) ? num(price, 2) + label : DASH,
-    el('td', { class: dirClass(change), text: valid(change) ? pct(change, 2) : DASH }),
-    q.error || ageText(ageSeconds(stamp, Date.now())))));
 }
 
 function overnight(root) {
-  root.append(sectionTitle('OVERNIGHT & PREMARKET', 'LIVE QUOTES · UNOFFICIAL'));
+  const section = el('div', {});
   const status = el('span', { class: 'dim', text: 'Loading…' });
-  const host = el('div', {});
+  const tiles = el('div', {});
+  const movers = el('div', {});
+  let timer = null;
   let inflight = false;
+
   const load = async () => {
-    if (inflight || !root.isConnected) return;
+    if (inflight) return;
     inflight = true;
     try {
       const response = await fetch('api/quotes?scope=trade', { cache: 'no-store' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const body = await response.json();
       const quotes = body.quotes || [];
-      host.replaceChildren(card('ES / NQ & ASIA / EUROPE', null, [quoteBlock(quotes, ['overnight'])]),
-        card(`US PRE/POST MOVERS · ${quotes.filter((q) => q.kind === 'premarket').length} SYMBOL SCAN`, null, [
-          quoteBlock(quotes, ['premarket'], { extendedOnly: true }),
-          info('Scan = top 30 current SPX names by issuer weight plus the configured watchlist, with a fallback list on partial builds; not all US stocks. Only valid extended-hours quotes appear and are ranked by absolute move against the last regular close.'),
-        ]));
-      status.textContent = `Fetched ${body.fetched_at || DASH} · Yahoo chart · prices can be delayed`;
+      const board = readings(quotes, ['overnight']);
+      tiles.replaceChildren(board.length ? el('div', { class: 'stat-strip trade-board' }, board.map((r) => stat(
+        `${r.q.label.toUpperCase()} · ${r.q.region}`, r.q.error ? DASH : num(r.price, 2),
+        [el('span', { class: dirClass(r.change), text: signed(r.change) }), ` · ${r.q.error || ageText(ageSeconds(r.stamp, Date.now()))}`],
+      ))) : info('No quote answered for the overnight board.'));
+      const extended = readings(quotes, ['premarket']).filter((r) => r.session)
+        .sort((a, b) => Math.abs(b.change || 0) - Math.abs(a.change || 0));
+      movers.replaceChildren(extended.length ? table(['NAME', 'SESSION', 'PRICE', 'VS LAST CLOSE', 'AGE'], extended.map((r) => el('tr', {}, [
+        el('td', {}, [el('a', { href: tickerHref(r.q.symbol), text: r.q.label })]),
+        el('td', {}, [tag(r.session, 'info')]),
+        el('td', { text: num(r.price, 2) }),
+        el('td', { class: dirClass(r.change), text: signed(r.change) }),
+        el('td', { class: 'dim', text: ageText(ageSeconds(r.stamp, Date.now())) }),
+      ]))) : info('No pre- or post-market prints right now. Regular-session moves are not shown as pre-market movers.'));
+      status.textContent = `Fetched ${new Date(body.fetched_at || Date.now()).toLocaleTimeString()} · Yahoo chart, unofficial, can lag · ${quotes.filter((q) => q.kind === 'premarket').length} names scanned`;
     } catch (error) {
       status.textContent = `Live source unavailable: ${error.message}`;
-      host.replaceChildren(info('No overnight quote is inferred from the nightly close.'));
     } finally {
       inflight = false;
-      if (root.isConnected) setTimeout(load, 60000);
     }
   };
-  root.append(card('SOURCE STATUS', el('button', { class: 'action', text: 'REFRESH', onclick: load }), status), host);
-  load();
+  // Poll only while this section is on screen and the tab is visible, as the
+  // live strip does; a hidden tab resumes on its next visit.
+  const tick = async () => {
+    clearTimeout(timer);
+    if (!section.isConnected) { document.removeEventListener('visibilitychange', onVisible); return; }
+    if (document.hidden) return;
+    await load();
+    if (section.isConnected) timer = setTimeout(tick, 60000);
+  };
+  const onVisible = () => { if (!document.hidden) tick(); };
+  document.addEventListener('visibilitychange', onVisible);
+
+  section.append(
+    card('ES / NQ · ASIA · EUROPE', el('button', { class: 'action', text: 'REFRESH', onclick: tick }), [tiles, el('div', { class: 'stat-note' }, [status])]),
+    card('US PRE / POST-MARKET MOVERS', el('span', { class: 'dim', text: 'top 30 S&P 500 weights + watchlist' }), [movers,
+      info('Not a whole-market scan. Only prints inside the extended session count, ranked by size of move against the last regular close.')]),
+  );
+  root.append(section);
+  tick();
 }
 
-function flows(root, catalysts, evidence) {
-  root.append(sectionTitle('CAPITAL & POSITIONING', 'EARNINGS PROXIMITY · SEC FORM 4'));
-  if (!catalysts || catalysts.unavailable || !Array.isArray(catalysts.events)) {
-    root.append(card('EARNINGS-RELATED BUYBACK BLACKOUT PROXY', null, info('Calendar artifact unavailable; coverage cannot be calculated.')));
-  } else {
-    const nearby = earningsProximity(catalysts.events, catalysts.as_of || '', 45);
-    const weighted = nearby.filter((e) => valid(e.index_weights?.SPX));
-    const weight = weighted.reduce((sum, e) => sum + e.index_weights.SPX, 0);
-    const daysAway = (day) => Math.round((Date.parse(`${day}T12:00:00Z`) - Date.parse(`${catalysts.as_of}T12:00:00Z`)) / 86400000);
-    const imminent = nearby.filter((e) => daysAway(e.date) <= 7);
-    const search = el('input', { placeholder: 'Search ticker / company', size: '22' });
-    const showAll = el('button', { class: 'action', text: 'SHOW ALL' });
-    const count = el('span', { class: 'field-note' });
-    const listHost = el('div', {});
-    let expanded = false;
-    const draw = () => {
-      const query = search.value.trim().toUpperCase();
-      const matches = nearby.filter((e) => !query || `${e.symbol} ${e.name || ''}`.toUpperCase().includes(query));
-      const shown = query || expanded ? matches : matches.slice(0, 30);
-      listHost.replaceChildren(table(['EARNINGS DATE', 'DAYS AWAY', 'TICKER', 'SPX WEIGHT', 'CALENDAR STATUS'], shown.map((e) => row(
-        e.date, String(daysAway(e.date)), el('td', {}, [el('a', { href: tickerHref(e.symbol), text: e.symbol })]),
-        valid(e.index_weights?.SPX) ? `${num(e.index_weights.SPX, 3)}%` : DASH,
-        e.certainty_class === 'vendor_calendar' ? 'vendor estimate' : e.certainty_class || DASH))));
-      count.textContent = `Showing ${shown.length} of ${matches.length} matching names`;
-      showAll.textContent = expanded ? 'SHOW FIRST 30' : 'SHOW ALL';
-    };
-    search.addEventListener('input', draw);
-    showAll.addEventListener('click', () => { expanded = !expanded; draw(); });
-    draw();
-    root.append(card('EARNINGS PROXIMITY · POSSIBLE BUYBACK WINDOW RISK · NEXT 45 DAYS', null, [
-      el('div', { class: 'stat-strip' }, [
-        el('div', { class: 'stat' }, [el('div', { class: 'stat-label', text: 'SCHEDULED NAMES' }), el('div', { class: 'stat-value', text: num(nearby.length, 0) })]),
-        el('div', { class: 'stat' }, [el('div', { class: 'stat-label', text: 'WITHIN 7 DAYS' }), el('div', { class: 'stat-value', text: num(imminent.length, 0) })]),
-        el('div', { class: 'stat' }, [el('div', { class: 'stat-label', text: 'KNOWN SPX WEIGHT' }), el('div', { class: 'stat-value', text: `${num(weight, 2)}%` })]),
-      ]),
-      el('div', { class: 'field-row' }, [field('FIND', search), showAll, count]), listHost,
-      info(`Calendar as of ${catalysts.as_of}. Coverage: ${weighted.length} of ${nearby.length} scheduled names have SPX weights. Earnings proximity is only a watch queue, NOT a verified issuer repurchase blackout: company policy may differ, 10b5-1 plans may continue, and Nasdaq dates may change. Exact start/end and buyback dollars remain unknown.`),
-    ]));
-  }
+// ------------------------------------------------------------ scorecard
 
-  if (!evidence || evidence.unavailable || !Array.isArray(evidence.focus)) {
-    root.append(card('INSIDER PURCHASE CLUSTERS', null, info('Form 4 evidence artifact unavailable; no negative inference is possible.')));
-    return;
-  }
-  const focus = evidence?.focus || [];
-  const names = evidence?.names || {};
-  const clusters = focus.map((symbol) => ({ symbol, cluster: names[symbol]?.insiders?.strict_cluster,
-    coverage: names[symbol]?.insiders?.form4_coverage }))
-    .filter((r) => r.cluster).sort((a, b) => b.cluster.available.localeCompare(a.cluster.available));
-  const complete = focus.filter((symbol) => names[symbol]?.insiders?.form4_coverage?.complete).length;
-  root.append(card('INSIDER PURCHASE CLUSTERS · FOCUS NAMES ONLY', null, [
-    clusters.length ? table(['TICKER', 'WINDOW', 'OWNERS', 'REPORTED VALUE', 'FILED / SOURCE'], clusters.map((r) => row(
-      el('td', {}, [el('a', { href: tickerHref(r.symbol), text: r.symbol })]),
-      `${r.cluster.from} → ${r.cluster.to}${r.coverage?.complete ? '' : ' · partial'}`,
-      num(r.cluster.count, 0), money(r.cluster.value),
-      el('td', {}, [r.cluster.filing_urls?.[0]
-        ? el('a', { href: r.cluster.filing_urls[0], target: '_blank', rel: 'noopener noreferrer', text: r.cluster.available })
-        : r.cluster.available]))))
-      : info('No qualifying cluster in the focus names read this build.'),
-    info(`SEC Form 4 research subset: direct acquired P purchases, positive price, no indicated 10b5-1 plan or swap; >=2 distinct owner CIKs within 5 SPX sessions and >=$250k. ${complete}/${focus.length} focus names fully read, not a market-wide scan. Code P can include private purchases; filing date is the earliest observable date, not transaction date. No alpha claim. ${Object.keys(evidence?.failed || {}).length ? `Source gaps: ${Object.keys(evidence.failed).join(', ')}.` : ''}`),
-  ]));
-  const purchaseNames = focus.filter((symbol) => names[symbol]?.insiders?.strict_purchases?.length);
-  if (purchaseNames.length) {
-    const picker = el('select', {}, purchaseNames.map((symbol) => el('option', { value: symbol, text: symbol })));
-    const details = el('div', {});
-    const draw = () => {
-      const list = names[picker.value]?.insiders?.strict_purchases || [];
-      details.replaceChildren(table(['TRADE DATE', 'FILED', 'OWNER', 'VALUE', 'SEC FILING'], list.map((p) => row(
-        p.date, p.filed, p.owner || DASH, money(p.value), p.filing_url
-          ? el('td', {}, [el('a', { href: p.filing_url, target: '_blank', rel: 'noopener noreferrer', text: 'OPEN' })]) : DASH))));
-    };
-    picker.addEventListener('change', draw);
-    draw();
-    root.append(card('INSPECT STRICT PURCHASES · LAST 90 DAYS', null, [field('FOCUS NAME', picker), details,
-      info('This is the underlying subset, not a buy recommendation. A missing name may mean no qualifying filing or incomplete coverage; inspect the coverage count above.') ]));
-  }
-  root.append(info('Existing short-interest and CTA flip-level work remains on RISK → POSITIONING; no second copy is calculated here.'));
+// A state's edge over the base rate, coloured by whether it helps the call:
+// for a bearish state a lower forward return is the signal working.
+function edgeClass(r) {
+  if (!valid(r.difference_pct)) return 'dim';
+  return r.difference_pct * r.direction > 0 ? 'up' : 'down';
 }
 
-function scorecard(root, anchor, positioning, risk) {
-  root.append(sectionTitle('SIGNAL SCORECARD', 'DESCRIPTIVE HISTORY · NOT OUT-OF-SAMPLE ALPHA'));
-  const history = anchor?.history;
-  const rows = anchorScorecard(history);
-  const scoreTable = (readings) => table(['STATE AT CLOSE', 'HORIZON', 'SIGNAL / BASE N', 'DIR HIT / BASE', 'MEAN / BASE', 'Δ MEAN VS BASE'], readings.map((r) => row(
-    el('td', {}, [tag(r.label, ['RISK-ON', 'LONG', 'EXTREME FEAR'].includes(r.label) ? 'up' : 'down')]), `${r.horizon} sessions`,
-    `${num(r.count, 0)}${r.count < 10 ? ' · thin' : ''} / ${num(r.baseline_count, 0)}`,
-    r.hit_rate === null ? DASH : `${num(r.hit_rate, 1)}% / ${num(r.baseline_hit_rate, 1)}%`,
-    r.mean_pct === null ? DASH : `${pct(r.mean_pct, 2)} / ${pct(r.baseline_pct, 2)}`,
-    r.difference_pct === null ? DASH : pct(r.difference_pct, 2))));
-  root.append(card('FROZEN V1 ANCHOR · FORWARD SPY RETURN', null, [
-    history ? scoreTable(rows) : info('Anchor artifact unavailable; no historical score is inferred.'),
-    info(`As of ${anchor?.as_of || DASH}; ${history?.dates?.[0] || DASH} to ${history?.dates?.at(-1) || DASH}. `
-      + 'Signal observed at day-end; enter at next close, exit after the stated sessions. Events of the same state do not overlap. '
-      + 'Hit means SPY rose after RISK-ON or fell after RISK-OFF. Outcomes are underlying SPY returns, not anchor strategy P&L. Current-vintage Yahoo closes, no fees, no out-of-sample claim.'),
-    info('BASE = all eligible sessions in the same signal-history window, sampled in non-overlapping blocks at each horizon. Δ mean is underlying-index signal mean minus baseline; a positive Δ is adverse for bearish states. Different sample timing is not causal uplift. Fewer than 10 outcomes are marked thin.'),
-    info('Form 4 cluster, buyback-proxy, option-range and overnight signals have no causal archived panel here; their hit rates are unavailable until snapshots and point-in-time entry rules exist.'),
+function scoreBlock(title, rows, note) {
+  if (!rows.length) return card(title, null, info(note));
+  const chartNode = el('div', { class: 'chart short' });
+  const labels = [...new Set(rows.map((r) => r.label))];
+  const horizons = [...new Set(rows.map((r) => r.horizon))];
+  requestAnimationFrame(() => render(chartNode, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, left: 48, bottom: 44 },
+    legend: { bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9 },
+    tooltip: { ...option.tooltip, trigger: 'axis', valueFormatter: (v) => (valid(v) ? pct(v, 2) : DASH) },
+    xAxis: { ...option.xAxis, boundaryGap: true, data: horizons.map((h) => `${h} sessions`) },
+    yAxis: { ...option.yAxis, axisLabel: { ...option.yAxis.axisLabel, formatter: (v) => `${v}%` } },
+    series: [
+      ...labels.map((label, i) => ({
+        name: `after ${label}`, type: 'bar', barMaxWidth: 16,
+        itemStyle: { color: i === 0 ? p.up : p.down, opacity: 0.8 },
+        data: horizons.map((h) => rows.find((r) => r.label === label && r.horizon === h)?.mean_pct ?? null),
+      })),
+      { name: 'any day (base)', type: 'bar', barMaxWidth: 16, itemStyle: { color: p.faint },
+        data: horizons.map((h) => rows.find((r) => r.horizon === h)?.baseline_pct ?? null) },
+    ],
+  })));
+  const body = rows.map((r) => el('tr', {}, [
+    el('td', {}, [tag(r.label, r.direction > 0 ? 'up' : 'down')]),
+    el('td', { text: `${r.horizon}` }),
+    el('td', { class: r.count < 10 ? 'down' : '', text: `${num(r.count, 0)}${r.count < 10 ? ' · thin' : ''}` }),
+    el('td', { text: valid(r.hit_rate) ? `${num(r.hit_rate, 0)}% vs ${num(r.baseline_hit_rate, 0)}%` : DASH }),
+    el('td', { text: valid(r.mean_pct) ? `${signed(r.mean_pct)} vs ${signed(r.baseline_pct)}` : DASH }),
+    el('td', { class: edgeClass(r), text: signed(r.difference_pct) }),
   ]));
+  return card(title, null, [
+    el('div', { class: 'grid two trade-score' }, [
+      chartNode,
+      el('div', { class: 'table-scroll' }, [el('table', { class: 'data' }, [
+        el('thead', {}, [el('tr', {}, ['STATE', 'SESSIONS', 'N', 'HIT RATE', 'MEAN RETURN', 'EDGE'].map((h) => el('th', { text: h })))]),
+        el('tbody', {}, body),
+      ])]),
+    ]),
+    info(note),
+  ]);
+}
+
+const withDirection = (rows, bullish) => rows.map((r) => ({ ...r, direction: bullish.includes(r.label) ? 1 : -1 }));
+
+async function scorecard(root, ctx) {
+  const [anchor, positioning, risk] = await Promise.all(['anchor', 'positioning', 'risk']
+    .map((name) => ctx.loadArtifact(name).catch(() => null)));
+  const path = anchor?.full?.dates?.length ? anchor.full : anchor?.history;
+  const common = 'Signal read at the close; entry at the next close; same-state windows do not overlap. Hit = the index moved the way the state points. EDGE = mean after the state minus the mean of any day (green = in the state\'s favour). Descriptive, in-sample, current-vintage prices, no costs: not strategy P&L.';
+  root.append(scoreBlock('FROZEN V1 ANCHOR → SPY', path ? withDirection(anchorScorecard(path), ['RISK-ON']) : [],
+    path ? `RISK-ON = exposure ≥ 75%, RISK-OFF ≤ 25%. ${path.dates[0]} to ${path.dates.at(-1)}. ${common}` : 'Anchor artifact unavailable.'));
   const sentiment = risk?.sentiment?.history;
-  if (sentiment?.dates?.length && history?.dates?.length) root.append(card('FEAR & GREED EXTREMES · FORWARD SPY RETURN', null, [
-    scoreTable(sentimentScorecard(sentiment, history)),
-    info(`Fear & Greed scores aligned by session date to SPY. Extreme fear ≤25 tested as an up direction; extreme greed ≥75 as down. History ${sentiment.dates[0]} to ${sentiment.dates.at(-1)}; next-close entry, non-overlapping per state. Short sample and current-vintage components: descriptive only, not out-of-sample alpha.`),
-  ]));
-  for (const trend of positioning?.trend || []) {
-    const readings = trendScorecard(trend);
-    root.append(card(`${trend.label.toUpperCase()} TREND PROXY · FORWARD INDEX RETURN`, null, [
-      readings.length ? scoreTable(readings) : info('Full daily trend history is unavailable; thinned chart points cannot be scored as trading sessions.'),
-      info(`Close-only 4-lookback vote, ${trend.scorecard_history?.dates?.[0] || DASH} to ${trend.as_of}. LONG/SHORT requires ≥3 of 4 votes. `
-        + 'Hit means index rose after LONG or fell after SHORT. Full daily observations, signal at close, next-close entry and non-overlapping per-state outcomes. Descriptive current-vintage history, not actual CTA holdings or strategy P&L.'),
-    ]));
+  if (sentiment?.dates?.length && path?.dates?.length) {
+    root.append(scoreBlock('FEAR & GREED EXTREMES → SPY', withDirection(sentimentScorecard(sentiment, path), ['EXTREME FEAR']),
+      `Extreme fear ≤ 25 read as bullish, extreme greed ≥ 75 as bearish. ${sentiment.dates[0]} to ${sentiment.dates.at(-1)} only, so samples are small. ${common}`));
   }
-  if (!positioning?.trend?.length) root.append(info('Trend-proxy scorecard unavailable: no positioning history in this build.'));
+  for (const trend of positioning?.trend || []) {
+    root.append(scoreBlock(`${trend.label.toUpperCase()} TREND PROXY → INDEX`, withDirection(trendScorecard(trend), ['LONG']),
+      `LONG / SHORT = at least three of the four lookback votes agree (RISK → POSITIONING). ${trend.scorecard_history?.dates?.[0] || DASH} to ${trend.as_of}. ${common}`));
+  }
+  root.append(info('Buyback blackout, insider clusters and the implied range have no archived daily history yet, so they are not scored.'));
 }
 
-export default function renderTrade(root, payloads, _manifest, ctx) {
-  const [technicals, evidence, catalysts, anchor, positioning, risk] = payloads || [];
+// ------------------------------------------------------------ page
+
+export default function renderTrade(root, technicals, _manifest, ctx) {
   root.append(metaRow('TRADE DESK · US STOCKS & INDEX ETFs · OVERNIGHT TO WEEKS', [
-    'Public research and sizing arithmetic only. No Futu account, alerts, journal or trade execution.',
-    'Live quotes are separate from the nightly artifacts. Blank readings mean source coverage is absent, not zero.',
+    'Research and sizing arithmetic only: no account connection, alerts, journal or orders.',
+    'Levels come from the nightly build\'s daily bars; the overnight board is live and separate. A blank is missing coverage, never zero.',
+    'Buyback blackout and insider buying are on RISK → POSITIONING with short interest and the trend-follower levels.',
   ]));
-  const tabs = ['SETUPS & SIZE', 'OVERNIGHT', 'CAPITAL & INSIDERS', 'SCORECARD'];
+  const tabs = ['SETUPS & SIZE', 'OVERNIGHT', 'SCORECARD'];
   const host = el('div', {});
-  const switcher = periodSwitch(tabs, tabs[0], (selected) => {
+  const state = { reference: null, onReference: null };
+  const show = (selected) => {
     host.replaceChildren();
-    if (selected === tabs[0]) setups(host, technicals, evidence, ctx);
-    else if (selected === tabs[1]) overnight(host);
-    else if (selected === tabs[2]) flows(host, catalysts, evidence);
-    else scorecard(host, anchor, positioning, risk);
-  });
-  root.append(switcher, host);
-  setups(host, technicals, evidence, ctx);
+    if (selected === tabs[0]) {
+      setups(host, technicals, ctx, state);
+      sizing(host, state);
+    } else if (selected === tabs[1]) overnight(host);
+    else scorecard(host, ctx);
+  };
+  root.append(el('div', { class: 'trade-nav' }, [periodSwitch(tabs, tabs[0], show),
+    el('a', { href: '#positioning', class: 'dim', text: 'buyback blackout · insider buying → POSITIONING' })]), host);
+  show(tabs[0]);
 }

@@ -30,7 +30,8 @@ def build(ctx) -> dict:
         closes = closes.loc[: pd.Timestamp(ctx.as_of)]
     spy = closes["SPY"].dropna()
     result = A.anchor(spy, closes["HG=F"].dropna(), closes["CL=F"].dropna())
-    path = result["path"].tail(HISTORY_SESSIONS)
+    whole = result["path"]
+    path = whole.tail(HISTORY_SESSIONS)
     core = result["core"].reindex(path.index)
     gate = result["gate"].reindex(path.index)
 
@@ -61,4 +62,11 @@ def build(ctx) -> dict:
             "copper_oil_z": _values(gate["z"], 3),
         },
         "changes": [{"date": d.strftime("%Y-%m-%d"), "exposure": float(v)} for d, v in changes.tail(12).items()],
+        # Every session since the copper series allows, daily: the RISK chart's
+        # longer ranges and the Trade Desk scorecard both need the whole path.
+        "full": {
+            "dates": [d.strftime("%Y-%m-%d") for d in whole.index],
+            "exposure": _values(whole["exposure"], 3),
+            "spy": _values(spy.reindex(whole.index), 2),
+        },
     }

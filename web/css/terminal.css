@@ -864,3 +864,14 @@ tr.picked td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 .pos-table td { white-space: nowrap; }
 .pos-table .sub { display: block; font-size: 9.5px; color: var(--text-faint); max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
 .pos-spark .spark { width: 90px; height: 20px; }
+
+/* ---------- Trade Desk ---------- */
+.trade-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 10px; flex-wrap: wrap; }
+.trade-nav a { font-size: 10.5px; }
+.trade-pick { margin: 0 0 8px; }
+.grid.trade-top { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); margin-top: 10px; }
+@media (max-width: 1100px) { .grid.trade-top { grid-template-columns: minmax(0, 1fr); } }
+.trade-ladder td { white-space: nowrap; }
+.trade-ladder tr.trade-ladder-now td { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); font-weight: 700; }
+.trade-board .stat-value { font-size: 16px; }
+.trade-score .chart.short { height: 190px; }

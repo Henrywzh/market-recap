@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { anchorScorecard, closeLevels, earningsProximity, optionRange, sentimentScorecard, sizePosition, trendScorecard } from '../../web/js/trade-math.js';
+import { anchorScorecard, closeLevels, optionRange, priceLadder, sentimentScorecard, sizePosition, trendScorecard } from '../../web/js/trade-math.js';
 
 test('levels are close-based and require the complete window', () => {
   const levels = closeLevels(Array.from({ length: 60 }, (_, i) => i + 1));
@@ -72,9 +72,21 @@ test('sentiment scorecard joins on date instead of row position', () => {
   assert.equal(result.find((r) => r.label === 'EXTREME GREED').count, 0);
 });
 
-test('earnings proximity is a dated calendar filter, not an inferred blackout', () => {
-  const events = [{ event_type: 'earnings', symbol: 'A', date: '2026-10-01' },
-    { event_type: 'earnings', symbol: 'B', date: '2026-11-01' },
-    { event_type: 'economic_release', date: '2026-10-01' }];
-  assert.deepEqual(earningsProximity(events, '2026-09-28', 30).map((e) => e.symbol), ['A']);
+test('levels read traded closes when the OHLC companion has them', () => {
+  const dates = Array.from({ length: 30 }, (_, i) => `d${i}`);
+  const adjusted = Array.from({ length: 30 }, (_, i) => 90 + i);          // total-return basis
+  const traded = Array.from({ length: 30 }, (_, i) => 100 + i);           // what printed
+  const levels = closeLevels(adjusted, { dates, close: traded, open: traded, high: traded, low: traded, volume: traded }, dates);
+  assert.equal(levels.basis, 'traded');
+  assert.deepEqual(levels.twenty, { low: 109, high: 128 });
+  assert.equal(closeLevels(adjusted).basis, 'total_return');
+});
+
+test('the ladder sorts every level by price with its distance from the close', () => {
+  const levels = { close: 100, twenty: { low: 95, high: 104 }, sixty: null, year: null,
+    moving: { 20: 99, 50: null, 200: 90 }, atr14: 2.1 };
+  const ladder = priceLadder(levels, { lower: 96, upper: 104.5 });
+  assert.deepEqual(ladder.map((r) => r.label), ['IMPLIED HIGH', '+2 ATR', '20D HIGH', '20D AVG', 'IMPLIED LOW', '−2 ATR', '20D LOW', '200D AVG']);
+  assert.ok(Math.abs(ladder.find((r) => r.label === '200D AVG').distance_pct + 10) < 1e-9);
+  assert.deepEqual(priceLadder(null), []);
 });

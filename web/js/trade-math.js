@@ -3,8 +3,21 @@
 
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 
+// Levels are read on prices that traded: Yahoo's split-adjusted closes from
+// the OHLC companion. The artifact's main close is dividend-adjusted -- a
+// total-return series whose past values never printed (SPY's 252-session low
+// sits about 0.5% below the traded one) -- and is used only when the
+// companion is missing, which the result says.
+export function tradedCloses(closes, ohlcv = null, dates = null) {
+  if (ohlcv?.dates?.length && Array.isArray(ohlcv.close) && ohlcv.close.some(finite)) {
+    return { values: ohlcv.close, dates: ohlcv.dates, basis: 'traded' };
+  }
+  return { values: closes || [], dates: dates || [], basis: 'total_return' };
+}
+
 export function closeLevels(closes, ohlcv = null, dates = null) {
-  const clean = (closes || []).filter(finite);
+  const traded = tradedCloses(closes, ohlcv, dates);
+  const clean = traded.values.filter(finite);
   if (!clean.length) return null;
   const last = clean.at(-1);
   const window = (n) => clean.length > n
@@ -14,7 +27,32 @@ export function closeLevels(closes, ohlcv = null, dates = null) {
     ? clean.slice(-n).reduce((sum, v) => sum + v, 0) / n : null]));
   const bar = tradeBarReadings(ohlcv, dates, closes);
   return { close: last, previous: clean.length > 1 ? clean.at(-2) : null,
-    twenty: window(20), sixty: window(60), year: window(252), moving, ...bar, sessions: clean.length };
+    twenty: window(20), sixty: window(60), year: window(252), moving, ...bar, sessions: clean.length,
+    basis: traded.basis };
+}
+
+// Every level above and below the last close, nearest first on each side:
+// the prior-session extremes, the averages, a 2x ATR stop each way and, when
+// a same-day option snapshot exists, the straddle range.
+export function priceLadder(levels, range = null) {
+  if (!levels || !finite(levels.close)) return [];
+  const out = [];
+  const add = (label, kind, price) => { if (finite(price)) out.push({ label, kind, price }); };
+  for (const [key, name] of [['twenty', '20D'], ['sixty', '60D'], ['year', '52W']]) {
+    add(`${name} HIGH`, 'range', levels[key]?.high);
+    add(`${name} LOW`, 'range', levels[key]?.low);
+  }
+  for (const n of [20, 50, 200]) add(`${n}D AVG`, 'average', levels.moving?.[n]);
+  if (finite(levels.atr14)) {
+    add('+2 ATR', 'atr', levels.close + 2 * levels.atr14);
+    add('−2 ATR', 'atr', levels.close - 2 * levels.atr14);
+  }
+  if (range) {
+    add('IMPLIED HIGH', 'implied', range.upper);
+    add('IMPLIED LOW', 'implied', range.lower);
+  }
+  return out.map((r) => ({ ...r, distance_pct: 100 * (r.price / levels.close - 1) }))
+    .sort((a, b) => b.price - a.price);
 }
 
 export function tradeBarReadings(ohlcv, dates, closes) {
@@ -140,11 +178,4 @@ export function sentimentScorecard(sentiment, priceHistory, horizons = [5, 20, 6
     { label: 'EXTREME FEAR', match: (v) => v <= 25, direction: 1 },
     { label: 'EXTREME GREED', match: (v) => v >= 75, direction: -1 },
   ], horizons);
-}
-
-export function earningsProximity(events, asOf, days = 30) {
-  const end = new Date(`${asOf}T12:00:00Z`).getTime() + days * 86400000;
-  return (events || []).filter((e) => e.event_type === 'earnings' && e.symbol && e.date >= asOf
-    && new Date(`${e.date}T12:00:00Z`).getTime() <= end)
-    .sort((a, b) => a.date.localeCompare(b.date));
 }

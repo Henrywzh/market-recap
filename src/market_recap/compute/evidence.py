@@ -202,7 +202,9 @@ def strict_form4_buys(xml: str, *, issuer_cik: int, filed: str, filing_url: str 
         swap = (_text(tx, "transactionCoding/equitySwapInvolved") or "").lower()
         if coding != "P" or acquire != "A" or direct != "D" or swap not in ("0", "false", "no"):
             continue
-        if tx.find("deemedExecutionDate") is not None or (_text(tx, "transactionCoding/aff10b5One") or "").lower() in ("1", "true", "yes"):
+        # Many filers write an empty <deemedExecutionDate/>; only a dated one
+        # marks a trade executed under a plan or order placed earlier.
+        if _text(tx, "deemedExecutionDate") or (_text(tx, "transactionCoding/aff10b5One") or "").lower() in ("1", "true", "yes"):
             continue
         try:
             shares = float(_text(tx, "transactionAmounts/transactionShares") or "nan")

@@ -28,7 +28,6 @@ PANELS = {
     "heatmaps": heatmaps.build,
     "rotation": rotation.build,
     "risk": risk.build,
-    "positioning": positioning.build,
     "fixed_income": fixed_income.build,
     "macro": macro.build,
     "technicals": technicals_panel.build,
@@ -40,6 +39,8 @@ PANELS = {
     "valuation": valuation.build,
     "dcf": dcf.build,
     "evidence": evidence.build,
+    # Reads this session's catalysts and evidence (report dates), so after them.
+    "positioning": positioning.build,
     "anchor": anchor.build,
     "monitor": monitor.build,
     # OVERVIEW reads this session's other panels and so runs last.
@@ -130,6 +131,8 @@ def run(
                 pending.replace(ARTIFACT_DIR / "monitor.json")
             elif name == "overview":
                 payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in overview.INPUTS})
+            elif name == "positioning":
+                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in positioning.INPUTS})
             else:
                 payload = PANELS[name](ctx)
         except Exception as exc:

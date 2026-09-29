@@ -506,6 +506,12 @@ a month, public API, no key) for the index members, the watchlist and the
 broad ETFs -- days to cover, change on the round, and the members' total short
 value over 24 rounds.
 
+Buyback blackout (the share of S&P 500 weight between 30 days before and 2
+days after a report, from members' filed report dates, the earnings calendar
+and projections) and insider buying (strict Form 4 purchases for every
+member, from EDGAR's daily index, read incrementally) sit on the same page.
+The panel runs after catalysts and evidence and reads both (INPUTS).
+
 ETF flows for Invesco funds (QQQ, RSP): Invesco publishes only today's units,
 so the evening risk snapshot records them and the heat map builds a flow once
 two days are on record. Vanguard publishes no daily units at all; its funds

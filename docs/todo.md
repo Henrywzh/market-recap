@@ -111,32 +111,31 @@ First, the workflow gaps:
 
 Second, entries and exits:
 
-4. **Levels and expected range.** Trade Desk: 20/50/200-session averages and
-   distance, 20/60/252-session close extrema, latest opening gap, ATR. The
-   ATM-straddle range is gated on a same-session usable option snapshot;
-   none has been captured yet, so no observed range can currently appear.
-5. **Pre-market and overnight.** ES/NQ, Asia/Europe, and an abs-move-ranked
-   live scan of the current top 30 SPX names by weight plus watchlist. It is
-   not a full-universe or full-market mover feed.
-6. **Position-size calculator.** Account/stop risk, notional and 20-day
-   average-dollar-volume participation caps, with a 2× ATR stop shortcut.
-   Stock bid–ask is not in the free quote source; spread is an explicitly
-   manual input, not a fabricated observation.
+4. **Levels and expected range.** Trade Desk: chart and price ladder on
+   traded closes (20/50/200-day averages, prior 20/60-session and 52-week
+   closing extremes, ±2 ATR), gap, ATR. The straddle range appears only with
+   a same-session option snapshot; none has been captured yet.
+5. **Pre-market and overnight.** ES/NQ, Asia/Europe, and a pre/post-market
+   scan of the top 30 S&P 500 weights plus the watchlist. Not a whole-market
+   mover feed.
+6. **Position-size calculator.** Stop risk, position limit and dollar-volume
+   caps with a 2× ATR stop shortcut; spread is a manual assumption.
 
-Third, flows and positioning:
+Third, flows and positioning (all on RISK → POSITIONING):
 
-7. **Flows/positioning.** FINRA short interest and trend-follower flip levels
-   remain on POSITIONING. Trade Desk has a 45-day earnings-proximity watch
-   queue with SPX weights. It is not a verified company repurchase blackout
-   calendar; company-specific start/end dates remain unknown.
-8. **Insider cluster buys.** Strict SEC Form 4 direct P subset, filing links,
-   and read-coverage for the focus names (not all US issuers). The related
-   quantamental-lab cross-universe promotion gate is blocked, so no alpha
-   claim is made.
-9. **Signal scorecard.** Descriptive next-close, non-overlapping 5/20/60-session
-   forward SPY/index returns for the anchor, trend proxy and Fear & Greed
-   extremes. Implied-range, Form 4 and buyback scores require causal archived
-   signal panels and remain explicitly unavailable.
+7. **Who is forced to trade.** FINRA short interest, trend-follower flip
+   levels, and the share of S&P 500 weight in an estimated buyback blackout
+   (30 days before to 2 days after each report; a convention, not company
+   policy).
+8. **Insider buying.** Strict Form 4 purchases for every S&P 500 / Nasdaq-100
+   issuer from EDGAR's daily index, clusters and the largest buys. Each build
+   reads at most 1,500 new filings, so the 90-day window fills over about four
+   nights; the page shows coverage. No alpha claim (the quantamental-lab
+   cross-universe gate is blocked).
+9. **Signal scorecard** (Trade Desk). Forward returns after anchor states
+   (since 1993), Fear & Greed extremes (since 2024) and the trend proxy,
+   against any day. Descriptive, in-sample. Blackout, insider and implied-
+   range signals need archived daily history before they can be scored.
 
 ## 4. From the reference dashboard (2026-09-29)
 

@@ -12,10 +12,11 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import math
 from functools import lru_cache
 import json
+import re
 import threading
 import time
 
@@ -24,6 +25,7 @@ import pandas as pd
 
 from .. import cache
 from ..config import SEC_USER_AGENT
+from .http import FetchError
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
@@ -895,3 +897,56 @@ def fetch_form4(cik: int, accession: str, primary_document: str, *, use_cache: b
         suffix=".xml",
         use_cache=use_cache,
     )
+
+
+# --- Every Form 4 filed on a day ----------------------------------------------
+# EDGAR's daily form index lists each filing once per party: a Form 4 appears
+# under the issuer's CIK and again under each reporting owner's. Filtering on
+# issuer CIKs therefore finds every Form 4 about a company, whoever filed it.
+DAILY_INDEX_URL = "https://www.sec.gov/Archives/edgar/daily-index/{year}/QTR{quarter}/form.{day:%Y%m%d}.idx"
+FILING_URL = "https://www.sec.gov/Archives/{path}"
+_OWNERSHIP = re.compile(r"<ownershipDocument>.*?</ownershipDocument>", re.S)
+
+
+def parse_form_index(text: str, forms: frozenset[str] = frozenset({"4"})) -> list[dict]:
+    """(form, name, cik, filed, path) rows of a daily form index."""
+    rows = []
+    for line in text.splitlines():
+        parts = re.split(r"\s{2,}", line.strip())
+        if len(parts) < 5 or parts[0] not in forms or not parts[2].isdigit() or not parts[3].isdigit():
+            continue
+        rows.append({"form": parts[0], "name": parts[1], "cik": int(parts[2]),
+                     "filed": f"{parts[3][:4]}-{parts[3][4:6]}-{parts[3][6:]}", "path": parts[4]})
+    return rows
+
+
+def daily_form_index(day: date, *, today: date | None = None, use_cache: bool = True) -> list[dict] | None:
+    """Form 4 rows filed on ``day``; None when EDGAR has no index for it (a
+    weekend, a holiday, or a day not yet published). A day more than two days
+    old never changes and is kept; a recent one is refetched each session."""
+    today = today or date.today()
+    url = DAILY_INDEX_URL.format(year=day.year, quarter=(day.month - 1) // 3 + 1, day=day)
+
+    def fetch() -> str:
+        try:
+            return _get(url, 45.0)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (403, 404):
+                raise FetchError(f"no EDGAR daily index for {day}", not_found=True) from exc
+            raise
+
+    try:
+        text = cache.fetch_text(f"{NAMESPACE}/daily-index", f"form-{day:%Y%m%d}", fetch,
+                                kind="archive" if (today - day).days > 2 else "daily_file",
+                                suffix=".idx", use_cache=use_cache, remember_missing=(today - day).days > 2)
+    except FetchError as exc:
+        if exc.not_found:
+            return None
+        raise
+    return parse_form_index(text)
+
+
+def ownership_xml(path: str) -> str | None:
+    """The ownershipDocument inside one full submission (``edgar/data/...txt``)."""
+    match = _OWNERSHIP.search(_get(FILING_URL.format(path=path), 30.0))
+    return match.group(0) if match else None
