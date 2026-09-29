@@ -14,6 +14,7 @@ export const VIEWS = [
   { id: 'risk', label: 'RISK', group: 'risk', artifact: ['risk', 'anchor'], module: 'risk' },
   { id: 'rates', label: 'RATES & MACRO', group: 'risk', artifact: ['fixed_income', 'macro'], module: 'rates' },
   { id: 'priced', label: 'PRICED PATH', group: 'risk', artifact: 'priced', module: 'priced' },
+  { id: 'positioning', label: 'POSITIONING', group: 'risk', artifact: 'positioning', module: 'positioning' },
   { id: 'monitor', label: 'MONITOR', group: 'names', artifact: 'monitor', module: 'monitor' },
   { id: 'valuation', label: 'SCREEN', group: 'names', artifact: 'valuation', module: 'valuation', takesArg: true },
   { id: 'ticker', label: 'TICKER', group: 'names', artifact: 'valuation', module: 'ticker', takesArg: true },

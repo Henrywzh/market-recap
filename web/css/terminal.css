@@ -859,3 +859,8 @@ tr.pickable { cursor: pointer; }
 tr.pickable:hover td { background: var(--panel-alt); }
 tr.picked td { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 tr.picked td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* ---------- Positioning ---------- */
+.pos-table td { white-space: nowrap; }
+.pos-table .sub { display: block; font-size: 9.5px; color: var(--text-faint); max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.pos-spark .spark { width: 90px; height: 20px; }

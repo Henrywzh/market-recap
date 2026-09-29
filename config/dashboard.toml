@@ -172,6 +172,20 @@ IEF = "Fixed Income"
 SHY = "Fixed Income"
 TLT = "Fixed Income"
 
+[positioning]
+# POSITIONING (RISK -> POSITIONING). Short interest covers the index members,
+# the watchlist and these ETFs; ``rounds`` is how many FINRA rounds (two a
+# month) are charted; ``top`` rows per ranked table.
+short_interest_rounds = 24
+short_interest_top = 15
+short_interest_etfs = ["SPY", "QQQ", "IWM", "DIA", "RSP", "XLK", "XLF", "XLE", "XLV", "HYG", "LQD", "TLT"]
+history_years = 10
+
+[etf_detail]
+# ETF PRICE & PUBLISHED FLOWS: funds listed first in the picker (the first is
+# shown on load). Every fund on the heat map with a price follows.
+first = ["SPY", "QQQ", "VOO"]
+
 [etf_xray]
 # Holdings detail shown per fund; every line still counts in the summaries.
 top_holdings = 25
@@ -674,6 +688,9 @@ polymarket_tags = ["fed", "fed-rates"]
 tail = 30
 fred = ["BAMLH0A0HYM2", "BAMLC0A0CM", "BAMLH0A3HYC", "BAMLH0A1HYBB", "BAMLH0A2HYB", "BAMLC0A4CBBB", "NFCI", "ANFCI"]
 cboe = ["VIX", "VIX9D", "VIX3M", "VIX6M", "VIX1Y", "VVIX", "SKEW", "COR1M"]
+# ETFs whose issuer publishes only today's units (CUSIP from [etf_xray.holdings]):
+# recorded each evening so their flow can be built from the record.
+invesco = ["QQQ", "RSP"]
 
 # MARKET RISK (RISK -> RISK). One tile per series; no composite score.
 # Thresholds were written on 2026-09-26, before the page drew any of these

@@ -17,6 +17,12 @@ history -- today's view of the past, revisions included -- not what was
 known at the time, and its sidecar says so. It keeps what FRED will drop
 from the ICE spreads' three-year window, and gives the daily files a
 history to extend.
+
+The same evening run records the units of ETFs whose issuer publishes only
+today's figure (Invesco: QQQ, RSP). Rows: source "invesco", series
+"<TICKER> shares_outstanding" and "<TICKER> nav", dated by the issuer's own
+effective date. Differencing the record is the only way to a flow history
+for these funds; the record starts on the first evening it ran.
 """
 
 from __future__ import annotations
@@ -29,7 +35,7 @@ from typing import Any, Callable, Mapping
 import pandas as pd
 
 from ..config import load_config
-from ..sources import cboe, fred
+from ..sources import cboe, fred, invesco
 from ..sources.http import get_text
 from . import store
 
@@ -72,13 +78,37 @@ BASELINE_NOTE = (
 )
 
 
+def _etf_units(settings: Mapping[str, Any], config: Mapping[str, Any],
+               fetch_units: Callable[[str], dict]) -> tuple[list[tuple[str, str, pd.Series]], dict, dict]:
+    """(series, answered, failed) for the ETFs whose units are recorded here."""
+    holdings = config.get("etf_xray", {}).get("holdings", {})
+    series, answered, failed = [], {}, {}
+    for ticker in settings.get("invesco", []):
+        cusip = invesco.cusip_for(holdings.get(ticker))
+        if not cusip:
+            failed[f"invesco {ticker}"] = "no invesco:<CUSIP> entry under [etf_xray.holdings]"
+            continue
+        try:
+            units = fetch_units(cusip)
+        except Exception as exc:
+            failed[f"invesco {ticker}"] = str(exc)[:200]
+            continue
+        day = pd.Timestamp(units["date"])
+        for field in ("shares_outstanding", "nav"):
+            series.append(("invesco", f"{ticker} {field}", pd.Series([units[field]], index=[day], dtype=float)))
+        answered[f"invesco {ticker}"] = 1
+    return series, answered, failed
+
+
 def run(*, root=None, now: datetime | None = None, baseline: bool | None = None,
         fetch_ofr: Callable[[], pd.DataFrame] = fetch_ofr_fsi,
         fetch_fred: Callable[[str], pd.Series] = _fred,
-        fetch_cboe: Callable[[str], pd.Series] = _cboe) -> dict:
+        fetch_cboe: Callable[[str], pd.Series] = _cboe,
+        fetch_units: Callable[[str], dict] = invesco.fetch_units) -> dict:
     """Record tonight's tail of every series. ``baseline``: None writes the
     full-history baseline only if none exists yet; True forces a new one."""
-    settings: Mapping[str, Any] = load_config().get("snapshots", {}).get("risk", {})
+    config = load_config()
+    settings: Mapping[str, Any] = config.get("snapshots", {}).get("risk", {})
     tail = int(settings.get("tail", 30))
     now = now or datetime.now(timezone.utc)
     local = now.astimezone(store.NEW_YORK)
@@ -103,6 +133,10 @@ def run(*, root=None, now: datetime | None = None, baseline: bool | None = None,
                 answered[f"{source} {name}"] = int(pd.to_numeric(values, errors="coerce").notna().sum())
             except Exception as exc:
                 failed[f"{source} {name}"] = str(exc)[:200]
+    units, units_answered, units_failed = _etf_units(settings, config, fetch_units)
+    series += units
+    answered |= units_answered
+    failed |= units_failed
 
     rows = [row for source, name, values in series for row in rows_for(fetched_at, source, name, values, tail)]
     base = store.root_dir(root) / "risk"

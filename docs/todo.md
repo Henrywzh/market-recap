@@ -121,9 +121,9 @@ Second, entries and exits:
 
 Third, flows and positioning:
 
-7. **Who is forced to trade.** FINRA short interest (twice monthly: short
-   ratio, days to cover); the SPX levels where 20/50/100-day trend followers
-   flip; the buyback blackout calendar.
+7. **Who is forced to trade.** Built 2026-09-29 as RISK → POSITIONING: FINRA
+   short interest and the trend-follower flip levels. Still open: the
+   buyback blackout calendar.
 8. **Insider cluster buys** from SEC Form 4, limited to the universe;
    quantamental-lab already has the insider event study.
 9. **Signal scorecard.** Historical hit rate and average forward return next

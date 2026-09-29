@@ -100,6 +100,9 @@ FRESHNESS = {
     "weekly_article": {"stale_after_calendar_days": 45},
     # Weekly series (Fed H.4.1, NFCI, CFTC positions): one missed release is late, two is stale.
     "weekly_release": {"stale_after_calendar_days": 16},
+    # FINRA short interest: two rounds a month, each published about seven
+    # business days after its settlement date. One missed round is late.
+    "biweekly_release": {"stale_after_calendar_days": 30},
 }
 DEFAULT_FRESHNESS_POLICY = "daily_close"
 

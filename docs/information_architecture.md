@@ -60,7 +60,7 @@ Four top-level modes plus a tools menu. Each mode has at most four views.
 
 ```
 BRIEF                          landing page, the five-minute read
-MARKET   Overview · Risk · Priced Path · Rates & Macro
+MARKET   Overview · Risk · Priced Path · Rates & Macro · Positioning
 NAMES    Monitor · Screen · Ticker · Cross-listing
 CATALYSTS  Calendar · Earnings
 TOOLS ▾  Relative strength · ETF X-Ray · DCF calculator
@@ -495,6 +495,21 @@ The phased build put too much in front of the reader. After looking at it:
 
 Open decisions with their evidence (RISK anchor model, real-time news) are
 in `docs/todo.md`.
+
+## Positioning (added 2026-09-29)
+
+RISK → POSITIONING answers who is forced to trade. Trend followers: a public
+stand-in for systematic trend books (the mean sign of the index's 1M/3M/6M/12M
+returns) with the close that flips each lookback tomorrow, and the 50/100/200-
+day averages. Short interest: FINRA's consolidated short interest (two rounds
+a month, public API, no key) for the index members, the watchlist and the
+broad ETFs -- days to cover, change on the round, and the members' total short
+value over 24 rounds.
+
+ETF flows for Invesco funds (QQQ, RSP): Invesco publishes only today's units,
+so the evening risk snapshot records them and the heat map builds a flow once
+two days are on record. Vanguard publishes no daily units at all; its funds
+show price and averages only.
 
 - **Holdings.** Not connected yet. BRIEF's list and the ticker page reserve
   a position field (size, cost, horizon) so holdings plug in without a
