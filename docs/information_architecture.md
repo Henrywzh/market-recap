@@ -493,6 +493,9 @@ The phased build put too much in front of the reader. After looking at it:
 
 ## Deferred
 
+Open decisions with their evidence (RISK anchor model, real-time news) are
+in `docs/todo.md`.
+
 - **Holdings.** Not connected yet. BRIEF's list and the ticker page reserve
   a position field (size, cost, horizon) so holdings plug in without a
   layout change, and so risk tiles can later be read against actual
