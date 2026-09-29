@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ..sources import treasury
-from ..util import SourceRecord, clean_float
+from ..sources import fred, treasury
+from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, history_payload, to_iso_date
 
 # The curve is compared against its own history, so every snapshot names a
 # published date rather than "a week ago" in the abstract. Comparison windows
@@ -15,6 +15,35 @@ START_OF_YEAR = ("start_of_year", "Start of Year", None)
 # Basis points per percentage point. The curve is published in percent and the
 # change columns are in bps.
 BPS_PER_PCT = 100.0
+
+
+def _history(ctx, settings) -> dict:
+    """Constant-maturity yields and the 10Y-2Y spread over years, from FRED.
+
+    The par curve above comes from Treasury's yearly files; for a chart that
+    reaches back a decade FRED's DGS series are the same Treasury yields in
+    one file each. A series that fails is left out and says so in the log.
+    """
+    years = int(settings.get("history_years", 10))
+    lines: dict[str, pd.Series] = {}
+    for spec in settings.get("history_series", []):
+        try:
+            frame, url = fred.fetch_series(spec["series_id"])
+        except Exception as exc:
+            ctx.log.add(SourceRecord(f"fred_{spec['series_id'].lower()}", f"Treasury {spec['label']} yield history",
+                                     f"https://fred.stlouisfed.org/series/{spec['series_id']}",
+                                     status="error", error=str(exc)[:ERROR_DETAIL_CHARS]))
+            continue
+        series = frame.set_index("date")["value"].sort_index()
+        lines[spec["label"]] = series
+        ctx.log.add(SourceRecord(f"fred_{spec['series_id'].lower()}", f"Treasury {spec['label']} yield history", url,
+                                 to_iso_date(series.index[-1]), rows=len(series)))
+    out = {label: history_payload(series, years=years, digits=2) for label, series in lines.items()}
+    spread = settings.get("history_spread")
+    if spread and spread["long"] in lines and spread["short"] in lines:
+        pair = pd.concat([lines[spread["long"]], lines[spread["short"]]], axis=1, keys=["l", "s"]).dropna()
+        out[spread["label"]] = history_payload((pair["l"] - pair["s"]) * BPS_PER_PCT, years=years, digits=0)
+    return {"years": years, "series": out, "spread": spread["label"] if spread else None}
 
 
 def _pivot(frame: pd.DataFrame) -> pd.DataFrame:
@@ -153,6 +182,7 @@ def build(ctx) -> dict:
         "curves": curves,
         "rows": rows,
         "spreads": spread_rows,
+        "history": _history(ctx, settings),
         "note": (
             '"Latest Published" is the most recent date the U.S. Treasury has posted par yield '
             "curve rates for. Treasury usually publishes same-day but sometimes not until early "

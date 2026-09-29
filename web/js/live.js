@@ -71,7 +71,8 @@ function createController() {
   function render() {
     const now = Date.now();
     if (state.body) {
-      strip.replaceChildren(...state.body.quotes.map((q) => quoteStat(q, state.body, now)));
+      strip.replaceChildren(...state.body.quotes.filter((q) => ['etf', 'index', 'watchlist', 'rate'].includes(q.kind))
+        .map((q) => quoteStat(q, state.body, now)));
     }
     const minutes = Math.round((state.body?.refresh_seconds ?? 60) / 60);
     foot.textContent = 'Yahoo (ETFs, indices, watchlist) and CNBC (Treasury yields), fetched through this site '

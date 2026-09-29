@@ -56,6 +56,18 @@ def risk_archive(source: str, series: str) -> pd.Series:
     return pd.Series(rows["value"].to_numpy(dtype=float), index=pd.to_datetime(rows["date"]), name=series)
 
 
+def etf_units(ticker: str) -> pd.DataFrame:
+    """(date, nav, shares_outstanding) as the evening snapshots recorded them
+    for a fund whose issuer publishes only today's units. Empty when fewer
+    than two days are recorded: one day of units is not yet a flow."""
+    shares = risk_archive("invesco", f"{ticker} shares_outstanding")
+    nav = risk_archive("invesco", f"{ticker} nav")
+    frame = pd.concat({"shares_outstanding": shares, "nav": nav}, axis=1).dropna()
+    if len(frame) < 2:
+        return pd.DataFrame(columns=["date", "nav", "shares_outstanding"])
+    return frame.rename_axis("date").reset_index()[["date", "nav", "shares_outstanding"]]
+
+
 def expectation_runs(since: date, until: date) -> list[Path]:
     """Every expectations run file between two dates, oldest first."""
     base = root() / "expectations"

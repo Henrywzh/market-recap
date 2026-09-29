@@ -56,6 +56,28 @@ def clean_float(value: Any, digits: int | None = None) -> float | None:
     return round(out, digits) if digits is not None else out
 
 
+def history_payload(series: pd.Series, *, years: int, digits: int, daily_days: int = 365) -> dict:
+    """{dates, values} for a history chart with a range switch.
+
+    The last ``daily_days`` stay daily; anything older is thinned to each
+    week's last observation, which keeps a ten-year chart legible at a
+    tenth of the bytes. Values are the series' own observations: a week's
+    point is the last print in that week, not an average.
+    """
+    clean = pd.to_numeric(series, errors="coerce").dropna().sort_index()
+    clean = clean[~clean.index.duplicated(keep="last")]
+    if clean.empty:
+        return {"dates": [], "values": []}
+    last = clean.index[-1]
+    clean = clean[clean.index > last - pd.DateOffset(years=years)]
+    cut = last - pd.Timedelta(days=daily_days)
+    older = clean[clean.index <= cut]
+    older = older.groupby(older.index.to_period("W-FRI")).tail(1)
+    kept = pd.concat([older, clean[clean.index > cut]])
+    return {"dates": [d.strftime("%Y-%m-%d") for d in kept.index],
+            "values": [clean_float(v, digits) for v in kept]}
+
+
 def freshness_status(observed: Any, policy: str) -> str:
     """Label an observation against its policy without inventing a reason.
 

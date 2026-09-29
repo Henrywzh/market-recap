@@ -170,3 +170,60 @@ export function multiLine(node, dates, seriesMap, options = {}) {
     };
   });
 }
+
+// Lines on a time axis, each with its own dates: series from different
+// calendars (FRED, futures, monthly prints) need no shared index.
+// lines: [{ name, dates, values, color? (a colour or p => colour), axis?: 0|1, dashed?, width? }]
+// options: { left?: axis-0 formatter, right?: axis-1 formatter, value?: tooltip
+//   formatter (value, line) => text, markY?: [{ y, label }] on axis 0 }
+export function timeLines(node, lines, options = {}) {
+  return render(node, (option, p) => {
+    const colorOf = (line, i) => (typeof line.color === 'function' ? line.color(p) : line.color) || SERIES_COLORS[i % SERIES_COLORS.length];
+    const axis = (formatter, extra = {}) => ({
+      ...option.yAxis,
+      axisLabel: { ...option.yAxis.axisLabel, formatter: formatter || undefined },
+      ...extra,
+    });
+    const twoAxes = lines.some((l) => l.axis === 1);
+    return {
+      ...option,
+      grid: { ...option.grid, left: 56, right: twoAxes ? 56 : 16, bottom: lines.length > 1 ? 52 : 28 },
+      legend: lines.length > 1 ? {
+        bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9,
+      } : undefined,
+      tooltip: {
+        ...option.tooltip,
+        valueFormatter: undefined,
+        formatter: (items) => {
+          const rows = [].concat(items).map((it) => {
+            const line = lines[it.seriesIndex];
+            const v = it.value?.[1];
+            const text = v === null || v === undefined ? '—' : options.value ? options.value(v, line) : String(v);
+            return `${it.marker}${it.seriesName} <b>${text}</b>`;
+          });
+          const first = [].concat(items)[0];
+          return [first ? first.value[0] : '', ...rows].join('<br>');
+        },
+      },
+      xAxis: { ...option.xAxis, type: 'time', boundaryGap: false, data: undefined },
+      yAxis: twoAxes
+        ? [axis(options.left), axis(options.right, { position: 'right', splitLine: { show: false } })]
+        : axis(options.left),
+      series: lines.map((line, i) => ({
+        name: line.name,
+        type: 'line',
+        yAxisIndex: twoAxes ? line.axis || 0 : 0,
+        data: line.dates.map((d, k) => [d, line.values[k]]),
+        showSymbol: false,
+        connectNulls: false,
+        lineStyle: { width: line.width || 1.3, color: colorOf(line, i), type: line.dashed ? 'dashed' : 'solid' },
+        itemStyle: { color: colorOf(line, i) },
+        markLine: i === 0 && options.markY?.length ? {
+          silent: true, symbol: 'none',
+          data: options.markY.map((m) => ({ yAxis: m.y, label: { formatter: m.label || '', color: p.dim, fontSize: 9, position: 'insideEndTop' } })),
+          lineStyle: { color: p.faint, type: 'dashed' },
+        } : undefined,
+      })),
+    };
+  });
+}

@@ -4,8 +4,9 @@
 // the week's change, and whether it is past the line written in config
 // beforehand. No score.
 
-import { el, card, num, metaRow, DASH } from '../fmt.js';
+import { el, card, num, metaRow, tag, DASH } from '../fmt.js';
 import { render } from '../charts.js';
+import { rangeSwitch, sliceRange, initialRange } from '../range.js';
 import { spark } from '../spark.js';
 
 const HORIZONS = [
@@ -86,8 +87,9 @@ export function tileNode(tile, { asOf, onPick = null, selected = false, compact 
   return node;
 }
 
-function historyChart(node, tile) {
-  const h = tile.history || { dates: [], values: [] };
+function historyChart(node, tile, range = 'MAX') {
+  const full = tile.history || { dates: [], values: [] };
+  const h = sliceRange(full.dates, { values: full.values }, range);
   render(node, (option, p) => ({
     ...option,
     grid: { ...option.grid, left: 56, right: 16, top: 14 },
@@ -152,6 +154,10 @@ function sectionCard(section, data, { charts = 1 } = {}) {
   let selected = [...tiles.filter((t) => t.breach), ...tiles.filter((t) => !t.breach)].slice(0, charts).map((t) => t.key);
   const grid = el('div', { class: 'risk-grid' });
   const slots = selected.map(() => ({ node: el('div', { class: 'chart' }), title: el('span', { class: 'dim' }) }));
+  // One range for the card's charts; offered as far as its longest history.
+  const longest = tiles.map((t) => t.history?.dates || []).reduce((a, b) => (b.length > a.length ? b : a), []);
+  let range = initialRange(longest, 'MAX');
+  const switcher = rangeSwitch(longest, range, (label) => { range = label; draw(); });
   const pick = (key) => {
     if (selected.includes(key)) return;
     selected = [key, ...selected].slice(0, charts);
@@ -163,10 +169,10 @@ function sectionCard(section, data, { charts = 1 } = {}) {
       const tile = tiles.find((t) => t.key === key);
       if (!tile) return;
       slots[i].title.textContent = `${tile.label} · weekly · 10 years or since ${tile.since}`;
-      historyChart(slots[i].node, tile);
+      historyChart(slots[i].node, tile, range);
     });
   };
-  const chartBlocks = slots.map((slot) => el('div', {}, [el('div', { class: 'risk-chart-head' }, [slot.title]), slot.node]));
+  const chartBlocks = slots.map((slot, i) => el('div', {}, [el('div', { class: 'chart-head risk-chart-head' }, [slot.title, i === 0 ? switcher : null]), slot.node]));
   const breached = tiles.filter((t) => t.breach).length;
   const body = [grid, charts > 1 ? el('div', { class: 'risk-charts' }, chartBlocks) : chartBlocks[0]];
   if (section.key === 'volatility') {
@@ -183,42 +189,54 @@ const pctOf = (v) => (present(v) ? `${Math.round(v * 100)}%` : DASH);
 function anchorCard(a) {
   if (!a || a.unavailable) return card('SYSTEMATIC ANCHOR', null, el('div', { class: 'gap', text: 'The anchor was not built for this session.' }));
   const c = a.components;
-  const chip = (text, cls = '') => el('span', { class: `mchip ${cls}`, text });
   const chartNode = el('div', { class: 'chart short' });
-  const keep = 252;
-  const h = { dates: a.history.dates.slice(-keep), exposure: a.history.exposure.slice(-keep), spy: a.history.spy.slice(-keep) };
-  requestAnimationFrame(() => render(chartNode, (option, p) => ({
-    ...option,
-    grid: { left: 36, right: 40, top: 8, bottom: 22 },
-    tooltip: { ...option.tooltip, trigger: 'axis' },
-    xAxis: { ...option.xAxis, data: h.dates },
-    yAxis: [
-      { ...option.yAxis, min: 0, max: 1, axisLabel: { color: p.dim, fontSize: 9, formatter: (v) => `${Math.round(v * 100)}%` } },
-      { ...option.yAxis, position: 'right', splitLine: { show: false }, axisLabel: { color: p.faint, fontSize: 9 } },
-    ],
-    series: [
-      { name: 'anchor exposure', type: 'line', step: 'end', data: h.exposure, showSymbol: false, areaStyle: { opacity: 0.12 }, lineStyle: { width: 1.4, color: p.accent }, itemStyle: { color: p.accent } },
-      { name: 'SPY', type: 'line', yAxisIndex: 1, data: h.spy, showSymbol: false, lineStyle: { width: 1, color: p.faint } },
-    ],
-  })));
+  // The whole daily path where the build carries it (since 2001), else five years.
+  const series = a.full?.dates?.length ? a.full : a.history;
+  let range = initialRange(series.dates, '1Y');
+  const draw = () => {
+    const h = sliceRange(series.dates, { exposure: series.exposure, spy: series.spy }, range);
+    render(chartNode, (option, p) => ({
+      ...option,
+      grid: { left: 36, right: 40, top: 8, bottom: 22 },
+      tooltip: { ...option.tooltip, trigger: 'axis' },
+      xAxis: { ...option.xAxis, data: h.dates },
+      yAxis: [
+        { ...option.yAxis, min: 0, max: 1, axisLabel: { color: p.dim, fontSize: 9, formatter: (v) => `${Math.round(v * 100)}%` } },
+        { ...option.yAxis, position: 'right', splitLine: { show: false }, axisLabel: { color: p.faint, fontSize: 9 } },
+      ],
+      series: [
+        { name: 'anchor exposure', type: 'line', step: 'end', data: h.exposure, showSymbol: false, areaStyle: { opacity: 0.12 }, lineStyle: { width: 1.4, color: p.accent }, itemStyle: { color: p.accent } },
+        { name: 'SPY', type: 'line', yAxisIndex: 1, data: h.spy, showSymbol: false, lineStyle: { width: 1, color: p.faint } },
+      ],
+    }));
+  };
+  requestAnimationFrame(draw);
   const last = a.changes[a.changes.length - 1];
   return card('SYSTEMATIC ANCHOR · EQUITY EXPOSURE', el('span', { class: 'dim', text: 'quantamental-lab frozen v1' }), [
     el('div', { class: 'anchor-head' }, [
       el('span', { class: 'anchor-value', text: pctOf(a.held) }),
       el('span', { class: 'dim', text: `held · next session ${pctOf(a.next)}${last ? ` · since ${last.date}` : ''}` }),
     ]),
-    el('div', { class: 'anchor-chips' }, [
-      chip(`VOL ${present(c.realised_vol) ? num(c.realised_vol * 100, 1) : DASH}% → ×${num(c.vol_scaled, 2)}`),
-      chip(`TREND ${c.trend_on ? 'ON · SPY > 200D' : 'OFF · cap 50%'}`, c.trend_on ? 'up' : 'down'),
-      chip(`COPPER/OIL ${c.copper_oil_on === false ? `OFF · z ${num(c.copper_oil_z, 2)} · cap 50%` : c.copper_oil_on ? `ON · z ${num(c.copper_oil_z, 2)}` : DASH}`, c.copper_oil_on === false ? 'down' : 'up'),
-      chip(`DRAWDOWN LADDER ×${num(c.ladder, 1)}`, c.ladder < 1 ? 'down' : ''),
+    el('div', { class: 'anchor-chips tag-row' }, [
+      tag(`VOL ${present(c.realised_vol) ? num(c.realised_vol * 100, 1) : DASH}% → ×${num(c.vol_scaled, 2)}`, c.vol_scaled < 1 ? 'warn' : 'dim'),
+      tag(`TREND ${c.trend_on ? 'ON · SPY > 200D' : 'OFF · cap 50%'}`, c.trend_on ? 'up' : 'down'),
+      tag(`COPPER/OIL ${c.copper_oil_on === false ? `OFF · z ${num(c.copper_oil_z, 2)} · cap 50%` : c.copper_oil_on ? `ON · z ${num(c.copper_oil_z, 2)}` : DASH}`, c.copper_oil_on === false ? 'down' : c.copper_oil_on ? 'up' : 'dim'),
+      tag(`DRAWDOWN LADDER ×${num(c.ladder, 1)}`, c.ladder < 1 ? 'down' : 'dim'),
     ]),
+    el('div', { class: 'chart-head' }, [el('span', { class: 'dim', text: 'EXPOSURE · SPY on the right axis' }), rangeSwitch(series.dates, range, (label) => { range = label; draw(); })]),
     chartNode,
   ]);
 }
 
 // Self-computed after CNN's seven components (compute/sentiment.py); it
 // follows CNN's outline, not its number.
+// The five CNN bands as tag tones: the two fear bands red, the two greed
+// bands green, neutral grey.
+export function fgTone(score) {
+  if (!present(score)) return 'dim';
+  return score < 45 ? 'down' : score > 55 ? 'up' : 'dim';
+}
+
 const FG_UNITS = { momentum: '%', strength: '% of members', breadth: '', put_call: '', volatility: '%', safe_haven: 'pp', junk_bond: 'bp' };
 function fgReading(c) {
   if (!present(c.value)) return DASH;
@@ -234,21 +252,26 @@ function sentimentCard(g) {
   if (!g || !present(g.score)) return card('FEAR & GREED', head, el('div', { class: 'gap', text: `Not computed this session${g?.error ? `: ${g.error}` : ''}.` }));
   const tone = (v) => (!present(v) ? 'dim' : v < 45 ? 'down' : v > 55 ? 'up' : '');
   const chartNode = el('div', { class: 'chart short' });
-  requestAnimationFrame(() => render(chartNode, (option, p) => ({
-    ...option,
-    grid: { left: 30, right: 12, top: 8, bottom: 22 },
-    tooltip: { ...option.tooltip, trigger: 'axis' },
-    xAxis: { ...option.xAxis, data: g.history.dates },
-    yAxis: { ...option.yAxis, min: 0, max: 100, interval: 25, axisLabel: { color: p.dim, fontSize: 9 } },
-    series: [{
-      name: 'fear & greed', type: 'line', data: g.history.score, showSymbol: false, lineStyle: { width: 1.3, color: p.text },
-      markArea: { silent: true, data: [
-        [{ yAxis: 0, itemStyle: { color: p.down, opacity: 0.08 } }, { yAxis: 25 }],
-        [{ yAxis: 75, itemStyle: { color: p.up, opacity: 0.08 } }, { yAxis: 100 }],
-      ] },
-      markLine: { silent: true, symbol: 'none', data: [{ yAxis: 50 }], lineStyle: { color: p.faint, type: 'dashed' }, label: { show: false } },
-    }],
-  })));
+  let range = initialRange(g.history.dates, '1Y');
+  const draw = () => {
+    const h = sliceRange(g.history.dates, { score: g.history.score }, range);
+    render(chartNode, (option, p) => ({
+      ...option,
+      grid: { left: 30, right: 12, top: 8, bottom: 22 },
+      tooltip: { ...option.tooltip, trigger: 'axis' },
+      xAxis: { ...option.xAxis, data: h.dates },
+      yAxis: { ...option.yAxis, min: 0, max: 100, interval: 25, axisLabel: { color: p.dim, fontSize: 9 } },
+      series: [{
+        name: 'fear & greed', type: 'line', data: h.score, showSymbol: false, lineStyle: { width: 1.3, color: p.text },
+        markArea: { silent: true, data: [
+          [{ yAxis: 0, itemStyle: { color: p.down, opacity: 0.08 } }, { yAxis: 25 }],
+          [{ yAxis: 75, itemStyle: { color: p.up, opacity: 0.08 } }, { yAxis: 100 }],
+        ] },
+        markLine: { silent: true, symbol: 'none', data: [{ yAxis: 50 }], lineStyle: { color: p.faint, type: 'dashed' }, label: { show: false } },
+      }],
+    }));
+  };
+  requestAnimationFrame(draw);
   const rows = g.components.map((c) => el('tr', {}, [
     el('td', { class: 'fg-label', text: c.label }),
     el('td', { class: 'dim', text: fgReading(c) }),
@@ -259,9 +282,10 @@ function sentimentCard(g) {
   return card('FEAR & GREED', head, [
     el('div', { class: 'anchor-head' }, [
       el('span', { class: `anchor-value fg-value ${tone(g.score)}`, text: num(g.score, 0) }),
-      el('span', { class: tone(g.score), text: g.rating }),
+      tag(g.rating, fgTone(g.score)),
       el('span', { class: 'dim', text: `${ago('1W', g.week_ago)} · ${ago('1M', g.month_ago)} · ${ago('1Y', g.year_ago)}${g.components_counted < g.components.length ? ` · ${g.components_counted} of ${g.components.length} components` : ''}` }),
     ]),
+    el('div', { class: 'chart-head' }, [el('span', { class: 'dim', text: 'DAILY · shaded: extreme fear below 25, extreme greed above 75' }), rangeSwitch(g.history.dates, range, (label) => { range = label; draw(); })]),
     chartNode,
     el('div', { class: 'table-scroll' }, [el('table', { class: 'data fg-table' }, [
       el('thead', {}, [el('tr', {}, ['COMPONENT', 'READING', '', 'SCORE'].map((h) => el('th', { text: h })))]),

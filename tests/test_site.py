@@ -46,6 +46,18 @@ def test_live_contract_is_the_dashboard_universe_and_nothing_else():
     assert contract["refresh_seconds"] == 60
 
 
+def test_trade_premarket_scan_uses_weighted_members_plus_watchlist_once():
+    config = {
+        "universe": {"quote_tickers": [], "indices": []},
+        "watchlist": [{"ticker": "TSM"}, {"ticker": "AAPL"}],
+        "live": {"premarket_top_weight_names": 2, "premarket_movers": ["FALLBACK"]},
+    }
+    contract = site.live_contract(config, weighted_names=["AAPL", "MSFT", "NVDA"])
+    assert [r["symbol"] for r in contract["premarket_movers"]] == ["AAPL", "MSFT", "TSM"]
+    fallback = site.live_contract(config)
+    assert [r["symbol"] for r in fallback["premarket_movers"]] == ["FALLBACK", "TSM", "AAPL"]
+
+
 def test_built_site_carries_the_live_contract(tmp_path):
     import json
 

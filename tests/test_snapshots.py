@@ -155,6 +155,16 @@ def test_window_follows_new_york_wall_clock(utc, inside):
     assert store.in_window(utc, ["15:10", "16:00"]) is inside
 
 
+def test_second_options_run_skips_a_sufficient_same_day_capture(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "load_config", lambda: {"snapshots": {"options": {
+        "window": ["15:10", "16:00"], "fixed": ["SPY", "QQQ"]}}})
+    folder = tmp_path / "options" / "2026"
+    folder.mkdir(parents=True)
+    (folder / "2026-09-28-meta.json").write_text('{"underlyings_ok": 2, "usable_underlyings": 2}')
+    result = S.run(root=tmp_path, now=datetime(2026, 9, 28, 19, 30, tzinfo=timezone.utc))
+    assert result["status"] == "skipped" and "already has 2" in result["reason"]
+
+
 # --- Futures symbols ----------------------------------------------------------
 
 def test_fed_funds_symbols_start_this_month_and_roll_the_year():

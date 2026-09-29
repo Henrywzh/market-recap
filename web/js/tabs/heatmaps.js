@@ -179,7 +179,12 @@ export default function renderHeatmaps(root, data) {
   const priceNode = el('div', { class: 'chart' });
   const flowNode = el('div', { class: 'chart short' });
   const premiumNode = el('div', { class: 'chart short' });
-  const select = el('select', { id: 'etf-pick' }, coverage.published.map((t) => el('option', { value: t, text: t })));
+  // Every fund with a price, the contract's first choices on top; a fund
+  // without a flow record still shows its price and says why the flow is empty.
+  const pickable = coverage.detail || coverage.published;
+  const select = el('select', { id: 'etf-pick' }, pickable.map((t) => el('option', {
+    value: t, text: coverage.published.includes(t) ? t : `${t} · price only`,
+  })));
 
   async function loadEtf() {
     const ticker = select.value;
@@ -195,7 +200,9 @@ export default function renderHeatmaps(root, data) {
       });
       multiLine(priceNode, payload.dates, series);
 
-      render(flowNode, (option, p) => ({
+      if (!(payload.flow || []).length) {
+        flowNode.replaceChildren(el('div', { class: 'note-text', text: payload.flow_note || 'No published flow for this fund.' }));
+      } else render(flowNode, (option, p) => ({
         ...option,
         grid: { ...option.grid, top: 10, bottom: 24 },
         xAxis: { ...option.xAxis, data: payload.dates, boundaryGap: true },
@@ -235,12 +242,13 @@ export default function renderHeatmaps(root, data) {
         // An empty chart frame reads as "premium is zero". Say why it is absent.
         premiumNode.innerHTML = '';
         premiumNode.append(el('div', { class: 'note-text' }, [
-          `${payload.source} does not publish a premium/discount series for this fund, `,
-          'so there is nothing to plot here. State Street funds carry one.',
+          `${payload.source || 'The issuer'} does not publish a premium/discount series for this fund, `,
+          'so there is nothing to plot here. State Street and Invesco funds carry one.',
         ]));
       }
 
-      status.textContent = `${ticker}: ${payload.sessions} published sessions since ${payload.history_start}.`
+      status.textContent = !payload.sessions ? `${ticker}: price and averages only.`
+        : `${ticker}: ${payload.sessions} published sessions since ${payload.history_start}.`
         + (payload.shares_unchanged_since ? ` Issuer share count unchanged since ${payload.shares_unchanged_since}; the flat bars since then are the issuer not updating, not a measured zero.` : '');
     } catch (error) {
       status.textContent = error.message;

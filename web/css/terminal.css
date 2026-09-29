@@ -830,3 +830,48 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .risk-more > summary::before { content: '▸ '; }
 .risk-more[open] > summary::before { content: '▾ '; }
 .ticker-eo-stats { margin-bottom: 8px; }
+
+/* ---------- State tags and history ranges ---------- */
+/* A tag says what a state means before its label is read: filled, one colour
+   per meaning, the same everywhere (rotation quadrant, gates, sentiment). */
+.tag {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+.tag-up { color: var(--up); border-color: color-mix(in srgb, var(--up) 55%, transparent); background: color-mix(in srgb, var(--up) 16%, transparent); }
+.tag-down { color: var(--down); border-color: color-mix(in srgb, var(--down) 55%, transparent); background: color-mix(in srgb, var(--down) 16%, transparent); }
+.tag-warn { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.tag-info { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 55%, transparent); background: color-mix(in srgb, var(--blue) 16%, transparent); }
+.tag-dim { color: var(--text-dim); border-color: var(--border-strong); background: var(--panel-alt); }
+.tag-row { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+
+.range-switch button { font-size: 9.5px; padding: 1px 6px; }
+.chart-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 0 2px; font-size: 10.5px; }
+.chart-head .dim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+tr.pickable { cursor: pointer; }
+tr.pickable:hover td { background: var(--panel-alt); }
+tr.picked td { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+tr.picked td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* ---------- Positioning ---------- */
+.pos-table td { white-space: nowrap; }
+.pos-table .sub { display: block; font-size: 9.5px; color: var(--text-faint); max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.pos-spark .spark { width: 90px; height: 20px; }
+
+/* ---------- Trade Desk ---------- */
+.trade-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 10px; flex-wrap: wrap; }
+.trade-nav a { font-size: 10.5px; }
+.trade-pick { margin: 0 0 8px; }
+.grid.trade-top { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); margin-top: 10px; }
+@media (max-width: 1100px) { .grid.trade-top { grid-template-columns: minmax(0, 1fr); } }
+.trade-ladder td { white-space: nowrap; }
+.trade-ladder tr.trade-ladder-now td { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); font-weight: 700; }
+.trade-board .stat-value { font-size: 16px; }
+.trade-score .chart.short { height: 190px; }

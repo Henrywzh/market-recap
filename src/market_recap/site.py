@@ -49,7 +49,7 @@ def import_map(web: Path = WEB_DIR) -> str:
     return '<script type="importmap">' + json.dumps({"imports": imports}, separators=(",", ":")) + "</script>"
 
 
-def live_contract(config: dict | None = None) -> dict:
+def live_contract(config: dict | None = None, *, weighted_names: list[str] | None = None) -> dict:
     """What the intraday strip may fetch, derived from the dashboard contract.
 
     The quote function reads this file and fetches nothing else, so it is an
@@ -69,12 +69,18 @@ def live_contract(config: dict | None = None) -> dict:
         equities.append({"symbol": entry["ticker"], "label": entry["ticker"], "kind": "watchlist"})
     seen: set[str] = set()
     equities = [e for e in equities if not (e["symbol"] in seen or seen.add(e["symbol"]))]
+    limit = max(0, min(int(live.get("premarket_top_weight_names", 0)), 50))
+    candidates = (weighted_names or [])[:limit] if weighted_names else live.get("premarket_movers", [])
+    candidates = list(dict.fromkeys([*candidates, *(e["ticker"] for e in config.get("watchlist", []))]))
     return {
         "refresh_seconds": live.get("refresh_seconds", 60),
         "closed_refresh_seconds": live.get("closed_refresh_seconds", 300),
         "server_cache_seconds": live.get("server_cache_seconds", 15),
         "stale_after_seconds": live.get("stale_after_seconds", 1200),
         "equities": equities,
+        "overnight": [{"symbol": r["symbol"], "label": r["label"], "kind": "overnight", "region": r["region"]}
+                      for r in live.get("overnight", [])],
+        "premarket_movers": [{"symbol": symbol, "label": symbol, "kind": "premarket"} for symbol in candidates],
         "rates": [{"symbol": r["symbol"], "label": r["label"], "kind": "rate"} for r in live.get("rates", [])],
     }
 
@@ -129,7 +135,13 @@ def build(*, dist: Path | None = None) -> dict:
     # Beside the page rather than under artifacts/: it is the contract the
     # quote function enforces, written from config on every site build, not a
     # data product of the refresh.
-    (dist / "live.json").write_text(json.dumps(live_contract(), indent=1), encoding="utf-8")
+    try:
+        heatmap = json.loads((ARTIFACT_DIR / "heatmaps.json").read_text())
+        weighted_names = [r["ticker"] for r in sorted(heatmap["constituents"],
+                          key=lambda r: r.get("weight") or 0, reverse=True) if r.get("ticker")]
+    except (OSError, ValueError, KeyError, TypeError):
+        weighted_names = None
+    (dist / "live.json").write_text(json.dumps(live_contract(weighted_names=weighted_names), indent=1), encoding="utf-8")
 
     # Cloudflare Pages serves _headers from the site root.
     #

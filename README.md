@@ -21,7 +21,7 @@ The views are grouped by the question they answer
 | **RISK** | **Risk** · Rates & macro · **Priced path** |
 | **NAMES** | Monitor · Screen (VALUATION & QUALITY) · **Ticker** · Cross-listing |
 | **CATALYSTS** | Calendar · Earnings |
-| **TOOLS** | Technicals · ETF X-Ray · DCF |
+| **TOOLS** | Technicals · Trade Desk · ETF X-Ray · DCF |
 
 **Overview** is the one-glance read: the live strip; stocks (S&P 500,
 Nasdaq 100, Russell 2000, equal-weight S&P) with 1D/1W/1M/YTD and the
@@ -54,6 +54,20 @@ the panel that owns it, so nothing is computed twice. Views that take a
 ticker read it after a slash (`#dcf/MSFT`, `#technicals/NVDA`); hashes from
 before the regrouping (`#financials`, `#fixed-income`, `#macro`, `?ticker=`)
 still land on the right view.
+
+**Trade Desk** (`#trade/SPY`) is for US stocks and index ETFs held overnight
+to weeks. SETUPS & SIZE: a price chart on traded (split-adjusted, not
+dividend-adjusted) closes with the 20/50/200-day averages and the prior
+20-session and 52-week closing extremes; a price ladder of every level above
+and below the close; ATR, 20-day dollar volume, the latest opening gap and,
+with a same-session option snapshot, the ATM-straddle range; and a sizing
+calculator capped by stop risk, position size and a share of dollar volume
+(the spread is an assumption you enter). OVERNIGHT: ES/NQ, Asia and Europe,
+and pre/post-market prints for the top 30 S&P 500 weights plus the
+watchlist, polled only while that tab is visible. SCORECARD: forward returns
+after the anchor's states (daily since 1993), Fear & Greed extremes and the
+trend proxy, against any day -- descriptive and in-sample. Buyback blackout
+and insider buying are on RISK → POSITIONING.
 
 The panels, as each is built:
 

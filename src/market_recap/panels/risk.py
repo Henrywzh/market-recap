@@ -306,7 +306,9 @@ def _sentiment(inputs: _Inputs) -> dict:
                                    inputs.fred.get("BAMLC0A0CM", pd.Series(dtype=float))),
     }
     calendar = spx.index[spx.index > spx.index[-1] - pd.Timedelta(days=3 * 365)]
-    return S.gauge(raw, calendar)
+    # The whole calendar as history, so the page's range switch can reach
+    # past one year where the components allow.
+    return S.gauge(raw, calendar, history_sessions=len(calendar))
 
 
 def build(ctx) -> dict:

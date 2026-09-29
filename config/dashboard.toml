@@ -56,9 +56,10 @@ sector_rebased = ["1M", "3M", "6M", "1Y", "3Y"]
 technicals_chart = ["6M", "1Y", "2Y", "3Y", "5Y", "10Y"]
 # Sessions of chart history baked into each per-ticker artifact.
 chart_window = "2Y"
-# yfinance history length for the commodity table. It has to cover the longest
-# window the table offers or that column is silently always blank.
-commodity_history = "2y"
+# yfinance history length for the commodity table and its chart. It has to
+# cover the longest window the table offers or that column is silently always
+# blank; the chart shows all of it (daily for the last year, weekly before).
+commodity_history = "10y"
 
 # Rolling windows for the breadth and trend tables on MARKETS.
 [breadth]
@@ -75,6 +76,20 @@ refresh_seconds = 60        # automatic refresh while the session is open and th
 closed_refresh_seconds = 300  # how often a closed session checks whether it has opened
 server_cache_seconds = 15   # repeated clicks and readers share one fetch per window
 stale_after_seconds = 1200  # during the session, an older price is marked STALE
+# Overnight board; these are Yahoo chart symbols, never proxies for cash SPX/NDX.
+overnight = [
+  { symbol = "ES=F", label = "S&P 500 futures", region = "US" },
+  { symbol = "NQ=F", label = "Nasdaq 100 futures", region = "US" },
+  { symbol = "^N225", label = "Nikkei 225", region = "Asia" },
+  { symbol = "^HSI", label = "Hang Seng", region = "Asia" },
+  { symbol = "^FTSE", label = "FTSE 100", region = "Europe" },
+  { symbol = "^GDAXI", label = "DAX", region = "Europe" },
+]
+# Bounded scan: top current SPX names by issuer weight from the existing heat-map
+# artifact, plus the watchlist. These names are fallback if that artifact is
+# unavailable during a partial build. Not a full-US-market mover screen.
+premarket_top_weight_names = 30
+premarket_movers = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "TSLA", "JPM", "LLY"]
 rates = [
   { symbol = "US2Y", label = "UST 2Y" },
   { symbol = "US10Y", label = "UST 10Y" },
@@ -170,6 +185,36 @@ HYG = "Fixed Income"
 IEF = "Fixed Income"
 SHY = "Fixed Income"
 TLT = "Fixed Income"
+
+[positioning]
+# POSITIONING (RISK -> POSITIONING). Short interest covers the index members,
+# the watchlist and these ETFs; ``rounds`` is how many FINRA rounds (two a
+# month) are charted; ``top`` rows per ranked table.
+short_interest_rounds = 24
+short_interest_top = 15
+short_interest_etfs = ["SPY", "QQQ", "IWM", "DIA", "RSP", "XLK", "XLF", "XLE", "XLV", "HYG", "LQD", "TLT"]
+history_years = 10
+# Buyback blackout: a window of ``before`` calendar days ahead of each report
+# to ``after`` days behind it -- the common sell-side convention, not any
+# company's policy. Charted from ``history_days`` back to ``days_ahead``.
+blackout_days_before = 30
+blackout_days_after = 2
+blackout_history_days = 365
+blackout_days_ahead = 60
+# Insider buying: strict Form 4 purchases (evidence.strict_form4_buys) over
+# ``window_days``; each build reads at most ``max_new_filings`` filings it has
+# not parsed before, newest day first, within ``budget_seconds``.
+insider_window_days = 90
+insider_max_new_filings = 1500
+insider_budget_seconds = 420
+insider_cluster_min_value = 250000
+insider_recent_days = 30
+insider_top = 20
+
+[etf_detail]
+# ETF PRICE & PUBLISHED FLOWS: funds listed first in the picker (the first is
+# shown on load). Every fund on the heat map with a price follows.
+first = ["SPY", "QQQ", "VOO"]
 
 [etf_xray]
 # Holdings detail shown per fund; every line still counts in the summaries.
@@ -591,6 +636,8 @@ beta_min_weeks = 52
 [macro]
 # Monthly prints shown in the inflation table.
 releases = 12
+# Years of each inflation series carried for its chart.
+history_years = 10
 
 [fixed_income]
 # Calendar days back for each curve comparison. Calendar, not trading days:
@@ -605,6 +652,15 @@ spreads = [
   { label = "10Y - 2Y", long = "10Y", short = "2Y" },
   { label = "10Y - 3M", long = "10Y", short = "3M" },
 ]
+# The yields-over-time chart: FRED's constant-maturity series (the same
+# Treasury yields, one file each), daily for the last year, weekly before.
+history_years = 10
+history_series = [
+  { label = "2Y", series_id = "DGS2" },
+  { label = "10Y", series_id = "DGS10" },
+  { label = "30Y", series_id = "DGS30" },
+]
+history_spread = { label = "10Y − 2Y", long = "10Y", short = "2Y" }
 
 [cross_listing_diagnostics]
 # A premium series whose day-to-day changes carry less memory than this is
@@ -662,6 +718,9 @@ polymarket_tags = ["fed", "fed-rates"]
 tail = 30
 fred = ["BAMLH0A0HYM2", "BAMLC0A0CM", "BAMLH0A3HYC", "BAMLH0A1HYBB", "BAMLH0A2HYB", "BAMLC0A4CBBB", "NFCI", "ANFCI"]
 cboe = ["VIX", "VIX9D", "VIX3M", "VIX6M", "VIX1Y", "VVIX", "SKEW", "COR1M"]
+# ETFs whose issuer publishes only today's units (CUSIP from [etf_xray.holdings]):
+# recorded each evening so their flow can be built from the record.
+invesco = ["QQQ", "RSP"]
 
 # MARKET RISK (RISK -> RISK). One tile per series; no composite score.
 # Thresholds were written on 2026-09-26, before the page drew any of these

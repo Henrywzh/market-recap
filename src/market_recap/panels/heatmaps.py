@@ -6,7 +6,7 @@ import pandas as pd
 
 from ..compute import returns as R
 from ..config import ETF_ARTIFACT_DIR, period_sessions
-from ..sources import ishares, ssga, vanguard, yahoo
+from ..sources import invesco, ishares, snapshot_store, ssga, vanguard, yahoo
 from ..util import SourceRecord, clean_float, prune_stale, to_iso_date, write_json
 
 
@@ -72,15 +72,56 @@ def _cumulative_flows(flows: pd.Series, periods: list[str]) -> dict:
 # Each entry carries its own home URL. Deriving it from the provider id with a
 # string test -- which is what this did -- silently attributes a third
 # provider's funds to the second one.
+def _invesco_recorded(ticker: str, *, use_cache: bool = True) -> tuple[pd.DataFrame, str]:
+    """Invesco's daily units as the evening snapshots recorded them. Invesco
+    publishes no history of its own, so this starts when the record did."""
+    return snapshot_store.etf_units(ticker), invesco.HOME_URL
+
+
 FLOW_PROVIDERS = (
     ("ssga_nav_history", "State Street published NAV history", ssga.fetch_nav_history, ssga.HOME_URL),
     ("ishares_nav_history", "iShares published NAV history", ishares.fetch_nav_history, ishares.HOME_URL),
+    ("invesco_recorded", "Invesco published units, recorded each evening", _invesco_recorded, invesco.HOME_URL),
 )
+
+
+def _invesco_premium(cusip: str | None, use_cache: bool) -> pd.Series | None:
+    if not cusip:
+        return None
+    try:
+        frame, _ = invesco.fetch_premium_history(cusip, use_cache=use_cache)
+    except Exception:
+        return None
+    return frame.set_index("date")["premium_pct"] if not frame.empty else None
+
+
+def _price_only(ticker: str, prices: pd.Series, *, ma_windows: list[int], chart_sessions: int,
+                reason: str, premium: pd.Series | None) -> None:
+    """Price and averages for a fund with no flow record, so it can still be
+    picked on the page; the flow chart says why it is empty."""
+    tail = prices.dropna().tail(chart_sessions)
+    write_json(ETF_ARTIFACT_DIR / f"{ticker}.json", {
+        "ticker": ticker,
+        "as_of": to_iso_date(tail.index[-1]) if not tail.empty else None,
+        "history_start": None,
+        "sessions": 0,
+        "source": None,
+        "flow_note": reason,
+        "dates": [d.strftime("%Y-%m-%d") for d in tail.index],
+        "flow": [],
+        "close": [clean_float(v, 2) for v in tail.to_numpy()],
+        "moving_averages": {
+            str(w): [clean_float(v, 2) for v in prices.rolling(w, min_periods=w).mean().reindex(tail.index)]
+            for w in ma_windows
+        },
+        "premium_pct": [clean_float(v, 4) for v in premium.reindex(tail.index).to_numpy()] if premium is not None else [],
+        "shares_unchanged_since": None,
+    })
 
 
 def _build_published_flow(
     ticker: str, prices: pd.Series, *, periods: list[str], ma_windows: list[int],
-    chart_sessions: int, use_cache: bool,
+    chart_sessions: int, use_cache: bool, cusip: str | None = None,
 ) -> dict | None:
     """Reconstruct the whole flow history from an issuer's published file."""
     nav = None
@@ -104,7 +145,9 @@ def _build_published_flow(
     # Only State Street publishes a premium/discount series here; an iShares
     # fund simply has no premium line rather than a computed stand-in.
     premium = None
-    if source_id == "ssga_nav_history":
+    if source_id == "invesco_recorded":
+        premium = _invesco_premium(cusip, use_cache)
+    elif source_id == "ssga_nav_history":
         try:
             pd_frame, _ = ssga.fetch_premium_discount(ticker, use_cache=use_cache)
             if not pd_frame.empty:
@@ -192,14 +235,16 @@ def build(ctx) -> dict:
 
     # --- ETF treemap -------------------------------------------------------
     etf_groups = dict(ctx.config["etf_heatmap"])
-    published, unpublished = [], []
+    holdings_sources = dict(ctx.config.get("etf_xray", {}).get("holdings", {}))
+    published, unpublished, price_only = [], [], []
     etf_nodes = []
 
     for ticker, group in etf_groups.items():
         prices = ctx.etf_closes[ticker] if ticker in ctx.etf_closes.columns else pd.Series(dtype=float)
+        cusip = invesco.cusip_for(holdings_sources.get(ticker))
         result = _build_published_flow(
             ticker, prices.dropna(), periods=periods, ma_windows=ma_windows,
-            chart_sessions=chart_sessions, use_cache=True,
+            chart_sessions=chart_sessions, use_cache=True, cusip=cusip,
         )
         node = {
             "ticker": ticker,
@@ -212,6 +257,15 @@ def build(ctx) -> dict:
             # than substituting a market-cap guess that would sit in the same
             # column as a measured figure and look equally solid.
             unpublished.append(ticker)
+            if not prices.dropna().empty:
+                reason = ("Invesco publishes only today's shares outstanding; they are recorded each "
+                          "evening and a flow appears once two days are on record."
+                          if cusip and ticker in ctx.config.get("snapshots", {}).get("risk", {}).get("invesco", [])
+                          else "The issuer publishes no daily shares-outstanding history for this fund, "
+                               "so there is no measured flow.")
+                _price_only(ticker, prices.dropna(), ma_windows=ma_windows, chart_sessions=chart_sessions,
+                            reason=reason, premium=_invesco_premium(cusip, True))
+                price_only.append(ticker)
             node |= {
                 "aum": None,
                 "aum_source": None,
@@ -336,14 +390,18 @@ def build(ctx) -> dict:
             )
         )
 
-    prune_stale(ETF_ARTIFACT_DIR, published)
+    prune_stale(ETF_ARTIFACT_DIR, published + price_only)
+    # The single-fund picker: the funds named first in the contract, then the
+    # rest in heat-map order; every fund with a price, flow record or not.
+    first = [t for t in ctx.config.get("etf_detail", {}).get("first", []) if t in published + price_only]
+    detail = first + [t for t in etf_groups if t in published + price_only and t not in first]
     return {
         "as_of": ctx.as_of,
         "holdings_as_of": ctx.holdings_as_of,
         "periods": periods,
         "constituents": nodes,
         "etfs": etf_nodes,
-        "flow_coverage": {"published": sorted(published), "unpublished": sorted(unpublished)},
+        "flow_coverage": {"published": sorted(published), "unpublished": sorted(unpublished), "detail": detail},
         "flow_sources": {k: sorted(v) for k, v in by_source.items()},
         "oversized_aum": sorted(n["ticker"] for n in etf_nodes if n.get("aum_basis") == "all_share_classes"),
         "shares_unchanged": {n["ticker"]: n["shares_unchanged_since"] for n in etf_nodes
