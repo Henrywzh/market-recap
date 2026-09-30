@@ -3,8 +3,10 @@
 // the THEMES panel; every figure carries its source and date, and a source
 // that failed leaves its reason in its own card.
 
-import { el, card, num, pct, tag, table, dirClass, sectionTitle, gap, metaRow, DASH } from '../fmt.js';
-import { render, SERIES_COLORS } from '../charts.js';
+import { el, card, num, pct, tag, table, dirClass, sectionTitle, gap, metaRow, periodSwitch, DASH } from '../fmt.js';
+import { viewChart, VIEWS } from '../viewchart.js';
+import { availableRanges, sliceRange } from '../range.js';
+import { render } from '../charts.js';
 import { tickerHref } from '../routes.js';
 
 const KIND_TONE = { earnings: 'warn', macro: 'info', data: 'up' };
@@ -28,47 +30,6 @@ function pctCell(value, digits = 1) {
 
 function link(symbol) {
   return el('a', { href: tickerHref(symbol), text: symbol });
-}
-
-function chartNode(cls = 'short') {
-  return el('div', { class: `chart ${cls}` });
-}
-
-// Bars on the left axis, a percent line on the right.
-function barLine(node, labels, bars, line, { barName, lineName, barFmt = (v) => num(v, 1), color } = {}) {
-  requestAnimationFrame(() => render(node, (option, p) => ({
-    ...option,
-    grid: { left: 52, right: 48, top: 24, bottom: 26 },
-    legend: { top: 0, textStyle: { color: p.dim, fontSize: 9 }, itemWidth: 10, itemHeight: 6 },
-    tooltip: { ...option.tooltip, trigger: 'axis' },
-    xAxis: { ...option.xAxis, boundaryGap: true, data: labels },
-    yAxis: [
-      { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 9, formatter: barFmt } },
-      { ...option.yAxis, position: 'right', splitLine: { show: false }, axisLabel: { color: p.dim, fontSize: 9, formatter: (v) => `${v}%` } },
-    ],
-    series: [
-      { name: barName, type: 'bar', data: bars, barMaxWidth: 14, itemStyle: { color: color ? color(p) : p.blue } },
-      ...(line ? [{ name: lineName, type: 'line', yAxisIndex: 1, data: line, showSymbol: false, lineStyle: { color: p.accent, width: 1.4 }, itemStyle: { color: p.accent } }] : []),
-    ],
-  })));
-}
-
-// Several lines on one date axis.
-function lines(node, dates, series, { fmt = (v) => num(v, 0), right = null } = {}) {
-  requestAnimationFrame(() => render(node, (option, p) => ({
-    ...option,
-    grid: { left: 52, right: 16, top: 26, bottom: 26 },
-    legend: { top: 0, textStyle: { color: p.dim, fontSize: 9 }, itemWidth: 10, itemHeight: 2 },
-    tooltip: { ...option.tooltip, trigger: 'axis', valueFormatter: (v) => (v === null || v === undefined ? DASH : fmt(v)) },
-    xAxis: { ...option.xAxis, data: dates },
-    yAxis: { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 9, formatter: fmt } },
-    series: series.map((s, i) => ({
-      name: s.name, type: 'line', data: s.values, showSymbol: false, connectNulls: true,
-      lineStyle: { width: s.width || 1.3, color: s.color ? s.color(p) : SERIES_COLORS[i % SERIES_COLORS.length], type: s.dashed ? 'dashed' : 'solid' },
-      itemStyle: { color: s.color ? s.color(p) : SERIES_COLORS[i % SERIES_COLORS.length] },
-    })),
-    ...(right || {}),
-  })));
 }
 
 function rolling(values, n) {
@@ -138,38 +99,52 @@ function bellwetherCard(g) {
   ]);
 }
 
+// The proxy against both indices, rebased to 100 at the start of the range.
 function relativeCard(g) {
-  const node = chartNode();
-  lines(node, g.relative.dates, [{ name: `${g.proxy_is_etf ? g.proxy : 'basket'} / S&P 500`, values: g.relative.values, color: (p) => p.accent }], { fmt: (v) => num(v, 0) });
-  return card('AGAINST THE S&P 500 · 1Y', el('span', { class: 'dim', text: '= 100 a year ago' }), node);
+  const spx = g.relative?.SPX;
+  const ndx = g.relative?.NDX;
+  if (!spx?.dates?.length) return card('AGAINST THE INDICES', null, gap('No proxy history.'));
+  const node = el('div', { class: 'chart short' });
+  const ranges = availableRanges(spx.dates);
+  let active = ranges.includes('1Y') ? '1Y' : ranges[ranges.length - 1];
+  const ndxBy = new Map((ndx?.dates || []).map((d, i) => [d, ndx.values[i]]));
+  const draw = () => {
+    const cut = sliceRange(spx.dates, { spx: spx.values, ndx: spx.dates.map((d) => ndxBy.get(d) ?? null) }, active);
+    const rebase = (values) => {
+      const first = values.find((v) => v !== null && v !== undefined);
+      return values.map((v) => (v === null || v === undefined || !first ? null : Math.round((1000 * v) / first) / 10));
+    };
+    const label = g.proxy_is_etf ? g.proxy : 'basket';
+    render(node, (option, p) => ({
+      ...option,
+      grid: { left: 44, right: 16, top: 26, bottom: 26 },
+      legend: { top: 0, textStyle: { color: p.dim, fontSize: 9 }, itemWidth: 10, itemHeight: 2 },
+      tooltip: { ...option.tooltip, trigger: 'axis', valueFormatter: (v) => (v === null || v === undefined ? DASH : num(v, 1)) },
+      xAxis: { ...option.xAxis, data: cut.dates },
+      yAxis: { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 9 } },
+      series: [
+        { name: `${label} / S&P 500`, type: 'line', data: rebase(cut.spx), showSymbol: false, lineStyle: { color: p.accent, width: 1.5 }, itemStyle: { color: p.accent },
+          markLine: { silent: true, symbol: 'none', data: [{ yAxis: 100 }], lineStyle: { color: p.faint }, label: { show: false } } },
+        ...(ndx ? [{ name: `${label} / Nasdaq 100`, type: 'line', data: rebase(cut.ndx), showSymbol: false, connectNulls: true, lineStyle: { color: p.blue, width: 1.3 }, itemStyle: { color: p.blue } }] : []),
+      ],
+    }));
+  };
+  requestAnimationFrame(draw);
+  const pick = Object.assign(periodSwitch(ranges, active, (r) => { active = r; draw(); }), { className: 'period-switch range-switch' });
+  return card('AGAINST THE S&P 500 AND NASDAQ 100', el('span', { class: 'tag-row' }, [el('span', { class: 'dim', text: '= 100 at the start · rising = outperforming' }), pick]), node);
 }
 
 // --- CLOUD -------------------------------------------------------------------------
 
 function capexCard(capex) {
   if (capex.unavailable) return card('HYPERSCALER CAPEX', null, unavailable(capex));
-  const quarters = [...new Set(capex.companies.flatMap((c) => c.quarters.map((q) => q.quarter)))].sort().slice(-8);
-  const node = chartNode('');
+  const quarters = [...new Set(capex.companies.flatMap((c) => c.quarters.map((q) => q.quarter)))].sort();
   const totals = new Map(capex.totals.map((t) => [t.quarter, t]));
-  requestAnimationFrame(() => render(node, (option, p) => ({
-    ...option,
-    grid: { left: 52, right: 48, top: 26, bottom: 26 },
-    legend: { top: 0, textStyle: { color: p.dim, fontSize: 9 }, itemWidth: 10, itemHeight: 6 },
-    tooltip: { ...option.tooltip, trigger: 'axis' },
-    xAxis: { ...option.xAxis, boundaryGap: true, data: quarters },
-    yAxis: [
-      { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 9, formatter: (v) => `$${v}B` } },
-      { ...option.yAxis, position: 'right', splitLine: { show: false }, axisLabel: { color: p.dim, fontSize: 9, formatter: (v) => `${v}%` } },
-    ],
-    series: [
-      ...capex.companies.map((c, i) => ({
-        name: c.symbol, type: 'bar', stack: 'capex', barMaxWidth: 26, itemStyle: { color: SERIES_COLORS[i % SERIES_COLORS.length] },
-        data: quarters.map((q) => c.quarters.find((x) => x.quarter === q)?.capex_bn ?? null),
-      })),
-      { name: 'total y/y', type: 'line', yAxisIndex: 1, showSymbol: true, symbolSize: 4, lineStyle: { color: p.text, width: 1.2 }, itemStyle: { color: p.text },
-        data: quarters.map((q) => totals.get(q)?.yoy_pct ?? null) },
-    ],
-  })));
+  const chart = viewChart({
+    dates: quarters, type: 'stack', views: VIEWS.quarterly(), tail: 8, fmt: (v) => `$${num(v, 0)}B`,
+    series: capex.companies.map((c) => ({ name: c.symbol, values: quarters.map((q) => c.quarters.find((x) => x.quarter === q)?.capex_bn ?? null) })),
+    changeOnly: [{ name: 'all five', width: 2.2, color: (p) => p.text, values: quarters.map((q) => (totals.get(q)?.complete ? totals.get(q).capex_bn : null)) }],
+  });
   const rows = capex.companies.map((c) => {
     const q = c.quarters[c.quarters.length - 1] || {};
     return el('tr', {}, [
@@ -186,18 +161,19 @@ function capexCard(capex) {
     last ? tag(`${last.quarter} TOTAL $${num(last.capex_bn, 0)}B · ${pct(last.yoy_pct, 0)} Y/Y`, 'warn') : null,
     el('span', { class: 'dim', text: `latest filing ${capex.latest_filed || DASH}` }),
   ]), [
-    node,
+    chart,
     table(['NAME', 'QUARTER TO', 'CAPEX', 'Y/Y', '+ FINANCE LEASES', 'FILED'], rows),
-    el('div', { class: 'field-note', text: 'Purchases of property and equipment from each filing\'s cash-flow statement (quarters derived from year-to-date figures where only those are filed). Finance leases: right-of-use assets taken on under new finance leases, not in capex. Oracle\'s quarters end Aug/Nov/Feb/May and count toward the calendar quarter they mostly cover; a total is shown only where all five have filed.' }),
+    el('div', { class: 'field-note', text: 'Purchases of property and equipment from each filing\'s cash-flow statement (quarters derived from year-to-date figures where only those are filed). Finance leases: right-of-use assets taken on under new finance leases, not in capex. Oracle\'s quarters end Aug/Nov/Feb/May and count toward the calendar quarter they mostly cover; the five-company line in the change views is shown only where all five have filed.' }),
   ]);
 }
 
 function twRevenueCard(title, series, note) {
   if (series.unavailable) return card(title, null, unavailable(series));
-  const months = [...new Set(series.flatMap((s) => s.months.map((m) => m.month)))].sort().slice(-24);
-  const node = chartNode('');
-  lines(node, months, series.map((s) => ({ name: s.label, values: months.map((m) => s.months.find((x) => x.month === m)?.yoy_pct ?? null) })),
-    { fmt: (v) => `${num(v, 0)}%` });
+  const months = [...new Set(series.flatMap((s) => s.months.map((m) => m.month)))].sort();
+  const chart = viewChart({
+    dates: months, views: VIEWS.monthly(), tail: 24, initial: 'YoY', fmt: (v) => `NT$${num(v, 0)}B`,
+    series: series.map((s) => ({ name: s.label, values: months.map((m) => { const r = s.months.find((x) => x.month === m); return r?.revenue_k ? r.revenue_k / 1e6 : null; }) })),
+  });
   const rows = series.map((s) => {
     const m = s.months[s.months.length - 1] || {};
     return el('tr', {}, [
@@ -209,8 +185,8 @@ function twRevenueCard(title, series, note) {
       el('td', { class: s.due?.late ? 'down' : 'dim', text: s.due ? `${s.due.month} due ${s.due.due}${s.due.late ? ' · late' : ''}` : DASH }),
     ]);
   });
-  return card(title, el('span', { class: 'dim', text: 'MOPS monthly revenue · y/y %' }), [
-    node,
+  return card(title, el('span', { class: 'dim', text: 'MOPS monthly revenue' }), [
+    chart,
     table(['COMPANY', 'MONTH', 'REVENUE', 'Y/Y', 'YTD Y/Y', 'NEXT'], rows),
     el('div', { class: 'field-note', text: note }),
   ]);
@@ -218,12 +194,11 @@ function twRevenueCard(title, series, note) {
 
 function openrouterCard(or) {
   if (or.unavailable) return card('OPENROUTER · TOKENS & ESTIMATED REVENUE', null, unavailable(or));
-  const dates = or.dates.slice(-120);
-  const cut = or.dates.length - dates.length;
-  const revNode = chartNode('');
-  const tokNode = chartNode('');
-  lines(revNode, dates, or.providers.map((p) => ({ name: p.name, values: rolling(p.revenue_k, 7).slice(cut) })), { fmt: (v) => `$${num(v, 0)}k` });
-  lines(tokNode, dates, or.providers.map((p) => ({ name: p.name, values: rolling(p.tokens_b, 7).slice(cut) })), { fmt: (v) => `${num(v, 0)}B` });
+  const common = { dates: or.dates, views: VIEWS.daily(), tail: 150 };
+  const revenue = viewChart({ ...common, title: 'ESTIMATED REVENUE / DAY · 7D AVG', fmt: (v) => `$${num(v, 0)}k`,
+    series: or.providers.map((p) => ({ name: p.name, values: rolling(p.revenue_k, 7) })) });
+  const tokens = viewChart({ ...common, title: 'TOKENS / DAY · 7D AVG', fmt: (v) => `${num(v, 0)}B`,
+    series: or.providers.map((p) => ({ name: p.name, values: rolling(p.tokens_b, 7) })) });
   const rows = [...or.providers].sort((a, b) => b.week_revenue_k - a.week_revenue_k).map((p) => el('tr', {}, [
     el('td', { text: p.name }),
     el('td', { text: `$${num(p.week_revenue_k / 1000, 2)}M` }),
@@ -233,43 +208,50 @@ function openrouterCard(or) {
     pctCell(p.tokens_vs_4w_pct),
   ]));
   return card('OPENROUTER · TOKENS & ESTIMATED REVENUE BY MODEL AUTHOR', el('span', { class: 'dim', text: `through ${or.dates[or.dates.length - 1]}${or.commit ? ` · alternative-data ${or.commit.sha.slice(0, 7)}` : ''}` }), [
-    el('div', { class: 'grid two' }, [
-      el('div', {}, [el('div', { class: 'card-title', text: 'ESTIMATED REVENUE / DAY · 7D AVG' }), revNode]),
-      el('div', {}, [el('div', { class: 'card-title', text: 'TOKENS / DAY · 7D AVG' }), tokNode]),
-    ]),
+    el('div', { class: 'grid two' }, [revenue, tokens]),
     table(['AUTHOR', 'LAST 7D REVENUE', 'SHARE', 'VS PRIOR 4W', 'LAST 7D TOKENS', 'VS PRIOR 4W'], rows),
-    el('div', { class: 'field-note', text: 'OpenRouter\'s routed traffic only -- a slice of each lab\'s demand, not its revenue. Revenue is alternative-data\'s estimate: observed tokens at the model\'s list price at the time. Today\'s partial day is left out.' }),
+    el('div', { class: 'field-note', text: 'OpenRouter\'s routed traffic only -- a slice of each lab\'s demand, not its revenue. Revenue is alternative-data\'s estimate: observed tokens at the model\'s list price at the time. Today\'s partial day is left out. WoW / 4W compare the 7-day average with the one 7 / 28 days earlier.' }),
   ]);
 }
 
 function rampCard(ramp) {
   if (ramp.unavailable) return card('RAMP AI INDEX', null, unavailable(ramp));
-  const n = ramp.months.length;
-  const last = n - 1;
-  const spendNode = chartNode('');
-  const vendorNode = chartNode('');
-  lines(spendNode, ramp.months, [
-    { name: 'median $/employee/month', values: ramp.median_pepm, color: (p) => p.accent, width: 1.8 },
-  ], { fmt: (v) => `$${num(v, 1)}` });
+  const last = ramp.months.length - 1;
+  const mom = (values) => (last > 0 && values[last - 1] ? `${pct(100 * (values[last] / values[last - 1] - 1), 1)} m/m` : '');
+  const spend = viewChart({
+    title: 'AI SPEND PER EMPLOYEE PER MONTH', dates: ramp.months, views: VIEWS.monthly(), fmt: (v) => `$${num(v, v < 10 ? 1 : 0)}`,
+    series: [
+      { name: 'median', values: ramp.median_pepm, color: (p) => p.accent, width: 2 },
+      { name: '90th pct', values: ramp.p90_pepm, color: (p) => p.blue },
+      { name: '99th pct', values: ramp.p99_pepm, color: (p) => p.purple },
+      { name: 'top-10% median', values: ramp.top10_median_pepm, hidden: true },
+      { name: 'top-1% median', values: ramp.top1_median_pepm, hidden: true },
+    ],
+  });
+  const adoption = viewChart({
+    title: 'ADOPTION · % OF BUSINESSES', dates: ramp.adoption.months, views: VIEWS.monthly('diff'), fmt: (v) => `${num(v, 0)}%`,
+    series: [{ name: 'paying for AI', values: ramp.adoption.pct, color: (p) => p.accent, width: 2 }],
+  });
   const vendorMonths = [...new Set(Object.values(ramp.vendors).flatMap((v) => v.months))].sort();
-  lines(vendorNode, vendorMonths, Object.entries(ramp.vendors).map(([name, v]) => ({ name, values: vendorMonths.map((m) => v.pct[v.months.indexOf(m)] ?? null) })),
-    { fmt: (v) => `${num(v, 0)}%` });
+  const vendors = viewChart({
+    title: 'ADOPTION BY VENDOR · % OF BUSINESSES', dates: vendorMonths, views: VIEWS.monthly('diff'), fmt: (v) => `${num(v, 0)}%`,
+    series: Object.entries(ramp.vendors).map(([name, v]) => ({ name, values: vendorMonths.map((m) => v.pct[v.months.indexOf(m)] ?? null) })),
+  });
   const adopt = ramp.adoption.pct[ramp.adoption.pct.length - 1];
   const sectorRows = ramp.sectors.rows.slice(0, 8).map((r) => el('tr', {}, [el('td', { text: r.sector }), el('td', { text: `$${num(r.median_pepm, 2)}` })]));
   return card('RAMP AI INDEX · US BUSINESSES', el('span', { class: 'dim', text: `through ${ramp.months[last]}` }), [
     el('div', { class: 'stat-strip' }, [
-      stat('MEDIAN AI SPEND', `$${num(ramp.median_pepm[last], 2)}`, `per employee per month · ${n > 1 ? `${pct(100 * (ramp.median_pepm[last] / ramp.median_pepm[last - 1] - 1), 1)} m/m` : ''}`),
-      stat('90TH PERCENTILE', `$${num(ramp.p90_pepm[last], 0)}`, 'per employee per month'),
-      stat('TOP-10% MEDIAN', `$${num(ramp.top10_median_pepm[last], 0)}`, 'per employee per month'),
+      stat('MEDIAN', `$${num(ramp.median_pepm[last], 2)}`, `per employee per month · ${mom(ramp.median_pepm)}`),
+      stat('90TH PERCENTILE', `$${num(ramp.p90_pepm[last], 0)}`, mom(ramp.p90_pepm)),
+      stat('99TH PERCENTILE', `$${num(ramp.p99_pepm[last], 0)}`, mom(ramp.p99_pepm)),
+      stat('TOP-10% MEDIAN', `$${num(ramp.top10_median_pepm[last], 0)}`, mom(ramp.top10_median_pepm)),
       stat('ADOPTION', `${num(adopt, 1)}%`, `of businesses paying for AI · ${ramp.adoption.months[ramp.adoption.months.length - 1]}`),
     ]),
-    el('div', { class: 'grid two' }, [
-      el('div', {}, [el('div', { class: 'card-title', text: 'MEDIAN SPEND PER EMPLOYEE' }), spendNode]),
-      el('div', {}, [el('div', { class: 'card-title', text: 'ADOPTION BY VENDOR · % OF BUSINESSES' }), vendorNode]),
-    ]),
+    spend,
+    el('div', { class: 'grid two' }, [adoption, vendors]),
     el('div', { class: 'card-title', text: `MEDIAN SPEND BY SECTOR · ${ramp.sectors.month}` }),
     table(['SECTOR', '$ / EMPLOYEE / MONTH'], sectorRows),
-    el('div', { class: 'field-note', text: 'Ramp AI Index (ramp.com/data/ai-index): card and bill-pay spend of businesses on Ramp -- skewed to US small and mid-sized firms. Read from alternative-data\'s collection.' }),
+    el('div', { class: 'field-note', text: 'Ramp AI Index (ramp.com/data/ai-index): card and bill-pay spend of businesses on Ramp -- skewed to US small and mid-sized firms. Per-employee spend is across businesses paying for AI. Percentiles span 300×, so RAW draws on a log axis; top-10% / top-1% medians are in the legend, off by default. Read from alternative-data\'s collection.' }),
   ]);
 }
 
@@ -277,16 +259,16 @@ function rampCard(ramp) {
 
 function koreaCard(k) {
   if (k.unavailable) return card('KOREA IC EXPORTS', null, unavailable(k));
-  const months = k.months.slice(-24);
-  const node = chartNode('');
-  barLine(node, months.map((m) => m.month), months.map((m) => m.exports_bn), months.map((m) => m.yoy_pct),
-    { barName: 'exports $B', lineName: 'y/y %', barFmt: (v) => `$${v}B` });
+  const chart = viewChart({
+    dates: k.months.map((m) => m.month), type: 'bar', views: VIEWS.monthly(), tail: 24, fmt: (v) => `$${num(v, 0)}B`,
+    series: [{ name: 'IC exports $B', values: k.months.map((m) => m.exports_bn), color: (p) => p.blue }],
+  });
   const last = k.months[k.months.length - 1] || {};
   return card('KOREA IC EXPORTS · HS 8542', el('span', { class: 'tag-row' }, [
     tag(`${last.month} $${num(last.exports_bn, 1)}B · ${pct(last.yoy_pct, 0)} Y/Y`, last.yoy_pct > 0 ? 'up' : 'down'),
     el('span', { class: k.due?.late ? 'down' : 'dim', text: k.due ? `${k.due.month} due ~${k.due.due}` : '' }),
   ]), [
-    node,
+    chart,
     el('div', { class: 'field-note', text: 'Korea Customs Service, confirmed monthly exports of electronic integrated circuits (memory is most of it), customs-acceptance basis, USD. The ministry\'s 1st-of-month flash is earlier but not read here.' }),
   ]);
 }
@@ -298,14 +280,14 @@ function pcppCard(pc) {
     const sec = pc[kind];
     if (!sec) continue;
     const fams = Object.entries(sec.families);
-    const node = chartNode('');
     const dates = fams[0]?.[1].index.dates || [];
-    lines(node, dates, fams.map(([name, f]) => ({ name, values: f.index.values, width: 1.8 })), { fmt: (v) => num(v, 0) });
+    const chart = viewChart({ dates, views: VIEWS.weekly(), fmt: (v) => num(v, 0),
+      series: fams.map(([name, f]) => ({ name, values: f.index.values, width: 1.8 })) });
     const famRows = fams.map(([name, f]) => el('tr', {}, [el('td', { text: `${name} (median of ${f.count})` }), pctCell(f.chg_1m), pctCell(f.chg_3m), pctCell(f.chg_6m), pctCell(f.chg_12m)]));
     const rows = sec.rows.map((r) => el('tr', {}, [el('td', { class: 'dim', text: r.title }), pctCell(r.chg_1m), pctCell(r.chg_3m), pctCell(r.chg_6m), pctCell(r.chg_12m)]));
     blocks.push(el('div', {}, [
       el('div', { class: 'card-title', text: kind === 'memory' ? 'MEMORY KITS · INDEX, 18 MONTHS AGO = 100' : 'CPUS · INDEX, 18 MONTHS AGO = 100' }),
-      node,
+      chart,
       table(['', '1M', '3M', '6M', '12M'], famRows),
       el('details', { class: 'method-fold' }, [el('summary', { text: `EACH ${kind === 'memory' ? 'KIT' : 'CPU GROUP'} · CHANGE %` }),
         table(['', '1M', '3M', '6M', '12M'], rows)]),

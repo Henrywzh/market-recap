@@ -107,22 +107,22 @@ def _group(ctx, spec: dict, settings: dict, catalysts: dict, evidence: dict, exc
         if e.get("lane") == "macro" and as_of.isoformat() < e["date"] <= end and any(p.search(e["title"]) for p in patterns):
             calendar.append({"date": e["date"], "kind": "macro", "title": e["title"], "time": e.get("time"),
                              "importance": e.get("importance")})
-    ratio = (proxy_price / market.reindex(proxy_price.index)).dropna() if not proxy_price.empty else pd.Series(dtype=float)
+    relative = {}
+    for key, symbol in (("SPX", ctx.primary.symbol), ("NDX", "^NDX")):
+        if proxy_price.empty or symbol not in ctx.index_closes.columns:
+            continue
+        ratio = (proxy_price / ctx.index_closes[symbol].reindex(proxy_price.index)).dropna()
+        if not ratio.empty:
+            relative[key] = history_payload(ratio, years=10, digits=6)
     return {
         "key": spec["key"], "label": spec["label"], "proxy": proxy_label, "proxy_is_etf": bool(etf),
         "run_in": T.run_in(proxy_price, market) if not proxy_price.empty else {},
-        "relative": _relative(ratio),
+        # Proxy / index, unscaled: the page rebases it to 100 at the start of
+        # whichever range is shown.
+        "relative": relative,
         "bellwethers": bellwethers,
         "calendar": calendar,
     }
-
-
-def _relative(ratio: pd.Series) -> dict:
-    """The proxy against the S&P 500 over the last year, = 100 a year ago."""
-    year = ratio.iloc[-253:]
-    if year.empty:
-        return {"dates": [], "values": []}
-    return history_payload(100 * year / year.iloc[0], years=1, digits=2, daily_days=366)
 
 
 # --- CLOUD ----------------------------------------------------------------------
@@ -234,7 +234,9 @@ def _ramp() -> dict:
         "months": [month(v) for v in pepm["date_month"]],
         "median_pepm": [clean_float(v, 2) for v in pepm["median_pepm"]],
         "p90_pepm": [clean_float(v, 2) for v in pepm["p90_pepm"]],
+        "p99_pepm": [clean_float(v, 2) for v in pepm["p99_pepm"]],
         "top10_median_pepm": [clean_float(v, 2) for v in pepm["top_10_percent_median_pepm"]],
+        "top1_median_pepm": [clean_float(v, 2) for v in pepm["top_1_percent_median_pepm"]],
         "adoption": {"months": [month(v) for v in adoption["date_month"]],
                      "pct": [clean_float(v, 2) for v in adoption["adoption_rate_pct"]]},
         "sectors": {"month": month(latest) if pd.notna(latest) else None,

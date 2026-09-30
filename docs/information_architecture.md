@@ -502,6 +502,12 @@ The phased build put too much in front of the reader. After looking at it:
   its data's due dates, late ones in red), the proxy against the S&P 500
   over a year, the bellwether table (proxy beta and same-way share on
   their past reports) and, for CLOUD and SEMIS, the industry data cards.
+  The proxy is drawn against both the S&P 500 and the Nasdaq 100 with a
+  6M-MAX range switch. Data charts carry a view switch (`web/js/viewchart.js`):
+  RAW and the changes that suit the series' frequency -- MoM / YoY monthly,
+  QoQ / YoY quarterly, WoW / 4W daily, 4W / 13W / YoY weekly; point changes
+  for series that are already percentages; RAW goes to a log axis when the
+  series span more than 25x (Ramp's median against its 99th percentile).
   Groups live in `[[themes.groups]]` in the config.
 - **Links to the ticker page** (`routes.tickerHref`) from MONITOR, SCREEN,
   HEAT MAPS tiles, SECTORS' contributor bars, EARNINGS movers and the
