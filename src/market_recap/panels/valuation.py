@@ -37,39 +37,73 @@ WEIGHT_CHECK_FACTOR = 2.5
 # means a share count or a split went wrong on one of them.
 PE_AGREEMENT_TOLERANCE = 0.25
 
-# Columns the history adds to the table, beside the snapshot metrics.
+# Columns the history adds to the table, beside the snapshot metrics. The
+# percentile is on the history's own basis (operating unless the company has
+# no operating history), the table's own P/E stays reported.
 HISTORY_METRICS = (
+    V.Metric("pe_operating", "P/E operating (TTM)", "x", "valuation", "low"),
     V.Metric("pe_percentile", "P/E percentile, own 10Y", "pct", "valuation", "low"),
     V.Metric("pe_vs_median", "P/E vs own 10Y median", "pct", "valuation", "low"),
 )
 
 
-def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits: pd.Series | None) -> dict | None:
-    """P/E against its own ten years; writes the ticker's chart artifact."""
-    if prices is None or not data.eps_history:
-        return None
-    steps = V.eps_steps(data.eps_history, splits)
-    pe = V.pe_series(prices, steps)
-    stats = V.pe_stats(pe) if not pe.empty else None
-    if stats is None:
-        return None
-    window = pe.iloc[-V.HISTORY_SESSIONS:]
+def _weekly(series: pd.Series) -> pd.Series:
     # Weekly for the chart (a decade of daily points is 2,500 per ticker); the
-    # statistics above are on every session. Each point keeps the date of the
+    # statistics are on every session. Each point keeps the date of the
     # session it is -- resampling labels a week by its Friday, which dated the
     # latest point to a Friday that had not happened yet.
-    weekly = window.groupby(window.index.to_period("W-FRI")).tail(1)
+    return series.groupby(series.index.to_period("W-FRI")).tail(1)
+
+
+def _stats_json(stats: dict) -> dict:
+    return {k: clean_float(v, 2) if isinstance(v, float) else v for k, v in stats.items()}
+
+
+def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits: pd.Series | None,
+             sector: str | None) -> dict | None:
+    """P/E against its own ten years, on the operating basis and as reported;
+    writes the ticker's chart artifact. Returns {basis, <basis>: stats, ...}."""
+    if prices is None or not data.eps_history:
+        return None
+    reported_steps = V.eps_steps(data.eps_history, splits)
+    basis = V.operating_basis(data.eps_history, sector)
+    operating = V.operating_steps(data.eps_history, splits, basis)
+    series = {V.REPORTED: V.pe_series(prices, reported_steps), basis: V.pe_series(prices, V.as_steps(operating))}
+    stats = {key: V.pe_stats(pe) if not pe.empty else None for key, pe in series.items()}
+    if stats[V.REPORTED] is None and stats[basis] is None:
+        return None
+    # The operating basis leads unless it has too little history to rank.
+    lead = basis if stats[basis] is not None else V.REPORTED
+    first = stats[lead]["first"]
+    dates = _weekly(series[lead].iloc[-V.HISTORY_SESSIONS:]).index
+    by_filed = {s["filed"]: s for s in operating}
+
+    def payload(key: str) -> dict | None:
+        if stats[key] is None:
+            return None
+        return {
+            "basis": key,
+            "label": V.BASIS_LABELS[key],
+            "pe": [clean_float(v, 2) for v in series[key].reindex(dates).to_numpy()],
+            "stats": _stats_json(stats[key]),
+        }
+
     write_json(VALUATION_ARTIFACT_DIR / f"{symbol}.json", {
         "ticker": symbol,
-        "dates": [d.strftime("%Y-%m-%d") for d in weekly.index],
-        "pe": [clean_float(v, 2) for v in weekly.to_numpy()],
-        "stats": {k: clean_float(v, 2) if isinstance(v, float) else v for k, v in stats.items()},
+        "dates": [d.strftime("%Y-%m-%d") for d in dates],
+        "basis": lead,
+        **payload(lead),
+        "alternate": payload(V.REPORTED if lead != V.REPORTED else basis),
+        # Each quarter's TTM EPS both ways, and what the operating figure took out.
         "eps": [
-            {"filed": filed, "period_end": end, "eps": clean_float(eps, 4)}
-            for filed, end, eps in steps if filed >= stats["first"]
+            {"filed": filed, "period_end": end, "reported": clean_float(eps, 4),
+             "operating": clean_float(by_filed.get(filed, {}).get("eps"), 4),
+             "removed": clean_float(by_filed.get(filed, {}).get("removed"), 4),
+             "tax_rate": clean_float(by_filed.get(filed, {}).get("tax_rate"), 3)}
+            for filed, end, eps in reported_steps if filed >= first
         ],
     })
-    return stats
+    return {"basis": lead, **stats}
 
 
 def _split_factor(splits, symbol: str, after: str | None) -> float:
@@ -95,6 +129,9 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
     metrics = V.compute(V.Inputs(snapshot, data.rows, market_cap, ev), sector=meta.get("sector"))
     _, tested = V.piotroski(data.rows)
     _, debt_basis = V.debt(snapshot)
+    history = history or {}
+    basis = history.get("basis")
+    reported, lead = history.get(V.REPORTED) or {}, history.get(basis) or {}
     return {
         "ticker": symbol,
         "name": meta.get("name"),
@@ -117,14 +154,19 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         "earnings_yield": clean_float(V._pct(snapshot["ttm"].get("net_income"), market_cap), 4),
         "book_yield": clean_float(V._pct(snapshot["balance"].get("equity"), market_cap), 4),
         "pe_history": history is not None,
-        "pe_history_current": clean_float((history or {}).get("current"), 2),
-        "pe_percentile": clean_float((history or {}).get("percentile"), 1),
-        "pe_vs_median": clean_float((history or {}).get("vs_median"), 1),
+        # The reported history's latest point checks the table's P/E (both are
+        # reported); the percentile is on the history's leading basis.
+        "pe_history_current": clean_float(reported.get("current"), 2),
+        "pe_operating": clean_float(lead.get("current"), 2) if basis != V.REPORTED else None,
+        "pe_basis": basis,
+        "pe_percentile": clean_float(lead.get("percentile"), 1),
+        "pe_vs_median": clean_float(lead.get("vs_median"), 1),
     }
 
 
-def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dict[str, pd.Series]) -> dict | None:
-    """Each index's and each sector's P/E against its own ten years.
+def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dict[str, dict[str, pd.Series]]) -> dict | None:
+    """Each index's and each sector's P/E against its own ten years, on
+    operating earnings (each company on its own basis) and as reported.
 
     A company counts at today's share count throughout: its own P/E is exact
     on every date, but the weights between companies are today's, and the
@@ -132,7 +174,8 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
     """
     if not caps:
         return None
-    cap_frame, earnings_frame = pd.DataFrame(caps), pd.DataFrame(earnings)
+    cap_frame = pd.DataFrame(caps)
+    frames = {key: pd.DataFrame(values) for key, values in earnings.items()}
     groups = [(spec.key, spec.label, "index", [r["ticker"] for r in rows if spec.key in r["indices"]])
               for spec in ctx.indices]
     primary = [r for r in rows if ctx.primary.key in r["indices"] and r["sector"]]
@@ -143,22 +186,24 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
         columns = [t for t in tickers if t in cap_frame.columns]
         if not columns:
             continue
-        frame = V.aggregate_pe(cap_frame[columns], earnings_frame[columns]).iloc[-V.HISTORY_SESSIONS:]
-        stats = V.pe_stats(frame["pe"])
-        weekly = frame.groupby(frame.index.to_period("W-FRI")).tail(1)
-        dates = dates or [d.strftime("%Y-%m-%d") for d in weekly.index]
-        series.append({
-            "key": key,
-            "label": label,
-            "kind": kind,
-            "companies": len(columns),
-            "coverage": clean_float(frame["coverage"].iloc[-1], 3),
-            "stats": {k: clean_float(v, 2) if isinstance(v, float) else v for k, v in stats.items()} if stats else None,
-            "pe": [clean_float(v, 2) for v in weekly["pe"].to_numpy()],
-        })
+        entry = {"key": key, "label": label, "kind": kind, "companies": len(columns)}
+        for basis, frame_all in frames.items():
+            frame = V.aggregate_pe(cap_frame[columns], frame_all.reindex(columns=columns)).iloc[-V.HISTORY_SESSIONS:]
+            stats = V.pe_stats(frame["pe"])
+            weekly = _weekly(frame)
+            dates = dates or [d.strftime("%Y-%m-%d") for d in weekly.index]
+            suffix = "" if basis == V.OPERATING else f"_{basis}"
+            entry |= {
+                f"coverage{suffix}": clean_float(frame["coverage"].iloc[-1], 3),
+                f"stats{suffix}": _stats_json(stats) if stats else None,
+                f"pe{suffix}": [clean_float(v, 2) for v in weekly["pe"].to_numpy()],
+            }
+        series.append(entry)
     return {
         "dates": dates,
         "series": series,
+        "basis": V.OPERATING,
+        "alternate": V.REPORTED,
         "window_sessions": V.HISTORY_SESSIONS,
         "min_coverage": V.AGGREGATE_MIN_COVERAGE,
     }
@@ -211,7 +256,8 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     rows, skipped = [], {}
     # Market cap and TTM earnings through time, one listing per company: a
     # second share class carries the whole company's cap again.
-    caps, earnings, companies = {}, {}, set()
+    caps, companies = {}, set()
+    earnings: dict[str, dict[str, pd.Series]] = {V.OPERATING: {}, V.REPORTED: {}}
     for symbol in symbols:
         cik = cik_for(symbol, cik_map)
         if cik is None:
@@ -228,7 +274,8 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         closes = ctx.closes[symbol].dropna() if symbol in ctx.closes.columns else None
         price = float(closes.iloc[-1]) if closes is not None and not closes.empty else None
         symbol_splits = ctx.splits[symbol] if symbol in ctx.splits.columns else None
-        history = _history(symbol, data, ctx.prices.get(symbol), symbol_splits)
+        sector = meta.get(symbol, {}).get("sector")
+        history = _history(symbol, data, ctx.prices.get(symbol), symbol_splits, sector)
         row = _row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history)
         rows.append(row)
         prices = ctx.prices.get(symbol)
@@ -236,7 +283,10 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             companies.add(row["cik"])
             shares = row["market_cap"] / price
             caps[symbol] = prices * shares
-            earnings[symbol] = V.plausible_eps(prices, V.eps_steps(data.eps_history, symbol_splits)) * shares
+            earnings[V.REPORTED][symbol] = V.plausible_eps(prices, V.eps_steps(data.eps_history, symbol_splits)) * shares
+            basis = V.operating_basis(data.eps_history, sector)
+            operating = V.as_steps(V.operating_steps(data.eps_history, symbol_splits, basis))
+            earnings[V.OPERATING][symbol] = V.plausible_eps(prices, operating) * shares
 
     primary = ctx.members[ctx.primary.key].drop_duplicates("yahoo_symbol").set_index("yahoo_symbol")["weight"]
     check = _weight_check([r for r in rows if ctx.primary.key in r["indices"]], primary.to_dict())

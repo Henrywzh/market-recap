@@ -101,8 +101,11 @@ function headerStats(symbol, row, mon) {
     stats.push(stat('NEXT EARNINGS', mon.earnings_date || DASH, mon.earnings_date ? timing : 'none on the calendar'));
   }
   if (row) {
-    stats.push(stat('P/E VS OWN 10Y', row.pe_percentile === null || row.pe_percentile === undefined ? DASH : `${ordinal(row.pe_percentile)} pct`,
-      row.pe_vs_median === null || row.pe_vs_median === undefined ? null : `${row.pe_vs_median > 0 ? '+' : ''}${num(row.pe_vs_median, 0)}% vs median`));
+    // On the history's own basis: operating earnings unless the company has none.
+    const basis = row.pe_basis && row.pe_basis !== 'reported' ? (row.pe_basis === 'operating' ? 'operating' : 'ex gains') : null;
+    const current = row.pe_operating !== null && row.pe_operating !== undefined ? `${num(row.pe_operating, 1)}x ${basis} · ` : '';
+    stats.push(stat(`P/E VS OWN 10Y${basis ? ` · ${basis.toUpperCase()}` : ''}`, row.pe_percentile === null || row.pe_percentile === undefined ? DASH : `${ordinal(row.pe_percentile)} pct`,
+      row.pe_vs_median === null || row.pe_vs_median === undefined ? null : `${current}${row.pe_vs_median > 0 ? '+' : ''}${num(row.pe_vs_median, 0)}% vs median`));
   }
   return stats.length ? el('div', { class: 'stat-strip' }, stats) : null;
 }

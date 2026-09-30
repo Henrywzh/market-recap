@@ -4,7 +4,7 @@
 // is compared with other utilities, never with software. The top fifth by the
 // metric's own "better" direction is green, the bottom fifth red.
 
-import { el, card, table, num, sectionTitle, notice, metaRow, DASH } from '../fmt.js';
+import { el, card, table, num, sectionTitle, notice, metaRow, periodSwitch, DASH } from '../fmt.js';
 import { render, SERIES_COLORS } from '../charts.js';
 
 const BILLION = 1e9;
@@ -16,6 +16,8 @@ const TAIL_SHARE = 0.2;
 // the 98th, EV/EBITDA's axis ran to 165x and the market sat in its first fifth.
 const AXIS_PERCENTILES = [0.05, 0.95];
 const ALL = '';
+// The P/E history's earnings bases, as the switch names them.
+const BASIS_NAMES = { operating: 'OPERATING', ex_gains: 'EX GAINS', reported: 'REPORTED' };
 
 function format(value, unit) {
   if (value === null || value === undefined) return DASH;
@@ -138,15 +140,22 @@ async function loadHistory(symbol) {
 
 // `cap` stops the axis where a year of near-zero group earnings would
 // otherwise stretch it to hundreds and flatten the decade into a line.
-function historyChart(node, history, { cap = null } = {}) {
+// `compare` draws the other basis faintly behind, so what the switch removed
+// shows as the gap between the two lines.
+function historyChart(node, history, { cap = null, compare = null } = {}) {
   const s = history.stats;
   render(node, (option, p) => ({
     ...option,
-    grid: { ...option.grid, right: 60, bottom: 30 },
+    grid: { ...option.grid, right: 60, bottom: 30, top: compare ? 24 : option.grid?.top },
+    legend: compare ? { top: 0, textStyle: { color: p.dim, fontSize: 9 }, itemWidth: 10, itemHeight: 2 } : undefined,
+    tooltip: { ...option.tooltip, trigger: 'axis', valueFormatter: (v) => (v === null || v === undefined ? DASH : `${num(v, 1)}x`) },
     xAxis: { ...option.xAxis, data: history.dates },
     yAxis: { ...option.yAxis, max: cap ? Math.ceil(cap) : undefined, axisLabel: { color: p.dim, fontSize: 10, formatter: (v) => `${v}x` } },
-    series: [{
-      name: 'P/E', type: 'line', data: history.pe, showSymbol: false, connectNulls: false,
+    series: [...(compare ? [{
+      name: compare.name, type: 'line', data: compare.pe, showSymbol: false, connectNulls: false, z: 1,
+      lineStyle: { width: 1, color: p.faint, type: 'dashed' }, itemStyle: { color: p.faint },
+    }] : []), {
+      name: history.name || 'P/E', type: 'line', data: history.pe, showSymbol: false, connectNulls: false, z: 2, itemStyle: { color: p.text },
       lineStyle: { width: 1.4, color: p.text },
       markArea: { silent: true, itemStyle: { color: 'rgba(232,163,61,0.12)' },
         data: [[{ yAxis: s.p25 }, { yAxis: s.p75 }]] },
@@ -250,7 +259,8 @@ export function renderAggregates(root, data) {
       + `A week is drawn only when companies with an EPS in force hold at least ${num(agg.min_coverage * 100, 0)}% of the group's priced market cap. `
       + `When a group's total earnings approach zero (Energy through 2016's losses, Utilities in 2019–20, most sectors on 2020's earnings in early 2021) its P/E runs into the hundreds; the chart's axis stops at ${AGGREGATE_AXIS_CAP}x the group's 90th percentile, and the range in the stats is the true one. `
       + 'An EPS more than twice the share price either way is taken as a units error in the filing and left out. '
-      + 'This is trailing GAAP, not FactSet\'s forward operating P/E (on EARNINGS), so it runs higher and moves more around recessions. Percentile and band are over the last ten years of sessions.',
+      + 'OPERATING (the default) divides by each company\'s operating earnings: pre-tax income, capped at operating income less interest paid, taxed at the company\'s own rate -- so gains on stakes (Alphabet and Amazon on Anthropic), divestitures and one-off tax items do not make a group look cheap. Financials and utilities, whose ordinary earnings are partly below the operating line, and companies that report no operating line, are on reported EPS less gains on equity securities. REPORTED is plain diluted EPS. '
+      + 'Both are trailing, not FactSet\'s forward operating P/E (on EARNINGS), so they run higher and move more around recessions. Percentile and band are over the last ten years of sessions, each on its own basis.',
   ]));
   root.append(aggregateSection(data));
   return true;
@@ -270,25 +280,41 @@ function aggregateSection(data) {
     el('div', { class: `stat-value ${cls}`, text: value }),
     note ? el('div', { class: 'stat-note', text: note }) : null,
   ]);
+  // Operating earnings lead; REPORTED shows the same groups on reported EPS.
+  // Older artifacts carry only the reported series, under the plain keys.
+  const bases = agg.alternate ? [BASIS_NAMES[agg.basis], BASIS_NAMES[agg.alternate]] : ['REPORTED'];
+  let basis = bases[0];
+  const view = (s) => {
+    const suffix = basis === 'REPORTED' && agg.alternate ? `_${agg.alternate}` : '';
+    return { ...s, stats: s[`stats${suffix}`], pe: s[`pe${suffix}`], coverage: s[`coverage${suffix}`] };
+  };
+  const other = (s) => {
+    if (!agg.alternate) return null;
+    const suffix = basis === 'REPORTED' ? '' : `_${agg.alternate}`;
+    return { name: basis === 'REPORTED' ? 'operating' : 'reported', pe: s[`pe${suffix}`] };
+  };
   const draw = () => {
-    const s = agg.series.find((x) => x.key === selected);
-    percentileChart(barsNode, agg.series, selected, (key) => { selected = key; draw(); });
-    lineTitle.textContent = `${s.label} · ${s.companies} companies · weekly`;
+    const shown = agg.series.map(view);
+    const s = shown.find((x) => x.key === selected);
+    percentileChart(barsNode, shown, selected, (key) => { selected = key; draw(); });
+    lineTitle.textContent = `${s.label} · ${s.companies} companies · weekly · ${basis.toLowerCase()} earnings`;
     if (s.stats) {
       const cap = s.stats.max > s.stats.p90 * AGGREGATE_AXIS_CAP ? s.stats.p90 * AGGREGATE_AXIS_CAP : null;
-      historyChart(lineNode, { dates: agg.dates, pe: s.pe, stats: s.stats }, { cap });
+      historyChart(lineNode, { dates: agg.dates, pe: s.pe, stats: s.stats, name: basis.toLowerCase() }, { cap, compare: other(agg.series.find((x) => x.key === selected)) });
     }
     const st = s.stats || {};
     stats.replaceChildren(
-      stat('P/E (TTM)', present(st.current) ? `${num(st.current, 1)}x` : DASH, s.label),
+      stat(`P/E (TTM, ${basis.toLowerCase()})`, present(st.current) ? `${num(st.current, 1)}x` : DASH, s.label),
       stat('OWN 10Y PERCENTILE', present(st.percentile) ? `${num(st.percentile, 0)}th` : DASH, `range ${num(st.min, 1)}x – ${num(st.max, 1)}x`,
         st.percentile >= 80 ? 'down' : st.percentile <= 20 ? 'up' : ''),
       stat('VS 10Y MEDIAN', present(st.vs_median) ? `${st.vs_median > 0 ? '+' : ''}${num(st.vs_median, 0)}%` : DASH, `median ${num(st.median, 1)}x · IQR ${num(st.p25, 1)}–${num(st.p75, 1)}x`),
       stat('COVERAGE', present(s.coverage) ? `${num(s.coverage * 100, 0)}%` : DASH, 'of its market cap with filed EPS'),
     );
   };
+  const basisSwitch = bases.length > 1 ? periodSwitch(bases, basis, (b) => { basis = b; draw(); }) : null;
   const section = el('div', { class: 'grid two val-agg' }, [
-    card('P/E VS OWN 10 YEARS · INDICES & SECTORS', el('span', { class: 'dim', text: 'percentile · red ≥ 80th · green ≤ 20th · click to chart' }), [barsNode]),
+    card('P/E VS OWN 10 YEARS · INDICES & SECTORS', el('span', { class: 'tag-row' }, [
+      el('span', { class: 'dim', text: 'percentile · red ≥ 80th · green ≤ 20th · click to chart' }), basisSwitch]), [barsNode]),
     card('P/E · 10 YEARS', lineTitle, [stats, lineNode]),
   ]);
   requestAnimationFrame(draw);
@@ -296,18 +322,35 @@ function aggregateSection(data) {
 }
 
 function epsChart(node, history) {
+  // Older artifacts carry one `eps` per quarter; newer ones both bases.
+  const reported = history.eps.map((e) => e.reported ?? e.eps);
+  const operating = history.eps.map((e) => e.operating ?? null);
+  const both = operating.some((v) => v !== null);
   render(node, (option, p) => ({
     ...option,
-    grid: { ...option.grid, top: 10, bottom: 24 },
+    grid: { ...option.grid, top: both ? 22 : 10, bottom: 24 },
+    legend: both ? { top: 0, textStyle: { color: p.dim, fontSize: 9 }, itemWidth: 10, itemHeight: 2 } : undefined,
+    tooltip: { ...option.tooltip, trigger: 'axis', valueFormatter: (v) => (v === null || v === undefined ? DASH : `$${num(v, 2)}`) },
     xAxis: { ...option.xAxis, data: history.eps.map((e) => e.filed) },
-    series: [{ name: 'TTM EPS', type: 'line', step: 'end', data: history.eps.map((e) => e.eps),
-      showSymbol: false, lineStyle: { width: 1.2, color: p.blue } }],
+    series: [
+      { name: 'reported', type: 'line', step: 'end', data: reported, showSymbol: false,
+        lineStyle: { width: 1.2, color: both ? p.faint : p.blue }, itemStyle: { color: both ? p.faint : p.blue } },
+      ...(both ? [{ name: 'operating', type: 'line', step: 'end', data: operating, showSymbol: false,
+        lineStyle: { width: 1.4, color: p.blue }, itemStyle: { color: p.blue } }] : []),
+    ],
   }));
 }
 
-function historyTable(history) {
-  const s = history.stats;
+function historyTable(history, view) {
+  const s = view.stats;
+  const latest = history.eps?.[history.eps.length - 1];
+  const removed = view.basis !== 'reported' && latest && latest.removed !== null && latest.removed !== undefined
+    ? [['Taken out of latest TTM EPS', `$${num(latest.removed, 2)} of $${num(latest.reported, 2)}`
+      + (latest.tax_rate !== null && latest.tax_rate !== undefined ? ` · tax ${num(latest.tax_rate * 100, 0)}%` : '')]]
+    : [];
   const rows = [
+    ['Earnings basis', (BASIS_NAMES[view.basis] || 'REPORTED').toLowerCase()],
+    ...removed,
     ['Current P/E', s.current === null ? 'n/m (loss)' : `${num(s.current, 1)}x`],
     ['Percentile in own 10 years', s.percentile === null ? DASH : `${num(s.percentile, 0)}th`],
     ['vs 10-year median', s.vs_median === null ? DASH : `${s.vs_median > 0 ? '+' : ''}${num(s.vs_median, 0)}%`],
@@ -377,27 +420,53 @@ function mainTable(rows, metrics, data, sort, onSort, onPick) {
 // status; throws when the company has no P/E history in this build.
 export async function renderPeHistory(host, symbol, data) {
   const history = await loadHistory(symbol);
+  // The leading basis (operating unless the company has no operating
+  // history) and the other one; an older artifact has only the first.
+  const views = [
+    { basis: history.basis || 'reported', label: history.label, pe: history.pe, stats: history.stats },
+    ...(history.alternate ? [history.alternate] : []),
+  ];
+  let active = views[0];
   const historyNode = el('div', { class: 'chart tall' });
   const epsNode = el('div', { class: 'chart short' });
-  const historyStats = historyTable(history);
+  const tableHost = el('div', {});
+  const draw = () => {
+    const s = active.stats;
+    const other = views.find((v) => v !== active);
+    tableHost.replaceChildren(historyTable(history, active));
+    historyChart(historyNode, { dates: history.dates, pe: active.pe, stats: s, name: BASIS_NAMES[active.basis].toLowerCase() }, {
+      cap: s && s.max > s.p90 * AGGREGATE_AXIS_CAP ? s.p90 * AGGREGATE_AXIS_CAP : null,
+      compare: other ? { name: BASIS_NAMES[other.basis].toLowerCase(), pe: other.pe } : null,
+    });
+  };
+  const basisSwitch = views.length > 1
+    ? periodSwitch(views.map((v) => BASIS_NAMES[v.basis]), BASIS_NAMES[active.basis], (name) => {
+      active = views.find((v) => BASIS_NAMES[v.basis] === name); draw();
+    })
+    : null;
   host.replaceChildren(
     el('div', { class: 'grid two' }, [
-      el('div', {}, [historyNode]),
-      el('div', {}, [historyStats, el('div', { class: 'card-title', text: 'TTM DILUTED EPS, TODAY\'S SHARE BASIS, BY FILING DATE' }), epsNode]),
+      el('div', {}, [basisSwitch ? el('div', { class: 'tag-row' }, [el('span', { class: 'dim', text: 'EARNINGS' }), basisSwitch]) : null, historyNode]),
+      el('div', {}, [tableHost, el('div', { class: 'card-title', text: 'TTM EPS, TODAY\'S SHARE BASIS, BY FILING DATE' }), epsNode]),
     ]),
     el('details', { class: 'method-fold' }, [el('summary', { text: 'ⓘ METHOD & DATA' }), el('div', { class: 'method-copy', text:
-      `Each session's P/E is the split-adjusted close (not dividend-adjusted) over the TTM diluted EPS `
+      `Each session's P/E is the split-adjusted close (not dividend-adjusted) over the TTM EPS `
       + `public by then: every quarter is built only from filings made by the day it was first reported, `
       + `so the history never uses a number before it was published. A loss leaves a gap; an EPS with no `
       + `successor for two quarters expires rather than being carried forward. Band: 25th–75th percentile. `
-      + `The table's P/E (market cap / net income) and this one (price / EPS) disagree by more than `
+      + `OPERATING takes out what sits below the operating line: pre-tax income, capped at operating income less `
+      + `interest paid, taxed at the median of the company's own trailing tax rates over three years, less `
+      + `minority holders' share, over diluted shares. Only a net gain is taken out -- stakes marked up `
+      + `(Alphabet, Amazon), divestitures, discontinued operations -- because some filers' operating line leaves `
+      + `costs out; interest paid always stays. EX GAINS (financials, utilities, and companies that report no `
+      + `operating line) is reported EPS less gains on equity securities after tax. REPORTED is plain diluted EPS. `
+      + `The table's P/E (market cap / net income) and the reported history (price / EPS) disagree by more than `
       + `${Math.round(data.pe_history.agreement_tolerance * 100)}% for ${data.pe_history.disagree.length} companies`
       + (data.pe_history.disagree.length ? ` (${data.pe_history.disagree.join(', ')}) — usually a merger or spin-off `
         + 'moving the share count, preferred dividends, or a large minority interest' : '')
       + `. The axis stops at ${AGGREGATE_AXIS_CAP}x the 90th percentile when a spike (earnings near zero) would flatten the rest; the table keeps the true range.` })]),
   );
-  const s = history.stats;
-  historyChart(historyNode, history, { cap: s && s.max > s.p90 * AGGREGATE_AXIS_CAP ? s.p90 * AGGREGATE_AXIS_CAP : null });
+  draw();
   epsChart(epsNode, history);
   const row = data.rows.find((r) => r.ticker === symbol);
   return `${row?.name || symbol} · weekly, ${history.dates[0]} → ${history.dates[history.dates.length - 1]}`;
@@ -491,7 +560,7 @@ export default async function renderValuation(root, data, _manifest, ctx = {}) {
     }
   }
   historyInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') loadPeHistory(); });
-  const historyCard = card('P/E AGAINST ITS OWN 10 YEARS — PRICE ÷ TTM EPS AS FILED AT THE TIME', null, [
+  const historyCard = card('P/E AGAINST ITS OWN 10 YEARS — PRICE ÷ TTM EPS AS FILED AT THE TIME · OPERATING OR REPORTED', null, [
     el('div', { class: 'field-row' }, [
       el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), historyInput]),
       el('button', { class: 'action', text: 'LOAD', onclick: loadPeHistory }),

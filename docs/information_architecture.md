@@ -477,8 +477,10 @@ The phased build put too much in front of the reader. After looking at it:
   standalone FINANCIALS view is gone; its hash opens the ticker page.
 - **Ticker page order** is price and trend first (default windows, a
   period switch; the inputs and the forward-return table stay on TOOLS →
-  TECHNICALS), then P/E against its own ten years (axis capped at 1.6× the
-  90th percentile when a near-zero-earnings spike would flatten it), then
+  TECHNICALS), then P/E against its own ten years (operating earnings by
+  default with an OPERATING / REPORTED switch, the other basis dashed
+  behind; axis capped at 1.6× the 90th percentile when a near-zero-earnings
+  spike would flatten it), then
   the sector comparison beside the evidence, then filings. Method notes sit
   in the ⓘ fold; the research note card appears only when there is a note.
 - **Event card and timeline** (EVENTS panel, `artifacts/events/{T}.json`).

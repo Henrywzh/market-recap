@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+import math
 from statistics import pstdev
 
 import numpy as np
@@ -303,6 +304,130 @@ def eps_steps(history: Sequence[dict], splits: pd.Series | None) -> list[tuple[s
         eps = sum(sign * value / split_factor_after(splits, filed) for value, filed, sign in quarter["parts"])
         steps.append((quarter["filed"], quarter["period_end"], eps))
     return steps
+
+
+# --- Operating EPS ---------------------------------------------------------------
+# Reported EPS counts whatever sits below the operating line. Alphabet's
+# 2026 Q2 carried $99bn of gains on its equity stakes against $41bn of
+# operating income, and Amazon's $53bn: marked up, both looked their cheapest
+# in ten years. An operating P/E takes those gains out:
+#
+#   pre-tax income, but no more than operating income less interest paid,
+#   taxed at the company's own rate
+#
+# Only a net gain below the operating line is removed. A net loss stays: a
+# filer's "operating income" does not always carry all of its costs (Disney
+# tags its segment total, before corporate costs and amortisation), and
+# removing losses would make such a company look cheaper than its own
+# statements say. Interest paid stays in either way. Discontinued operations
+# go with the rest, since they are below pre-tax income from continuing ones.
+# The tax rate is the median of the company's trailing-twelve-month rates at
+# its last TAX_RATE_QUARTERS quarter ends, each as then filed, so one quarter's
+# tax charge (Meta's $16bn in 2025 Q3) does not move it.
+TAX_RATE_QUARTERS = 12
+TAX_RATE_BOUNDS = (0.0, 0.35)
+# A company with no positive pre-tax year in the window: the federal rate.
+DEFAULT_TAX_RATE = 0.21
+# A filed diluted count this far from the one the filing's own net income and
+# EPS imply is a units error (Waters tagged 98.2 billion shares for 98.2
+# million); the implied count is used instead.
+SHARE_UNITS_FACTOR = 20
+# The bases a P/E history can be on. OPERATING as above. EX_GAINS: the
+# reported EPS less gains (or losses) on equity securities after tax -- for
+# financials and utilities, whose ordinary earnings are partly below the
+# operating line (interest is a bank's business; AFUDC a utility's), and for
+# companies that tag no operating line (Merck, J&J, Deere).
+OPERATING, EX_GAINS, REPORTED = "operating", "ex_gains", "reported"
+BASIS_LABELS = {
+    OPERATING: "pre-tax income capped at operating income less interest, taxed at the company's own rate",
+    EX_GAINS: "reported EPS less gains on equity securities, after tax",
+    REPORTED: "reported diluted EPS",
+}
+BELOW_THE_LINE_SECTORS = frozenset({FINANCIALS_SECTOR, "Utilities"})
+
+
+def tax_rates(history: Sequence[dict]) -> list[float]:
+    """Each quarter's normalised tax rate, from what was filed by then."""
+    ratios: list[float] = []
+    out = []
+    low, high = TAX_RATE_BOUNDS
+    for quarter in history:
+        core = quarter.get("core") or {}
+        tax, pretax = core.get("taxes"), core.get("pretax_income")
+        ratios.append(tax / pretax if tax is not None and pretax is not None and pretax > 0 else math.nan)
+        window = [r for r in ratios[-TAX_RATE_QUARTERS:] if not math.isnan(r)]
+        rate = float(np.median(window)) if window else DEFAULT_TAX_RATE
+        out.append(min(max(rate, low), high))
+    return out
+
+
+def _shares(core: dict, eps: float, splits: pd.Series | None, filed: str) -> float | None:
+    """The quarter's diluted count on today's share basis, checked against the
+    count its own net income and EPS imply."""
+    implied = core["net_income"] / eps if core.get("net_income") and eps else None
+    shares = core.get("shares")
+    if shares:
+        shares *= split_factor_after(splits, core.get("shares_filed") or filed)
+        if implied and implied > 0 and not 1 / SHARE_UNITS_FACTOR <= shares / implied <= SHARE_UNITS_FACTOR:
+            shares = implied
+    else:
+        shares = implied
+    return shares if shares and shares > 0 else None
+
+
+def minority_share(core: dict) -> float:
+    """What of a year's net income belongs to minority holders (Freeport's
+    Indonesian partners, TKO's Endeavor units): the per-share figure is the
+    parent's."""
+    if core.get("minority_share") is not None:
+        return core["minority_share"]
+    if core.get("profit_loss") is not None and core.get("parent_income") is not None:
+        return core["profit_loss"] - core["parent_income"]
+    return 0.0
+
+
+def operating_basis(history: Sequence[dict], sector: str | None) -> str:
+    """OPERATING when the latest quarter has an operating line to build from;
+    one basis for the whole history, so a company's decade is one measure."""
+    latest = (history[-1].get("core") or {}) if history else {}
+    return EX_GAINS if sector in BELOW_THE_LINE_SECTORS or latest.get("ebit") is None else OPERATING
+
+
+def operating_steps(history: Sequence[dict], splits: pd.Series | None, basis: str) -> list[dict]:
+    """Operating TTM EPS on today's share basis per quarter, with what went
+    into it: {filed, period_end, eps, reported, removed, tax_rate}.
+
+    A quarter whose inputs were not filed is left out; the figure before it
+    stands, as for a reported EPS, until it expires.
+    """
+    reported = {filed: eps for filed, _, eps in eps_steps(history, splits)}
+    out = []
+    for quarter, rate in zip(history, tax_rates(history)):
+        core = quarter.get("core") or {}
+        filed, eps = quarter["filed"], reported.get(quarter["filed"])
+        if eps is None:
+            continue
+        shares = _shares(core, eps, splits, filed)
+        if shares is None:
+            continue
+        if basis == OPERATING:
+            if core.get("ebit") is None:
+                continue
+            # Some filers sign interest expense negative (Disney); some tag
+            # none (Charter), where the pre-tax cap keeps it in.
+            pretax = core["ebit"] - abs(core.get("interest_expense") or 0.0)
+            if core.get("pretax_income") is not None:
+                pretax = min(pretax, core["pretax_income"])
+            value = (pretax * (1 - rate) - minority_share(core)) / shares
+        else:
+            value = eps - (core.get("equity_gains") or 0.0) * (1 - rate) / shares
+        out.append({"filed": filed, "period_end": quarter["period_end"], "eps": value,
+                    "reported": eps, "removed": eps - value, "tax_rate": rate})
+    return out
+
+
+def as_steps(steps: Sequence[dict]) -> list[tuple[str, str, float]]:
+    return [(s["filed"], s["period_end"], s["eps"]) for s in steps]
 
 
 def eps_in_force(sessions: pd.DatetimeIndex, steps: Sequence[tuple[str, str, float]]) -> pd.Series:

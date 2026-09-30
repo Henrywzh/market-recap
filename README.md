@@ -84,7 +84,7 @@ The panels, as each is built:
 | **TECHNICALS** | Any A/B relative-strength ratio with its moving averages and MACD over a chosen period; single-ticker price with **your own MA periods, slope window and period**, a ±1.5σ band, z-score regime, SMA slope, and forward return by z-score band. Every indicator is computed in the browser from the baked close history, by one module tested against pandas |
 | **ETF X-RAY** | Every fund on the ETF heat map looked through to its holdings, from the **issuer's own file** (State Street, iShares and Invesco daily, Vanguard monthly): concentration (top-10 weight, effective N), sector and country weights against SPY, the top 25 holdings with each one's contribution to the day, overlap with every other fund, and a **valuation look-through** (P/E, P/B, ROE, FCF and dividend yield, growth, margin) aggregated like an index and joined to the VALUATION rows, with the share of the fund it covers. Bond funds show duration, yield to maturity, coupon and maturity buckets. Funds with no usable holdings file (the commodity funds) are listed with the reason, never proxied |
 | **CROSS-LISTING** | A US line against its home-market line at the depositary ratio, with the diagnostics that say whether the series measures a dislocation or a session gap |
-| **VALUATION → VALUATION & QUALITY** | Every S&P 500 / Nasdaq-100 member on one sortable table: P/E, EV/EBITDA, EV/Sales, P/B, FCF / dividend / shareholder yield, ROE, ROIC, gross profitability, margins, growth, accruals, leverage, interest cover, Piotroski F-score and margin stability — trailing twelve months from each company's own 10-Qs, market cap from the close. Valuation × quality scatter, sector medians, and colour by rank within sector. **P/E against each company's own ten years**: price ÷ TTM EPS as it was filed at the time, with its median, percentile band and where today sits |
+| **VALUATION → VALUATION & QUALITY** | Every S&P 500 / Nasdaq-100 member on one sortable table: P/E, EV/EBITDA, EV/Sales, P/B, FCF / dividend / shareholder yield, ROE, ROIC, gross profitability, margins, growth, accruals, leverage, interest cover, Piotroski F-score and margin stability — trailing twelve months from each company's own 10-Qs, market cap from the close. Valuation × quality scatter, sector medians, and colour by rank within sector. **P/E against each company's own ten years**: price ÷ TTM EPS as it was filed at the time, on operating earnings (stake gains, divestitures and one-off tax items taken out) or as reported, with its median, percentile band and where today sits |
 | **FINANCIALS** | Ten fiscal years of income statement, balance sheet and cash flow for every S&P 500 and Nasdaq-100 member, with key ratios, each column's period end and last filing date, restatements applied and pre-split years put on today's share basis |
 | **VALUATION → DCF** | SEC-filled 5-year history, your 5-year forecast, WACC, terminal value, equity bridge and a WACC × exit-multiple sensitivity grid |
 
@@ -487,6 +487,27 @@ the nightly build's close.
   independently and compared; the ~2% that disagree by more than 25% are
   listed on the tab — mergers and spin-offs that move the share count,
   preferred dividends, large minority interests.
+- The P/E history, its percentile and the index and sector P/E lead with
+  **operating** earnings; REPORTED is one click away. Reported EPS counts
+  whatever sits below the operating line: Alphabet's 2026 Q2 carried $99bn of
+  gains on its equity stakes (Anthropic, SpaceX) against $41bn of operating
+  income, and on reported EPS it sat at the bottom of its own ten years.
+  Operating TTM EPS is pre-tax income capped at operating income less
+  interest paid, taxed at the median of the company's own trailing tax rates
+  over twelve quarters (bounded 0–35%), less minority holders' share, over
+  diluted shares — every input as filed by the day the quarter was reported.
+  Only a net gain below the line is removed: some filers' operating line
+  leaves costs out (Disney tags its segment total), so a net loss stays.
+  Financials and utilities, whose ordinary earnings are partly below the line,
+  and companies that tag no operating line (Merck, J&J, Deere), are on
+  reported EPS less gains on equity securities after tax. A company with too
+  little operating history to rank stays on reported. The table's own P/E
+  column stays reported; `P/E operating` sits beside it.
+- A 10-Q never replaces a 10-K's figure for a whole year: Comfort Systems'
+  2026 Q1 10-Q tagged its Q1 2025 operating income as all of 2025, and as the
+  later filing it had won. A diluted share count 20x away from the one the
+  filing's own net income and EPS imply is a units error (Waters) and the
+  implied count is used.
 - TTM is last fiscal year + year to date − the same span a year earlier. A
   line the latest 10-Q did not tag (Alphabet's Q2 2026 dividends) is taken
   from the quarter before, at most one quarter stale, and starred on the row.
