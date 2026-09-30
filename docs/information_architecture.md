@@ -496,6 +496,13 @@ The phased build put too much in front of the reader. After looking at it:
   high-importance macro dates). CALENDAR leads with the compact cards for
   the next seven days' reports from names at or above 0.25% of the S&P 500
   or 0.5% of the Nasdaq-100, or on the watchlist.
+- **THEMES** (CATALYSTS → THEMES, `#themes/<key>`): a tile per group with
+  its run-in against the S&P 500, then for the chosen group a six-week
+  calendar (bellwether reports, projected ones marked; macro releases;
+  its data's due dates, late ones in red), the proxy against the S&P 500
+  over a year, the bellwether table (proxy beta and same-way share on
+  their past reports) and, for CLOUD and SEMIS, the industry data cards.
+  Groups live in `[[themes.groups]]` in the config.
 - **Links to the ticker page** (`routes.tickerHref`) from MONITOR, SCREEN,
   HEAT MAPS tiles, SECTORS' contributor bars, EARNINGS movers and the
   CALENDAR's earnings rows. ETF X-RAY holdings are not linked yet.

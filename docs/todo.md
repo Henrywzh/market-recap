@@ -157,7 +157,12 @@ Done (2026-09-30): the event card, read-through and index impact, and the
 per-name timeline (see `docs/information_architecture.md`, Ticker page).
 Open:
 
-- **Theme calendars.** Groups defined in config by what moves together,
+- **Theme calendars: built 2026-09-30** (CATALYSTS → THEMES, six groups;
+  CLOUD and SEMIS carry industry data). Still open from the plan below:
+  Samsung/SK hynix report dates (no 8-K, no Nasdaq row), DRAM contract
+  prices (no free source), Korea's 1st-of-month flash, the 10-day export
+  prints (needs a data.go.kr key), and industry data for the other four.
+- **Theme calendars (original plan).** Groups defined in config by what moves together,
   not by GICS sector (memory/semis, hyperscaler capex, banks, energy,
   consumer, health care, industrials/transport, housing). Each group: its
   bellwether reports (including foreign ones that file no 8-K, e.g.

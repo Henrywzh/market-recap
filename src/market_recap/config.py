@@ -104,6 +104,9 @@ FRESHNESS = {
     # FINRA short interest: two rounds a month, each published about seven
     # business days after its settlement date. One missed round is late.
     "biweekly_release": {"stale_after_calendar_days": 30},
+    # A quarter-end figure (capex from 10-Qs): due about 45 days after the
+    # quarter closes, so it is not stale until the next one is overdue.
+    "quarterly_filing": {"stale_after_calendar_days": 140},
 }
 DEFAULT_FRESHNESS_POLICY = "daily_close"
 

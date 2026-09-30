@@ -88,6 +88,9 @@ jobs:
           # Restore the last published ledgers (MONITOR observations, the earnings
           # season's captured year-ago EPS), never an evictable cache.
           MONITOR_PUBLISHED_STATE: "1"
+          # THEMES reads alternative-data's files and asks GitHub which commit
+          # last touched each; the anonymous API limit is 60 an hour per IP.
+          GITHUB_TOKEN: ${{ github.token }}
         # --strict: nobody reads an unattended run's output, so a warning is a
         # failure. A red run emails the repo owner; a stale page does not.
         run: make refresh REFRESH_FLAGS=--strict

@@ -205,6 +205,67 @@ readthrough_show = 5
 # High-importance macro dates carried onto every timeline.
 timeline_days_ahead = 45
 
+[themes]
+# CATALYSTS -> THEMES. Groups of names that move together, not GICS sectors.
+# Each group: a proxy (an ETF, or an equal-weight basket of members when no
+# ETF isolates the theme), bellwethers whose past reports are scored against
+# that proxy, and the macro releases (regex on CATALYSTS titles) that bear on
+# it. The industry data for the first two groups is built in the panel.
+calendar_days = 42
+etfs = ["SMH", "KRE", "XRT", "ITB"]
+# Monthly revenue from MOPS (Taiwan): AI server makers for CLOUD, TSMC and
+# Nanya for SEMIS. Code -> label.
+tw_cloud = { "2382" = "Quanta", "6669" = "Wiwynn", "3231" = "Wistron" }
+tw_semis = { "2330" = "TSMC", "2408" = "Nanya" }
+tw_months = 37
+# OpenRouter model authors shown (alternative-data's daily provider economics).
+openrouter_providers = ["anthropic", "openai", "google", "x-ai", "deepseek", "qwen", "moonshotai", "z-ai"]
+openrouter_months = 7
+capex_filers = ["MSFT", "GOOGL", "AMZN", "META", "ORCL"]
+capex_quarters = 12
+
+[[themes.groups]]
+key = "cloud"
+label = "CLOUD & AI CAPEX"
+basket = ["MSFT", "GOOGL", "AMZN", "META", "ORCL"]
+bellwethers = ["MSFT", "GOOGL", "AMZN", "META", "ORCL", "NVDA", "AVGO", "AMD"]
+macro = []
+
+[[themes.groups]]
+key = "semis"
+label = "SEMICONDUCTORS & MEMORY"
+etf = "SMH"
+bellwethers = ["NVDA", "MU", "AVGO", "AMD", "LRCX", "AMAT", "KLAC", "SNDK", "INTC", "TXN", "TSM", "ASML"]
+macro = ["ISM Manufacturing", "Industrial production"]
+
+[[themes.groups]]
+key = "energy"
+label = "ENERGY"
+etf = "XLE"
+bellwethers = ["XOM", "CVX", "COP", "EOG", "SLB", "OXY", "PSX", "MPC"]
+macro = ["petroleum", "CPI", "PPI"]
+
+[[themes.groups]]
+key = "banks"
+label = "BANKS"
+etf = "KRE"
+bellwethers = ["JPM", "BAC", "WFC", "C", "GS", "MS", "USB", "PNC"]
+macro = ["FOMC", "Beige Book", "CPI", "Employment report"]
+
+[[themes.groups]]
+key = "consumer"
+label = "CONSUMER"
+etf = "XRT"
+bellwethers = ["WMT", "COST", "AMZN", "HD", "TGT", "NKE", "MCD", "SBUX", "LULU"]
+macro = ["Retail sales", "PCE", "Employment report", "CPI"]
+
+[[themes.groups]]
+key = "housing"
+label = "HOUSING"
+etf = "ITB"
+bellwethers = ["DHI", "LEN", "PHM", "NVR", "HD", "LOW", "TOL"]
+macro = ["Housing starts", "New home sales", "Construction spending", "FOMC"]
+
 [positioning]
 # POSITIONING (RISK -> POSITIONING). Short interest covers the index members,
 # the watchlist and these ETFs; ``rounds`` is how many FINRA rounds (two a
