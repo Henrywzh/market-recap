@@ -11,7 +11,7 @@ import { render } from '../charts.js';
 import { renderPeHistory } from './valuation.js';
 import { renderStatements } from './financials.js';
 import { renderSingleTicker } from './technicals.js';
-import { eventCard, outcomeCard, timelineCard, loadEvents } from '../event-card.js';
+import { eventCard, outcomeCard, timelineCard, loadEvents, historyCard, revisionsCard, sinceCard, filingsCard } from '../event-card.js';
 
 const BILLION = 1e9;
 // The multiples shown in the header block, in this order. The full set is on
@@ -332,6 +332,12 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   if (outcome) root.append(outcome);
   const upcoming = eventPayload ? eventCard(eventPayload, asOf) : null;
   if (upcoming) root.append(upcoming);
+  // What the report is measured against: its own record, where estimates
+  // are moving, and what the industry data did since it last reported.
+  const history = eventPayload ? historyCard(eventPayload) : null;
+  if (history) root.append(history);
+  const expectations = eventPayload ? [revisionsCard(eventPayload), sinceCard(eventPayload)].filter(Boolean) : [];
+  if (expectations.length) root.append(expectations.length > 1 ? el('div', { class: 'grid two' }, expectations) : expectations[0]);
   // Company sections need filings. A fund, an index or a name no index holds
   // gets its price readings and one line saying why the rest is absent.
   // Order: the price first, then what it is worth against its own history,
@@ -353,6 +359,8 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   }
   const timeline = eventPayload ? timelineCard(eventPayload, prices, events?.macro, asOf) : null;
   if (timeline) root.append(timeline);
+  const filings = eventPayload ? filingsCard(eventPayload) : null;
+  if (filings) root.append(filings);
   if (row) {
     await section(root, 'P/E AGAINST ITS OWN 10 YEARS', (host) => {
       if (!row.pe_history) throw new Error(`${symbol} has no P/E history in this build (a loss, too little history, or no EPS filed)`);

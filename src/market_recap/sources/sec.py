@@ -900,6 +900,9 @@ class Filer:
     rows: tuple
     trailing: dict | None
     eps_history: tuple = ()
+    # {end, value, filed} per fiscal quarter: the scale a release's revenue
+    # guidance is checked against.
+    quarterly_revenue: tuple = ()
 
 
 @lru_cache(maxsize=None)
@@ -919,7 +922,18 @@ def filer(cik: int, use_cache: bool = True) -> Filer:
         rows=tuple(rows),
         trailing=trailing_snapshot(facts) if rows else None,
         eps_history=tuple(eps_history(facts)) if rows else (),
+        quarterly_revenue=tuple(_quarterly_revenue(facts)) if rows else (),
     )
+
+
+def _quarterly_revenue(facts: dict) -> list[dict]:
+    """Revenue per fiscal quarter, from the revenue tag reported most recently
+    (filers move between tags; the one still in use is the one that counts)."""
+    from ..compute.capex import quarterly
+
+    series = [quarterly(facts, tag) for tag in ITEMS_BY_KEY["revenue"].tags]
+    best = max((found for found in series if found), key=lambda found: found[-1]["end"], default=[])
+    return [{"end": q["end"], "value": q["value"], "filed": q["filed"]} for q in best]
 
 
 def unextracted_reason(taxonomies) -> str:

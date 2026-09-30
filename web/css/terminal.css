@@ -888,6 +888,9 @@ tr.picked td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 .event-lead { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 10px; }
 @media (max-width: 1100px) { .event-lead { grid-template-columns: minmax(0, 1fr); } }
 .chart.event-timeline { height: 280px; }
+.event-stats + .event-stats { margin-top: 6px; }
+.stat-value.warn { color: var(--accent); }
+.event-history-line { font-size: 12px; line-height: 1.5; margin: 2px 0 8px; }
 .section-sub { font-size: 10.5px; letter-spacing: 0.1em; color: var(--text-dim); margin: 12px 0 6px; }
 
 /* THEMES */

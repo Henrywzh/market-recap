@@ -41,9 +41,10 @@ PANELS = {
     "evidence": evidence.build,
     # Reads this session's catalysts and evidence (report dates), so after them.
     "positioning": positioning.build,
-    # Event cards and timelines: this session's report dates and reactions.
-    "events": events.build,
+    # Themes first: the event cards read its industry series ("since the
+    # last report"). Both read this session's report dates and reactions.
     "themes": themes.build,
+    "events": events.build,
     "anchor": anchor.build,
     "monitor": monitor.build,
     # OVERVIEW reads this session's other panels and so runs last.

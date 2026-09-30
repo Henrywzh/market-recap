@@ -397,6 +397,82 @@ def _pcpp() -> dict:
     return out
 
 
+# --- Drivers: the industry series in one shape, for the event cards ---------------
+# Each series lists its points with the date it became public ("available"),
+# so a card can say what has been released since the company last reported.
+# A month's figure is dated by when its publisher releases it -- the 10th of
+# the next month for Taiwan's monthly revenue, about the 15th for Korea's
+# customs data -- or by when this build first saw it, if earlier.
+
+def _after_month(month: str, day: int) -> str:
+    year, m = (int(p) for p in month.split("-"))
+    year, m = (year, m + 1) if m < 12 else (year + 1, 1)
+    return date(year, m, min(day, 28)).isoformat()
+
+
+def _driver(key: str, label: str, themes: list[str], kind: str, unit: str, points: list[dict]) -> dict | None:
+    points = sorted((p for p in points if p.get("value") is not None and p.get("available")), key=lambda p: p["available"])
+    return {"key": key, "label": label, "themes": themes, "kind": kind, "unit": unit, "points": points} if points else None
+
+
+def _monthly(rows: list[dict], value: str, day: int, released: str | None = None) -> list[dict]:
+    out = []
+    for r in rows or []:
+        available = r.get(released) if released else None
+        available = available or min(filter(None, [r.get("first_seen"), _after_month(r["month"], day)]))
+        out.append({"period": r["month"], "available": available, "value": r.get(value)})
+    return out
+
+
+def _drivers(cloud: dict, semis: dict) -> list[dict]:
+    """kind 'yoy': the value is a year-on-year change, compared as is; 'level':
+    a level, compared as a % change since the report."""
+    out = []
+    # A failed section is {"unavailable": ...}, not a list.
+    listed = lambda x: x if isinstance(x, list) else []  # noqa: E731
+    for tw in listed(semis.get("tw")):
+        out.append(_driver(f"tw_{tw['code']}", f"{tw['label']} monthly revenue, y/y", ["semis"], "yoy", "pct",
+                           _monthly(tw.get("months"), "yoy_pct", 10)))
+    for tw in listed(cloud.get("odm")):
+        out.append(_driver(f"tw_{tw['code']}", f"{tw['label']} monthly revenue, y/y", ["cloud"], "yoy", "pct",
+                           _monthly(tw.get("months"), "yoy_pct", 10)))
+    out.append(_driver("korea_chips", "Korea chip exports (customs), y/y", ["semis"], "yoy", "pct",
+                       _monthly((semis.get("korea") or {}).get("months"), "yoy_pct", 15)))
+    out.append(_driver("korea_flash", "Korea chip exports (1st-of-month release), y/y", ["semis"], "yoy", "pct",
+                       _monthly((semis.get("korea_flash") or {}).get("months"), "semis_yoy_pct", 1, released="released")))
+    for family, agg in ((semis.get("pcpp") or {}).get("memory") or {}).get("families", {}).items():
+        index = agg.get("index") or {}
+        out.append(_driver(f"pcpp_{family.lower()}", f"{family} retail price index (PCPartPicker UK)", ["semis"], "level", "index",
+                           [{"period": d, "available": d, "value": v} for d, v in zip(index.get("dates", []), index.get("values", []))]))
+    capex = [t for t in (cloud.get("capex") or {}).get("totals") or [] if t.get("complete")]
+    out.append(_driver("hyperscaler_capex", "Five hyperscalers' capex, y/y", ["cloud", "semis"], "yoy", "pct",
+                       [{"period": t["quarter"], "available": t.get("available") or _quarter_public(t["quarter"]), "value": t.get("yoy_pct")}
+                        for t in capex]))
+    out.append(_driver("nvda_dc", "NVIDIA data-center revenue, y/y", ["cloud", "semis"], "yoy", "pct",
+                       [{"period": q.get("filed"), "available": q.get("filed"), "value": q.get("dc_yoy_pct")}
+                        for q in (cloud.get("nvda") or {}).get("quarters") or []]))
+    router = cloud.get("openrouter") or {}
+    if router.get("dates"):
+        tokens = pd.Series(router["total_tokens_b"], index=pd.to_datetime(router["dates"])).rolling(7).sum().dropna()
+        weekly = tokens.iloc[::-7][::-1]
+        out.append(_driver("openrouter_tokens", "OpenRouter tokens, trailing 7 days", ["cloud"], "level", "bn",
+                           [{"period": d.strftime("%Y-%m-%d"), "available": (d + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+                             "value": round(float(v), 1)} for d, v in weekly.items()]))
+    ramp = cloud.get("ramp") or {}
+    out.append(_driver("ramp_median", "Ramp AI spend per employee, median", ["cloud"], "level", "usd",
+                       [{"period": m, "available": _after_month(m, 15), "value": v}
+                        for m, v in zip(ramp.get("months") or [], ramp.get("median_pepm") or [])]))
+    return [d for d in out if d]
+
+
+def _quarter_public(quarter: str) -> str:
+    """A calendar quarter's capex is public once the last of the five has
+    filed -- about six weeks after it ends."""
+    year, q = int(quarter[:4]), int(quarter[-1])
+    end = date(year, 3 * q, 28) + timedelta(days=4)
+    return (end.replace(day=1) + timedelta(days=45)).isoformat()
+
+
 # --- build -------------------------------------------------------------------------
 
 def build(ctx, *, inputs: dict | None = None) -> dict:
@@ -439,7 +515,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
             "heatmap": _heatmap(catalysts, as_of, int(settings.get("heatmap_days", 21))),
             "membership": _membership(ctx, settings, excess),
             "member_corr": float(settings.get("member_corr", 0.55)),
-            "cloud": cloud, "semis": semis}
+            "cloud": cloud, "semis": semis, "drivers": _section(lambda: _drivers(cloud, semis))}
 
 
 def _heatmap(catalysts: dict, as_of: date, days: int) -> dict:

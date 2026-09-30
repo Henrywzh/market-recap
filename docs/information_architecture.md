@@ -498,6 +498,20 @@ The phased build put too much in front of the reader. After looking at it:
   high-importance macro dates). CALENDAR leads with the compact cards for
   the next seven days' reports from names at or above 0.25% of the S&P 500
   or 0.5% of the Nasdaq-100, or on the watchlist.
+- **Behind the card** (every name, under it): LAST 8 REPORTS -- EPS
+  against the report-day Nasdaq consensus, the guide the release stated
+  (8-K EX-99; revenue, EPS, gross margin, checked against the company's
+  last quarter so a segment line or a misread is dropped, FY marked), how
+  the next quarter landed against that guide, the first session's move and
+  the 5- and 20-session drift after it, with one summary line. The card
+  places today's consensus against the last guide (STREET ABOVE GUIDE when
+  it sits above the range). ESTIMATE REVISIONS (7/30/60/90 days, this and
+  next quarter and year, spread) beside SINCE THE LAST REPORT: each series
+  of the name's THEMES as public on its last report day and now. OTHER
+  8-K FILINGS after the timeline. The implied move is the snapshot's
+  straddle only when it expires within a week of the reaction session.
+  Report-day calendars (120 new days) and releases (200 new, soonest
+  reporters first) are read under a per-build budget; both are kept.
 - **THEMES** (CATALYSTS → THEMES, `#themes/<key>`): a tile per group with
   its run-in against the S&P 500, then for the chosen group a six-week
   calendar (bellwether reports, projected ones marked; macro releases;
