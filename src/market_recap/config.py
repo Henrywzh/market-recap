@@ -29,6 +29,7 @@ FINANCIALS_ARTIFACT_DIR = ARTIFACT_DIR / "financials"
 VALUATION_ARTIFACT_DIR = ARTIFACT_DIR / "valuation"
 ETF_ARTIFACT_DIR = ARTIFACT_DIR / "etfs"
 XRAY_ARTIFACT_DIR = ARTIFACT_DIR / "xray"
+EVENTS_ARTIFACT_DIR = ARTIFACT_DIR / "events"
 
 # Identify this client honestly. Sending a Chrome User-Agent from a Python
 # process is actively counter-productive: FRED's edge accepts curl's own
@@ -161,5 +162,5 @@ def load_config() -> dict[str, Any]:
 
 def ensure_dirs() -> None:
     for path in (CACHE_DIR, ARTIFACT_DIR, TICKER_ARTIFACT_DIR, DCF_ARTIFACT_DIR, FINANCIALS_ARTIFACT_DIR, VALUATION_ARTIFACT_DIR, ETF_ARTIFACT_DIR,
-                 XRAY_ARTIFACT_DIR):
+                 XRAY_ARTIFACT_DIR, EVENTS_ARTIFACT_DIR):
         path.mkdir(parents=True, exist_ok=True)

@@ -875,3 +875,17 @@ tr.picked td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 .trade-ladder tr.trade-ladder-now td { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); font-weight: 700; }
 .trade-board .stat-value { font-size: 16px; }
 .trade-score .chart.short { height: 190px; }
+
+/* Earnings event cards (TICKER, CATALYSTS lead strip) and the timeline. */
+.accent-text { color: var(--accent); }
+.event-card.compact { padding-bottom: 8px; }
+.event-card.compact .card-head { flex-wrap: wrap; gap: 6px; }
+.event-card.compact a.card-title { color: var(--text); text-decoration: none; }
+.event-card.compact .stat-value { font-size: 16px; }
+.event-peers { margin-top: 8px; font-size: 11px; }
+.event-peers a.tag { text-decoration: none; }
+.event-open { margin-left: auto; font-size: 11px; }
+.event-lead { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 10px; }
+@media (max-width: 1100px) { .event-lead { grid-template-columns: minmax(0, 1fr); } }
+.chart.event-timeline { height: 280px; }
+.section-sub { font-size: 10.5px; letter-spacing: 0.1em; color: var(--text-dim); margin: 12px 0 6px; }

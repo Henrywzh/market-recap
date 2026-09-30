@@ -58,6 +58,7 @@ def parse_trend(payload: Any) -> dict[str, dict] | None:
         if period not in PERIODS:
             continue
         estimate = row.get("earningsEstimate") or {}
+        revenue = row.get("revenueEstimate") or {}
         eps = row.get("epsTrend") or {}
         revisions = row.get("epsRevisions") or {}
         out[period] = {
@@ -75,6 +76,11 @@ def parse_trend(payload: Any) -> dict[str, dict] | None:
             "down_30d": _raw(revisions.get("downLast30days")),
             "up_7d": _raw(revisions.get("upLast7days")),
             "down_7d": _raw(revisions.get("downLast7Days")),
+            "revenue": _raw(revenue.get("avg")),
+            "revenue_low": _raw(revenue.get("low")),
+            "revenue_high": _raw(revenue.get("high")),
+            "revenue_year_ago": _raw(revenue.get("yearAgoRevenue")),
+            "revenue_analysts": _raw(revenue.get("numberOfAnalysts")),
         }
     return out or None
 

@@ -186,6 +186,25 @@ IEF = "Fixed Income"
 SHY = "Fixed Income"
 TLT = "Fixed Income"
 
+[events]
+# Event cards (CATALYSTS lead strip, TICKER page) and per-name timelines.
+# Cards cover reports within card_horizon_days; the CATALYSTS page leads with
+# those in the next lead_days from names at or above either index weight (%)
+# or on the watchlist.
+card_horizon_days = 30
+lead_days = 7
+lead_min_spx_weight = 0.25
+lead_min_ndx_weight = 0.5
+# Read-through: the candidates are the names whose daily excess returns were
+# most correlated over the lookback; each is scored on the company's own
+# reaction sessions, and needs readthrough_min_reports of them.
+readthrough_lookback_sessions = 252
+readthrough_candidates = 12
+readthrough_min_reports = 4
+readthrough_show = 5
+# High-importance macro dates carried onto every timeline.
+timeline_days_ahead = 45
+
 [positioning]
 # POSITIONING (RISK -> POSITIONING). Short interest covers the index members,
 # the watchlist and these ETFs; ``rounds`` is how many FINRA rounds (two a

@@ -7,6 +7,7 @@
 // releases that matter; every event keeps its full detail one click down.
 
 import { el, card, table, num, pct, dirClass, sectionTitle, gap, metaRow, DASH } from '../fmt.js';
+import { eventCard, outcomeCard } from '../event-card.js';
 import { tickerHref } from '../routes.js';
 
 const NEW_YORK = 'America/New_York';
@@ -465,7 +466,24 @@ function methodNotes(data) {
   ];
 }
 
-export default async function renderCatalysts(root, data) {
+// Reports heavy enough to move an index (or on the watchlist): the next
+// week's cards, and the ones the last session traded on.
+function eventLead(events) {
+  if (!events || (!events.upcoming?.length && !events.reported?.length)) return null;
+  const t = events.thresholds || {};
+  const nodes = [];
+  if (events.reported?.length) {
+    nodes.push(el('div', { class: 'section-sub', text: `JUST REPORTED · TRADED ${events.as_of}` }));
+    nodes.push(el('div', { class: 'event-lead' }, events.reported.map((p) => outcomeCard(p, { compact: true }))));
+  }
+  if (events.upcoming?.length) {
+    nodes.push(el('div', { class: 'section-sub', text: `REPORTING IN THE NEXT ${events.lead_days} DAYS · SPX ≥ ${t.SPX}% OR NDX ≥ ${t.NDX}% OR WATCHLIST` }));
+    nodes.push(el('div', { class: 'event-lead' }, events.upcoming.map((p) => eventCard(p, events.as_of, { compact: true }))));
+  }
+  return el('div', {}, nodes);
+}
+
+export default async function renderCatalysts(root, data, _manifest, ctx = {}) {
   root.append(sectionTitle('CATALYSTS', 'WHAT IS SCHEDULED NEXT'));
   if (!data.events) {
     root.append(gap('No catalyst calendar in this build.'));
@@ -510,6 +528,9 @@ export default async function renderCatalysts(root, data) {
   search.addEventListener('input', () => { filter.query = search.value.trim(); draw(); });
 
   root.append(sessionStrip(data, jump));
+  const events = await ctx.loadArtifact?.('events').catch(() => null);
+  const lead = events && events.as_of === data.as_of ? eventLead(events) : null;
+  if (lead) root.append(lead);
   const keys = keyReleases(data);
   if (keys) root.append(keys);
   root.append(lastSession(data.recent, data.certainty_labels));
