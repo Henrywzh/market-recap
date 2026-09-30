@@ -150,3 +150,25 @@ Taken (2026-09-29): a 6M / 1Y / 3Y / 5Y / MAX range switch on the history
 charts (RISK core series, anchor, Fear & Greed; yields over time, commodity
 and inflation charts on RATES & MACRO), and filled state tags (rotation
 quadrant, anchor gates, Fear & Greed band, technical verdicts).
+
+## 5. Catalysts by theme, and the event card after hours
+
+Done (2026-09-30): the event card, read-through and index impact, and the
+per-name timeline (see `docs/information_architecture.md`, Ticker page).
+Open:
+
+- **Theme calendars.** Groups defined in config by what moves together,
+  not by GICS sector (memory/semis, hyperscaler capex, banks, energy,
+  consumer, health care, industrials/transport, housing). Each group: its
+  bellwether reports (including foreign ones that file no 8-K, e.g.
+  Samsung's preliminary results, SK hynix, TSMC), and its industry data
+  (Korea's exports on the 1st and the 1-10 / 1-20 day prints, TSMC monthly
+  revenue around the 10th, DRAM contract prices at month end, SIA/WSTS
+  sales). Each industry series needs its own free source checked first.
+- **Sector × day heat map** of index weight reporting over the next three
+  weeks (from CATALYSTS alone; no new source).
+- **After-hours move on the card.** The live Pages Function could quote
+  the evening's reporters, so the outcome is visible before the next build.
+- **Implied vs realised scorecard** over a season: the per-report implied
+  move is now kept on each timeline report where the options snapshot has
+  that afternoon; a season-level table needs a few weeks of snapshots.

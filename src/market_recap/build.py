@@ -13,7 +13,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalysts, cross_listing, dcf, earnings, evidence, financials, fixed_income, heatmaps, macro, markets, monitor, overview, positioning, priced, risk, rotation, valuation, xray
+from .panels import anchor, catalysts, cross_listing, dcf, earnings, events, evidence, financials, fixed_income, heatmaps, macro, markets, monitor, overview, positioning, priced, risk, rotation, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -41,6 +41,8 @@ PANELS = {
     "evidence": evidence.build,
     # Reads this session's catalysts and evidence (report dates), so after them.
     "positioning": positioning.build,
+    # Event cards and timelines: this session's report dates and reactions.
+    "events": events.build,
     "anchor": anchor.build,
     "monitor": monitor.build,
     # OVERVIEW reads this session's other panels and so runs last.
@@ -133,6 +135,8 @@ def run(
                 payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in overview.INPUTS})
             elif name == "positioning":
                 payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in positioning.INPUTS})
+            elif name == "events":
+                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in events.INPUTS})
             else:
                 payload = PANELS[name](ctx)
         except Exception as exc:

@@ -11,6 +11,7 @@ import { render } from '../charts.js';
 import { renderPeHistory } from './valuation.js';
 import { renderStatements } from './financials.js';
 import { renderSingleTicker } from './technicals.js';
+import { eventCard, outcomeCard, timelineCard, loadEvents } from '../event-card.js';
 
 const BILLION = 1e9;
 // The multiples shown in the header block, in this order. The full set is on
@@ -53,6 +54,15 @@ function median(values) {
 async function optional(ctx, name) {
   try {
     return await ctx.loadArtifact(name);
+  } catch {
+    return null;
+  }
+}
+
+async function loadPrices(symbol) {
+  try {
+    const response = await fetch(`artifacts/tickers/${encodeURIComponent(symbol)}.json`, { cache: 'no-cache' });
+    return response.ok ? await response.json() : null;
   } catch {
     return null;
   }
@@ -270,8 +280,8 @@ async function section(root, title, draw) {
 }
 
 export default async function renderTicker(root, valuation, _manifest, ctx) {
-  const [monitor, technicals, financials, dcf, crossListing, evidence] = await Promise.all(
-    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence'].map((name) => optional(ctx, name)),
+  const [monitor, technicals, financials, dcf, crossListing, evidence, events] = await Promise.all(
+    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events'].map((name) => optional(ctx, name)),
   );
   const rows = valuation?.rows || [];
   const universe = new Map(rows.map((r) => [r.ticker, r.name]));
@@ -295,6 +305,14 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
 
   const stats = headerStats(symbol, row, mon);
   if (stats) root.append(stats);
+  // The report is the next thing that moves the name: its card, or the one
+  // the last session traded on, sits right under the header.
+  const [eventPayload, prices] = await Promise.all([loadEvents(symbol), loadPrices(symbol)]);
+  const asOf = events?.as_of || eventPayload?.as_of;
+  const outcome = eventPayload ? outcomeCard(eventPayload) : null;
+  if (outcome) root.append(outcome);
+  const upcoming = eventPayload ? eventCard(eventPayload, asOf) : null;
+  if (upcoming) root.append(upcoming);
   // Company sections need filings. A fund, an index or a name no index holds
   // gets its price readings and one line saying why the rest is absent.
   // Order: the price first, then what it is worth against its own history,
@@ -314,6 +332,8 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   } else {
     root.append(card('PRICE & TREND', null, gap(`${symbol} has no baked price history in this build.`)));
   }
+  const timeline = eventPayload ? timelineCard(eventPayload, prices, events?.macro, asOf) : null;
+  if (timeline) root.append(timeline);
   if (row) {
     await section(root, 'P/E AGAINST ITS OWN 10 YEARS', (host) => {
       if (!row.pe_history) throw new Error(`${symbol} has no P/E history in this build (a loss, too little history, or no EPS filed)`);

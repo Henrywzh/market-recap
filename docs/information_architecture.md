@@ -481,6 +481,21 @@ The phased build put too much in front of the reader. After looking at it:
   90th percentile when a near-zero-earnings spike would flatten it), then
   the sector comparison beside the evidence, then filings. Method notes sit
   in the ⓘ fold; the research note card appears only when there is a note.
+- **Event card and timeline** (EVENTS panel, `artifacts/events/{T}.json`).
+  A name with a report within 30 days gets the event card under the header:
+  consensus EPS (Nasdaq) with Yahoo's range, revisions and revenue when
+  Yahoo's current-quarter row is the calendar's fiscal quarter; the implied
+  move against its own last eight moves; index impact (weight × implied
+  move); the run-in against its sector ETF; and read-through both ways --
+  who has moved with it on its report sessions, and whose reports have
+  moved it. A name the last session traded on gets the outcome card
+  instead (EPS vs consensus, move vs the implied move the afternoon before,
+  each peer's move against what its beta implied). The timeline follows the
+  price section: reports, rating changes and insider buys on the price, and
+  the next 45 days (report, estimated blackout, correlated names' reports,
+  high-importance macro dates). CALENDAR leads with the compact cards for
+  the next seven days' reports from names at or above 0.25% of the S&P 500
+  or 0.5% of the Nasdaq-100, or on the watchlist.
 - **Links to the ticker page** (`routes.tickerHref`) from MONITOR, SCREEN,
   HEAT MAPS tiles, SECTORS' contributor bars, EARNINGS movers and the
   CALENDAR's earnings rows. ETF X-RAY holdings are not linked yet.
