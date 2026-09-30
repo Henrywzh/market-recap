@@ -137,6 +137,22 @@ def test_universe_order_and_monitor_cap():
     assert left_out == {"monitor_over_limit": ["CCC"]}
 
 
+def test_names_reporting_soon_come_before_monitor_candidates():
+    settings = {"fixed": ["SPY"], "monitor_max": 1, "report_days": 3, "report_max": 2}
+    reporters = [
+        {"symbol": "MU", "date": "2026-09-30"},     # today, after the close
+        {"symbol": "NKE", "date": "2026-10-01"},
+        {"symbol": "SPY", "date": "2026-09-30"},    # already in
+        {"symbol": "LATE", "date": "2026-10-09"},   # beyond report_days
+        {"symbol": "PAST", "date": "2026-09-29"},
+        {"symbol": "EXTRA", "date": "2026-10-02"},  # over report_max
+    ]
+    rows = [{"ticker": "AAA", "candidate": True, "peer_excess_pct": -30.0, "earnings_date": None}]
+    universe, left_out = S.build_universe(settings, [], rows, date(2026, 9, 30), reporters)
+    assert universe == ["SPY", "MU", "NKE", "AAA"]
+    assert left_out["reporters_over_limit"] == ["EXTRA"]
+
+
 def test_universe_without_a_published_monitor():
     universe, left_out = S.build_universe({"fixed": ["SPY"], "monitor_max": 5}, [], None, date(2026, 9, 26))
     assert universe == ["SPY"] and left_out == {}
@@ -153,6 +169,13 @@ def test_universe_without_a_published_monitor():
 ])
 def test_window_follows_new_york_wall_clock(utc, inside):
     assert store.in_window(utc, ["15:10", "16:00"]) is inside
+
+
+def test_configured_window_takes_the_late_starts_github_gives():
+    """Every scheduled run in the first week started 18:56-20:27 New York."""
+    window = S.load_config()["snapshots"]["options"]["window"]
+    assert store.in_window(datetime(2026, 9, 29, 23, 39, tzinfo=timezone.utc), window)       # 19:39 EDT
+    assert not store.in_window(datetime(2026, 9, 30, 4, 30, tzinfo=timezone.utc), window)    # 00:30 next day
 
 
 def test_second_options_run_skips_a_sufficient_same_day_capture(tmp_path, monkeypatch):

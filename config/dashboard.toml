@@ -780,9 +780,15 @@ history_period = "2y"
 root = "data/snapshots"
 
 [snapshots.options]
-# New York wall-clock window on weekdays. Late in the session, because free
-# chains fetched after the close often carry zero bids or stale quotes.
-window = ["15:10", "16:00"]
+# New York wall-clock window on weekdays: from late in the session to
+# midnight. GitHub starts scheduled runs hours late (every options run in the
+# first week landed 18:56-20:27, outside a 15:10-16:00 window, and skipped).
+# Options stop trading at 16:00, so a later run records the closing quotes,
+# which is what an after-close report is priced on; a contract whose bid or
+# ask has gone to zero is not used (compute.options.mid_quote), and the meta
+# file says whether the copy was taken after the close.
+window = ["15:10", "23:59"]
+close = "16:00"
 # Recorded every session so each has a continuous IV history: index and
 # sector ETFs, rates/credit/gold funds and the largest index weights.
 fixed = [
@@ -792,6 +798,11 @@ fixed = [
   "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "TSLA", "JPM", "LLY",
 ]
 include_watchlist = true
+# Names reporting within report_days (calendar), read from the published
+# events.json, soonest first: the session's closing straddle is the implied
+# move on their event card.
+report_days = 3
+report_max = 40
 # MONITOR candidates added on top, read from the published monitor.json: those
 # reporting within monitor_earnings_days first, then the furthest behind peers.
 monitor_max = 15
