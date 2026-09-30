@@ -30,17 +30,34 @@ CONSTANT_MATURITY_DAYS = 30
 
 # --- earnings ----------------------------------------------------------------------
 
-def earnings_announcements(recent: dict, *, since: date | None = None) -> list[dict]:
+# SEC serves a filing accepted in the last day with its Eastern wall-clock
+# time marked "Z" -- Micron's 16:02 release of 2026-09-30 read
+# "16:02:22.000Z" that evening, its 16:02 release in June reads "20:02:01Z"
+# -- and corrects it later. Read as UTC, an after-close report became 12:02
+# "intraday" and was given a same-day move of 0.0%. A stamp this recent is
+# read as Eastern: if SEC has already corrected it, an after-close report is
+# still after the close, and before-open and intraday trade the same session.
+FRESH_STAMP_DAYS = 1
+
+
+def _accepted(stamp: str, fresh_after: date | None):
+    moment = pd.Timestamp(stamp)
+    if fresh_after is not None and moment.date() >= fresh_after:
+        return moment.tz_localize(None).tz_localize(NEW_YORK)
+    return (moment.tz_localize("UTC") if moment.tzinfo is None else moment).tz_convert(NEW_YORK)
+
+
+def earnings_announcements(recent: dict, *, since: date | None = None, today: date | None = None) -> list[dict]:
     """Earnings releases from a submissions index's recent block, newest first."""
     forms = recent.get("form") or []
     items = recent.get("items") or [""] * len(forms)
     accepted = recent.get("acceptanceDateTime") or [None] * len(forms)
+    fresh_after = today - timedelta(days=FRESH_STAMP_DAYS) if today else None
     out, seen = [], set()
     for form, item, stamp in zip(forms, items, accepted):
         if form != "8-K" or "2.02" not in str(item or "") or not stamp:
             continue
-        moment = pd.Timestamp(stamp)
-        moment = (moment.tz_localize("UTC") if moment.tzinfo is None else moment).tz_convert(NEW_YORK)
+        moment = _accepted(stamp, fresh_after)
         day = moment.date()
         if day in seen or (since and day < since):
             continue

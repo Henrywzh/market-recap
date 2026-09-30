@@ -123,3 +123,15 @@ def test_short_and_ratings_become_evidence_lines_by_the_configured_rule():
     assert (ratings["upgrades"], ratings["downgrades"], ratings["target_cuts"]) == (0, 2, 1)
     for_, against = V.evidence_lines(None, short, ratings, {"short_change_pct": 20})
     assert for_ == [] and len(against) == 2
+
+
+def test_a_same_day_sec_stamp_is_eastern_wall_clock():
+    """Micron's 16:02 release on 2026-09-30 was served as 16:02:22Z that evening."""
+    recent = {"form": ["8-K", "8-K"], "items": ["2.02,9.01", "2.02,9.01"],
+              "acceptanceDateTime": ["2026-09-30T16:02:22.000Z", "2026-06-24T20:02:01.000Z"]}
+    fresh, old = V.earnings_announcements(recent, today=date(2026, 9, 30))
+    assert (fresh["date"], fresh["time"], fresh["timing"]) == ("2026-09-30", "16:02", "amc")
+    assert (old["time"], old["timing"]) == ("16:02", "amc")        # corrected stamps are UTC
+    # Once SEC has corrected it, reading it as Eastern still says after the close.
+    recent["acceptanceDateTime"][0] = "2026-09-30T20:02:22.000Z"
+    assert V.earnings_announcements(recent, today=date(2026, 10, 1))[0]["timing"] == "amc"

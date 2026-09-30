@@ -121,18 +121,27 @@ def _article(ident: str, use_cache: bool) -> dict:
 def fetch(today: date, months: int = 13, *, use_cache: bool = True) -> tuple[list[dict], list[str]]:
     """Monthly releases, oldest first, and the months that could not be read."""
     found: dict[str, str] = {}
+    pages_failed: list[str] = []
     for keyword in ("수출입 동향", "수출입동향"):
         for page in (1, 2, 3, 4):
-            html = cache.fetch_text(
-                NAMESPACE, f"list-{keyword.replace(' ', '_')}-{page}",
-                lambda: get_text(f"{LIST_URL}?searchCondition=1&searchKeyword={quote(keyword)}&pageIndex={page}", user_agent=UA, retries=1),
-                kind="daily_file", suffix=".html", use_cache=use_cache)
+            # The ministry's server drops the odd request from a cloud runner
+            # ("empty reply"); one list page lost costs its releases only.
+            try:
+                html = cache.fetch_text(
+                    NAMESPACE, f"list-{keyword.replace(' ', '_')}-{page}",
+                    lambda: get_text(f"{LIST_URL}?searchCondition=1&searchKeyword={quote(keyword)}&pageIndex={page}", user_agent=UA, retries=2),
+                    kind="daily_file", suffix=".html", use_cache=use_cache)
+            except Exception as exc:  # noqa: BLE001
+                pages_failed.append(f"list '{keyword}' page {page}: {str(exc)[:80]}")
+                continue
             for month, ident in releases(html):
                 found.setdefault(month, ident)
+    if not found:
+        raise RuntimeError("no list page could be read: " + "; ".join(pages_failed[:2]))
     # Each release states its own y/y change, so a year of releases is enough;
     # the site is slow (seconds a page, a 1.7 MB PDF each), and a published
     # release is cached for good once read.
-    rows, failed = [], []
+    rows, failed = [], list(pages_failed)
     for month, ident in sorted(found.items())[-months:]:
         try:
             row = _article(ident, use_cache)

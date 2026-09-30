@@ -467,8 +467,10 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         event = next_report.get(symbol)
         if event and symbol in carded:
             payload["card"] = _card(symbol, event, entry, info, trends.get(symbol), snapshot, ctx, sector_etf)
-            # Only the guide the last report gave is about the quarter now due.
-            last_guide = payload["history"][0].get("guide") if payload["history"] else None
+            # Only the guide the last report before this one gave is about
+            # the quarter now due (a release filed today guides the next).
+            before = [r for r in payload["history"] if r["date"] < payload["card"]["date"]]
+            last_guide = before[0].get("guide") if before else None
             payload["card"]["vs_guide"] = E.against_guide(last_guide, payload["card"]["consensus"])
         if symbol in recent_symbols:
             event = next(e for e in recent_events if e["symbol"] == symbol)

@@ -127,14 +127,14 @@ def build(ctx) -> dict:
         closes = ctx.closes[symbol] if symbol in ctx.closes.columns else pd.Series(dtype=float)
         six_k = (settings.get("six_k") or {}).get(symbol)
         announcements = (V.six_k_announcements(recent or {}, six_k["pattern"], six_k.get("timing", "bmo"))
-                         if six_k else V.earnings_announcements(recent or {}))
+                         if six_k else V.earnings_announcements(recent or {}, today=as_of))
         if cik and recent is not None and not six_k and len(announcements) < REACTIONS:
             # A heavy filer's recent block holds one year; read older pages
             # until eight releases are found or three years are covered.
             try:
                 block = sec.submissions_until(cik, lambda b: len(V.earnings_announcements(b)) >= REACTIONS + 1,
                                               since=(as_of - timedelta(days=3 * 365)).isoformat())
-                announcements = V.earnings_announcements(block)
+                announcements = V.earnings_announcements(block, today=as_of)
             except Exception:
                 pass
         entry: dict = {"reactions": V.reactions(closes, index_close, announcements, REACTIONS)}

@@ -358,7 +358,14 @@ function koreaFlashCard(k) {
 }
 
 function pcppCard(pc) {
-  if (pc.unavailable) return card('RETAIL PRICES · PCPARTPICKER UK', null, unavailable(pc));
+  if (pc.unavailable) {
+    // PCPartPicker's Cloudflare answers cloud servers with 403; it is read
+    // from a home connection only, and not worked around.
+    const refused = /\b403\b/.test(pc.unavailable);
+    return card('RETAIL PRICES · PCPARTPICKER UK', null, refused
+      ? gap('PCPartPicker refuses requests from the cloud build\'s servers (HTTP 403), so this build has no retail prices. It reads fine from a home connection; its bot protection is not worked around.')
+      : unavailable(pc));
+  }
   const blocks = [];
   for (const kind of ['memory', 'cpu']) {
     const sec = pc[kind];
