@@ -223,6 +223,27 @@ openrouter_providers = ["anthropic", "openai", "google", "x-ai", "deepseek", "qw
 openrouter_months = 7
 capex_filers = ["MSFT", "GOOGL", "AMZN", "META", "ORCL"]
 capex_quarters = 12
+nvda_quarters = 8
+# Earnings weight by sector and day, over the next heatmap_days.
+heatmap_days = 21
+# A name "trades with" a theme when its daily excess return correlated with
+# the theme's proxy at or above this over the last year (TICKER shows it).
+member_corr = 0.55
+
+# Korean bellwethers: results dates from DART, own move on the Korean session.
+korea_index = "^KS11"
+
+[[themes.korean]]
+label = "Samsung Electronics"
+yahoo = "005930.KS"
+dart = "삼성전자"
+group = "semis"
+
+[[themes.korean]]
+label = "SK hynix"
+yahoo = "000660.KS"
+dart = "SK하이닉스"
+group = "semis"
 
 [[themes.groups]]
 key = "cloud"
@@ -1141,3 +1162,9 @@ iv_percentile_min_days = 60
 # single_buy_min_value.
 cluster_min_value = 250000
 single_buy_min_value = 1000000
+# Foreign private issuers report on Form 6-K, which has no item code: their
+# earnings release is recognised by the document name they file it under.
+# Both release overnight New York time, so the reaction is that day's session.
+[evidence.six_k]
+TSM = { pattern = '^tsm-\d{8}x6k\.htm$', timing = "bmo" }
+ASML = { pattern = 'quarterlyfilings', timing = "bmo" }

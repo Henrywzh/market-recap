@@ -123,6 +123,21 @@ function links(symbol, { mon, dcf, pairs }) {
   return el('div', { class: 'field-note' }, nodes);
 }
 
+// The CATALYSTS -> THEMES groups this name belongs to: named there (a
+// bellwether or basket member) or trading with the theme's proxy.
+function themeTags(memberships, threshold) {
+  if (!memberships?.length) return null;
+  const order = { bellwether: 0, basket: 1, 'trades with': 2 };
+  return el('div', { class: 'tag-row theme-tags' }, [
+    el('span', { class: 'stat-label', text: 'THEMES' }),
+    ...[...memberships].sort((a, b) => order[a.role] - order[b.role] || (b.corr || 0) - (a.corr || 0)).map((m) => el('a', {
+      href: `#themes/${m.key.toUpperCase()}`, class: `tag tag-${m.role === 'trades with' ? 'info' : 'warn'}`,
+      text: `${m.label} · ${m.role}${m.corr !== null && m.corr !== undefined ? ` ρ${num(m.corr, 2)}` : ''}`,
+      title: m.role === 'trades with' ? `daily excess-return correlation with the theme's proxy over the last year, at or above ${threshold}` : `named as a ${m.role} of this theme`,
+    })),
+  ]);
+}
+
 // Only a name with a recorded decision gets the card; an empty one is noise.
 function noteCard(mon) {
   const note = mon?.note;
@@ -280,8 +295,8 @@ async function section(root, title, draw) {
 }
 
 export default async function renderTicker(root, valuation, _manifest, ctx) {
-  const [monitor, technicals, financials, dcf, crossListing, evidence, events] = await Promise.all(
-    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events'].map((name) => optional(ctx, name)),
+  const [monitor, technicals, financials, dcf, crossListing, evidence, events, themes] = await Promise.all(
+    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events', 'themes'].map((name) => optional(ctx, name)),
   );
   const rows = valuation?.rows || [];
   const universe = new Map(rows.map((r) => [r.ticker, r.name]));
@@ -296,7 +311,8 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   root.append(sectionTitle(`${symbol}${name ? ` · ${name}` : ''}`,
     [row?.sector || mon?.sector, row?.indices?.join(' + ') || (mon?.membership === 'watchlist' ? 'watchlist' : null)]
       .filter(Boolean).join(' · ')));
-  root.append(card('COMPANY', null, [searchRow(symbol, universe, ctx), links(symbol, { mon, dcf, pairs: crossListing?.pairs || [] })]));
+  root.append(card('COMPANY', null, [searchRow(symbol, universe, ctx), links(symbol, { mon, dcf, pairs: crossListing?.pairs || [] }),
+    themeTags(themes?.membership?.[symbol], themes?.member_corr)]));
 
   if (!universe.has(symbol) && !mon) {
     root.append(gap(`${symbol} is not covered by this build: it is not an index member, a watchlist name or a baked ticker.`));

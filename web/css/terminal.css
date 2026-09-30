@@ -900,3 +900,8 @@ tr.picked td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 .adata-para { font-size: 12px; line-height: 1.5; margin-bottom: 8px; }
 .adata-para .stat-label { display: block; margin-bottom: 2px; }
 .data.text-cols td, .data.text-cols th { text-align: left; }
+.heatmap-table td.heat-cell { text-align: center; background: color-mix(in srgb, var(--accent) var(--heat, 0%), transparent); min-width: 34px; }
+.heatmap-table th.heat-day { text-align: center; white-space: nowrap; font-size: 10px; }
+.heatmap-table td.heat-total { text-align: center; }
+.heatmap-table td.heat-sector { white-space: nowrap; }
+.theme-tags { margin-top: 8px; } .theme-tags a.tag { text-decoration: none; }

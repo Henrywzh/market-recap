@@ -111,6 +111,9 @@ Every one of these is free and requires no account.
 | **Korea Customs Service** trade statistics (`tradedata.go.kr`) | THEMES: Korean IC (HS 8542) exports | Confirmed monthly figures, mid-month; certificate verification on |
 | **ADATA Industrial** Memory & Flash Market Watch | THEMES: monthly DRAM / NAND note | A module maker's read, quoted; its charts are images and are not read |
 | **PCPartPicker** UK price trends (`uk.pcpartpicker.com/trends/price/{memory,cpu}/`) | THEMES: retail memory-kit and CPU prices | Read from the chart images' pixels (the page has no numbers); only ratios are reported, with the source linked |
+| **DART** (FSS electronic disclosure, public search `dsab007/detailSearch.ax`) | THEMES: Samsung Electronics and SK hynix results dates | Their "영업(잠정)실적" fair disclosures, corrections dropped; no key needed |
+| **Korea MOTIE** monthly trade release (`motir.go.kr`, PDF attachment) | THEMES: 1st-of-month semiconductor and total exports | Read with `pdftotext` (poppler, installed by the workflow); the site is slow, so only the last 13 releases are read, each cached once |
+| **SEC EDGAR** earnings releases (8-K Item 2.02, Exhibit 99.1) | THEMES: NVIDIA Data Center revenue and outlook; capex guidance quoted from the releases | Segment revenue is not in XBRL company facts; matched text is quoted as written. Older submissions pages are read when a heavy filer's recent block (one year for the big banks) holds fewer than eight earnings releases; TSMC and ASML results come from their 6-K filings |
 | **alternative-data** (github.com/Henrywzh/alternative-data) normalized files | THEMES: OpenRouter daily tokens and estimated revenue; Ramp AI Index | Read from the public repo, with the commit that last touched each file |
 
 ### Two things worth knowing about the feeds

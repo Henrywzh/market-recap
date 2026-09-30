@@ -883,6 +883,41 @@ def submissions_recent(cik: int, *, use_cache: bool = True) -> dict:
     return json.loads(text).get("filings", {}).get("recent", {})
 
 
+OLDER_URL = "https://data.sec.gov/submissions/{name}"
+
+
+def _submissions(cik: int, use_cache: bool) -> dict:
+    text = cache.fetch_text(f"{NAMESPACE}/submissions", f"CIK{cik:010d}",
+                            lambda: _get(SUBMISSIONS_URL.format(cik=cik), 45.0),
+                            kind="daily_file", suffix=".json", use_cache=use_cache, compress=True)
+    return json.loads(text)
+
+
+def submissions_until(cik: int, enough, *, since: str, use_cache: bool = True) -> dict:
+    """The recent block extended with older pages until ``enough(block)`` holds
+    or the pages reach back past ``since``.
+
+    SEC's recent block is the last 1,000 filings or the last year, whichever
+    is more. For a bank that files thousands of structured-note prospectuses
+    a year, that is four earnings releases; the rest are in dated pages. A
+    page is cached under the date range it covers, so SEC renumbering its
+    pages as new filings arrive never serves a page under the wrong dates.
+    """
+    payload = _submissions(cik, use_cache)
+    block = {k: list(v) for k, v in payload.get("filings", {}).get("recent", {}).items()}
+    for page in sorted(payload.get("filings", {}).get("files") or [], key=lambda f: f.get("filingTo", ""), reverse=True):
+        if enough(block) or page.get("filingTo", "") < since:
+            break
+        name = page["name"]
+        text = cache.fetch_text(f"{NAMESPACE}/submissions-older", f"CIK{cik:010d}-{page.get('filingFrom')}-{page.get('filingTo')}",
+                                lambda: _get(OLDER_URL.format(name=name), 60.0),
+                                kind="archive", suffix=".json", use_cache=use_cache, compress=True)
+        older = json.loads(text)
+        for key in block:
+            block[key].extend(older.get(key) or [None] * len(older.get("form") or []))
+    return block
+
+
 def fetch_form4(cik: int, accession: str, primary_document: str, *, use_cache: bool = True) -> str:
     """One Form 4's raw XML. The index names the XSL-rendered view
     (``xslF345X06/doc.xml``); the raw document is the same file at the

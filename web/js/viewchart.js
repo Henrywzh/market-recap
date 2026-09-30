@@ -52,7 +52,11 @@ export function viewChart(spec) {
     // so the first year of a YoY view is not blank for want of a base.
     const cut = (values) => (spec.tail ? values.slice(-spec.tail) : values);
     const source = raw ? spec.series : [...spec.series, ...(spec.changeOnly || [])];
-    const series = source.map((s) => ({ ...s, values: cut(raw ? s.values : change(s.values, view.lag, view.kind)) }));
+    // A view may carry the change as its source states it (a release's own
+    // y/y) instead of computing it from the levels.
+    const series = view.series
+      ? view.series.map((s) => ({ ...s, values: cut(s.values) }))
+      : source.map((s) => ({ ...s, values: cut(raw ? s.values : change(s.values, view.lag, view.kind)) }));
     const dates = cut(spec.dates);
     const log = raw && spec.type !== 'stack' && spec.type !== 'bar' && logSpan(series);
     note.textContent = raw ? (log ? 'log scale' : '') : (view.kind === 'diff' ? 'change, pp' : 'change, %');

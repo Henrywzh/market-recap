@@ -51,6 +51,28 @@ def earnings_announcements(recent: dict, *, since: date | None = None) -> list[d
     return sorted(out, key=lambda r: r["date"], reverse=True)
 
 
+def six_k_announcements(recent: dict, pattern: str, timing: str) -> list[dict]:
+    """Earnings releases of a foreign private issuer, newest first.
+
+    A 6-K carries no item code, so the release is recognised by the name its
+    filer gives the document (TSMC ``tsm-YYYYMMDDx6k.htm``, ASML
+    ``...quarterlyfilings.htm``). Both release overnight New York time, so
+    the timing is configured rather than read from the acceptance clock.
+    """
+    import re as _re
+    rule = _re.compile(pattern)
+    forms = recent.get("form") or []
+    docs = recent.get("primaryDocument") or [""] * len(forms)
+    filed = recent.get("filingDate") or [None] * len(forms)
+    out, seen = [], set()
+    for form, doc, day in zip(forms, docs, filed):
+        if form != "6-K" or not day or day in seen or not rule.search(doc or ""):
+            continue
+        seen.add(day)
+        out.append({"date": day, "time": None, "timing": timing})
+    return out
+
+
 def reaction(closes: pd.Series, day: date, timing: str) -> dict | None:
     """Close-to-close move over the session that first traded on the news."""
     s = closes.dropna()

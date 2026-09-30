@@ -70,7 +70,7 @@ function calendarCard(g, asOf, days) {
     el('td', { text: c.date }),
     el('td', {}, [tag(KIND_LABEL[c.kind], c.projected ? 'dim' : KIND_TONE[c.kind], c.projected ? 'projected from its own report rhythm' : null)]),
     el('td', {}, c.kind === 'earnings'
-      ? [link(c.symbol), el('span', { class: 'dim', text: ` ${(c.timing || '').toUpperCase()}${c.projected ? ' · projected' : ''}${c.beta !== null && c.beta !== undefined ? ` · proxy β ${num(c.beta, 2)}` : ''}` })]
+      ? [c.listing ? el('span', { text: c.symbol }) : link(c.symbol), el('span', { class: 'dim', text: ` ${(c.timing || '').toUpperCase()}${c.projected ? ' · projected' : ''}${c.beta !== null && c.beta !== undefined ? ` · proxy β ${num(c.beta, 2)}` : ''}` })]
       : [el('span', { class: c.late ? 'down' : '', text: c.title }), c.time ? el('span', { class: 'dim', text: ` ${c.time} ET` }) : null, c.late ? el('span', { class: 'down', text: ' · late' }) : null]),
   ]));
   return card(`NEXT ${days} DAYS`, el('span', { class: 'dim', text: `from ${asOf}` }), table(['DATE', '', 'WHAT'], rows, { class: 'text-cols' }));
@@ -80,7 +80,9 @@ function bellwetherCard(g) {
   const rows = g.bellwethers.map((b) => {
     const s = b.impact || {};
     return el('tr', {}, [
-      el('td', {}, [link(b.symbol)]),
+      el('td', {}, [b.listing
+        ? el('a', { href: b.source_url || '#', target: '_blank', rel: 'noopener', text: b.symbol, title: `${b.listing} · results dates from DART` })
+        : link(b.symbol)]),
       el('td', { class: b.next?.projected ? 'dim' : '', text: b.next ? `${b.next.date}${b.next.timing ? ` ${b.next.timing.toUpperCase()}` : ''}${b.next.projected ? ' (proj.)' : ''}` : DASH }),
       el('td', { class: s.beta >= 0.3 ? 'up' : s.beta < 0 ? 'down' : '', text: s.beta === undefined ? DASH : num(s.beta, 2) }),
       el('td', { class: s.hit >= 0.75 ? 'up' : s.hit < 0.5 ? 'down' : '', text: s.hit === undefined || s.hit === null ? DASH : `${Math.round(s.hit * 100)}%` }),
@@ -93,9 +95,11 @@ function bellwetherCard(g) {
   const proxyNote = g.proxy_is_etf
     ? `Proxy ${g.proxy}: its move beyond the S&P 500 on each bellwether's reaction session, per 1% of the bellwether's own excess move. The ETF holds the bellwether itself, so part of the beta is its own weight.`
     : `Proxy: ${g.proxy}, leaving the bellwether out of the basket for its own score.`;
+  const korean = g.bellwethers.some((b) => b.listing)
+    ? ' Korean names: results dates from DART; own move on the Korean session beyond KOSPI, the proxy on the US session of the same date (the first to trade after a Korean-morning release).' : '';
   return card('BELLWETHERS · WHAT THEIR REPORTS DID TO THE THEME', null, [
     table(['NAME', 'NEXT REPORT', 'PROXY β', 'SAME WAY', 'AVG |PROXY|', 'AVG |OWN|', 'LAST: OWN → PROXY', 'N'], rows),
-    el('div', { class: 'field-note', text: `${proxyNote} N = past reports scored (8-K Item 2.02; foreign filers have none). History, not a forecast.` }),
+    el('div', { class: 'field-note', text: `${proxyNote} N = past reports scored (8-K Item 2.02; TSMC and ASML from their 6-K results filings).${korean} History, not a forecast.` }),
   ]);
 }
 
@@ -255,6 +259,63 @@ function rampCard(ramp) {
   ]);
 }
 
+function nvdaCard(nv) {
+  if (nv.unavailable) return card('NVIDIA DATA CENTER', null, unavailable(nv));
+  const q = nv.quarters;
+  const labels = q.map((r) => r.filed);
+  const chart = viewChart({
+    dates: labels, type: 'bar', views: [{ id: 'RAW' }, { id: 'QoQ', lag: 1 },
+      { id: 'YoY (stated)', series: [{ name: 'Data Center y/y', values: q.map((r) => r.dc_yoy_pct), color: (p) => p.accent }] }],
+    fmt: (v) => `$${num(v, 0)}B`,
+    series: [{ name: 'Data Center revenue', values: q.map((r) => r.dc_bn), color: (p) => p.up }],
+  });
+  const last = q[q.length - 1];
+  return card('NVIDIA DATA CENTER REVENUE · FROM ITS RELEASES', el('span', { class: 'tag-row' }, [
+    tag(`$${num(last.dc_bn, 1)}B · ${pct(last.dc_yoy_pct, 0)} Y/Y`, 'up'),
+    last.outlook_bn ? tag(`NEXT Q REVENUE OUTLOOK $${num(last.outlook_bn, 1)}B`, 'warn') : null,
+    el('a', { href: last.url, target: '_blank', rel: 'noopener', text: `release ${last.filed}` }),
+  ]), [
+    chart,
+    el('div', { class: 'field-note', text: 'Quarters are labelled by release date. Segment revenue is not in XBRL company facts, so it is read from each earnings release (8-K Exhibit 99.1); the y/y view is the release\'s own figure. Outlook: total revenue guided for the next quarter.' }),
+  ]);
+}
+
+function guidanceCard(g) {
+  if (g.unavailable) return card('CAPEX GUIDANCE', null, unavailable(g));
+  const rows = g.companies.map((c) => {
+    const [latest, prior] = c.releases;
+    const said = latest?.statements?.length ? latest.statements.join(' ') : null;
+    return el('tr', {}, [
+      el('td', {}, [link(c.symbol)]),
+      el('td', {}, [latest ? el('a', { href: latest.url, target: '_blank', rel: 'noopener', text: latest.filed }) : DASH]),
+      el('td', { class: said ? 'wrap-cell' : 'dim wrap-cell', text: said || 'Not stated in the release (given on the call, if at all).' }),
+      el('td', { class: 'dim wrap-cell', text: prior?.statements?.length ? `${prior.filed}: ${prior.statements.join(' ')}` : '' }),
+    ]);
+  });
+  return card('CAPEX GUIDANCE · AS WRITTEN IN THE EARNINGS RELEASES', null, [
+    table(['NAME', 'RELEASE', 'LATEST', 'PREVIOUS RELEASE'], rows, { class: 'text-cols' }),
+    el('div', { class: 'field-note', text: 'Sentences about capital expenditures ahead, quoted from each 8-K Exhibit 99.1. Microsoft, Alphabet and Amazon give their outlook on the call, not in the release, so they show none here.' }),
+  ]);
+}
+
+function heatmapCard(h) {
+  if (!h?.dates?.length) return null;
+  const max = Math.max(...h.rows.flatMap((r) => r.cells.map((c) => c?.w || 0)), 0.01);
+  const day = (d) => new Date(`${d}T00:00:00Z`).toUTCString().slice(0, 11);
+  const head = el('tr', {}, [el('th', { text: 'SECTOR' }), ...h.dates.map((d) => el('th', { class: 'heat-day', text: day(d) })), el('th', { text: 'TOTAL' })]);
+  const rows = h.rows.map((r) => el('tr', {}, [
+    el('td', { class: 'heat-sector', text: r.sector }),
+    ...r.cells.map((c) => el('td', {
+      class: 'heat-cell', style: c ? `--heat:${Math.round((100 * c.w) / max)}%` : null,
+      title: c ? `${c.n} reporting · ${c.top.join(', ')}` : '', text: c ? num(c.w, c.w < 1 ? 2 : 1) : '',
+    })),
+    el('td', { class: 'dim', text: `${num(r.total, 1)}%` }),
+  ]));
+  const totals = el('tr', {}, [el('td', { class: 'dim', text: 'ALL' }), ...h.day_totals.map((t) => el('td', { class: 'dim heat-total', text: t ? num(t, 1) : '' })), el('td', {})]);
+  return card('EARNINGS WEIGHT BY SECTOR · NEXT THREE WEEKS', el('span', { class: 'dim', text: '% of S&P 500 weight reporting; hover for names' }),
+    el('div', { class: 'table-scroll' }, [el('table', { class: 'data heatmap-table' }, [el('thead', {}, [head]), el('tbody', {}, [...rows, totals])])]));
+}
+
 // --- SEMIS -------------------------------------------------------------------------
 
 function koreaCard(k) {
@@ -270,6 +331,29 @@ function koreaCard(k) {
   ]), [
     chart,
     el('div', { class: 'field-note', text: 'Korea Customs Service, confirmed monthly exports of electronic integrated circuits (memory is most of it), customs-acceptance basis, USD. The ministry\'s 1st-of-month flash is earlier but not read here.' }),
+  ]);
+}
+
+function koreaFlashCard(k) {
+  if (k.unavailable) return card('KOREA EXPORTS · 1ST-OF-MONTH RELEASE', null, unavailable(k));
+  const m = k.months;
+  const chart = viewChart({
+    dates: m.map((r) => r.month), type: 'bar', fmt: (v) => `$${num(v, 0)}B`,
+    views: [{ id: 'RAW' }, { id: 'MoM', lag: 1 },
+      { id: 'YoY (stated)', series: [
+        { name: 'semiconductors y/y', values: m.map((r) => r.semis_yoy_pct), color: (p) => p.accent },
+        { name: 'all exports y/y', values: m.map((r) => r.total_yoy_pct), color: (p) => p.dim },
+      ] }],
+    series: [{ name: 'semiconductor exports $B', values: m.map((r) => r.semis_bn), color: (p) => p.blue }],
+  });
+  const last = m[m.length - 1] || {};
+  return card('KOREA EXPORTS · 1ST-OF-MONTH RELEASE', el('span', { class: 'tag-row' }, [
+    tag(`${last.month} SEMIS $${num(last.semis_bn, 1)}B · ${pct(last.semis_yoy_pct, 0)} Y/Y`, last.semis_yoy_pct > 0 ? 'up' : 'down'),
+    el('span', { class: k.due?.late ? 'down' : 'dim', text: k.due ? `${k.due.month} due ${k.due.due}` : '' }),
+    last.url ? el('a', { href: last.url, target: '_blank', rel: 'noopener', text: `released ${last.released || ''}` }) : null,
+  ]), [
+    chart,
+    el('div', { class: 'field-note', text: 'Ministry of Trade release on the 1st (09:00 Seoul, the previous evening in New York), read from its PDF: about two weeks before customs confirms the month. Semiconductors here are the ministry\'s item (chips, not only HS 8542); y/y as the release states it.' }),
   ]);
 }
 
@@ -326,7 +410,7 @@ function adataCard(a) {
 function industry(key, data) {
   if (key === 'cloud') {
     const c = data.cloud;
-    return [capexCard(c.capex),
+    return [capexCard(c.capex), guidanceCard(c.guidance), nvdaCard(c.nvda),
       twRevenueCard('AI SERVER MAKERS · MONTHLY REVENUE', c.odm, 'Quanta, Wiwynn and Wistron build most hyperscaler AI servers; their revenue is capex being delivered, reported by the 10th of the next month. Foxconn is left out: iPhone assembly dominates it.'),
       openrouterCard(c.openrouter), rampCard(c.ramp)];
   }
@@ -334,7 +418,8 @@ function industry(key, data) {
     const s = data.semis;
     return [el('div', { class: 'grid two' }, [
       twRevenueCard('TSMC & NANYA · MONTHLY REVENUE', s.tw, 'TSMC: leading-edge foundry demand. Nanya: commodity DRAM, the purest listed read on DRAM pricing. Published by the 10th of the next month.'),
-      koreaCard(s.korea)]),
+      koreaFlashCard(s.korea_flash)]),
+    koreaCard(s.korea),
     adataCard(s.adata), pcppCard(s.pcpp)];
   }
   return [];
@@ -351,6 +436,8 @@ export default async function renderThemes(root, data, _manifest, ctx = {}) {
     'Bellwether reports: scheduled on the Nasdaq calendar, or projected from the company\'s own report rhythm (median gap between past reports) and marked so.',
     'Data dates: when each monthly series is due -- Taiwan revenue by the 10th, Korea\'s confirmed customs figures around the 15th; a series past due is marked late.',
   ]));
+  const heat = heatmapCard(data.heatmap);
+  if (heat) root.append(heat);
   const host = el('div', {});
   // The hash argument is upper-cased like a ticker (#themes/SEMIS).
   const wanted = String(ctx.arg || '').toLowerCase();

@@ -508,6 +508,10 @@ The phased build put too much in front of the reader. After looking at it:
   QoQ / YoY quarterly, WoW / 4W daily, 4W / 13W / YoY weekly; point changes
   for series that are already percentages; RAW goes to a log axis when the
   series span more than 25x (Ramp's median against its 99th percentile).
+  The page opens with the earnings-weight heat map (S&P 500 weight
+  reporting by GICS sector and session, three weeks). TICKER shows the
+  themes a name belongs to: named in the config, or trading with the
+  theme's proxy (daily excess-return correlation >= 0.55 over a year).
   Groups live in `[[themes.groups]]` in the config.
 - **Links to the ticker page** (`routes.tickerHref`) from MONITOR, SCREEN,
   HEAT MAPS tiles, SECTORS' contributor bars, EARNINGS movers and the

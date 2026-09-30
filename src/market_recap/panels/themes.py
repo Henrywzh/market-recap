@@ -33,7 +33,8 @@ import pandas as pd
 from ..compute import capex as X
 from ..compute import events as E
 from ..compute import themes as T
-from ..sources import adata, altdata, korea_customs, mops, pcpartpicker, sec
+from .. import cache
+from ..sources import adata, altdata, dart, korea_customs, mops, motie, pcpartpicker, releases, sec, yahoo
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, describe_error, history_payload
 from .financials import cik_for
 
@@ -52,8 +53,64 @@ def _next_report(symbol: str, catalysts: dict, reactions: list[dict], as_of: dat
     return {"date": projected.isoformat(), "timing": None, "projected": True} if projected else None
 
 
+def _krx_closes(settings: dict) -> pd.DataFrame:
+    """Korean closes for the Korean bellwethers and KOSPI, kept apart from the
+    US price cache: merged into it, KRX-only sessions would add rows to it."""
+    symbols = [k["yahoo"] for k in settings.get("korean") or []] + [settings.get("korea_index", "^KS11")]
+    return cache.frame("themes", "krx-closes", lambda: yahoo.fetch_closes(symbols, period="5y", use_cache=False),
+                       kind="daily_file")
+
+
+def _korean(settings: dict, key: str, proxy: pd.Series, krx: pd.DataFrame, as_of: date) -> list[dict]:
+    """Korean bellwethers: results dates from DART, their own move on the
+    Korean session that day (beyond KOSPI), and the proxy on the US session
+    of the same date -- the first to trade after a Korean-morning release."""
+    out = []
+    index = krx.get(settings.get("korea_index", "^KS11"))
+    for spec in settings.get("korean") or []:
+        if spec.get("group") != key:
+            continue
+        entry = {"symbol": spec["label"], "listing": spec["yahoo"], "in_universe": False, "reports": 0,
+                 "impact": None, "own_mean_abs": None, "last": None, "next": None}
+        try:
+            filings = dart.results(spec["dart"], as_of)
+        except Exception as exc:  # noqa: BLE001 - a refused search leaves the row, with why
+            entry["error"] = describe_error(exc)
+            out.append(entry)
+            continue
+        own, follow, moves = [], [], []
+        close = krx.get(spec["yahoo"])
+        for f in filings[:8]:
+            day = pd.Timestamp(f["date"])
+            if close is None or index is None or day not in close.dropna().index:
+                continue
+            c, i = close.dropna(), index.dropna()
+            pos, ipos = c.index.get_loc(day), i.index.get_indexer([day])[0]
+            if pos == 0 or ipos <= 0:
+                continue
+            move = 100 * (c.iloc[pos] / c.iloc[pos - 1] - 1)
+            excess = move - 100 * (i.iloc[ipos] / i.iloc[ipos - 1] - 1)
+            us = proxy[proxy.index >= day].dropna()
+            follower = float(us.iloc[0]) if not us.empty and (us.index[0] - day).days <= 4 else None
+            own.append(excess)
+            follow.append(follower)
+            moves.append({"date": f["date"], "move_pct": round(move, 2), "excess_pct": round(excess, 2),
+                          "proxy_pct": None if follower is None else round(follower, 2), "url": f["url"]})
+        entry["reports"] = len(moves)
+        entry["impact"] = E.co_move(own, follow, min_reports=int(settings.get("min_reports", 4)))
+        entry["own_mean_abs"] = round(sum(abs(m["move_pct"]) for m in moves) / len(moves), 2) if moves else None
+        if moves:
+            entry["last"] = {"date": moves[0]["date"], "session": moves[0]["date"], "move_pct": moves[0]["move_pct"],
+                             "proxy_pct": moves[0]["proxy_pct"]}
+        projected = T.project_next([date.fromisoformat(f["date"]) for f in filings], as_of)
+        entry["next"] = {"date": projected.isoformat(), "timing": None, "projected": True} if projected else None
+        entry["source_url"] = filings[0]["url"] if filings else None
+        out.append(entry)
+    return out
+
+
 def _group(ctx, spec: dict, settings: dict, catalysts: dict, evidence: dict, excess: pd.DataFrame,
-           market: pd.Series, as_of: date) -> dict:
+           market: pd.Series, as_of: date, krx: pd.DataFrame | None = None) -> dict:
     names = evidence.get("names") or {}
     etf = spec.get("etf")
     basket = list(spec.get("basket") or [])
@@ -95,13 +152,18 @@ def _group(ctx, spec: dict, settings: dict, catalysts: dict, evidence: dict, exc
                      if not proxy.empty else None} if last else None,
         })
 
+    if krx is not None and not krx.empty:
+        proxy = excess[etf] if etf and etf in excess.columns else T.basket_excess(excess, basket)
+        bellwethers += _korean(settings, spec["key"], proxy, krx, as_of)
+
     end = (as_of + timedelta(days=int(settings.get("calendar_days", 42)))).isoformat()
     calendar = []
     for b in bellwethers:
         n = b["next"]
         if n and as_of.isoformat() < n["date"] <= end:
             calendar.append({"date": n["date"], "kind": "earnings", "symbol": b["symbol"], "timing": n["timing"],
-                             "projected": n["projected"], "beta": (b["impact"] or {}).get("beta")})
+                             "projected": n["projected"], "beta": (b["impact"] or {}).get("beta"),
+                             "listing": b.get("listing")})
     patterns = [re.compile(p, re.I) for p in spec.get("macro") or []]
     for e in catalysts.get("events") or []:
         if e.get("lane") == "macro" and as_of.isoformat() < e["date"] <= end and any(p.search(e["title"]) for p in patterns):
@@ -170,6 +232,41 @@ def _capex(ctx, settings: dict) -> dict:
         t["yoy_pct"] = round(100 * (t["capex_bn"] / prior["capex_bn"] - 1), 1) if prior and t["complete"] and prior["complete"] else None
     latest_filed = max((q["filed"] for c in companies for q in c["quarters"]), default=None)
     return {"companies": companies, "totals": rows, "latest_filed": latest_filed}
+
+
+NVDA_DC = r"Data Center (?:quarterly )?revenue (?:was|of) \$([\d.]+) billion[^.]*?up ([\d,]+)% from a year ago"
+NVDA_REVENUE = r"Revenue (?:was|of) \$([\d.]+) billion[^•]*?up ([\d,]+)% from a year ago"
+NVDA_OUTLOOK = r"Revenue is expected to be \$([\d.]+) billion"
+
+
+def _nvda(settings: dict) -> dict:
+    """NVIDIA's data-center revenue and next-quarter outlook, from its releases."""
+    cik = cik_for("NVDA", sec.fetch_ticker_cik_map())
+    rows = []
+    for r in releases.recent(cik, int(settings.get("nvda_quarters", 8))):
+        dc, total, outlook = (releases.first(p, r["text"]) for p in (NVDA_DC, NVDA_REVENUE, NVDA_OUTLOOK))
+        rows.append({"filed": r["filed"], "url": r["url"],
+                     "dc_bn": float(dc[0]) if dc else None, "dc_yoy_pct": float(dc[1].replace(",", "")) if dc else None,
+                     "revenue_bn": float(total[0]) if total else None,
+                     "revenue_yoy_pct": float(total[1].replace(",", "")) if total else None,
+                     "outlook_bn": float(outlook[0]) if outlook else None})
+    if not any(r["dc_bn"] for r in rows):
+        raise RuntimeError("no Data Center revenue line matched in the releases")
+    return {"quarters": sorted(rows, key=lambda r: r["filed"])}
+
+
+def _guidance(settings: dict) -> dict:
+    """What each filer's last two releases say about capex ahead, quoted."""
+    cik_map = sec.fetch_ticker_cik_map()
+    out = []
+    for ticker in settings.get("capex_filers") or []:
+        cik = cik_for(ticker, cik_map)
+        if not cik:
+            continue
+        items = [{"filed": r["filed"], "url": r["url"], "statements": releases.guidance(r["text"])}
+                 for r in releases.recent(cik, 2)]
+        out.append({"symbol": ticker, "releases": items})
+    return {"companies": out}
 
 
 def _tw_revenue(codes: dict, months: int, as_of: date) -> list[dict]:
@@ -264,6 +361,14 @@ def _korea(as_of: date) -> dict:
             "due": T.monthly_due(latest, 15, as_of)}
 
 
+def _korea_flash(as_of: date) -> dict:
+    rows, failed = motie.fetch(as_of)
+    if not rows:
+        raise RuntimeError("; ".join(failed) or "no release read")
+    latest = rows[-1]["month"]
+    return {"months": rows, "failed": failed, "due": T.monthly_due(latest, 1, as_of), "page": motie.LIST_URL}
+
+
 def _family(title: str) -> str:
     return next((key for key in ("DDR5", "DDR4", "AMD", "Intel") if title.startswith(key)), "other")
 
@@ -305,10 +410,16 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     etfs = [s for s in {*settings.get("etfs", []), *(g.get("etf") for g in settings["groups"] if g.get("etf"))}
             if s in ctx.etf_closes.columns]
     excess = E.daily_excess(pd.concat([ctx.closes, ctx.etf_closes[etfs]], axis=1), market)
-    groups = [_group(ctx, spec, settings, catalysts, evidence, excess, market, as_of) for spec in settings["groups"]]
+    try:
+        krx = _krx_closes(settings) if settings.get("korean") else None
+    except Exception:
+        krx = None
+    groups = [_group(ctx, spec, settings, catalysts, evidence, excess, market, as_of, krx) for spec in settings["groups"]]
 
     cloud = {
         "capex": _section(lambda: _capex(ctx, settings)),
+        "guidance": _section(lambda: _guidance(settings)),
+        "nvda": _section(lambda: _nvda(settings)),
         "odm": _section(lambda: _tw_revenue(settings["tw_cloud"], int(settings.get("tw_months", 37)), as_of)),
         "openrouter": _section(lambda: _openrouter(settings, as_of)),
         "ramp": _section(_ramp),
@@ -316,6 +427,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     semis = {
         "tw": _section(lambda: _tw_revenue(settings["tw_semis"], int(settings.get("tw_months", 37)), as_of)),
         "korea": _section(lambda: _korea(as_of)),
+        "korea_flash": _section(lambda: _korea_flash(as_of)),
         "adata": _section(lambda: {"notes": adata.fetch_recent(as_of, 6)}),
         "pcpp": _section(_pcpp),
     }
@@ -324,7 +436,60 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     for g in groups:
         g["calendar"].sort(key=lambda e: (e["date"], {"data": 0, "macro": 1, "earnings": 2}[e["kind"]]))
     return {"as_of": ctx.as_of, "calendar_days": int(settings.get("calendar_days", 42)), "groups": groups,
+            "heatmap": _heatmap(catalysts, as_of, int(settings.get("heatmap_days", 21))),
+            "membership": _membership(ctx, settings, excess),
+            "member_corr": float(settings.get("member_corr", 0.55)),
             "cloud": cloud, "semis": semis}
+
+
+def _heatmap(catalysts: dict, as_of: date, days: int) -> dict:
+    """S&P 500 weight reporting, by GICS sector and session, over the next ``days``."""
+    end = (as_of + timedelta(days=days)).isoformat()
+    events = [e for e in catalysts.get("events") or [] if e.get("event_type") == "earnings"
+              and as_of.isoformat() < e["date"] <= end and (e.get("index_weights") or {}).get("SPX")]
+    dates = sorted({e["date"] for e in events})
+    sectors = sorted({e.get("sector") or "Other" for e in events})
+    cells: dict[tuple[str, str], dict] = {}
+    for e in events:
+        cell = cells.setdefault((e.get("sector") or "Other", e["date"]), {"weight": 0.0, "names": []})
+        cell["weight"] += e["index_weights"]["SPX"]
+        cell["names"].append((e["symbol"], e["index_weights"]["SPX"]))
+    rows = []
+    for sector in sectors:
+        row = []
+        for day in dates:
+            c = cells.get((sector, day))
+            row.append(None if not c else {"w": round(c["weight"], 3),
+                                           "top": [n for n, _ in sorted(c["names"], key=lambda x: -x[1])[:4]],
+                                           "n": len(c["names"])})
+        rows.append({"sector": sector, "cells": row, "total": round(sum(c["w"] for c in row if c), 2)})
+    return {"dates": dates, "rows": sorted(rows, key=lambda r: -r["total"]),
+            "day_totals": [round(sum((r["cells"][i] or {}).get("w", 0) for r in rows), 2) for i in range(len(dates))]}
+
+
+def _membership(ctx, settings: dict, excess: pd.DataFrame) -> dict:
+    """Which themes each name belongs to: named in the config (bellwether or
+    basket), or trading with the theme's proxy (daily excess-return
+    correlation over the last year at or above ``member_corr``)."""
+    threshold = float(settings.get("member_corr", 0.55))
+    recent = excess.iloc[-252:]
+    out: dict[str, list[dict]] = {}
+    for spec in settings["groups"]:
+        etf, basket = spec.get("etf"), list(spec.get("basket") or [])
+        named = set(spec.get("bellwethers") or []) | set(basket)
+        proxy = recent[etf] if etf and etf in recent.columns else T.basket_excess(recent, basket)
+        if proxy.dropna().empty:
+            continue
+        names = recent[[c for c in ctx.closes.columns if c in recent.columns]]
+        overlap = names.notna().mul(proxy.notna(), axis=0).sum()
+        corr = names.corrwith(proxy).where(overlap >= 150)        # too little shared history: no reading
+        for symbol in set(corr[corr >= threshold].index) | (named & set(ctx.closes.columns)):
+            value = corr.get(symbol)
+            out.setdefault(symbol, []).append({
+                "key": spec["key"], "label": spec["label"],
+                "role": "bellwether" if symbol in (spec.get("bellwethers") or []) else "basket" if symbol in basket else "trades with",
+                "corr": None if value is None or pd.isna(value) else round(float(value), 2)})
+    return out
 
 
 def _data_dates(groups: list[dict], cloud: dict, semis: dict, as_of: date, settings: dict) -> None:
@@ -343,6 +508,8 @@ def _data_dates(groups: list[dict], cloud: dict, semis: dict, as_of: date, setti
         add("semis", f"{series['label']} monthly revenue", series.get("due"))
     korea = semis.get("korea") or {}
     add("semis", "Korea IC exports (customs, confirmed)", korea.get("due"))
+    flash = semis.get("korea_flash") or {}
+    add("semis", "Korea exports, 1st-of-month release (semis first)", flash.get("due"))
 
 
 def _log(ctx, cloud: dict, semis: dict) -> None:
@@ -355,6 +522,9 @@ def _log(ctx, cloud: dict, semis: dict) -> None:
     record("sec_capex", "Cloud capex (SEC XBRL 10-Q/10-K)", "https://www.sec.gov/edgar/search/", capex,
            None if "unavailable" in capex else max((c["quarters"][-1]["end"] for c in capex["companies"] if c["quarters"]), default=None),
            "quarterly_filing")
+    nv = cloud["nvda"]
+    record("sec_releases", "Earnings releases (8-K Ex. 99.1): NVIDIA Data Center, capex guidance", "https://www.sec.gov/edgar/search/", nv,
+           None if "unavailable" in nv else nv["quarters"][-1]["filed"], "quarterly_filing")
     odm = cloud["odm"]
     record("mops_revenue", "Taiwan monthly revenue (MOPS)", mops.PAGE_URL, odm if isinstance(odm, dict) else {},
            None if isinstance(odm, dict) else max((s["months"][-1]["month"] + "-01" for s in odm if s["months"]), default=None),
@@ -368,6 +538,9 @@ def _log(ctx, cloud: dict, semis: dict) -> None:
     korea = semis["korea"]
     record("korea_customs", "Korea Customs IC exports (HS 8542)", korea_customs.HOME_URL, korea,
            None if "unavailable" in korea else (korea["months"][-1]["month"] + "-01" if korea["months"] else None), "monthly_release")
+    flash = semis["korea_flash"]
+    record("motie_trade", "Korea monthly trade release (MOTIE, 1st of month)", motie.LIST_URL, flash,
+           None if "unavailable" in flash else flash["months"][-1]["month"] + "-01", "monthly_release")
     notes = semis["adata"]
     record("adata_market_watch", "ADATA Memory & Flash Market Watch", "https://industrial.adata.com/en/edm", notes,
            None if "unavailable" in notes or not notes["notes"] else notes["notes"][0]["month"] + "-01", "monthly_release")
