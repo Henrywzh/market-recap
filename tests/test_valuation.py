@@ -248,3 +248,105 @@ def test_pe_series_blanks_an_eps_in_the_wrong_units():
     pe = V.pe_series(prices, steps)
     assert np.isnan(pe.iloc[0])
     assert pe.iloc[1] == 20.0
+
+
+# --- Operating P/E ----------------------------------------------------------------
+
+def _quarter(filed, eps, **core):
+    """One eps_history entry with a single-part TTM EPS and its core inputs."""
+    base = {"ebit": None, "interest_expense": None, "pretax_income": None, "taxes": None, "net_income": None,
+            "equity_gains": None, "minority_share": None, "profit_loss": None, "parent_income": None,
+            "shares": 10.0, "shares_filed": filed}
+    return {"period_end": filed, "filed": filed, "parts": [(eps, filed, 1)], "core": base | core}
+
+
+def test_a_quarterly_report_never_replaces_the_annual_reports_year():
+    """Comfort Systems' Q1 10-Q tagged Q1 2025 as the whole of 2025."""
+    rows = [
+        {"form": "10-K", "start": "2025-01-01", "end": "2025-12-31", "val": 1314.0, "filed": "2026-02-19"},
+        {"form": "10-Q", "start": "2025-01-01", "end": "2025-12-31", "val": 209.0, "filed": "2026-04-23"},
+    ]
+    facts = {"facts": {"us-gaap": {"OperatingIncomeLoss": {"units": {"USD": rows}}}}}
+    item = sec.ITEMS_BY_KEY["ebit"]
+    key = ("2025-01-01", "2025-12-31")
+    assert sec._period_values(facts, item, ())[key]["value"] == 1314.0
+    assert sec._vintages(facts, item, ["2026-05-01"])["2026-05-01"][key]["value"] == 1314.0
+
+
+def test_vintages_match_period_values_as_of_each_day():
+    rows = [
+        {"form": "10-K", "start": "2024-01-01", "end": "2024-12-31", "val": 8.0, "filed": "2025-02-01"},
+        {"form": "10-Q", "start": "2025-01-01", "end": "2025-03-31", "val": 3.0, "filed": "2025-05-01"},
+        {"form": "10-K", "start": "2024-01-01", "end": "2024-12-31", "val": 7.5, "filed": "2026-02-01"},
+    ]
+    facts = {"facts": {"us-gaap": {"NetIncomeLoss": {"units": {"USD": rows}}}}}
+    item = sec.ITEMS_BY_KEY["net_income"]
+    days = ["2025-01-01", "2025-02-01", "2025-06-01", "2026-03-01"]
+    vintages = sec._vintages(facts, item, days)
+    for day in days:
+        expected = {k: v["value"] for k, v in sec._period_values(facts, item, (), filed_by=day).items()}
+        assert {k: v["value"] for k, v in vintages[day].items()} == expected
+
+
+def test_tax_rate_is_a_median_that_one_charge_does_not_move():
+    history = [_quarter(f"2025-0{i}-01", 1.0, taxes=20.0, pretax_income=100.0) for i in range(1, 6)]
+    history.append(_quarter("2025-07-01", 1.0, taxes=90.0, pretax_income=100.0))   # a one-off charge
+    assert V.tax_rates(history)[-1] == pytest.approx(0.20)
+    # No positive pre-tax income: the federal rate; an extreme rate is bounded.
+    assert V.tax_rates([_quarter("2025-01-01", -1.0, taxes=5.0, pretax_income=-10.0)]) == [V.DEFAULT_TAX_RATE]
+    assert V.tax_rates([_quarter("2025-01-01", 1.0, taxes=60.0, pretax_income=100.0)]) == [V.TAX_RATE_BOUNDS[1]]
+
+
+def test_operating_eps_takes_out_a_stake_gain_but_keeps_interest():
+    """Alphabet's shape: pre-tax far above operating income on equity gains."""
+    q = _quarter("2026-07-23", 20.0, ebit=150.0, interest_expense=2.0, pretax_income=300.0, taxes=40.0,
+                 net_income=200.0)
+    step = V.operating_steps([q], None, V.OPERATING)[0]
+    rate = 40.0 / 300.0
+    assert step["eps"] == pytest.approx((150.0 - 2.0) * (1 - rate) / 10.0)
+    assert step["removed"] == pytest.approx(20.0 - step["eps"])
+
+
+def test_operating_eps_keeps_losses_below_the_line_and_odd_interest_signs():
+    # Pre-tax below operating income less interest: the loss stays (Disney's
+    # operating line is its segment total; Charter tags no interest at all).
+    loss = _quarter("2026-01-01", 5.0, ebit=180.0, interest_expense=-18.0, pretax_income=120.0, taxes=30.0)
+    no_interest = _quarter("2026-01-01", 5.0, ebit=126.0, pretax_income=75.0, taxes=18.0)
+    for q in (loss, no_interest):
+        rate = q["core"]["taxes"] / q["core"]["pretax_income"]
+        assert V.operating_steps([q], None, V.OPERATING)[0]["eps"] == pytest.approx(
+            q["core"]["pretax_income"] * (1 - rate) / 10.0)
+
+
+def test_operating_eps_is_the_parents_share():
+    q = _quarter("2026-01-01", 2.0, ebit=100.0, pretax_income=100.0, taxes=20.0, profit_loss=80.0, parent_income=40.0)
+    assert V.operating_steps([q], None, V.OPERATING)[0]["eps"] == pytest.approx((80.0 - 40.0) / 10.0)
+    q["core"]["minority_share"] = 30.0     # the direct tag wins
+    assert V.operating_steps([q], None, V.OPERATING)[0]["eps"] == pytest.approx((80.0 - 30.0) / 10.0)
+
+
+def test_share_count_in_the_wrong_units_is_replaced_by_the_implied_one():
+    """Waters tagged 98.2 billion diluted shares for 98.2 million."""
+    q = _quarter("2026-08-11", 2.0, ebit=100.0, pretax_income=100.0, taxes=20.0, net_income=80.0, shares=40_000.0)
+    assert V.operating_steps([q], None, V.OPERATING)[0]["eps"] == pytest.approx(80.0 / 40.0)
+
+
+def test_financials_and_utilities_are_reported_less_equity_gains():
+    q = _quarter("2026-01-01", 10.0, ebit=None, pretax_income=100.0, taxes=20.0, equity_gains=25.0)
+    for sector in (V.FINANCIALS_SECTOR, "Utilities"):
+        assert V.operating_basis([q], sector) == V.EX_GAINS
+    assert V.operating_basis([q], "Industrials") == V.EX_GAINS          # no operating line filed
+    q["core"]["ebit"] = 90.0
+    assert V.operating_basis([q], "Industrials") == V.OPERATING
+    step = V.operating_steps([q], None, V.EX_GAINS)[0]
+    assert step["eps"] == pytest.approx(10.0 - 25.0 * (1 - 0.2) / 10.0)
+
+
+def test_operating_share_count_follows_a_split_after_its_filing():
+    import pandas as pd
+
+    splits = pd.Series([4.0], index=[pd.Timestamp("2026-03-01")])
+    q = _quarter("2026-01-15", 8.0, ebit=100.0, pretax_income=100.0, taxes=20.0)
+    step = V.operating_steps([q], splits, V.OPERATING)[0]
+    assert step["reported"] == pytest.approx(2.0)
+    assert step["eps"] == pytest.approx(80.0 / 40.0)

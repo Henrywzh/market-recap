@@ -616,8 +616,26 @@ MAX_DILUTED_TO_COVER = 20
 COVER_SHARES_TAG = "EntityCommonStockSharesOutstanding"
 
 
+@lru_cache(maxsize=None)
+def _ordinal(day: str) -> int:
+    return date.fromisoformat(str(day)[:10]).toordinal()
+
+
 def _days(earlier: str, later: str) -> int:
-    return (pd.Timestamp(later) - pd.Timestamp(earlier)).days
+    # Tens of thousands of calls per filer as a decade of quarters is rebuilt
+    # as then filed; a filing's dates repeat, so each is parsed once.
+    return _ordinal(later) - _ordinal(earlier)
+
+
+def _form_rank(key: tuple[str | None, str], form: str | None) -> int:
+    """0 unless a quarterly report claims a whole year. A 10-Q has no year to
+    report; Comfort Systems' 2026 Q1 10-Q tagged its Q1 2025 operating income
+    as the whole of 2025, and as the later filing it replaced the 10-K's."""
+    start, end = key
+    if start is None or form in ANNUAL_FORMS:
+        return 0
+    low, high = ANNUAL_SPAN_DAYS
+    return 1 if low <= _days(start, end) <= high else 0
 
 
 def _period_values(
@@ -638,11 +656,10 @@ def _period_values(
             key, filed = (start, row["end"]), row.get("filed") or ""
             if filed_by is not None and filed > filed_by:
                 continue
+            rank = (priority, _form_rank(key, row.get("form")))
             current = picked.get(key)
-            if current is None or priority < current["priority"] or (
-                priority == current["priority"] and filed >= current["filed"]
-            ):
-                picked[key] = {"value": row["val"], "filed": filed, "priority": priority}
+            if current is None or rank < current["rank"] or (rank == current["rank"] and filed >= current["filed"]):
+                picked[key] = {"value": row["val"], "filed": filed, "priority": priority, "rank": rank}
     if item.unit in PER_SHARE_UNITS:
         for entry in picked.values():
             factor = math.prod(ratio for last_old, ratio in splits if entry["filed"] <= last_old)
@@ -697,6 +714,34 @@ def trailing_parts(periods: dict, end: str) -> list[tuple[dict, int]] | None:
     return [(ytd, 1), (last_year, 1), (prior_ytd, -1)]
 
 
+def _vintages(facts: dict, item: LineItem, dates) -> dict[str, dict]:
+    """``_period_values(facts, item, (), filed_by=d)`` for every date in
+    ``dates``, read in one pass over the filings in date order: a decade of
+    quarters, each seeing only what had been filed by its own day."""
+    gaap = facts.get("facts", {}).get("us-gaap", {})
+    rows = []
+    for priority, tag in enumerate(item.tags):
+        for row in gaap.get(tag, {}).get("units", {}).get(item.unit, []):
+            if row.get("form") not in QUARTERLY_FORMS or row.get("end") is None or row.get("val") is None:
+                continue
+            start = row.get("start")
+            if item.instant != (start is None):
+                continue
+            key = (start, row["end"])
+            rows.append((row.get("filed") or "", (priority, _form_rank(key, row.get("form"))), key, row["val"]))
+    rows.sort(key=lambda r: r[0])
+    out, picked, i = {}, {}, 0
+    for day in sorted(set(dates)):
+        while i < len(rows) and rows[i][0] <= day:
+            filed, rank, key, value = rows[i]
+            i += 1
+            current = picked.get(key)
+            if current is None or rank < current["rank"] or (rank == current["rank"] and filed >= current["filed"]):
+                picked[key] = {"value": value, "filed": filed, "priority": rank[0], "rank": rank}
+        out[day] = dict(picked)
+    return out
+
+
 def eps_history(facts: dict) -> list[dict]:
     """TTM diluted EPS for every reported quarter, as it was known when first filed.
 
@@ -704,7 +749,8 @@ def eps_history(facts: dict) -> list[dict]:
     that quarter was first reported, so a valuation history read from it never
     sees a number before it was public. Its parts are returned with their own
     filing dates and on the share basis of that date; the caller puts them on
-    today's basis with the split record.
+    today's basis with the split record. ``core`` carries what an operating
+    P/E is built from, known on the same day.
     """
     item = ITEMS_BY_KEY["eps_diluted"]
     first_filed: dict[str, str] = {}
@@ -712,17 +758,56 @@ def eps_history(facts: dict) -> list[dict]:
         for row in facts.get("facts", {}).get("us-gaap", {}).get(tag, {}).get("units", {}).get(item.unit, []):
             if row.get("form") in QUARTERLY_FORMS and row.get("start") and row.get("end") and row.get("filed"):
                 first_filed[row["end"]] = min(first_filed.get(row["end"], row["filed"]), row["filed"])
+    days = set(first_filed.values())
+    eps = _vintages(facts, item, days)
+    core = {key: _vintages(facts, ITEMS_BY_KEY[key], days) for key in CORE_KEYS + ("shares",)}
+    core |= {item.key: _vintages(facts, item, days) for item in CORE_EXTRA}
     history = []
     for end in sorted(first_filed):
-        periods = _period_values(facts, item, (), filed_by=first_filed[end])
-        parts = trailing_parts(periods, end)
+        filed = first_filed[end]
+        parts = trailing_parts(eps[filed], end)
         if parts:
             history.append({
                 "period_end": end,
-                "filed": first_filed[end],
+                "filed": filed,
                 "parts": [(entry["value"], entry["filed"], sign) for entry, sign in parts],
+                "core": core_inputs({key: vintage[filed] for key, vintage in core.items()}, end),
             })
     return history
+
+
+# What an operating P/E is built from, beside the reported EPS: the operating
+# line, the interest paid on debt, pre-tax income and tax (for the company's
+# own tax rate), and the gains on equity holdings a financial company's net
+# income is cleaned of. Kept apart from LINE_ITEMS -- the statements tab does
+# not show them as lines.
+CORE_KEYS = ("ebit", "interest_expense", "pretax_income", "taxes", "net_income")
+# Minority holders' share: tagged directly, or the gap between net income
+# before and after it (TKO tags only the two totals).
+CORE_EXTRA = (
+    LineItem("equity_gains", "Gains on equity securities", ("EquitySecuritiesFvNiGainLoss",), "income"),
+    LineItem("minority_share", "Net income to non-controlling interests",
+             ("NetIncomeLossAttributableToNoncontrollingInterest",), "income"),
+    LineItem("profit_loss", "Net income including non-controlling interests", ("ProfitLoss",), "income"),
+    LineItem("parent_income", "Net income to the parent", ("NetIncomeLoss",), "income"),
+)
+# A share count is an average over a period; anything shorter is a stub.
+MIN_SHARE_PERIOD_DAYS = 80
+
+
+def core_inputs(periods: dict[str, dict], end: str) -> dict:
+    """TTM figures ending at ``end`` from each item's periods as then filed,
+    and that period's diluted share count with its own filing date (the caller
+    puts it on today's share basis). A figure that cannot be built is None."""
+    out = {key: trailing_value(periods[key], end)[0] for key in CORE_KEYS + tuple(i.key for i in CORE_EXTRA)}
+    # The shortest period ending at ``end`` is the latest count: the quarter's,
+    # or the year's in a 10-K that reports no fourth quarter.
+    shares = periods["shares"]
+    spans = [k for k in shares if k[0] is not None and k[1] == end and _days(k[0], end) >= MIN_SHARE_PERIOD_DAYS]
+    entry = shares[min(spans, key=lambda k: _days(k[0], k[1]))] if spans else None
+    out["shares"] = entry["value"] if entry else None
+    out["shares_filed"] = entry["filed"] if entry else None
+    return out
 
 
 def _instant_near(periods: dict, end: str) -> float | None:
@@ -815,6 +900,9 @@ class Filer:
     rows: tuple
     trailing: dict | None
     eps_history: tuple = ()
+    # {end, value, filed} per fiscal quarter: the scale a release's revenue
+    # guidance is checked against.
+    quarterly_revenue: tuple = ()
 
 
 @lru_cache(maxsize=None)
@@ -834,7 +922,18 @@ def filer(cik: int, use_cache: bool = True) -> Filer:
         rows=tuple(rows),
         trailing=trailing_snapshot(facts) if rows else None,
         eps_history=tuple(eps_history(facts)) if rows else (),
+        quarterly_revenue=tuple(_quarterly_revenue(facts)) if rows else (),
     )
+
+
+def _quarterly_revenue(facts: dict) -> list[dict]:
+    """Revenue per fiscal quarter, from the revenue tag reported most recently
+    (filers move between tags; the one still in use is the one that counts)."""
+    from ..compute.capex import quarterly
+
+    series = [quarterly(facts, tag) for tag in ITEMS_BY_KEY["revenue"].tags]
+    best = max((found for found in series if found), key=lambda found: found[-1]["end"], default=[])
+    return [{"end": q["end"], "value": q["value"], "filed": q["filed"]} for q in best]
 
 
 def unextracted_reason(taxonomies) -> str:
@@ -881,6 +980,41 @@ def submissions_recent(cik: int, *, use_cache: bool = True) -> dict:
         compress=True,
     )
     return json.loads(text).get("filings", {}).get("recent", {})
+
+
+OLDER_URL = "https://data.sec.gov/submissions/{name}"
+
+
+def _submissions(cik: int, use_cache: bool) -> dict:
+    text = cache.fetch_text(f"{NAMESPACE}/submissions", f"CIK{cik:010d}",
+                            lambda: _get(SUBMISSIONS_URL.format(cik=cik), 45.0),
+                            kind="daily_file", suffix=".json", use_cache=use_cache, compress=True)
+    return json.loads(text)
+
+
+def submissions_until(cik: int, enough, *, since: str, use_cache: bool = True) -> dict:
+    """The recent block extended with older pages until ``enough(block)`` holds
+    or the pages reach back past ``since``.
+
+    SEC's recent block is the last 1,000 filings or the last year, whichever
+    is more. For a bank that files thousands of structured-note prospectuses
+    a year, that is four earnings releases; the rest are in dated pages. A
+    page is cached under the date range it covers, so SEC renumbering its
+    pages as new filings arrive never serves a page under the wrong dates.
+    """
+    payload = _submissions(cik, use_cache)
+    block = {k: list(v) for k, v in payload.get("filings", {}).get("recent", {}).items()}
+    for page in sorted(payload.get("filings", {}).get("files") or [], key=lambda f: f.get("filingTo", ""), reverse=True):
+        if enough(block) or page.get("filingTo", "") < since:
+            break
+        name = page["name"]
+        text = cache.fetch_text(f"{NAMESPACE}/submissions-older", f"CIK{cik:010d}-{page.get('filingFrom')}-{page.get('filingTo')}",
+                                lambda: _get(OLDER_URL.format(name=name), 60.0),
+                                kind="archive", suffix=".json", use_cache=use_cache, compress=True)
+        older = json.loads(text)
+        for key in block:
+            block[key].extend(older.get(key) or [None] * len(older.get("form") or []))
+    return block
 
 
 def fetch_form4(cik: int, accession: str, primary_document: str, *, use_cache: bool = True) -> str:

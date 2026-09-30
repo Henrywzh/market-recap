@@ -83,12 +83,29 @@ function pricedStats(c) {
   const indices = Object.entries(impact.indices || {}).sort((a, b) => b[1].points_pct - a[1].points_pct);
   return [
     stat('IMPLIED MOVE', implied ? `±${num(implied.straddle_pct, 1)}%` : DASH,
-      implied ? `straddle to ${implied.expiry} · ${implied.snapshot_day} snapshot` : 'not in the options snapshot'),
+      implied ? `straddle to ${implied.expiry} · ${implied.snapshot_day} snapshot` : 'no straddle expiring within a week of the report in the snapshot'),
     stat(`AVG |MOVE| · LAST ${p.reports || 0}`, p.mean_abs ? `±${num(p.mean_abs, 1)}%` : DASH,
       p.reports ? `median ±${num(p.median_abs, 1)}% · up ${p.up} of ${p.reports}${p.beat_implied !== null && p.beat_implied !== undefined ? ` · ${p.beat_implied} beat today's implied` : ''}` : 'no 8-K releases on file'),
     stat('INDEX IMPACT', indices.length ? indices.map(([k, v]) => `${k} ±${num(v.points_pct, 2)}%`).join(' ') : DASH,
       indices.length ? `weight × ${impact.basis} move ±${num(impact.move_pct, 1)}% · ${indices.map(([k, v]) => `${k} ${num(v.weight, 2)}%`).join(', ')}` : 'not an index member'),
   ];
+}
+
+// Where the street sits against the range the company itself gave for this
+// quarter at its last report: above the top of it is a high bar.
+function guideStats(c) {
+  const g = c.vs_guide;
+  if (!g) return [];
+  const fmt = (key, v) => (key === 'revenue' ? billions(v) : num(v));
+  return Object.entries(g).map(([key, x]) => stat(`${key === 'eps' ? 'EPS' : 'REVENUE'} VS OWN GUIDE`,
+    `${x.vs_mid_pct > 0 ? '+' : ''}${num(x.vs_mid_pct, 1)}%`,
+    `consensus ${fmt(key, x.consensus)} vs guide ${fmt(key, x.low)}–${fmt(key, x.high)} · ${x.position} the range`,
+    x.position === 'above' ? 'warn' : x.position === 'below' ? 'up' : ''));
+}
+
+function guideTag(c) {
+  const above = Object.entries(c.vs_guide || {}).filter(([, x]) => x.position === 'above').map(([k]) => (k === 'eps' ? 'EPS' : 'REV'));
+  return above.length ? tag(`STREET ABOVE GUIDE · ${above.join(' + ')}`, 'warn', 'consensus above the top of the range the company gave last quarter') : null;
 }
 
 function setupStats(c) {
@@ -145,12 +162,14 @@ export function eventCard(payload, asOf, { compact = false } = {}) {
   const c = payload.card;
   if (!c) return null;
   const title = compact ? `${payload.symbol} · ${(payload.name || '').toUpperCase()}` : 'NEXT REPORT · EVENT CARD';
-  const right = el('span', { class: 'tag-row' }, [whenTag(c, asOf), pricedTag(c.priced),
+  const right = el('span', { class: 'tag-row' }, [whenTag(c, asOf), pricedTag(c.priced), guideTag(c),
     el('span', { class: 'dim', text: `${c.date} · reacts ${c.reaction_session || DASH}` })]);
   const rt = payload.readthrough || {};
   const body = [
     el('div', { class: 'stat-strip event-stats' }, [...consensusStats(c), ...pricedStats(c), ...(compact ? [] : setupStats(c))]),
   ];
+  const bar = compact ? [] : guideStats(c);
+  if (bar.length) body.push(el('div', { class: 'stat-strip event-stats' }, bar));
   if (compact) {
     const peers = (rt.with || []).slice(0, 4);
     body.push(el('div', { class: 'tag-row event-peers' }, [
@@ -207,6 +226,122 @@ export function outcomeCard(payload, { compact = false } = {}) {
     ]);
   }
   return card('LAST REPORT · OUTCOME', right, [stats, peers ? el('div', { class: 'card-title', text: 'READ-THROUGH ON THE SESSION' }) : null, peers]);
+}
+
+// --- Report history, revisions, the industry since the last report, filings ---
+
+function signed(v, digits = 1, unit = '%') {
+  return v === null || v === undefined ? DASH : `${v > 0 ? '+' : ''}${num(v, digits)}${unit}`;
+}
+
+function guideText(g) {
+  if (!g) return DASH;
+  const parts = [];
+  if (g.revenue_low !== undefined) {
+    parts.push(`rev ${g.revenue_low === g.revenue_high ? billions(g.revenue_low) : `${billions(g.revenue_low)}–${billions(g.revenue_high)}`}${g.revenue_horizon === 'year' ? ' FY' : ''}`);
+  } else if (g.revenue_growth_low !== undefined) {
+    parts.push(`rev +${num(g.revenue_growth_low, 0)}–${num(g.revenue_growth_high, 0)}%`);
+  }
+  if (g.eps_low !== undefined) parts.push(`EPS ${num(g.eps_low)}–${num(g.eps_high)}${g.eps_horizon === 'year' ? ' FY' : ''}`);
+  if (g.gross_margin_pct !== undefined && g.gross_margin_pct !== null) parts.push(`GM ${num(g.gross_margin_pct, 1)}%`);
+  return parts.join(' · ') || DASH;
+}
+
+function historyLine(sum) {
+  if (!sum || !sum.reports) return null;
+  const parts = [];
+  if (sum.measured) parts.push(`beat EPS consensus ${sum.beats} of ${sum.measured} (median surprise ${signed(sum.median_surprise_pct)})`);
+  if (sum.beat_and_fell) parts.push(`fell on ${sum.beat_and_fell} of those beats`);
+  parts.push(`up vs the S&P on ${sum.up} of ${sum.reports}`);
+  if (sum.drift_measured) parts.push(`the first day's direction held 20 sessions on ${sum.held_20d} of ${sum.drift_measured}`);
+  if (sum.guides_checked) parts.push(`beat its own EPS guide midpoint ${sum.beat_own_guide} of ${sum.guides_checked}`);
+  return parts.join(' · ');
+}
+
+// The last reports: what each was measured against, the guide it gave, how
+// the stock answered and whether that lasted.
+export function historyCard(payload) {
+  const rows = payload.history || [];
+  if (!rows.length) return null;
+  const body = rows.map((r) => {
+    const guideLink = r.guide?.url ? el('a', { href: r.guide.url, target: '_blank', rel: 'noopener', text: guideText(r.guide), title: r.guide.quote || '' }) : null;
+    return el('tr', {}, [
+      el('td', { text: `${r.date} ${(r.timing || '').toUpperCase()}` }),
+      el('td', { class: 'dim', text: r.fiscal_quarter || DASH }),
+      el('td', { text: r.eps === null || r.eps === undefined ? DASH : `${num(r.eps_consensus)} → ${num(r.eps)}` }),
+      el('td', { class: dirClass(r.surprise_pct), text: signed(r.surprise_pct) }),
+      el('td', { class: guideLink ? '' : 'dim' }, [guideLink || (r.guide ? guideText(r.guide) : DASH)]),
+      el('td', { class: dirClass(r.next_eps_vs_guide_pct), text: signed(r.next_eps_vs_guide_pct), title: 'the next quarter\'s EPS against this guide\'s midpoint' }),
+      el('td', { class: dirClass(r.move_pct), text: `${pct(r.move_pct, 1)}${r.excess_pct !== null && r.excess_pct !== undefined ? ` (${signed(r.excess_pct)})` : ''}` }),
+      el('td', { class: dirClass(r.drift_5d), text: signed(r.drift_5d) }),
+      el('td', { class: dirClass(r.drift_20d), text: signed(r.drift_20d) }),
+    ]);
+  });
+  const line = historyLine(payload.history_summary);
+  return card(`LAST ${rows.length} REPORTS`, el('span', { class: 'dim', text: 'EPS vs consensus · the guide each gave · the move and what followed' }), [
+    line ? el('div', { class: 'event-history-line', text: line }) : null,
+    table(['REPORTED', 'QUARTER', 'EPS EST → ACT', 'SURPRISE', 'GUIDE GIVEN', 'NEXT VS GUIDE', 'DAY 1 (VS S&P)', '+5D VS S&P', '+20D VS S&P'], body),
+    el('div', { class: 'field-note', text:
+      'EPS and consensus: Nasdaq\'s calendar on the report day (adjusted EPS). Guide: the figures the earnings release (8-K, EX-99) states for the next period -- '
+      + 'the last figure in a GAAP / non-GAAP row, checked against the company\'s last quarter (a figure far from its scale is dropped; FY marks a full-year guide). '
+      + 'Companies that guide only on the call show none. +5D / +20D: excess return over the S&P 500 from the first session\'s close. Hover a guide for the release\'s wording.' }),
+  ]);
+}
+
+// Consensus now against 7/30/60/90 days ago, per fiscal period.
+export function revisionsCard(payload) {
+  const rows = payload.revisions || [];
+  if (!rows.length) return null;
+  const body = rows.map((r) => el('tr', {}, [
+    el('td', { text: r.label }),
+    el('td', { class: 'dim', text: r.end || DASH }),
+    el('td', { text: num(r.eps) }),
+    ...['7d', '30d', '60d', '90d'].map((w) => el('td', { class: dirClass(r.changes[w]), text: signed(r.changes[w]) })),
+    el('td', { class: 'dim', text: r.up_30d === null && r.down_30d === null ? DASH : `${r.up_30d ?? 0}↑ ${r.down_30d ?? 0}↓` }),
+    el('td', { class: 'dim', text: r.spread_pct === null ? DASH : `${num(r.spread_pct, 0)}%`, title: '(high − low estimate) / consensus' }),
+  ]));
+  return card('ESTIMATE REVISIONS', el('span', { class: 'dim', text: 'consensus EPS now vs days ago · Yahoo' }), [
+    table(['PERIOD', 'ENDS', 'EPS', '7D', '30D', '60D', '90D', 'REVISIONS 30D', 'SPREAD'], body),
+  ]);
+}
+
+function driverValue(unit, v) {
+  if (v === null || v === undefined) return DASH;
+  if (unit === 'pct') return signed(v, 1);
+  if (unit === 'usd') return `$${num(v, 2)}`;
+  if (unit === 'bn') return `${num(v / 1000, 1)}T`;
+  return num(v, 1);
+}
+
+// The industry series of the name's themes: where each stood when the
+// company last reported, where it is now.
+export function sinceCard(payload) {
+  const rows = payload.since || [];
+  if (!rows.length) return null;
+  const last = (payload.history || [])[0]?.date;
+  // Periods on hover: a half-width card has no room for them in the cells.
+  const body = rows.map((r) => el('tr', {}, [
+    el('td', { text: r.label }),
+    el('td', { class: 'dim', text: driverValue(r.unit, r.then.value), title: `${r.then.period}, public ${r.then.available}` }),
+    el('td', { text: driverValue(r.unit, r.now.value), title: `${r.now.period}, public ${r.now.available}` }),
+    el('td', { class: dirClass(r.change_pct ?? r.change_pp), text: r.change_pct !== undefined ? signed(r.change_pct) : signed(r.change_pp, 0, 'pp') }),
+    el('td', { class: 'dim', text: String(r.releases) }),
+  ]));
+  return card(`SINCE THE LAST REPORT${last ? ` · ${last}` : ''}`, el('span', { class: 'dim', text: 'the industry data of its themes' }), [
+    table(['SERIES', 'THEN', 'NOW', 'CHANGE', 'NEW'], body),
+    el('div', { class: 'field-note', text: 'THEN: each series as it was public on the report day (a month\'s figure dates from its publisher\'s release). NOW: its latest. NEW: releases since. y/y series change in pp, levels in %. Hover a value for its period; series and sources are on THEMES.' }),
+  ]);
+}
+
+export function filingsCard(payload) {
+  const rows = payload.filings || [];
+  if (!rows.length) return null;
+  return card('OTHER 8-K FILINGS', el('span', { class: 'dim', text: 'last 120 days · earnings releases left out' }), [
+    table(['FILED', 'WHAT'], rows.map((f) => el('tr', {}, [
+      el('td', { text: f.date }),
+      el('td', {}, [el('a', { href: f.url, target: '_blank', rel: 'noopener', text: f.labels.join(' · ') }), el('span', { class: 'dim', text: ` item ${f.items.join(', ')}` })]),
+    ]))),
+  ]);
 }
 
 function addDays(iso, days) {

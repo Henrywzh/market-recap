@@ -77,13 +77,14 @@ The panels, as each is built:
 | **MARKETS** | A **live intraday strip** (see below), then the recap: SPY/QQQ/IWM quote strip, SPX/NDX drawdown with sessions since the high, advance/decline, a price + net-breadth + movers block for **each index**, a **watchlist** of names no index holds, sector performance / weight / **contribution**, sectors rebased to 100, % of each sector above its moving averages, SMA200 slope by sector |
 | **CATALYSTS → CALENDAR** | Things to watch, in two lanes. **Macro & broad index**: BLS, BEA and Census releases at the time each agency publishes, FOMC decisions / press conferences / minutes and Board speeches from the Fed's calendar, announced Treasury coupon auctions, rule-based events (options expiry and quad witching, S&P rebalance, VIX expiry, jobless claims, ISM, EIA crude inventories) and hand-kept events (elections, deadlines) from the config — each with the previous print from FRED and the period it covers. **Single name**: earnings of every S&P 500 / Nasdaq-100 member and watchlist name with before-open / after-close timing, consensus EPS, estimates and index weight. A **last session** block shows what was released and who reported, with EPS vs. consensus and the day's move. Times in New York and the reader's own zone; every event says how its date is known | High-importance releases (FOMC, CPI, payrolls, GDP) are listed 45 days out. After a release the last-session block shows the actual against the survey point (TradingView).
 | **CATALYSTS → EARNINGS** | S&P 500 earnings in three blocks. **FactSet Earnings Insight** figures read from its articles (growth, beat rates, forward P/E vs its 10-year average, the quarter's and year's EPS revision against FactSet's typical one; history from 2014). A **daily bottom-up revision tracker** built from every member's consensus trend (current quarter, this year and next, 7–90 days, by sector, with the names that moved it). The **reporting season** from Nasdaq's calendar: reported, beat rate, surprise, growth against year-ago EPS captured before each report |
+| **CATALYSTS → THEMES** | Six groups of names that trade together (cloud & AI capex, semiconductors & memory, energy, banks, consumer, housing), each with a proxy (an ETF, or an equal-weight basket) and its run-in against the S&P 500, its bellwethers' next reports (scheduled, or projected from their own rhythm) with how far the proxy moved on their past reports, and a six-week calendar of those reports, the macro releases that bear on it and its own data's due dates. CLOUD adds hyperscaler capex from 10-Q/10-K XBRL, three Taiwanese AI-server makers' monthly revenue, OpenRouter tokens and estimated revenue by model author, and the Ramp AI Index; SEMIS adds TSMC and Nanya monthly revenue, Korean IC exports, ADATA's monthly memory note and UK retail memory/CPU prices read from PCPartPicker's trend charts |
 | **HEAT MAPS** | S&P 500 treemap sized by the **issuer-published SPY weight** and coloured by return; US ETF treemap sized by AUM and coloured by estimated net flow |
 | **RATES & MACRO → FIXED INCOME** | Published par yield curve vs. 1 week / 1 month / start of year, level and bps change by tenor, 10Y−2Y and 10Y−3M spreads |
 | **RATES & MACRO → MACRO** | Commodity futures/ETF proxies with multi-period returns, last 12 monthly inflation releases as a heat table |
 | **TECHNICALS** | Any A/B relative-strength ratio with its moving averages and MACD over a chosen period; single-ticker price with **your own MA periods, slope window and period**, a ±1.5σ band, z-score regime, SMA slope, and forward return by z-score band. Every indicator is computed in the browser from the baked close history, by one module tested against pandas |
 | **ETF X-RAY** | Every fund on the ETF heat map looked through to its holdings, from the **issuer's own file** (State Street, iShares and Invesco daily, Vanguard monthly): concentration (top-10 weight, effective N), sector and country weights against SPY, the top 25 holdings with each one's contribution to the day, overlap with every other fund, and a **valuation look-through** (P/E, P/B, ROE, FCF and dividend yield, growth, margin) aggregated like an index and joined to the VALUATION rows, with the share of the fund it covers. Bond funds show duration, yield to maturity, coupon and maturity buckets. Funds with no usable holdings file (the commodity funds) are listed with the reason, never proxied |
 | **CROSS-LISTING** | A US line against its home-market line at the depositary ratio, with the diagnostics that say whether the series measures a dislocation or a session gap |
-| **VALUATION → VALUATION & QUALITY** | Every S&P 500 / Nasdaq-100 member on one sortable table: P/E, EV/EBITDA, EV/Sales, P/B, FCF / dividend / shareholder yield, ROE, ROIC, gross profitability, margins, growth, accruals, leverage, interest cover, Piotroski F-score and margin stability — trailing twelve months from each company's own 10-Qs, market cap from the close. Valuation × quality scatter, sector medians, and colour by rank within sector. **P/E against each company's own ten years**: price ÷ TTM EPS as it was filed at the time, with its median, percentile band and where today sits |
+| **VALUATION → VALUATION & QUALITY** | Every S&P 500 / Nasdaq-100 member on one sortable table: P/E, EV/EBITDA, EV/Sales, P/B, FCF / dividend / shareholder yield, ROE, ROIC, gross profitability, margins, growth, accruals, leverage, interest cover, Piotroski F-score and margin stability — trailing twelve months from each company's own 10-Qs, market cap from the close. Valuation × quality scatter, sector medians, and colour by rank within sector. **P/E against each company's own ten years**: price ÷ TTM EPS as it was filed at the time, on operating earnings (stake gains, divestitures and one-off tax items taken out) or as reported, with its median, percentile band and where today sits |
 | **FINANCIALS** | Ten fiscal years of income statement, balance sheet and cash flow for every S&P 500 and Nasdaq-100 member, with key ratios, each column's period end and last filing date, restatements applied and pre-split years put on today's share basis |
 | **VALUATION → DCF** | SEC-filled 5-year history, your 5-year forecast, WACC, terminal value, equity bridge and a WACC × exit-multiple sensitivity grid |
 
@@ -106,6 +107,14 @@ Every one of these is free and requires no account.
 | **FactSet Insight** Earnings Insight articles (`insight.factset.com/topic/earnings`) | CATALYSTS → EARNINGS FactSet block | Figures parsed from article text (parser shared with alternative-data's `factset_earnings_data`); history before the first build is the committed seed `data/reference/factset_earnings_insight.csv`. Weekly at best; numbers only, credited and linked |
 | **Nasdaq** earnings calendar (`api.nasdaq.com/api/calendar/earnings`) | CATALYSTS single-name lane | Unofficial JSON behind nasdaq.com; timing, consensus EPS and, for past dates, reported EPS. Not marked company-confirmed |
 | **SEC** XBRL company facts | FINANCIALS, VALUATION & QUALITY and the DCF | Annual and quarterly 10-K/10-Q figures with their filing dates, plus the cover-page share count; one parse per filer feeds all three tabs |
+| **MOPS** (`mops.twse.com.tw/mops/api/t05st10_ifrs`) | THEMES: TSMC, Nanya, Quanta, Wiwynn, Wistron monthly revenue | The TWSE's disclosure system; published by the 10th. No publication date in the answer, so the date first seen here is kept |
+| **Korea Customs Service** trade statistics (`tradedata.go.kr`) | THEMES: Korean IC (HS 8542) exports | Confirmed monthly figures, mid-month; certificate verification on |
+| **ADATA Industrial** Memory & Flash Market Watch | THEMES: monthly DRAM / NAND note | A module maker's read, quoted; its charts are images and are not read |
+| **PCPartPicker** UK price trends (`uk.pcpartpicker.com/trends/price/{memory,cpu}/`) | THEMES: retail memory-kit and CPU prices | Read from the chart images' pixels (the page has no numbers); only ratios are reported, with the source linked |
+| **DART** (FSS electronic disclosure, public search `dsab007/detailSearch.ax`) | THEMES: Samsung Electronics and SK hynix results dates | Their "영업(잠정)실적" fair disclosures, corrections dropped; no key needed |
+| **Korea MOTIE** monthly trade release (`motir.go.kr`, PDF attachment) | THEMES: 1st-of-month semiconductor and total exports | Read with `pdftotext` (poppler, installed by the workflow); the site is slow, so only the last 13 releases are read, each cached once |
+| **SEC EDGAR** earnings releases (8-K Item 2.02, Exhibit 99.1) | THEMES: NVIDIA Data Center revenue and outlook; capex guidance quoted from the releases | Segment revenue is not in XBRL company facts; matched text is quoted as written. Older submissions pages are read when a heavy filer's recent block (one year for the big banks) holds fewer than eight earnings releases; TSMC and ASML results come from their 6-K filings |
+| **alternative-data** (github.com/Henrywzh/alternative-data) normalized files | THEMES: OpenRouter daily tokens and estimated revenue; Ramp AI Index | Read from the public repo, with the commit that last touched each file |
 
 ### Two things worth knowing about the feeds
 
@@ -478,6 +487,27 @@ the nightly build's close.
   independently and compared; the ~2% that disagree by more than 25% are
   listed on the tab — mergers and spin-offs that move the share count,
   preferred dividends, large minority interests.
+- The P/E history, its percentile and the index and sector P/E lead with
+  **operating** earnings; REPORTED is one click away. Reported EPS counts
+  whatever sits below the operating line: Alphabet's 2026 Q2 carried $99bn of
+  gains on its equity stakes (Anthropic, SpaceX) against $41bn of operating
+  income, and on reported EPS it sat at the bottom of its own ten years.
+  Operating TTM EPS is pre-tax income capped at operating income less
+  interest paid, taxed at the median of the company's own trailing tax rates
+  over twelve quarters (bounded 0–35%), less minority holders' share, over
+  diluted shares — every input as filed by the day the quarter was reported.
+  Only a net gain below the line is removed: some filers' operating line
+  leaves costs out (Disney tags its segment total), so a net loss stays.
+  Financials and utilities, whose ordinary earnings are partly below the line,
+  and companies that tag no operating line (Merck, J&J, Deere), are on
+  reported EPS less gains on equity securities after tax. A company with too
+  little operating history to rank stays on reported. The table's own P/E
+  column stays reported; `P/E operating` sits beside it.
+- A 10-Q never replaces a 10-K's figure for a whole year: Comfort Systems'
+  2026 Q1 10-Q tagged its Q1 2025 operating income as all of 2025, and as the
+  later filing it had won. A diluted share count 20x away from the one the
+  filing's own net income and EPS imply is a units error (Waters) and the
+  implied count is used.
 - TTM is last fiscal year + year to date − the same span a year earlier. A
   line the latest 10-Q did not tag (Alphabet's Q2 2026 dividends) is taken
   from the quarter before, at most one quarter stale, and starred on the row.

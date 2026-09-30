@@ -11,7 +11,7 @@ import { render } from '../charts.js';
 import { renderPeHistory } from './valuation.js';
 import { renderStatements } from './financials.js';
 import { renderSingleTicker } from './technicals.js';
-import { eventCard, outcomeCard, timelineCard, loadEvents } from '../event-card.js';
+import { eventCard, outcomeCard, timelineCard, loadEvents, historyCard, revisionsCard, sinceCard, filingsCard } from '../event-card.js';
 
 const BILLION = 1e9;
 // The multiples shown in the header block, in this order. The full set is on
@@ -101,8 +101,11 @@ function headerStats(symbol, row, mon) {
     stats.push(stat('NEXT EARNINGS', mon.earnings_date || DASH, mon.earnings_date ? timing : 'none on the calendar'));
   }
   if (row) {
-    stats.push(stat('P/E VS OWN 10Y', row.pe_percentile === null || row.pe_percentile === undefined ? DASH : `${ordinal(row.pe_percentile)} pct`,
-      row.pe_vs_median === null || row.pe_vs_median === undefined ? null : `${row.pe_vs_median > 0 ? '+' : ''}${num(row.pe_vs_median, 0)}% vs median`));
+    // On the history's own basis: operating earnings unless the company has none.
+    const basis = row.pe_basis && row.pe_basis !== 'reported' ? (row.pe_basis === 'operating' ? 'operating' : 'ex gains') : null;
+    const current = row.pe_operating !== null && row.pe_operating !== undefined ? `${num(row.pe_operating, 1)}x ${basis} · ` : '';
+    stats.push(stat(`P/E VS OWN 10Y${basis ? ` · ${basis.toUpperCase()}` : ''}`, row.pe_percentile === null || row.pe_percentile === undefined ? DASH : `${ordinal(row.pe_percentile)} pct`,
+      row.pe_vs_median === null || row.pe_vs_median === undefined ? null : `${current}${row.pe_vs_median > 0 ? '+' : ''}${num(row.pe_vs_median, 0)}% vs median`));
   }
   return stats.length ? el('div', { class: 'stat-strip' }, stats) : null;
 }
@@ -121,6 +124,21 @@ function links(symbol, { mon, dcf, pairs }) {
     nodes.push(el('a', { href, text: label }));
   });
   return el('div', { class: 'field-note' }, nodes);
+}
+
+// The CATALYSTS -> THEMES groups this name belongs to: named there (a
+// bellwether or basket member) or trading with the theme's proxy.
+function themeTags(memberships, threshold) {
+  if (!memberships?.length) return null;
+  const order = { bellwether: 0, basket: 1, 'trades with': 2 };
+  return el('div', { class: 'tag-row theme-tags' }, [
+    el('span', { class: 'stat-label', text: 'THEMES' }),
+    ...[...memberships].sort((a, b) => order[a.role] - order[b.role] || (b.corr || 0) - (a.corr || 0)).map((m) => el('a', {
+      href: `#themes/${m.key.toUpperCase()}`, class: `tag tag-${m.role === 'trades with' ? 'info' : 'warn'}`,
+      text: `${m.label} · ${m.role}${m.corr !== null && m.corr !== undefined ? ` ρ${num(m.corr, 2)}` : ''}`,
+      title: m.role === 'trades with' ? `daily excess-return correlation with the theme's proxy over the last year, at or above ${threshold}` : `named as a ${m.role} of this theme`,
+    })),
+  ]);
 }
 
 // Only a name with a recorded decision gets the card; an empty one is noise.
@@ -280,8 +298,8 @@ async function section(root, title, draw) {
 }
 
 export default async function renderTicker(root, valuation, _manifest, ctx) {
-  const [monitor, technicals, financials, dcf, crossListing, evidence, events] = await Promise.all(
-    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events'].map((name) => optional(ctx, name)),
+  const [monitor, technicals, financials, dcf, crossListing, evidence, events, themes] = await Promise.all(
+    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events', 'themes'].map((name) => optional(ctx, name)),
   );
   const rows = valuation?.rows || [];
   const universe = new Map(rows.map((r) => [r.ticker, r.name]));
@@ -296,7 +314,8 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   root.append(sectionTitle(`${symbol}${name ? ` · ${name}` : ''}`,
     [row?.sector || mon?.sector, row?.indices?.join(' + ') || (mon?.membership === 'watchlist' ? 'watchlist' : null)]
       .filter(Boolean).join(' · ')));
-  root.append(card('COMPANY', null, [searchRow(symbol, universe, ctx), links(symbol, { mon, dcf, pairs: crossListing?.pairs || [] })]));
+  root.append(card('COMPANY', null, [searchRow(symbol, universe, ctx), links(symbol, { mon, dcf, pairs: crossListing?.pairs || [] }),
+    themeTags(themes?.membership?.[symbol], themes?.member_corr)]));
 
   if (!universe.has(symbol) && !mon) {
     root.append(gap(`${symbol} is not covered by this build: it is not an index member, a watchlist name or a baked ticker.`));
@@ -313,6 +332,12 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   if (outcome) root.append(outcome);
   const upcoming = eventPayload ? eventCard(eventPayload, asOf) : null;
   if (upcoming) root.append(upcoming);
+  // What the report is measured against: its own record, where estimates
+  // are moving, and what the industry data did since it last reported.
+  const history = eventPayload ? historyCard(eventPayload) : null;
+  if (history) root.append(history);
+  const expectations = eventPayload ? [revisionsCard(eventPayload), sinceCard(eventPayload)].filter(Boolean) : [];
+  if (expectations.length) root.append(expectations.length > 1 ? el('div', { class: 'grid two' }, expectations) : expectations[0]);
   // Company sections need filings. A fund, an index or a name no index holds
   // gets its price readings and one line saying why the rest is absent.
   // Order: the price first, then what it is worth against its own history,
@@ -334,6 +359,8 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   }
   const timeline = eventPayload ? timelineCard(eventPayload, prices, events?.macro, asOf) : null;
   if (timeline) root.append(timeline);
+  const filings = eventPayload ? filingsCard(eventPayload) : null;
+  if (filings) root.append(filings);
   if (row) {
     await section(root, 'P/E AGAINST ITS OWN 10 YEARS', (host) => {
       if (!row.pe_history) throw new Error(`${symbol} has no P/E history in this build (a loss, too little history, or no EPS filed)`);

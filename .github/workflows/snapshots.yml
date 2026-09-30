@@ -10,10 +10,12 @@ name: snapshots
 
 on:
   schedule:
-    # Two chances inside 15:10-16:00 New York in either DST season. GitHub
-    # schedules can start late; an idempotence guard skips a second good copy.
+    # From 15:10 New York in either DST season. GitHub schedules start hours
+    # late, so the window runs to midnight (closing quotes); an idempotence
+    # guard skips a later copy once one is good.
     - cron: "10,30 19 * * 1-5"
     - cron: "10,30 20 * * 1-5"
+    - cron: "40 21 * * 1-5"
     # Expectations: four times a weekday, from the open to after the close.
     - cron: "41 13,16,19,22 * * 1-5"
     # Risk inputs as published: once each weekday evening, after FRED, OFR

@@ -4,6 +4,7 @@ from datetime import date
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from market_recap.compute import events as E
 
@@ -92,3 +93,96 @@ def test_outcome_compares_the_move_with_the_implied_move_the_afternoon_before():
     assert out["peers"] == [{"symbol": "PEER", "beta": 0.5, "expected_pct": -5.0, "excess_pct": -4.5}]
     # No reaction on file for that report yet: no outcome card, rather than a blank one.
     assert panel._outcome("AAA", {**event, "date": "2026-09-30"}, entry, history, excess, {}) is None
+
+
+# --- Guidance, report history, revisions -------------------------------------------
+from market_recap.sources import releases as R
+
+
+MICRON = ("Business Outlook The following table presents Micron's guidance for the fourth quarter of 2026: "
+          "FQ4-26 GAAP (1) Outlook Non-GAAP (2) Outlook Revenue $50.0 billion ± $1.0 billion $50.0 billion ± $1.0 billion "
+          "Gross margin Approximately 86% Approximately 86% Operating expenses Approximately $1.86 billion "
+          "Diluted earnings per share $30.73 ± $1.00 $31.00 ± $1.00 Further information")
+
+
+def test_outlook_reads_a_gaap_non_gaap_table_and_takes_non_gaap():
+    o = R.outlook("Revenue $ 4,634 $ 2,708 $ 1,127 Gross margin 79 % 68 % " + MICRON)
+    assert (o["revenue_low"], o["revenue_high"]) == (49e9, 51e9)
+    assert (o["eps_low"], o["eps_high"]) == (30.0, 32.0)
+    assert o["gross_margin_pct"] == 86.0 and "fourth quarter" in o["period"]
+
+
+@pytest.mark.parametrize("text,key,expected", [
+    ("For the third quarter of 2026, AMD expects revenue to be approximately $13 billion, plus or minus $300 million.",
+     "revenue", (12.7e9, 13.3e9)),
+    ("Outlook: Revenue is expected to be $108.0 billion, plus or minus 2%.", "revenue", (105.84e9, 110.16e9)),
+    ("Outlook For the third quarter of 2026, the Company expects net revenue to be in the range of $2.290 billion to $2.320 billion",
+     "revenue", (2.29e9, 2.32e9)),
+    ("TI's third quarter outlook is for revenue in the range of $5.65 billion to $6.15 billion, and earnings per share between $2.23 and $2.57",
+     "eps", (2.23, 2.57)),
+])
+def test_outlook_wordings(text, key, expected):
+    o = R.outlook(text)
+    assert (o[f"{key}_low"], o[f"{key}_high"]) == pytest.approx(expected)
+
+
+def test_outlook_growth_guidance_and_none():
+    o = R.outlook("Guidance for Q2 FY 2027: Total revenues are expected to grow between 30% and 34% in constant currency.")
+    assert (o["revenue_growth_low"], o["revenue_growth_high"]) == (30.0, 34.0)
+    assert R.outlook("We will discuss our outlook on the call.") is None
+
+
+def test_guide_is_checked_against_the_companys_own_scale():
+    outlook = {"revenue_low": 1.93e9, "revenue_high": 1.95e9, "eps_low": 6.30, "eps_high": 6.35, "quote": "q"}
+    # A segment line against $6.4bn of quarterly revenue is dropped; the EPS stays.
+    g = E.checked_guide(outlook, revenue_ref=6.4e9, eps_ref=5.9)
+    assert "revenue_low" not in g and g["eps_horizon"] == "quarter"
+    # A full-year range is kept and marked so.
+    g = E.checked_guide({"revenue_low": 46.1e9, "revenue_high": 46.4e9}, revenue_ref=10.2e9, eps_ref=None)
+    assert g["revenue_horizon"] == "year"
+    assert E.checked_guide({"eps_low": 1.0, "eps_high": 1.2}, revenue_ref=None, eps_ref=40.0) is None
+
+
+def test_report_history_drift_and_guide_follow_through():
+    sessions = pd.bdate_range("2026-01-02", periods=60)
+    close = pd.Series(range(100, 160), index=sessions, dtype=float)
+    index = pd.Series(100.0, index=sessions)
+    reactions = [{"date": "2026-02-26", "session": "2026-02-27", "timing": "amc", "move_pct": 5.0, "excess_pct": 4.0},
+                 {"date": "2026-01-05", "session": "2026-01-06", "timing": "amc", "move_pct": -3.0, "excess_pct": -3.5}]
+    calendar = {"2026-02-26": {"eps": 1.1, "eps_forecast": 1.0, "surprise_pct": 10.0, "fiscal_quarter": "Jan/2026"},
+                "2026-01-05": {"eps": 0.9, "eps_forecast": 1.0, "surprise_pct": -10.0}}
+    guides = {"2026-01-05": {"eps_low": 0.95, "eps_high": 1.05, "eps_horizon": "quarter"}}
+    rows = E.report_history(reactions, calendar, guides, close, index)
+    newest, older = rows
+    at = sessions.get_loc(pd.Timestamp("2026-02-27"))
+    assert newest["drift_5d"] == pytest.approx(round((close.iloc[at + 5] / close.iloc[at] - 1) * 100, 2))
+    assert newest["drift_20d"] is None                           # not 20 sessions yet
+    assert older["next_eps_vs_guide_pct"] == pytest.approx(10.0)  # 1.1 against a 1.00 midpoint
+    summary = E.history_summary(rows)
+    assert summary["beats"] == 1 and summary["measured"] == 2 and summary["beat_own_guide"] == 1
+
+
+def test_against_guide_places_the_consensus_in_the_range():
+    guide = {"eps_low": 30.0, "eps_high": 32.0, "eps_horizon": "quarter",
+             "revenue_low": 49e9, "revenue_high": 51e9, "revenue_horizon": "quarter"}
+    out = E.against_guide(guide, {"eps": 31.35, "revenue": 51.47e9})
+    assert out["eps"]["position"] == "inside" and out["eps"]["vs_mid_pct"] == pytest.approx(1.1)
+    assert out["revenue"]["position"] == "above"
+    assert E.against_guide({"eps_low": 100.0, "eps_high": 110.0, "eps_horizon": "year"}, {"eps": 31.0}) is None
+
+
+def test_revision_table_changes_and_spread():
+    trend = {"0q": {"eps": 11.0, "eps_7d": 10.0, "eps_30d": 10.0, "eps_60d": None, "eps_90d": 8.0,
+                    "low": 10.0, "high": 12.0, "end": "2026-12-31", "up_30d": 3, "down_30d": 1, "analysts": 20}}
+    row = E.revision_table(trend)[0]
+    assert row["changes"] == {"7d": 10.0, "30d": 10.0, "60d": None, "90d": 37.5}
+    assert row["spread_pct"] == pytest.approx(18.2)
+
+
+def test_a_straddle_running_weeks_past_the_report_is_not_its_implied_move():
+    from market_recap.panels import events as P
+
+    rows = pd.DataFrame([{"expiry": "2026-10-30", "days": 30, "straddle_pct": 6.1, "atm_iv": 0.3}])
+    assert P._event_implied(rows, date(2026, 10, 13)) is None
+    rows = pd.DataFrame([{"expiry": "2026-10-16", "days": 16, "straddle_pct": 4.0, "atm_iv": 0.3}])
+    assert P._event_implied(rows, date(2026, 10, 13))["straddle_pct"] == 4.0

@@ -477,8 +477,10 @@ The phased build put too much in front of the reader. After looking at it:
   standalone FINANCIALS view is gone; its hash opens the ticker page.
 - **Ticker page order** is price and trend first (default windows, a
   period switch; the inputs and the forward-return table stay on TOOLS →
-  TECHNICALS), then P/E against its own ten years (axis capped at 1.6× the
-  90th percentile when a near-zero-earnings spike would flatten it), then
+  TECHNICALS), then P/E against its own ten years (operating earnings by
+  default with an OPERATING / REPORTED switch, the other basis dashed
+  behind; axis capped at 1.6× the 90th percentile when a near-zero-earnings
+  spike would flatten it), then
   the sector comparison beside the evidence, then filings. Method notes sit
   in the ⓘ fold; the research note card appears only when there is a note.
 - **Event card and timeline** (EVENTS panel, `artifacts/events/{T}.json`).
@@ -496,6 +498,37 @@ The phased build put too much in front of the reader. After looking at it:
   high-importance macro dates). CALENDAR leads with the compact cards for
   the next seven days' reports from names at or above 0.25% of the S&P 500
   or 0.5% of the Nasdaq-100, or on the watchlist.
+- **Behind the card** (every name, under it): LAST 8 REPORTS -- EPS
+  against the report-day Nasdaq consensus, the guide the release stated
+  (8-K EX-99; revenue, EPS, gross margin, checked against the company's
+  last quarter so a segment line or a misread is dropped, FY marked), how
+  the next quarter landed against that guide, the first session's move and
+  the 5- and 20-session drift after it, with one summary line. The card
+  places today's consensus against the last guide (STREET ABOVE GUIDE when
+  it sits above the range). ESTIMATE REVISIONS (7/30/60/90 days, this and
+  next quarter and year, spread) beside SINCE THE LAST REPORT: each series
+  of the name's THEMES as public on its last report day and now. OTHER
+  8-K FILINGS after the timeline. The implied move is the snapshot's
+  straddle only when it expires within a week of the reaction session.
+  Report-day calendars (120 new days) and releases (200 new, soonest
+  reporters first) are read under a per-build budget; both are kept.
+- **THEMES** (CATALYSTS → THEMES, `#themes/<key>`): a tile per group with
+  its run-in against the S&P 500, then for the chosen group a six-week
+  calendar (bellwether reports, projected ones marked; macro releases;
+  its data's due dates, late ones in red), the proxy against the S&P 500
+  over a year, the bellwether table (proxy beta and same-way share on
+  their past reports) and, for CLOUD and SEMIS, the industry data cards.
+  The proxy is drawn against both the S&P 500 and the Nasdaq 100 with a
+  6M-MAX range switch. Data charts carry a view switch (`web/js/viewchart.js`):
+  RAW and the changes that suit the series' frequency -- MoM / YoY monthly,
+  QoQ / YoY quarterly, WoW / 4W daily, 4W / 13W / YoY weekly; point changes
+  for series that are already percentages; RAW goes to a log axis when the
+  series span more than 25x (Ramp's median against its 99th percentile).
+  The page opens with the earnings-weight heat map (S&P 500 weight
+  reporting by GICS sector and session, three weeks). TICKER shows the
+  themes a name belongs to: named in the config, or trading with the
+  theme's proxy (daily excess-return correlation >= 0.55 over a year).
+  Groups live in `[[themes.groups]]` in the config.
 - **Links to the ticker page** (`routes.tickerHref`) from MONITOR, SCREEN,
   HEAT MAPS tiles, SECTORS' contributor bars, EARNINGS movers and the
   CALENDAR's earnings rows. ETF X-RAY holdings are not linked yet.

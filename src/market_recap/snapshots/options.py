@@ -1,8 +1,10 @@
 """Once-a-session option-chain snapshot.
 
-Taken inside a late-session window (``[snapshots.options] window``) because
-free chains fetched after the close often carry zero bids or quotes left over
-from mid-afternoon. One file set per New York date:
+Taken inside a window from late in the session to midnight
+(``[snapshots.options] window``): GitHub starts scheduled runs hours late, and
+options stop trading at the close, so a later run records the closing quotes.
+Free chains fetched after the close can carry zero bids; such a contract is
+not used (``compute.options.mid_quote``). One file set per New York date:
 
 - ``options/YYYY/YYYY-MM-DD-summary.csv``: one row per underlying and expiry
   (``compute.options.summarize_expiry``).
@@ -44,11 +46,14 @@ def build_universe(
     watchlist: Sequence[Mapping[str, Any]],
     monitor_rows: Sequence[Mapping[str, Any]] | None,
     today: date,
+    reporters: Sequence[Mapping[str, Any]] | None = None,
 ) -> tuple[list[str], dict[str, list[str]]]:
-    """Fixed names, then the watchlist, then up to ``monitor_max`` MONITOR
-    candidates. Candidates reporting within ``monitor_earnings_days`` come
-    first (their implied move is the point), then the furthest behind peers.
-    Returns the ordered universe and what was left out by which rule."""
+    """Fixed names, then the watchlist, then the names reporting within
+    ``report_days`` (up to ``report_max``, soonest first -- this session's
+    closing straddle is their implied move), then up to ``monitor_max``
+    MONITOR candidates. Candidates reporting within ``monitor_earnings_days``
+    come first, then the furthest behind peers. Returns the ordered universe
+    and what was left out by which rule."""
     universe: list[str] = []
 
     def add(symbol: str) -> None:
@@ -63,6 +68,20 @@ def build_universe(
             add(entry["ticker"])
 
     left_out: dict[str, list[str]] = {}
+    soon = []
+    for row in reporters or []:
+        try:
+            days = (date.fromisoformat(str(row.get("date") or "")) - today).days
+        except ValueError:
+            continue
+        if 0 <= days <= int(settings.get("report_days", 3)) and row.get("symbol"):
+            soon.append((days, row["symbol"]))
+    soon = [symbol for _, symbol in sorted(soon) if symbol.upper() not in universe]
+    report_max = int(settings.get("report_max", 40))
+    for symbol in soon[:report_max]:
+        add(symbol)
+    if soon[report_max:]:
+        left_out["reporters_over_limit"] = soon[report_max:]
     limit = int(settings.get("monitor_max", 0))
     if monitor_rows is None or limit <= 0:
         return universe, left_out
@@ -85,6 +104,13 @@ def build_universe(
         add(row["ticker"])
     left_out["monitor_over_limit"] = [row["ticker"] for row in candidates[limit:]]
     return universe, left_out
+
+
+def published_reporters(base_url: str) -> list[dict]:
+    """{symbol, date} of every coming report the published EVENTS panel carded."""
+    text = get_text(f"{base_url.rstrip('/')}/artifacts/events.json", timeout=30.0, retries=1)
+    return [{"symbol": row.get("symbol"), "date": (row.get("card") or {}).get("date")}
+            for row in json.loads(text).get("upcoming") or []]
 
 
 def published_monitor_rows(base_url: str) -> list[dict]:
@@ -194,7 +220,13 @@ def run(*, root=None, now: datetime | None = None, force: bool = False) -> dict:
             monitor_rows = published_monitor_rows(base_url)
         except (FetchError, ValueError, KeyError) as exc:
             problems["monitor"] = str(exc)[:300]
-    universe, left_out = build_universe(settings, config.get("watchlist", []), monitor_rows, today)
+    reporters = None
+    if base_url and int(settings.get("report_max", 0)) > 0:
+        try:
+            reporters = published_reporters(base_url)
+        except (FetchError, ValueError, KeyError) as exc:
+            problems["events"] = str(exc)[:300]
+    universe, left_out = build_universe(settings, config.get("watchlist", []), monitor_rows, today, reporters)
 
     rate_symbol = settings.get("rate_symbol", "^IRX")
     try:
@@ -227,6 +259,7 @@ def run(*, root=None, now: datetime | None = None, force: bool = False) -> dict:
                               and float(row["straddle_pct"]) > 0})
     meta = {
         "session": today.isoformat(), "fetched_at": fetched_at, "window": window, "forced": force,
+        "after_close": local.time() >= store.parse_clock(settings.get("close", "16:00")),
         "universe": universe, "left_out": left_out, "failed": failed, "problems": problems,
         "rate": {"symbol": rate_symbol, "continuous": rate, "quoted_at": rate_time},
         "underlyings_ok": len({row["underlying"] for row in summaries}), "summary_rows": len(summaries),

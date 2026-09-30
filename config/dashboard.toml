@@ -205,6 +205,88 @@ readthrough_show = 5
 # High-importance macro dates carried onto every timeline.
 timeline_days_ahead = 45
 
+[themes]
+# CATALYSTS -> THEMES. Groups of names that move together, not GICS sectors.
+# Each group: a proxy (an ETF, or an equal-weight basket of members when no
+# ETF isolates the theme), bellwethers whose past reports are scored against
+# that proxy, and the macro releases (regex on CATALYSTS titles) that bear on
+# it. The industry data for the first two groups is built in the panel.
+calendar_days = 42
+etfs = ["SMH", "KRE", "XRT", "ITB"]
+# Monthly revenue from MOPS (Taiwan): AI server makers for CLOUD, TSMC and
+# Nanya for SEMIS. Code -> label.
+tw_cloud = { "2382" = "Quanta", "6669" = "Wiwynn", "3231" = "Wistron" }
+tw_semis = { "2330" = "TSMC", "2408" = "Nanya" }
+tw_months = 37
+# OpenRouter model authors shown (alternative-data's daily provider economics).
+openrouter_providers = ["anthropic", "openai", "google", "x-ai", "deepseek", "qwen", "moonshotai", "z-ai"]
+openrouter_months = 7
+capex_filers = ["MSFT", "GOOGL", "AMZN", "META", "ORCL"]
+capex_quarters = 12
+nvda_quarters = 8
+# Earnings weight by sector and day, over the next heatmap_days.
+heatmap_days = 21
+# A name "trades with" a theme when its daily excess return correlated with
+# the theme's proxy at or above this over the last year (TICKER shows it).
+member_corr = 0.55
+
+# Korean bellwethers: results dates from DART, own move on the Korean session.
+korea_index = "^KS11"
+
+[[themes.korean]]
+label = "Samsung Electronics"
+yahoo = "005930.KS"
+dart = "삼성전자"
+group = "semis"
+
+[[themes.korean]]
+label = "SK hynix"
+yahoo = "000660.KS"
+dart = "SK하이닉스"
+group = "semis"
+
+[[themes.groups]]
+key = "cloud"
+label = "CLOUD & AI CAPEX"
+basket = ["MSFT", "GOOGL", "AMZN", "META", "ORCL"]
+bellwethers = ["MSFT", "GOOGL", "AMZN", "META", "ORCL", "NVDA", "AVGO", "AMD"]
+macro = []
+
+[[themes.groups]]
+key = "semis"
+label = "SEMICONDUCTORS & MEMORY"
+etf = "SMH"
+bellwethers = ["NVDA", "MU", "AVGO", "AMD", "LRCX", "AMAT", "KLAC", "SNDK", "INTC", "TXN", "TSM", "ASML"]
+macro = ["ISM Manufacturing", "Industrial production"]
+
+[[themes.groups]]
+key = "energy"
+label = "ENERGY"
+etf = "XLE"
+bellwethers = ["XOM", "CVX", "COP", "EOG", "SLB", "OXY", "PSX", "MPC"]
+macro = ["petroleum", "CPI", "PPI"]
+
+[[themes.groups]]
+key = "banks"
+label = "BANKS"
+etf = "KRE"
+bellwethers = ["JPM", "BAC", "WFC", "C", "GS", "MS", "USB", "PNC"]
+macro = ["FOMC", "Beige Book", "CPI", "Employment report"]
+
+[[themes.groups]]
+key = "consumer"
+label = "CONSUMER"
+etf = "XRT"
+bellwethers = ["WMT", "COST", "AMZN", "HD", "TGT", "NKE", "MCD", "SBUX", "LULU"]
+macro = ["Retail sales", "PCE", "Employment report", "CPI"]
+
+[[themes.groups]]
+key = "housing"
+label = "HOUSING"
+etf = "ITB"
+bellwethers = ["DHI", "LEN", "PHM", "NVR", "HD", "LOW", "TOL"]
+macro = ["Housing starts", "New home sales", "Construction spending", "FOMC"]
+
 [positioning]
 # POSITIONING (RISK -> POSITIONING). Short interest covers the index members,
 # the watchlist and these ETFs; ``rounds`` is how many FINRA rounds (two a
@@ -698,9 +780,15 @@ history_period = "2y"
 root = "data/snapshots"
 
 [snapshots.options]
-# New York wall-clock window on weekdays. Late in the session, because free
-# chains fetched after the close often carry zero bids or stale quotes.
-window = ["15:10", "16:00"]
+# New York wall-clock window on weekdays: from late in the session to
+# midnight. GitHub starts scheduled runs hours late (every options run in the
+# first week landed 18:56-20:27, outside a 15:10-16:00 window, and skipped).
+# Options stop trading at 16:00, so a later run records the closing quotes,
+# which is what an after-close report is priced on; a contract whose bid or
+# ask has gone to zero is not used (compute.options.mid_quote), and the meta
+# file says whether the copy was taken after the close.
+window = ["15:10", "23:59"]
+close = "16:00"
 # Recorded every session so each has a continuous IV history: index and
 # sector ETFs, rates/credit/gold funds and the largest index weights.
 fixed = [
@@ -710,6 +798,11 @@ fixed = [
   "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "TSLA", "JPM", "LLY",
 ]
 include_watchlist = true
+# Names reporting within report_days (calendar), read from the published
+# events.json, soonest first: the session's closing straddle is the implied
+# move on their event card.
+report_days = 3
+report_max = 40
 # MONITOR candidates added on top, read from the published monitor.json: those
 # reporting within monitor_earnings_days first, then the furthest behind peers.
 monitor_max = 15
@@ -1080,3 +1173,9 @@ iv_percentile_min_days = 60
 # single_buy_min_value.
 cluster_min_value = 250000
 single_buy_min_value = 1000000
+# Foreign private issuers report on Form 6-K, which has no item code: their
+# earnings release is recognised by the document name they file it under.
+# Both release overnight New York time, so the reaction is that day's session.
+[evidence.six_k]
+TSM = { pattern = '^tsm-\d{8}x6k\.htm$', timing = "bmo" }
+ASML = { pattern = 'quarterlyfilings', timing = "bmo" }

@@ -21,6 +21,7 @@ export const VIEWS = [
   { id: 'cross-listing', label: 'CROSS-LISTING', group: 'names', artifact: 'cross_listing', module: 'cross-listing' },
   { id: 'catalysts', label: 'CALENDAR', group: 'catalysts', artifact: 'catalysts', module: 'catalysts' },
   { id: 'earnings', label: 'EARNINGS', group: 'catalysts', artifact: 'earnings', module: 'earnings' },
+  { id: 'themes', label: 'THEMES', group: 'catalysts', artifact: 'themes', module: 'themes', takesArg: true },
   { id: 'technicals', label: 'TECHNICALS', group: 'tools', artifact: 'technicals', module: 'technicals', takesArg: true },
   { id: 'trade', label: 'TRADE DESK', group: 'tools', artifact: 'technicals', module: 'trade', takesArg: true },
   { id: 'xray', label: 'ETF X-RAY', group: 'tools', artifact: 'xray', module: 'xray' },

@@ -514,8 +514,11 @@ def _valuation_metrics(
     if calculated_mismatch:
         _append_gap(gaps, "valuation P/E flagged or mismatched; P/E metrics withheld")
     if pe_ok:
+        # The operating P/E, on the same basis as the percentile beside it;
+        # the reported one where the company has no operating history.
+        operating = _number(valuation_row.get("pe_operating"), 2)
         values.update({
-            "pe": _number(valuation_row.get("pe"), 2),
+            "pe": operating if operating is not None else _number(valuation_row.get("pe"), 2),
             "pe_percentile": _number(valuation_row.get("pe_percentile"), 1),
             "pe_vs_median": _number(valuation_row.get("pe_vs_median"), 1),
         })

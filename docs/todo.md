@@ -157,7 +157,17 @@ Done (2026-09-30): the event card, read-through and index impact, and the
 per-name timeline (see `docs/information_architecture.md`, Ticker page).
 Open:
 
-- **Theme calendars.** Groups defined in config by what moves together,
+- **Theme calendars: built 2026-09-30** (CATALYSTS → THEMES, six groups;
+  CLOUD and SEMIS carry industry data). Since added: Samsung / SK hynix
+  (DART) and TSMC / ASML (6-K) report history, Korea's 1st-of-month trade
+  release, NVIDIA Data Center revenue and capex guidance from the releases,
+  the sector x day earnings heat map and theme tags on TICKER; bank report
+  history now reaches back past SEC's one-year recent block. Still open:
+  Samsung's early-quarter preliminary guidance (KRX KIND, not DART), DRAM
+  contract prices (no free source), the 10-day export prints (needs a
+  data.go.kr key), capex guidance given only on calls (MSFT, GOOGL, AMZN),
+  and industry data for energy, banks, consumer and housing (mostly FRED).
+- **Theme calendars (original plan).** Groups defined in config by what moves together,
   not by GICS sector (memory/semis, hyperscaler capex, banks, energy,
   consumer, health care, industrials/transport, housing). Each group: its
   bellwether reports (including foreign ones that file no 8-K, e.g.

@@ -61,6 +61,10 @@ jobs:
       # wrong number. Each run saves under its own key and restores the newest
       # -- but only one written by the same locked library versions. A cache
       # built by pandas 3 / yfinance 1 once put the page a session behind.
+      # THEMES reads Korea's monthly trade release from its PDF.
+      - name: Install pdftotext
+        run: command -v pdftotext || { sudo apt-get update -q && sudo apt-get install -y -q poppler-utils; }
+
       - name: Restore cache
         uses: actions/cache/restore@v6
         with:
@@ -88,6 +92,9 @@ jobs:
           # Restore the last published ledgers (MONITOR observations, the earnings
           # season's captured year-ago EPS), never an evictable cache.
           MONITOR_PUBLISHED_STATE: "1"
+          # THEMES reads alternative-data's files and asks GitHub which commit
+          # last touched each; the anonymous API limit is 60 an hour per IP.
+          GITHUB_TOKEN: ${{ github.token }}
         # --strict: nobody reads an unattended run's output, so a warning is a
         # failure. A red run emails the repo owner; a stale page does not.
         run: make refresh REFRESH_FLAGS=--strict

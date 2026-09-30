@@ -27,13 +27,14 @@ import pandas as pd
 from ..compute import events as E
 from ..compute import evidence as V
 from ..config import EVENTS_ARTIFACT_DIR
-from ..sources import estimates, sec, snapshot_store
+from .. import cache
+from ..sources import estimates, nasdaq, releases, sec, snapshot_store
 from ..util import SourceRecord, clean_float, describe_error, prune_stale, write_json
 from .catalysts import _universe
 from .financials import cik_for
 
 # Same-session artifacts this panel reads (build.optional_panel).
-INPUTS = ("catalysts", "evidence")
+INPUTS = ("catalysts", "evidence", "themes")
 
 
 def _issuers(symbols: list[str]) -> dict[str, set[str]]:
@@ -87,6 +88,19 @@ def _readthrough(symbol: str, excess: pd.DataFrame, corr: pd.DataFrame, reaction
     return out
 
 
+# A straddle is a report's implied move only if it expires soon after the
+# session that trades on it; one running weeks past (the snapshot's 30-day
+# expiry, for a name reporting in nine sessions) prices a month, not a report.
+EVENT_EXPIRY_DAYS = 7
+
+
+def _event_implied(rows: pd.DataFrame, session: date) -> dict | None:
+    implied = V.implied_move(rows, session)
+    if implied and (date.fromisoformat(implied["expiry"]) - session).days > EVENT_EXPIRY_DAYS:
+        return None
+    return implied
+
+
 def _implied_before(history: pd.DataFrame, symbol: str, report: date, timing: str | None, session: date) -> dict | None:
     """The implied move the options snapshot priced the afternoon before a report."""
     if history.empty:
@@ -95,7 +109,7 @@ def _implied_before(history: pd.DataFrame, symbol: str, report: date, timing: st
     rows = history[(history["underlying"] == symbol) & (history["day"] == day)]
     if rows.empty:
         return None
-    implied = V.implied_move(rows, session)
+    implied = _event_implied(rows, session)
     return {**implied, "snapshot_day": day} if implied else None
 
 
@@ -103,12 +117,21 @@ def _card(symbol: str, event: dict, entry: dict, info: dict, trend: dict | None,
           ctx, sector_etf: str | None) -> dict:
     """What one coming report is priced for, and what it would be worth."""
     next_info = entry.get("next") or {}
-    session = next_info.get("reaction_session")
+    session = next_info.get("reaction_session") if next_info.get("date") == event["date"] else None
+    if session is None:
+        # EVIDENCE only looks from tomorrow; a report after today's close
+        # trades on the next weekday (a holiday is the one miss).
+        day = date.fromisoformat(event["date"])
+        if event.get("timing") == "amc":
+            day += timedelta(days=1)
+            while day.weekday() >= 5:
+                day += timedelta(days=1)
+        session = day.isoformat()
     implied = None
     if snapshot and session:
         rows = snapshot[1][snapshot[1]["underlying"] == symbol]
         if not rows.empty:
-            implied = V.implied_move(rows, date.fromisoformat(session))
+            implied = _event_implied(rows, date.fromisoformat(session))
             if implied:
                 implied["snapshot_day"] = snapshot[0].isoformat()
     moves = [abs(r["move_pct"]) for r in entry.get("reactions") or []]
@@ -182,6 +205,136 @@ def _timeline(entry: dict, history: pd.DataFrame, symbol: str) -> list[dict]:
     return sorted(items, key=lambda i: i["date"])
 
 
+# --- Deeper card: history, guidance, filings, the industry since the last report ---
+
+def _calendars(dates: set[str], as_of: date, budget: int) -> tuple[dict[str, dict[str, dict]], int]:
+    """{report date: {symbol: Nasdaq row}} for past report dates, and how many
+    dates were left for a later build. A past day's calendar never changes and
+    is kept for good; one saved before the results were in (no EPS on any row)
+    is read again. At most ``budget`` days are fetched per build, so a cold
+    cache fills over a few nights instead of in one burst."""
+    out, fetched, left = {}, 0, 0
+    for day in sorted(dates, reverse=True):
+        if day >= as_of.isoformat():
+            continue
+        cached = cache.path_for(nasdaq.NAMESPACE, f"earnings-{day}", ".json").exists()
+        rows = None
+        if cached:
+            try:
+                rows = nasdaq.fetch_earnings(day, kind="archive")
+            except Exception:
+                rows = None
+            if rows is not None and not any(r.get("eps") is not None for r in rows):
+                rows = None
+        if rows is None:
+            if fetched >= budget:
+                left += 1
+                continue
+            fetched += 1
+            try:
+                rows = nasdaq.fetch_earnings(day, kind="archive", use_cache=False)
+            except Exception:
+                continue
+        out[day] = {r["symbol"]: r for r in rows}
+    return out, left
+
+
+# A release names its business items; these are the ones a card lists.
+FILING_ITEMS = {
+    "1.01": "material agreement", "1.02": "agreement ended", "2.01": "acquisition or disposal",
+    "2.03": "new debt", "2.05": "restructuring costs", "2.06": "impairment", "3.02": "equity sale",
+    "4.02": "restatement", "5.02": "officer or director change", "5.03": "bylaws change", "5.07": "shareholder vote",
+    "7.01": "Reg FD disclosure", "8.01": "other event",
+}
+
+
+def _filings(block: dict | None, since: str, cik: int | None, limit: int = 12) -> list[dict]:
+    """8-Ks other than earnings releases filed since ``since``, newest first."""
+    if not block or not cik:
+        return []
+    out = []
+    forms, items = block.get("form") or [], block.get("items") or []
+    for i, form in enumerate(forms):
+        filed = block["filingDate"][i]
+        if filed < since:
+            break
+        if form not in ("8-K", "8-K/A"):
+            continue
+        codes = [c.strip() for c in str(items[i] if i < len(items) else "").split(",") if c.strip()]
+        if "2.02" in codes:
+            continue
+        labels = [FILING_ITEMS[c] for c in codes if c in FILING_ITEMS]
+        if not labels:
+            continue
+        acc = block["accessionNumber"][i]
+        out.append({"date": filed, "form": form, "items": codes, "labels": labels,
+                    "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}/{acc}-index.html"})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _revenue_before(quarters: tuple, day: str) -> float | None:
+    """The last quarterly revenue filed by ``day``: the scale a guide is checked against."""
+    known = [q for q in quarters if q["filed"] <= day and q.get("value")]
+    return known[-1]["value"] if known else None
+
+
+def _guides(symbol: str, cik: int | None, reactions: list[dict], calendar: dict[str, dict[str, dict]],
+            count: int, budget: dict) -> dict[str, dict]:
+    """{report date: checked guide} from the releases of the last ``count``
+    reports. ``budget["left"]`` caps releases read for the first time."""
+    if not cik or not reactions:
+        return {}
+    try:
+        block = sec.submissions_recent(cik)
+        data = sec.filer(cik)
+    except Exception:
+        return {}
+    out = {}
+    for r in reactions[:count]:
+        day = r["date"]
+        try:
+            found = releases.release_on(cik, day, block, fetch=budget["left"] > 0)
+        except Exception:
+            continue
+        if found is None:
+            continue
+        url, text, fresh = found
+        if fresh:
+            budget["left"] -= 1
+        eps_ref = ((calendar.get(day) or {}).get(symbol) or {}).get("eps")
+        guide = E.checked_guide(releases.outlook(text), _revenue_before(data.quarterly_revenue, day), eps_ref)
+        if guide:
+            out[day] = guide | {"url": url}
+    return out
+
+
+def _since(drivers: list[dict], themes: list[str], day: str | None) -> list[dict]:
+    """Each industry series of the name's themes: where it stood when the
+    company last reported, where it is now, and how many releases since."""
+    if not day:
+        return []
+    out = []
+    for d in drivers:
+        if not set(d["themes"]) & set(themes):
+            continue
+        points = d["points"]
+        before = [p for p in points if p["available"] <= day]
+        after = [p for p in points if p["available"] > day]
+        if not after or not before:
+            continue
+        then, now = before[-1], points[-1]
+        row = {"key": d["key"], "label": d["label"], "kind": d["kind"], "unit": d["unit"],
+               "then": then, "now": now, "releases": len(after)}
+        if d["kind"] == "level" and then["value"]:
+            row["change_pct"] = round((now["value"] / then["value"] - 1) * 100, 1)
+        else:
+            row["change_pp"] = round(now["value"] - then["value"], 1)
+        out.append(row)
+    return out
+
+
 def _macro(catalysts: dict, as_of: str, days: int) -> list[dict]:
     end = (date.fromisoformat(as_of) + timedelta(days=days)).isoformat()
     keep = []
@@ -216,26 +369,70 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     issuers = _issuers(list(ctx.closes.columns))
     reactions = {s: n.get("reactions") or [] for s, n in names.items()}
 
-    earnings = [e for e in catalysts.get("events") or [] if e.get("event_type") == "earnings" and e.get("symbol")]
+    # CATALYSTS lists tomorrow onward; today's after-close reports are kept
+    # apart (they have not traded yet) and are still ahead of the card.
+    after_close = (catalysts.get("recent") or {}).get("earnings_after_close") or []
+    earnings = [e for e in [*(catalysts.get("events") or []), *after_close]
+                if e.get("event_type") == "earnings" and e.get("symbol")]
     next_report: dict[str, dict] = {}
     for e in sorted(earnings, key=lambda e: e["date"]):
-        if e["date"] > ctx.as_of:
+        # A report after today's close is still ahead: the session it trades
+        # on is tomorrow's, and today's closing straddle is its implied move.
+        if e["date"] > ctx.as_of or (e["date"] == ctx.as_of and e.get("timing") == "amc"):
             next_report.setdefault(e["symbol"], e)
 
     card_days = int(settings.get("card_horizon_days", 30))
     card_end = (as_of + timedelta(days=card_days)).isoformat()
     carded = sorted(s for s, e in next_report.items() if e["date"] <= card_end)
-    trends, missing = estimates.fetch_trends(carded) if carded else ({}, {})
-    ctx.log.add(SourceRecord("yahoo_estimates_quarter", "Current-quarter EPS and revenue estimates (Yahoo earningsTrend)",
+    # Every name's trend: the revisions table is on every ticker page, and
+    # EARNINGS has already read the whole universe's this session (cached).
+    everyone = sorted(set(ctx.closes.columns) & set(meta))
+    trends, missing = estimates.fetch_trends(everyone) if everyone else ({}, {})
+    ctx.log.add(SourceRecord("yahoo_estimates_quarter", "EPS and revenue estimates and revisions (Yahoo earningsTrend)",
                              estimates.URL.format(symbol="{symbol}"), ctx.as_of, rows=len(trends),
-                             status="ok" if len(missing) <= 0.2 * max(len(carded), 1) else "partial",
-                             error=f"{len(missing)} of {len(carded)} without estimates" if missing else None))
+                             status="ok" if len(missing) <= 0.2 * max(len(everyone), 1) else "partial",
+                             error=f"{len(missing)} of {len(everyone)} without estimates" if missing else None))
+
+    # Past reports: each date's Nasdaq calendar (consensus, actual, surprise).
+    report_dates = {r["date"] for rs in reactions.values() for r in rs if r.get("date")}
+    calendars, dates_left = _calendars(report_dates, as_of, int(settings.get("history_new_dates", 120)))
+    ctx.log.add(SourceRecord("nasdaq_earnings_history", "Nasdaq earnings calendar on past report dates (EPS vs consensus)",
+                             nasdaq.EARNINGS_URL.format(date="{date}"), ctx.as_of, rows=len(calendars),
+                             status="ok" if not dates_left else "partial",
+                             error=f"{dates_left} report dates left for later builds" if dates_left else None))
+    try:
+        cik_map = sec.fetch_ticker_cik_map()
+    except Exception:
+        cik_map = {}
+    focus = set(evidence.get("focus") or [])
+    guide_budget = {"left": int(settings.get("guide_new_releases", 200))}
+    themes = inputs.get("themes") or {}
+    drivers = themes.get("drivers") if isinstance(themes.get("drivers"), list) else []
+    membership = themes.get("membership") or {}
+    since_day = (as_of - timedelta(days=int(settings.get("filings_days", 120)))).isoformat()
+    recent_events = (catalysts.get("recent") or {}).get("earnings_reacted") or []
+    recent_symbols = {e["symbol"] for e in recent_events}
+
+    # Guidance is read from each release once and kept; a build reads at most
+    # ``guide_new_releases`` new ones, soonest reporters first, then the focus
+    # names, then the heaviest -- so the cards that matter fill first.
+    def priority(symbol: str) -> tuple:
+        event = next_report.get(symbol)
+        soon = event["date"] if event and symbol in carded else "9999"
+        weight = max((meta[symbol].get("weights") or {}).values(), default=0) or 0
+        return (soon, symbol not in focus, -weight, symbol)
+
+    deep = [s for s in everyone if s in carded or s in focus or s in recent_symbols
+            or _heavy({"weights": meta[s].get("weights") or {}}, settings) or meta[s].get("watchlist")]
+    guides_by_symbol = {}
+    for symbol in sorted(deep, key=priority):
+        rows = {d: {symbol: r} for d, rs in calendars.items() if (r := rs.get(symbol) or rs.get(symbol.replace("-", ".")))}
+        guides_by_symbol[symbol] = _guides(symbol, cik_for(symbol, cik_map) if cik_map else None, reactions.get(symbol) or [],
+                                           rows, int(settings.get("guide_reports", 4)), guide_budget)
 
     snapshot = snapshot_store.latest_options_summary(as_of)
     history = snapshot_store.options_summaries(as_of - timedelta(days=400), as_of) if snapshot else pd.DataFrame()
 
-    recent_events = (catalysts.get("recent") or {}).get("earnings_reacted") or []
-    recent_symbols = {e["symbol"] for e in recent_events}
     written, cards, outcomes = [], [], []
     for symbol in sorted(set(ctx.closes.columns) & set(meta)):
         info = meta[symbol]
@@ -252,9 +449,27 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
             "readthrough": readthrough,
             "timeline": _timeline(entry, history, symbol),
         }
+        cik = cik_for(symbol, cik_map) if cik_map else None
+        own = entry.get("reactions") or []
+        nasdaq_symbol = symbol.replace("-", ".")
+        calendar = {d: rows.get(symbol) or rows.get(nasdaq_symbol) for d, rows in calendars.items()}
+        guides = guides_by_symbol.get(symbol) or {}
+        close = ctx.closes[symbol] if symbol in ctx.closes.columns else pd.Series(dtype=float)
+        payload["history"] = E.report_history(own, {d: r for d, r in calendar.items() if r}, guides, close, index_close)
+        payload["history_summary"] = E.history_summary(payload["history"])
+        payload["revisions"] = E.revision_table(trends.get(symbol))
+        try:
+            block = sec.submissions_recent(cik) if cik else None
+        except Exception:
+            block = None
+        payload["filings"] = _filings(block, since_day, cik)
+        payload["since"] = _since(drivers, [m["key"] for m in membership.get(symbol) or []], own[0]["date"] if own else None)
         event = next_report.get(symbol)
         if event and symbol in carded:
             payload["card"] = _card(symbol, event, entry, info, trends.get(symbol), snapshot, ctx, sector_etf)
+            # Only the guide the last report gave is about the quarter now due.
+            last_guide = payload["history"][0].get("guide") if payload["history"] else None
+            payload["card"]["vs_guide"] = E.against_guide(last_guide, payload["card"]["consensus"])
         if symbol in recent_symbols:
             event = next(e for e in recent_events if e["symbol"] == symbol)
             outcome = _outcome(symbol, event, entry, history, excess, readthrough)
@@ -271,6 +486,11 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     cards.sort(key=lambda c: (c["card"]["date"], {"bmo": 0, "intraday": 1, "amc": 2}.get(c["card"]["timing"], 3),
                               -max(c["weights"].values(), default=0)))
     outcomes.sort(key=lambda c: -max(c["weights"].values(), default=0))
+    ctx.log.add(SourceRecord("sec_releases_guidance", "Guidance stated in earnings releases (8-K Item 2.02, EX-99)",
+                             "https://www.sec.gov/cgi-bin/browse-edgar", ctx.as_of,
+                             rows=sum(1 for s in written if (s in carded or s in focus)),
+                             status="ok" if guide_budget["left"] > 0 else "partial",
+                             error=None if guide_budget["left"] > 0 else "release budget spent; the rest are read next build"))
     return {
         "as_of": ctx.as_of,
         "options_snapshot": snapshot[0].isoformat() if snapshot else None,

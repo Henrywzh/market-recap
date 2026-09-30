@@ -294,6 +294,7 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
         | set(config["universe"]["quote_tickers"])
         | {config["universe"]["market_proxy"]}
         | set(_preset_symbols(config))
+        | set((config.get("themes") or {}).get("etfs") or [])
     )
     ctx.etf_closes = mark_missing_sessions(
         _through(yahoo.fetch_closes(etf_symbols, period=history_period, need_ohlcv=True), ctx.closes.index[-1]))
