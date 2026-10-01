@@ -7,7 +7,7 @@ under the wrong month, a preset naming a ticker no panel priced.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import json
 import sys
 from pathlib import Path

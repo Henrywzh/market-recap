@@ -73,3 +73,12 @@ test('the overview is the landing page, and MARKET comes before RISK', () => {
   assert.deepEqual(R.parseHash('#brief'), { id: 'overview', arg: null });
   assert.deepEqual(R.parseHash('#journal'), { id: 'overview', arg: null });
 });
+
+test('a dotted share class resolves to the build\'s dashed symbol, nothing else does', () => {
+  const has = (t) => ['BRK-B', 'BF-B', 'VOD.L', 'AAPL'].includes(t);
+  assert.equal(R.resolveTicker('BRK.B', has), 'BRK-B');
+  assert.equal(R.resolveTicker('BRK-B', has), 'BRK-B');
+  assert.equal(R.resolveTicker('VOD.L', has), 'VOD.L');
+  assert.equal(R.resolveTicker('XYZ.B', has), 'XYZ.B');            // unknown either way: left as typed
+  assert.equal(R.resolveTicker(null, has), null);
+});

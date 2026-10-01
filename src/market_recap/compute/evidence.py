@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, time, timedelta
 from bisect import bisect_left
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo

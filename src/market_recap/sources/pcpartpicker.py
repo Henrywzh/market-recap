@@ -23,7 +23,6 @@ republished. robots.txt allows these pages.
 from __future__ import annotations
 
 from datetime import date, timedelta
-import json
 import re
 
 import numpy as np

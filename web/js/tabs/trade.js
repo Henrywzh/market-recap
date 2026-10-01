@@ -9,6 +9,7 @@ import { rangeSwitch, sliceRange, initialRange } from '../range.js';
 import { tickerHref } from '../routes.js';
 import { ageSeconds, ageText } from '../live-model.js';
 import { anchorScorecard, closeLevels, optionRange, priceLadder, sentimentScorecard, sizePosition, trendScorecard } from '../trade-math.js';
+import { resolveTicker } from '../routes.js';
 
 const valid = (v) => typeof v === 'number' && Number.isFinite(v);
 const usd = (v, digits = 2) => (valid(v) ? `$${num(v, digits)}` : DASH);
@@ -105,7 +106,7 @@ function setups(root, technicals, ctx, state) {
   const evidence = ctx.loadArtifact('evidence').catch(() => null);
 
   const load = async () => {
-    const symbol = ticker.value.trim().toUpperCase();
+    const symbol = resolveTicker(ticker.value.trim().toUpperCase(), (t) => available.includes(t));
     if (!available.includes(symbol)) {
       host.replaceChildren(info(`${symbol || 'Ticker'} has no baked price history in this build.`));
       return;

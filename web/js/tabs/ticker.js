@@ -12,6 +12,7 @@ import { renderPeHistory } from './valuation.js';
 import { renderStatements } from './financials.js';
 import { renderSingleTicker } from './technicals.js';
 import { eventCard, outcomeCard, timelineCard, loadEvents, historyCard, revisionsCard, sinceCard, filingsCard } from '../event-card.js';
+import { resolveTicker } from '../routes.js';
 
 const BILLION = 1e9;
 // The multiples shown in the header block, in this order. The full set is on
@@ -306,8 +307,8 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   const universe = new Map(rows.map((r) => [r.ticker, r.name]));
   (technicals?.available || []).forEach((t) => { if (!universe.has(t)) universe.set(t, ''); });
 
-  const symbol = ctx.arg || (universe.has('AAPL') ? 'AAPL' : rows[0]?.ticker);
-  if (!ctx.arg && symbol) ctx.setArg(symbol);
+  const symbol = resolveTicker(ctx.arg, (t) => universe.has(t)) || (universe.has('AAPL') ? 'AAPL' : rows[0]?.ticker);
+  if (symbol && symbol !== ctx.arg) ctx.setArg(symbol);
   const row = rows.find((r) => r.ticker === symbol) || null;
   const mon = (monitor?.rows || []).find((r) => r.ticker === symbol) || null;
   const name = row?.name || mon?.name || '';

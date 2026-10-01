@@ -9,7 +9,7 @@ page footer says what that means.
 from __future__ import annotations
 
 import contextlib
-from datetime import date, datetime, time as clock_time
+from datetime import datetime, time as clock_time
 import io
 from pathlib import Path
 import threading

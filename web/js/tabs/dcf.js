@@ -1,4 +1,5 @@
 import { el, card, num, pct, sectionTitle, notice, DASH } from '../fmt.js';
+import { resolveTicker } from '../routes.js';
 
 const DCF_BASE = 'artifacts/dcf';
 const M = 1e6;
@@ -44,7 +45,8 @@ export default async function renderDcf(root, data, _manifest, ctx = {}) {
 
   // A ticker page links here with its ticker; one this build did not bake
   // still opens, on the first company, with the reason in the status line.
-  const requested = ctx.arg && data.available.includes(ctx.arg) ? ctx.arg : null;
+  const wanted = resolveTicker(ctx.arg, (t) => data.available.includes(t));
+  const requested = wanted && data.available.includes(wanted) ? wanted : null;
   const tickerInput = el('input', { id: 'dcf-ticker', value: requested || data.available[0], size: '8', list: 'dcf-list' });
   const datalist = el('datalist', { id: 'dcf-list' }, data.available.map((t) => el('option', { value: t })));
   const status = el('span', { class: 'field-note', text: `${data.available.length} companies available in this build.` });
@@ -61,7 +63,7 @@ export default async function renderDcf(root, data, _manifest, ctx = {}) {
   root.append(host);
 
   async function load() {
-    const symbol = tickerInput.value.trim().toUpperCase();
+    const symbol = resolveTicker(tickerInput.value.trim().toUpperCase(), (t) => data.available.includes(t));
     status.textContent = `Loading ${symbol}…`;
     try {
       const company = await loadCompany(symbol);

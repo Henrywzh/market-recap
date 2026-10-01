@@ -129,7 +129,16 @@ def build(ctx) -> dict:
         announcements = (V.six_k_announcements(recent or {}, six_k["pattern"], six_k.get("timing", "bmo"))
                          if six_k else V.earnings_announcements(recent or {}, today=as_of))
         if cik and recent is not None and not six_k and len(announcements) < REACTIONS:
-            # After a holding-company reorganisation (Exxon, 2026) the new
+            # A heavy filer's recent block holds one year; read older pages
+            # until eight releases are found or three years are covered.
+            try:
+                block = sec.submissions_until(cik, lambda b: len(V.earnings_announcements(b)) >= REACTIONS + 1,
+                                              since=(as_of - timedelta(days=3 * 365)).isoformat())
+                announcements = V.earnings_announcements(block, today=as_of)
+            except Exception:
+                pass
+        if cik and recent is not None and not six_k and len(announcements) < REACTIONS:
+            # Last, so the older pages above cannot replace what it adds. After a holding-company reorganisation (Exxon, 2026) the new
             # registrant holds a release or two; the rest are under the
             # predecessor CIK the facts reader already follows.
             try:
@@ -144,15 +153,6 @@ def build(ctx) -> dict:
                 seen = {a["date"] for a in announcements}
                 announcements = sorted(announcements + [a for a in older if a["date"] not in seen],
                                        key=lambda a: a["date"], reverse=True)
-        if cik and recent is not None and not six_k and len(announcements) < REACTIONS:
-            # A heavy filer's recent block holds one year; read older pages
-            # until eight releases are found or three years are covered.
-            try:
-                block = sec.submissions_until(cik, lambda b: len(V.earnings_announcements(b)) >= REACTIONS + 1,
-                                              since=(as_of - timedelta(days=3 * 365)).isoformat())
-                announcements = V.earnings_announcements(block, today=as_of)
-            except Exception:
-                pass
         entry: dict = {"reactions": V.reactions(closes, index_close, announcements, REACTIONS)}
         moves = [abs(r["move_pct"]) for r in entry["reactions"]]
         entry["mean_abs_move"] = round(sum(moves) / len(moves), 2) if moves else None

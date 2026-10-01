@@ -56,6 +56,15 @@ export function cleanTicker(value) {
   return TICKER_PATTERN.test(text) ? text : null;
 }
 
+// The build keys share classes the way Yahoo does (BRK-B, BF-B); readers
+// type the exchange's BRK.B. A dotted symbol the build lacks resolves to its
+// dashed form when the build has that -- never blindly, as VOD.L is London.
+export function resolveTicker(symbol, has) {
+  if (!symbol || has(symbol)) return symbol;
+  const dashed = symbol.replace(/^([A-Z]{1,6})\.([A-Z])$/, '$1-$2');
+  return dashed !== symbol && has(dashed) ? dashed : symbol;
+}
+
 // '#ticker/AAPL' -> { id: 'ticker', arg: 'AAPL' }. An unknown view falls back
 // to the default; a view that takes no argument ignores one. When no argument
 // is in the hash, `search` (the page's query string) may carry ?ticker=, which

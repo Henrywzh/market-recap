@@ -608,14 +608,16 @@ const CONSUMER_ORDER = ['RSAFS', 'RSFSXMV', 'PCEC96', 'PSAVERT', 'TOTALSL', 'UMC
 
 function bankTone(id, x) {
   const l = x.latest;
-  if (id === 'TOTLL' || id === 'DPSACBW027SBOG') return l.yoy > 0 ? 'up' : 'down';
   if (id === 'T10Y2Y' || id === 'T10Y3M') return l.value > 0 ? 'up' : 'down';      // banks lend long, fund short
+  if (l.yoy === null || l.yoy === undefined) return '';
+  if (id === 'TOTLL' || id === 'DPSACBW027SBOG') return l.yoy > 0 ? 'up' : 'down';
   if (id.startsWith('DR') || id === 'BAMLH0A0HYM2') return l.yoy > 0 ? 'down' : 'up'; // wider, more delinquent, tighter: worse
   return '';
 }
 
 function consumerTone(id, x) {
   const l = x.latest;
+  if (l.yoy === null || l.yoy === undefined) return '';
   if (id === 'ICSA' || id === 'CCSA') return l.yoy > 0 ? 'down' : 'up';
   if (id === 'PSAVERT' || id === 'TOTALSL') return '';
   return l.yoy > 0 ? 'up' : 'down';

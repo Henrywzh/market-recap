@@ -21,7 +21,6 @@ and all three produce a moving line.
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from ..config import period_sessions

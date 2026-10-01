@@ -506,8 +506,9 @@ def _published(series_id: str, freq: str, start: pd.Timestamp) -> dict | None:
             "values": [num(v) for v in frame["value"]], "year_ago": [num(v) for v in frame["year_ago"]]}
 
 
-def _dated(series_id: str, index: pd.DatetimeIndex, lag: tuple) -> tuple[list[str], str]:
-    exact = _release_dates(series_id)
+def _dated(series_id: str, index: pd.DatetimeIndex, lag: tuple, published: dict | None = None) -> tuple[list[str], str]:
+    # The vintages behind ``published`` already say when each date was first public.
+    exact = dict(zip(published["dates"], published["available"])) if published else _release_dates(series_id)
     dates = [d.strftime("%Y-%m-%d") for d in index]
     out = [exact.get(d) or _available(d_, lag) for d, d_ in zip(dates, index)]
     return out, ("alfred" if dates and dates[-1] in exact else "approximate")
@@ -518,10 +519,11 @@ def _fred_section(series_id: str, label: str, unit: str, freq: str) -> dict:
     s = frame.set_index("date")["value"].iloc[-(520 if freq == "weekly" else 120):]
     # Freddie Mac's weekly rate is dated by its release; Census's months are
     # public in the second half of the next month.
-    available, dated = _dated(series_id, s.index, ("days", 0) if freq == "weekly" else ("months", 1, 26))
+    published = _published(series_id, freq, s.index[0])
+    available, dated = _dated(series_id, s.index, ("days", 0) if freq == "weekly" else ("months", 1, 26), published)
     return {"id": series_id, "label": label, "unit": unit, "freq": freq,
             "dates": [d.strftime("%Y-%m-%d") for d in s.index], "values": [round(float(v), 3) for v in s],
-            "available": available, "dated": dated, "published": _published(series_id, freq, s.index[0])}
+            "available": available, "dated": dated, "published": published}
 
 
 def _housing(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
@@ -596,10 +598,11 @@ def _series_section(series_id: str, meta: tuple) -> dict:
     else:
         change = None if not prior else round((last / prior - 1) * 100, 2)
         yoy = None if pd.isna(year_ago) or not year_ago else round((last / float(year_ago) - 1) * 100, 2)
-    available, dated = _dated(series_id, s.index, lag) if freq != "daily" else ([_available(d, lag) for d in s.index], "market")
+    published = _published(series_id, freq, s.index[0])
+    available, dated = _dated(series_id, s.index, lag, published) if freq != "daily" else ([_available(d, lag) for d in s.index], "market")
     return {"id": series_id, "label": label, "short": short, "unit": unit, "freq": freq,
             "dates": [d.strftime("%Y-%m-%d") for d in s.index], "values": [round(float(v), 3) for v in s],
-            "available": available, "dated": dated, "published": _published(series_id, freq, s.index[0]),
+            "available": available, "dated": dated, "published": published,
             "latest": {"date": stamp.strftime("%Y-%m-%d"), "value": round(last, 3), "change": change, "yoy": yoy,
                        "available": available[-1]}}
 

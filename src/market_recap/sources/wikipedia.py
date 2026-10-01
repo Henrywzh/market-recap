@@ -7,7 +7,6 @@ what a company's sector was on a past date.
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from io import StringIO
 

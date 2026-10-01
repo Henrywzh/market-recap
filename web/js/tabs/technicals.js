@@ -6,6 +6,7 @@
 import { el, card, table, num, pct, dirClass, sectionTitle, periodSwitch, tag, DASH } from '../fmt.js';
 import { render, multiLine, SERIES_COLORS } from '../charts.js';
 import * as T from '../technicals-math.js';
+import { resolveTicker } from '../routes.js';
 
 const TICKER_BASE = 'artifacts/tickers';
 // A sanity bound on typed windows, not a data limit: ten years of history
@@ -290,7 +291,7 @@ export default async function renderTechnicals(root, data, _manifest, ctx = {}) 
   ]));
 
   await loadRatio();
-  const requested = ctx.arg;
+  const requested = resolveTicker(ctx.arg, (t) => available.has(t));
   await renderSingleTicker(root, data, { symbol: requested || (available.has('NVDA') ? 'NVDA' : data.available[0]) });
 }
 
@@ -319,7 +320,7 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
   const zWindow = defaults.zscore_window;
 
   async function loadSingle() {
-    const symbol = tickerInput.value.trim().toUpperCase();
+    const symbol = resolveTicker(tickerInput.value.trim().toUpperCase(), (t) => (data.available || []).includes(t));
     stStatus.textContent = `Loading ${symbol}…`;
     try {
       const windows = T.parseWindows(maInput.value, { max: MAX_MA_WINDOW });

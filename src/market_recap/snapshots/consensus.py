@@ -16,7 +16,9 @@ the universe is skipped.
 
 from __future__ import annotations
 
+import csv
 from datetime import datetime, timezone
+import gzip
 import json
 import math
 from typing import Any, Mapping
@@ -50,6 +52,17 @@ def rows_for(fetched_at: str, symbol: str, trend: Mapping[str, Any]) -> list[dic
     return out
 
 
+def _recorded(path) -> list[dict]:
+    """Rows an earlier run already wrote for the day; empty if none or unreadable."""
+    if not path.exists():
+        return []
+    try:
+        with gzip.open(path, "rt", newline="") as handle:
+            return list(csv.DictReader(handle))
+    except (OSError, EOFError, csv.Error):
+        return []
+
+
 def run(*, root=None, now: datetime | None = None, symbols: list[str] | None = None) -> dict:
     config = load_config()
     now = now or datetime.now(timezone.utc)
@@ -77,12 +90,18 @@ def run(*, root=None, now: datetime | None = None, symbols: list[str] | None = N
     fetched_at = store.utc_stamp(now)
     trends, failed = estimates.fetch_trends(symbols, use_cache=False)
     rows = [row for symbol in sorted(trends) for row in rows_for(fetched_at, symbol, trends[symbol])]
+    # A second run the same day adds to the first: a company it could not
+    # reach keeps the earlier run's estimates instead of losing them.
+    fresh = {row["symbol"] for row in rows}
+    kept = [row for row in _recorded(path) if row.get("symbol") not in fresh] if rows else []
+    rows = sorted(rows + kept, key=lambda r: (r["symbol"], r["period"]))
+    companies = len({row["symbol"] for row in rows})
     record = {"session": today.isoformat(), "fetched_at": fetched_at, "universe": len(symbols),
-              "companies": len(trends), "rows": len(rows), "failed": dict(list(failed.items())[:50]),
+              "companies": companies, "fetched": len(trends), "kept_from_earlier": len({r["symbol"] for r in kept}), "rows": len(rows), "failed": dict(list(failed.items())[:50]),
               "failed_count": len(failed)}
     if not rows:
         return {"status": "failed", "reason": "no estimates answered", **record}
     store.write_csv(path, rows, COLUMNS, compress=True)
     meta.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
-    status = "ok" if len(trends) >= COMPLETE_SHARE * len(symbols) else "partial"
+    status = "ok" if companies >= COMPLETE_SHARE * len(symbols) else "partial"
     return {"status": status, **record}

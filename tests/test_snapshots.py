@@ -251,3 +251,22 @@ def test_compressed_csv_is_byte_stable(tmp_path):
     assert first.read_bytes() == second.read_bytes()
     [parsed] = list(csv.DictReader(gzip.decompress(first.read_bytes()).decode().splitlines()))
     assert parsed == {"a": "1.5", "b": "", "c": '{"x": 1}'}
+
+
+def test_consensus_second_run_keeps_what_the_first_recorded(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    import csv
+    import gzip
+    from market_recap.snapshots import consensus
+    trend = lambda eps: {"0y": {"eps": eps, "end": "2026-12-31"}}  # noqa: E731
+    answers = [{"A": trend(1.0), "B": trend(2.0)}, {"B": trend(2.5), "C": trend(3.0)}]
+    monkeypatch.setattr(consensus.estimates, "fetch_trends", lambda symbols, use_cache=False: (answers.pop(0), {}))
+    now = datetime(2026, 10, 1, 23, 50, tzinfo=timezone.utc)                  # a Thursday evening in New York
+    universe = ["A", "B", "C", "D", "E"]
+    first = consensus.run(root=tmp_path, now=now, symbols=universe)
+    second = consensus.run(root=tmp_path, now=now, symbols=universe)
+    assert first["companies"] == 2 and second["companies"] == 3 and second["kept_from_earlier"] == 1
+    path = next(tmp_path.rglob("*.csv.gz"))
+    with gzip.open(path, "rt") as handle:
+        eps = {r["symbol"]: r["eps"] for r in csv.DictReader(handle)}
+    assert eps == {"A": "1.0", "B": "2.5", "C": "3.0"}                       # B refreshed, A kept
