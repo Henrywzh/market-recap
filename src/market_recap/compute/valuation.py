@@ -508,3 +508,45 @@ def aggregate_pe(caps: pd.DataFrame, earnings: pd.DataFrame) -> pd.DataFrame:
     pe = total_cap / total_earnings.where(total_earnings > 0)
     pe = pe.where(coverage >= AGGREGATE_MIN_COVERAGE)
     return pd.DataFrame({"pe": pe, "coverage": coverage})
+
+
+# --- Forward P/E ------------------------------------------------------------------
+# Price over the next twelve months' consensus EPS: this fiscal year's and next
+# year's estimates, weighted by how much of each the coming twelve months
+# covers (the convention FactSet's index figure uses). A fiscal year that has
+# ended but not been reported weighs nothing. Yahoo's estimates are on the
+# analysts' basis -- adjusted EPS for most companies -- so a forward multiple
+# is not the same measure as a trailing one on reported earnings.
+DAYS_PER_YEAR_F = 365.25
+
+
+def ntm_eps(trend: dict | None, today) -> dict | None:
+    """{eps, weight_this_year, this_year_end} or None without both years."""
+    if not trend:
+        return None
+    this, nxt = trend.get("0y") or {}, trend.get("+1y") or {}
+    if this.get("eps") is None or nxt.get("eps") is None or not this.get("end"):
+        return None
+    left = (pd.Timestamp(this["end"]) - pd.Timestamp(today)).days
+    weight = min(max(left / DAYS_PER_YEAR_F, 0.0), 1.0)
+    return {"eps": weight * this["eps"] + (1 - weight) * nxt["eps"], "weight_this_year": round(weight, 3),
+            "this_year_end": this["end"]}
+
+
+def forward_pe(price: float | None, ntm: dict | None) -> float | None:
+    """A forward multiple, blank on a forecast loss."""
+    if price is None or not ntm or ntm["eps"] <= 0:
+        return None
+    return price / ntm["eps"]
+
+
+def aggregate_forward(caps: dict[str, float], earnings: dict[str, float]) -> dict | None:
+    """Total cap over total NTM earnings for the companies with both, and the
+    share of the group's cap they hold."""
+    both = [s for s in caps if s in earnings and caps[s]]
+    total = sum(caps.values())
+    if not both or not total:
+        return None
+    covered = sum(caps[s] for s in both)
+    profit = sum(earnings[s] for s in both)
+    return {"pe": covered / profit if profit > 0 else None, "coverage": covered / total}

@@ -21,7 +21,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import csv
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 import math
 from pathlib import Path
@@ -898,3 +898,98 @@ def observations(*, use_cache: bool = True) -> tuple[list[dict], dict[str, str],
     rows += added
     rows.sort(key=lambda row: (row["report_date"] or "", row["source_url"] or ""))
     return rows, errors, {"seed": len(known), "listed": len(links), "checked": len(fresh), "added": len(added)}
+
+
+# --- The weekly Earnings Insight PDF -------------------------------------------------
+# The blog states the forward P/E only in its earnings-season updates; between
+# seasons (after 2026-08-07) its weekly pieces are on other subjects and the
+# series stopped. The Friday PDF states it every week, with its 5- and 10-year
+# averages and the trailing P/E. Its sector page is a chart image and is not
+# read. Text is extracted with pdftotext (poppler), as for Korea's release.
+PDF_URL = ("https://advantage.factset.com/hubfs/Website/Resources%20Section/Research%20Desk/"
+           "Earnings%20Insight/EarningsInsight_{stamp}.pdf")
+_PDF_FORWARD = re.compile(r"forward 12-month P/E ratio (?:for the S&P 500 )?is (\d+(?:\.\d+)?)", re.I)
+_PDF_FIVE = re.compile(r"5-year average (?:of |\()(\d+(?:\.\d+)?)", re.I)
+_PDF_TEN = re.compile(r"10-year average (?:of |\()(\d+(?:\.\d+)?)", re.I)
+_PDF_TRAILING = re.compile(r"trailing 12-month P/E ratio (?:for the S&P 500 )?is (\d+(?:\.\d+)?)", re.I)
+
+
+def parse_insight_text(text: str) -> dict | None:
+    """The valuation figures of one Earnings Insight, or None without a forward P/E."""
+    text = re.sub(r"\s+", " ", text)
+    forward = _PDF_FORWARD.search(text)
+    if not forward:
+        return None
+    # The averages are the ones in the forward P/E's own sentence and the next.
+    tail = text[forward.end():forward.end() + 260]
+    five, ten = _PDF_FIVE.search(tail), _PDF_TEN.search(tail)
+    trailing = _PDF_TRAILING.search(text)
+    value = lambda m: float(m.group(1)) if m else None  # noqa: E731
+    out = {"forward_12m_pe": value(forward), "forward_12m_pe_5y_avg": value(five),
+           "forward_12m_pe_10y_avg": value(ten), "trailing_12m_pe": value(trailing)}
+    return out if 5.0 <= out["forward_12m_pe"] <= 40.0 else None
+
+
+def _pdf_text(day: date) -> str | None:
+    """The PDF's text for one publication day; None when there is none. A day
+    without a PDF is remembered, so it is asked once."""
+    import shutil
+    import subprocess
+
+    stamp = day.strftime("%m%d%y")
+    missing = cache.path_for(NAMESPACE, f"insight-{stamp}", ".missing")
+    if missing.exists():
+        return None
+
+    def fetch() -> str:
+        from .http import get_bytes
+        data = get_bytes(PDF_URL.format(stamp=stamp), user_agent=USER_AGENT, timeout=60.0, retries=1)
+        tool = shutil.which("pdftotext")
+        if not tool:
+            raise RuntimeError("pdftotext (poppler) is not installed")
+        result = subprocess.run([tool, "-l", "40", "-", "-"], input=data, capture_output=True, timeout=120)
+        if result.returncode != 0:
+            raise RuntimeError(f"pdftotext failed: {result.stderr.decode(errors='replace')[:120]}")
+        return result.stdout.decode("utf-8", errors="replace")
+
+    try:
+        return cache.fetch_text(NAMESPACE, f"insight-{stamp}", fetch, kind="archive", suffix=".txt", compress=True)
+    except FetchError as exc:
+        if "404" in str(exc) or "403" in str(exc):
+            missing.parent.mkdir(parents=True, exist_ok=True)
+            missing.write_text(str(exc)[:200])
+            return None
+        raise
+
+
+def insight_observations(since: date, until: date, *, budget: int = 12) -> tuple[list[dict], list[str]]:
+    """{report_date, forward P/E, its averages, trailing P/E} per weekly PDF
+    from ``since`` to ``until``, and the weeks that could not be read. It is
+    published on Fridays, on the Thursday before a Friday holiday; at most
+    ``budget`` weeks are fetched for the first time per build."""
+    out, failed, fetched = [], [], 0
+    friday = since + timedelta(days=(4 - since.weekday()) % 7)
+    while friday <= until:
+        for day in (friday, friday - timedelta(days=1)):
+            stamp = day.strftime("%m%d%y")
+            cached = cache.path_for(NAMESPACE, f"insight-{stamp}", ".txt" + cache.GZIP_SUFFIX).exists()
+            if not cached and not cache.path_for(NAMESPACE, f"insight-{stamp}", ".missing").exists():
+                if fetched >= budget:
+                    failed.append(f"{day}: left for a later build")
+                    break
+                fetched += 1
+            try:
+                text = _pdf_text(day)
+            except Exception as exc:  # noqa: BLE001 - one week must not stop the rest
+                failed.append(f"{day}: {str(exc)[:100]}")
+                break
+            if text is None:
+                continue
+            figures = parse_insight_text(text)
+            if figures:
+                out.append({"report_date": day.isoformat(), "source_url": PDF_URL.format(stamp=stamp), **figures})
+            else:
+                failed.append(f"{day}: no forward P/E in the text")
+            break
+        friday += timedelta(days=7)
+    return out, failed

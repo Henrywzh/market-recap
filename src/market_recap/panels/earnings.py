@@ -140,7 +140,26 @@ def _season(ctx, universe: dict, trends: dict, previous: dict | None, today: dat
     return out, failed
 
 
-def _factset(rows: list[dict]) -> dict:
+def _forward_pe(rows: list[dict], insight: list[dict]) -> list[dict]:
+    """The S&P 500's forward P/E, weekly: the blog's articles, with the
+    Earnings Insight PDF taking a week the PDF covers (it states the figure
+    every week; the blog only in season)."""
+    points = {r["report_date"]: {"date": r["report_date"], "forward_12m_pe": r["forward_12m_pe"],
+                                 "ten_year_average": r.get("forward_12m_pe_10y_avg")}
+              for r in rows if r.get("forward_12m_pe") is not None}
+    for r in insight:
+        day = date.fromisoformat(r["report_date"])
+        # The blog's update and the PDF of the same week are one observation.
+        for other in [d for d in points if abs((date.fromisoformat(d) - day).days) <= 3]:
+            del points[other]
+        points[r["report_date"]] = {"date": r["report_date"], "forward_12m_pe": r["forward_12m_pe"],
+                                    "ten_year_average": r.get("forward_12m_pe_10y_avg"),
+                                    "five_year_average": r.get("forward_12m_pe_5y_avg"),
+                                    "trailing_12m_pe": r.get("trailing_12m_pe"), "source": "pdf"}
+    return [points[d] for d in sorted(points)]
+
+
+def _factset(rows: list[dict], insight: list[dict] = ()) -> dict:
     def latest(fields: tuple[str, ...]) -> dict | None:
         found = [r for r in rows if any(r.get(f) is not None for f in fields)]
         return found[-1] if found else None
@@ -178,8 +197,7 @@ def _factset(rows: list[dict]) -> dict:
          "annual_eps_revision_pct": r.get("annual_eps_revision_pct")}
         for q, r in sorted(first_revision.items())[-HISTORY_QUARTERS:]
     ]
-    pe = [{"date": r["report_date"], "forward_12m_pe": r["forward_12m_pe"], "ten_year_average": r.get("forward_12m_pe_10y_avg")}
-          for r in rows if r.get("forward_12m_pe") is not None]
+    pe = _forward_pe(rows, list(insight))
 
     def sectors(row: dict | None) -> dict:
         try:
@@ -193,11 +211,17 @@ def _factset(rows: list[dict]) -> dict:
         return {"report_date": row["report_date"], "reference_quarter": row["reference_quarter"],
                 "source_url": row["source_url"], **{f: row.get(f) for f in fields}}
 
+    picked = pick(snapshot, SNAPSHOT_FIELDS)
+    # The forward P/E tile reads the newest weekly point, which between
+    # seasons is the PDF's, not the last in-season article's.
+    if picked and pe and pe[-1]["date"] > (picked.get("report_date") or ""):
+        picked |= {"forward_12m_pe": pe[-1]["forward_12m_pe"], "forward_12m_pe_10y_avg": pe[-1].get("ten_year_average"),
+                   "forward_pe_date": pe[-1]["date"]}
     return {
         "articles": len(rows),
         "first_date": rows[0]["report_date"] if rows else None,
         "newest_date": rows[-1]["report_date"] if rows else None,
-        "snapshot": pick(snapshot, SNAPSHOT_FIELDS),
+        "snapshot": picked,
         "revision": {
             **pick(revision, ("quarterly_eps_revision_pct", "annual_eps_revision_pct")),
             "sectors": sectors(revision),
@@ -254,11 +278,27 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         error="; ".join(f"{k}: {v}" for k, v in list(errors.items())[:3]) or None,
     ))
 
+    # The weekly PDF from the blog's last forward P/E (at most a year back).
+    last_blog = max((r["report_date"] for r in rows if r.get("forward_12m_pe") is not None), default=None)
+    since = max(date.fromisoformat(last_blog) - timedelta(days=7) if last_blog else today - timedelta(days=365),
+                today - timedelta(days=365))
+    try:
+        insight, insight_failed = factset.insight_observations(since, today)
+    except Exception as exc:  # noqa: BLE001 - optional context
+        insight, insight_failed = [], [str(exc)[:ERROR_DETAIL_CHARS]]
+    ctx.log.add(SourceRecord(
+        "factset_insight_pdf", "FactSet Earnings Insight weekly PDF (forward P/E)",
+        factset.PDF_URL.format(stamp="MMDDYY"), rows=len(insight),
+        observed_date=insight[-1]["report_date"] if insight else None, policy="weekly_article",
+        status="ok" if not insight_failed else "partial",
+        error="; ".join(insight_failed[:3]) or None,
+    ))
+
     return {
         "as_of": ctx.as_of,
         "index": ctx.primary.key,
         "holdings_as_of": ctx.holdings_as_of,
-        "factset": {**_factset(rows), "collection": stats, "source_url": factset.TOPIC_URL},
+        "factset": {**_factset(rows, insight), "collection": stats, "source_url": factset.TOPIC_URL},
         "tracker": tracker,
         "season": season,
         "notices": notices,

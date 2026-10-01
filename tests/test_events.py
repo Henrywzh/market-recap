@@ -186,3 +186,32 @@ def test_a_straddle_running_weeks_past_the_report_is_not_its_implied_move():
     assert P._event_implied(rows, date(2026, 10, 13)) is None
     rows = pd.DataFrame([{"expiry": "2026-10-16", "days": 16, "straddle_pct": 4.0, "atm_iv": 0.3}])
     assert P._event_implied(rows, date(2026, 10, 13))["straddle_pct"] == 4.0
+
+
+def test_factset_insight_pdf_text_and_the_weekly_merge():
+    from market_recap.panels import earnings as P
+    from market_recap.sources import factset
+
+    text = ("Valuation: Forward P/E Ratio is 19.2, Above the 10-Year Average (19.0)\n"
+            "The forward 12-month P/E ratio for the S&P 500 is 19.2. This P/E ratio is below the 5-year average of 19.8 but above the\n"
+            "10-year average of 19.0. ... The trailing 12-month P/E ratio is 25.8, which is above the 5-year average of 24.4.")
+    got = factset.parse_insight_text(text)
+    assert got == {"forward_12m_pe": 19.2, "forward_12m_pe_5y_avg": 19.8, "forward_12m_pe_10y_avg": 19.0, "trailing_12m_pe": 25.8}
+    assert factset.parse_insight_text("no valuation here") is None
+    blog = [{"report_date": "2026-08-07", "forward_12m_pe": 20.0, "forward_12m_pe_10y_avg": 19.0},
+            {"report_date": "2026-07-31", "forward_12m_pe": 19.6, "forward_12m_pe_10y_avg": 19.0}]
+    pdf = [{"report_date": "2026-08-06", **got}, {"report_date": "2026-09-25", **got}]
+    merged = P._forward_pe(blog, pdf)
+    # The PDF of 08-06 and the blog of 08-07 are one week: the PDF's is kept.
+    assert [p["date"] for p in merged] == ["2026-07-31", "2026-08-06", "2026-09-25"]
+    assert merged[-1]["five_year_average"] == 19.8
+
+
+def test_consensus_snapshot_rows():
+    from market_recap.snapshots import consensus as C
+
+    trend = {"0q": {"end": "2026-12-31", "eps": 1.5, "low": 1.4, "high": 1.6, "analysts": 20},
+             "+1y": {"end": "2027-12-31", "eps": 7.0}, "0y": {"eps": None}}
+    rows = C.rows_for("2026-10-01T23:50:00Z", "AAA", trend)
+    assert [(r["period"], r["eps"]) for r in rows] == [("0q", 1.5), ("+1y", 7.0)]
+    assert set(rows[0]) == set(C.COLUMNS)

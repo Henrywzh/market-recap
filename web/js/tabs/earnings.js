@@ -115,7 +115,8 @@ function factsetCard(f) {
       stat('EPS BEAT RATE', snap.eps_beat_rate == null ? DASH : `${num(snap.eps_beat_rate, 0)}%`, snap.eps_surprise_pct == null ? '' : `surprise ${pct(snap.eps_surprise_pct, 1)}`),
       stat('REVENUE BEAT RATE', snap.revenue_beat_rate == null ? DASH : `${num(snap.revenue_beat_rate, 0)}%`, snap.revenue_surprise_pct == null ? '' : `surprise ${pct(snap.revenue_surprise_pct, 1)}`),
       stat('FORWARD 12M P/E', snap.forward_12m_pe == null ? DASH : `${num(snap.forward_12m_pe, 1)}×`,
-        snap.forward_12m_pe_10y_avg == null ? '' : `10Y avg ${num(snap.forward_12m_pe_10y_avg, 1)}× (${pct(premium, 0)})`),
+        (snap.forward_12m_pe_10y_avg == null ? '' : `10Y avg ${num(snap.forward_12m_pe_10y_avg, 1)}× (${pct(premium, 0)})`)
+          + (snap.forward_pe_date ? ` · ${snap.forward_pe_date}` : '')),
     ]));
   }
   const rev = f.revision;
@@ -166,10 +167,14 @@ function factsetCard(f) {
     }
     const pe = (f.forward_pe || []).slice(-104);
     if (pe.length) {
-      multiLine(peNode, pe.map((r) => r.date), {
+      // The weekly PDF also states the 5-year average; the blog's in-season
+      // articles state only the 10-year one.
+      const lines = {
         'Forward 12M P/E': pe.map((r) => r.forward_12m_pe),
         '10-year average': pe.map((r) => r.ten_year_average),
-      });
+      };
+      if (pe.some((r) => r.five_year_average)) lines['5-year average'] = pe.map((r) => r.five_year_average ?? null);
+      multiLine(peNode, pe.map((r) => r.date), lines);
     }
   });
   return node;

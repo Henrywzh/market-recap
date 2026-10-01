@@ -309,6 +309,8 @@ function aggregateSection(data) {
         st.percentile >= 80 ? 'down' : st.percentile <= 20 ? 'up' : ''),
       stat('VS 10Y MEDIAN', present(st.vs_median) ? `${st.vs_median > 0 ? '+' : ''}${num(st.vs_median, 0)}%` : DASH, `median ${num(st.median, 1)}x · IQR ${num(st.p25, 1)}–${num(st.p75, 1)}x`),
       stat('COVERAGE', present(s.coverage) ? `${num(s.coverage * 100, 0)}%` : DASH, 'of its market cap with filed EPS'),
+      stat('FORWARD P/E (NTM)', present(s.forward_now?.pe) ? `${num(s.forward_now.pe, 1)}x` : DASH,
+        s.forward_now ? `consensus EPS, ${num(s.forward_now.coverage * 100, 0)}% of cap · ${(s.forward_history?.dates || []).length} recorded days` : 'no consensus'),
     );
   };
   const basisSwitch = bases.length > 1 ? periodSwitch(bases, basis, (b) => { basis = b; draw(); }) : null;
@@ -348,7 +350,16 @@ function historyTable(history, view) {
     ? [['Taken out of latest TTM EPS', `$${num(latest.removed, 2)} of $${num(latest.reported, 2)}`
       + (latest.tax_rate !== null && latest.tax_rate !== undefined ? ` · tax ${num(latest.tax_rate * 100, 0)}%` : '')]]
     : [];
+  const fwd = history.forward;
+  const lastFwd = fwd?.pe?.length ? fwd.pe[fwd.pe.length - 1] : null;
+  const forwardRows = fwd ? [[
+    'Forward P/E (NTM consensus)',
+    lastFwd === null || lastFwd === undefined ? 'n/m (forecast loss)' : `${num(lastFwd, 1)}x`
+      + ` · NTM EPS $${num(fwd.eps_ntm[fwd.eps_ntm.length - 1], 2)}`
+      + (fwd.dates.length > 1 ? ` · recorded since ${fwd.dates[0]}` : ' · history recorded from today'),
+  ]] : [];
   const rows = [
+    ...forwardRows,
     ['Earnings basis', (BASIS_NAMES[view.basis] || 'REPORTED').toLowerCase()],
     ...removed,
     ['Current P/E', s.current === null ? 'n/m (loss)' : `${num(s.current, 1)}x`],

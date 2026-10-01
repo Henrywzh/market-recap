@@ -118,3 +118,29 @@ def options_summaries(since: date, until: date) -> pd.DataFrame:
 
 def configured_root() -> str:
     return str(load_config().get("snapshots", {}).get("root", "data/snapshots"))
+
+
+def consensus_history(since: date, until: date) -> dict[str, dict[str, dict]]:
+    """{day: {symbol: trend}} from the recorded consensus files, each trend in
+    estimates.parse_trend's shape (end, eps, low, high per period)."""
+    base = root() / "consensus"
+    out: dict[str, dict[str, dict]] = {}
+    day = since
+    while day <= until:
+        path = base / f"{day:%Y}" / f"{day:%Y-%m-%d}.csv.gz"
+        if path.exists():
+            try:
+                frame = pd.read_csv(path, compression="gzip")
+            except (OSError, ValueError):
+                frame = None
+            if frame is not None:
+                trends: dict[str, dict] = {}
+                for row in frame.itertuples(index=False):
+                    trends.setdefault(row.symbol, {})[row.period] = {
+                        "end": None if pd.isna(row.end) else str(row.end),
+                        "eps": None if pd.isna(row.eps) else float(row.eps),
+                        "low": None if pd.isna(row.eps_low) else float(row.eps_low),
+                        "high": None if pd.isna(row.eps_high) else float(row.eps_high)}
+                out[day.isoformat()] = trends
+        day += timedelta(days=1)
+    return out

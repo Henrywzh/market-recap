@@ -21,7 +21,7 @@ import pandas as pd
 
 from ..compute import valuation as V
 from ..config import VALUATION_ARTIFACT_DIR
-from ..sources import sec
+from ..sources import estimates, sec, snapshot_store
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, prune_stale, write_json
 from .financials import cik_for, universe
 
@@ -41,6 +41,7 @@ PE_AGREEMENT_TOLERANCE = 0.25
 # percentile is on the history's own basis (operating unless the company has
 # no operating history), the table's own P/E stays reported.
 HISTORY_METRICS = (
+    V.Metric("pe_forward", "P/E forward (NTM consensus)", "x", "valuation", "low"),
     V.Metric("pe_operating", "P/E operating (TTM)", "x", "valuation", "low"),
     V.Metric("pe_percentile", "P/E percentile, own 10Y", "pct", "valuation", "low"),
     V.Metric("pe_vs_median", "P/E vs own 10Y median", "pct", "valuation", "low"),
@@ -59,8 +60,31 @@ def _stats_json(stats: dict) -> dict:
     return {k: clean_float(v, 2) if isinstance(v, float) else v for k, v in stats.items()}
 
 
+def _forward_series(symbol: str, prices: pd.Series | None, recorded: dict[str, dict[str, dict]],
+                    today: pd.Timestamp, ntm_today: dict | None) -> dict | None:
+    """Forward P/E on every recorded day (the close that day over that day's
+    NTM consensus) and today's; the history starts when recording started."""
+    if prices is None or prices.dropna().empty:
+        return None
+    closes = prices.dropna()
+    points = {}
+    for day, trends in recorded.items():
+        stamp = pd.Timestamp(day)
+        ntm = V.ntm_eps(trends.get(symbol), stamp)
+        at = closes[closes.index <= stamp]
+        if ntm and not at.empty:
+            points[day] = (V.forward_pe(float(at.iloc[-1]), ntm), ntm["eps"])
+    if ntm_today:
+        points[today.strftime("%Y-%m-%d")] = (V.forward_pe(float(closes.iloc[-1]), ntm_today), ntm_today["eps"])
+    if not points:
+        return None
+    days = sorted(points)
+    return {"dates": days, "pe": [clean_float(points[d][0], 2) for d in days],
+            "eps_ntm": [clean_float(points[d][1], 4) for d in days], "recorded_days": len(recorded)}
+
+
 def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits: pd.Series | None,
-             sector: str | None) -> dict | None:
+             sector: str | None, forward: dict | None = None) -> dict | None:
     """P/E against its own ten years, on the operating basis and as reported;
     writes the ticker's chart artifact. Returns {basis, <basis>: stats, ...}."""
     if prices is None or not data.eps_history:
@@ -94,6 +118,7 @@ def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits: pd.
         "basis": lead,
         **payload(lead),
         "alternate": payload(V.REPORTED if lead != V.REPORTED else basis),
+        "forward": forward,
         # Each quarter's TTM EPS both ways, and what the operating figure took out.
         "eps": [
             {"filed": filed, "period_end": end, "reported": clean_float(eps, 4),
@@ -120,7 +145,7 @@ def _split_factor(splits, symbol: str, after: str | None) -> float:
 
 
 def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices: list[str], splits,
-         history: dict | None) -> dict:
+         history: dict | None, ntm: dict | None = None) -> dict:
     snapshot = data.trailing
     factor = _split_factor(splits, symbol, snapshot["shares_as_of"])
     shares = snapshot["shares"] * factor if snapshot["shares"] else None
@@ -153,6 +178,8 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         # total earnings over its total price, losses included, as for an index.
         "earnings_yield": clean_float(V._pct(snapshot["ttm"].get("net_income"), market_cap), 4),
         "book_yield": clean_float(V._pct(snapshot["balance"].get("equity"), market_cap), 4),
+        "pe_forward": clean_float(V.forward_pe(price, ntm), 2),
+        "eps_ntm": clean_float(ntm["eps"], 4) if ntm else None,
         "pe_history": history is not None,
         # The reported history's latest point checks the table's P/E (both are
         # reported); the percentile is on the history's leading basis.
@@ -164,7 +191,29 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
     }
 
 
-def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dict[str, dict[str, pd.Series]]) -> dict | None:
+def _forward_aggregate(cap_frame: pd.DataFrame, columns: list[str], forward_earnings: dict[str, dict[str, float]]) -> dict | None:
+    """A group's forward P/E on each day consensus was recorded: total cap
+    that day over total NTM earnings, where the companies with an estimate
+    hold at least AGGREGATE_MIN_COVERAGE of the cap."""
+    days = sorted({d for s in columns for d in forward_earnings.get(s, {})})
+    out_days, out_pe = [], []
+    for day in days:
+        at = cap_frame.loc[:pd.Timestamp(day), columns]
+        if at.empty:
+            continue
+        caps = at.iloc[-1].dropna()
+        with_estimate = [s for s in caps.index if day in forward_earnings.get(s, {})]
+        total = caps.sum()
+        if not total or caps[with_estimate].sum() < V.AGGREGATE_MIN_COVERAGE * total:
+            continue
+        profit = sum(forward_earnings[s][day] for s in with_estimate)
+        out_days.append(day)
+        out_pe.append(clean_float(caps[with_estimate].sum() / profit, 2) if profit > 0 else None)
+    return {"dates": out_days, "pe": out_pe} if out_days else None
+
+
+def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dict[str, dict[str, pd.Series]],
+                forward_earnings: dict[str, dict[str, float]] | None = None) -> dict | None:
     """Each index's and each sector's P/E against its own ten years, on
     operating earnings (each company on its own basis) and as reported.
 
@@ -187,6 +236,15 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
         if not columns:
             continue
         entry = {"key": key, "label": label, "kind": kind, "companies": len(columns)}
+        members = [r for r in rows if r["ticker"] in columns and r.get("market_cap")]
+        forward = V.aggregate_forward({r["ticker"]: r["market_cap"] for r in members},
+                                      {r["ticker"]: r["eps_ntm"] * r["market_cap"] / r["price"]
+                                       for r in members if r.get("eps_ntm") is not None and r.get("price")})
+        if forward:
+            entry["forward_now"] = {"pe": clean_float(forward["pe"], 2), "coverage": clean_float(forward["coverage"], 3)}
+        recorded = _forward_aggregate(cap_frame, columns, forward_earnings or {})
+        if recorded:
+            entry["forward_history"] = recorded
         for basis, frame_all in frames.items():
             frame = V.aggregate_pe(cap_frame[columns], frame_all.reindex(columns=columns)).iloc[-V.HISTORY_SESSIONS:]
             stats = V.pe_stats(frame["pe"])
@@ -253,11 +311,20 @@ def build(ctx, *, use_cache: bool = True) -> dict:
 
     if use_cache:
         sec.check_filings(cik_for(symbol, cik_map) for symbol in symbols)
+    # Consensus for the forward multiple: EARNINGS read the whole universe's
+    # this session, so these are the cached answers.
+    try:
+        trends, _ = estimates.fetch_trends(sorted(symbols))
+    except Exception:
+        trends = {}
+    today = pd.Timestamp(ctx.as_of)
+    recorded = snapshot_store.consensus_history((today - pd.Timedelta(days=V.HISTORY_SESSIONS * 7 // 5)).date(), today.date())
     rows, skipped = [], {}
     # Market cap and TTM earnings through time, one listing per company: a
     # second share class carries the whole company's cap again.
     caps, companies = {}, set()
     earnings: dict[str, dict[str, pd.Series]] = {V.OPERATING: {}, V.REPORTED: {}}
+    forward_earnings: dict[str, dict[str, float]] = {}
     for symbol in symbols:
         cik = cik_for(symbol, cik_map)
         if cik is None:
@@ -275,8 +342,10 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         price = float(closes.iloc[-1]) if closes is not None and not closes.empty else None
         symbol_splits = ctx.splits[symbol] if symbol in ctx.splits.columns else None
         sector = meta.get(symbol, {}).get("sector")
-        history = _history(symbol, data, ctx.prices.get(symbol), symbol_splits, sector)
-        row = _row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history)
+        ntm = V.ntm_eps(trends.get(symbol), today)
+        forward = _forward_series(symbol, ctx.prices.get(symbol), recorded, today, ntm)
+        history = _history(symbol, data, ctx.prices.get(symbol), symbol_splits, sector, forward)
+        row = _row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history, ntm)
         rows.append(row)
         prices = ctx.prices.get(symbol)
         if prices is not None and data.eps_history and row["market_cap"] and price and row["cik"] not in companies:
@@ -287,6 +356,8 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             basis = V.operating_basis(data.eps_history, sector)
             operating = V.as_steps(V.operating_steps(data.eps_history, symbol_splits, basis))
             earnings[V.OPERATING][symbol] = V.plausible_eps(prices, operating) * shares
+            if forward:
+                forward_earnings[symbol] = {d: e * shares for d, e in zip(forward["dates"], forward["eps_ntm"]) if e is not None}
 
     primary = ctx.members[ctx.primary.key].drop_duplicates("yahoo_symbol").set_index("yahoo_symbol")["weight"]
     check = _weight_check([r for r in rows if ctx.primary.key in r["indices"]], primary.to_dict())
@@ -326,7 +397,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             "disagree": disagree,
         },
         "weight_check": check,
-        "aggregates": _aggregates(ctx, rows, caps, earnings),
+        "aggregates": _aggregates(ctx, rows, caps, earnings, forward_earnings),
         "financials_sector": V.FINANCIALS_SECTOR,
         "note": (
             "Market cap is the closing price times a filed share count: the latest cover-page count "

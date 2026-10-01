@@ -21,12 +21,15 @@ on:
     # Risk inputs as published: once each weekday evening, after FRED, OFR
     # and Cboe have posted the session.
     - cron: "17 23 * * 1-5"
+    # Consensus EPS for every valued company, each weekday evening: the only
+    # way a forward P/E gets a history.
+    - cron: "47 23 * * 1-5"
   workflow_dispatch:
     inputs:
       kind:
         description: "What to record"
         type: choice
-        options: [options, expectations, risk]
+        options: [options, expectations, risk, consensus]
         default: expectations
       force:
         description: "options: record even outside the New York window"
@@ -58,6 +61,8 @@ jobs:
             echo "kind=expectations" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event.schedule }}" = "17 23 * * 1-5" ]; then
             echo "kind=risk" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "47 23 * * 1-5" ]; then
+            echo "kind=consensus" >> "$GITHUB_OUTPUT"
           else
             echo "kind=options" >> "$GITHUB_OUTPUT"
           fi
@@ -126,7 +131,7 @@ jobs:
           else:
               result = json.loads(path.read_text())
               print(f"**{result.get('status')}** {result.get('reason') or ''}")
-              for key in ("underlyings_ok", "summary_rows", "contract_rows", "rows", "seconds"):
+              for key in ("underlyings_ok", "summary_rows", "contract_rows", "rows", "companies", "seconds"):
                   if key in result:
                       print(f"- {key}: {result[key]}")
               failed = result.get("failed") or {}

@@ -350,3 +350,22 @@ def test_operating_share_count_follows_a_split_after_its_filing():
     step = V.operating_steps([q], splits, V.OPERATING)[0]
     assert step["reported"] == pytest.approx(2.0)
     assert step["eps"] == pytest.approx(80.0 / 40.0)
+
+
+# --- Forward P/E ---------------------------------------------------------------------
+
+def test_ntm_eps_weights_this_and_next_year_by_what_is_left():
+    trend = {"0y": {"end": "2026-12-31", "eps": 10.0}, "+1y": {"end": "2027-12-31", "eps": 12.0}}
+    ntm = V.ntm_eps(trend, pd.Timestamp("2026-10-01"))
+    weight = 91 / 365.25
+    assert ntm["eps"] == pytest.approx(weight * 10 + (1 - weight) * 12)
+    # A fiscal year that ended but has not been reported weighs nothing (Micron's FY26).
+    trend = {"0y": {"end": "2026-08-31", "eps": 73.9}, "+1y": {"end": "2027-08-31", "eps": 161.5}}
+    assert V.ntm_eps(trend, pd.Timestamp("2026-10-01"))["eps"] == pytest.approx(161.5)
+    assert V.ntm_eps({"0y": {"end": "2026-12-31", "eps": 1.0}}, pd.Timestamp("2026-10-01")) is None
+    assert V.forward_pe(100.0, {"eps": -1.0}) is None
+
+
+def test_group_forward_pe_is_cap_over_ntm_earnings_with_coverage():
+    out = V.aggregate_forward({"A": 100.0, "B": 300.0, "C": 100.0}, {"A": 5.0, "B": 15.0})
+    assert out["pe"] == pytest.approx(400.0 / 20.0) and out["coverage"] == pytest.approx(0.8)

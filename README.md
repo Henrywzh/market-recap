@@ -288,13 +288,16 @@ data/snapshots/            checkout of the `snapshots` branch (recorded history)
 
 ## Recorded snapshots
 
-Two kinds of history cannot be downloaded later for free, so
-`.github/workflows/snapshots.yml` records them from the day it runs and
+Some history cannot be downloaded later for free, so
+`.github/workflows/snapshots.yml` records it from the day it runs and
 commits each run to the orphan `snapshots` branch (data only):
 
-- **Option chains**, once a session between 15:10 and 16:00 New York: about
-  50 underlyings (`[snapshots.options]`: index, sector and macro ETFs, the
-  largest index weights, the watchlist, and up to 15 MONITOR candidates).
+- **Option chains**, once a session from 15:10 New York (GitHub starts
+  scheduled runs hours late, so the window runs to midnight: options stop
+  trading at 16:00 and a later run records the closing quotes; a zero bid is
+  unusable). About 50-90 underlyings (`[snapshots.options]`: index, sector
+  and macro ETFs, the largest index weights, the watchlist, every name
+  reporting within three days, and up to 15 MONITOR candidates).
   Per expiry, ATM IV, 25-delta put and call IV, the ATM straddle and open
   interest, all solved from bid/ask mids under Black-76 against the
   parity-implied forward, never Yahoo's last-trade IV. Contracts within 25%
@@ -302,6 +305,22 @@ commits each run to the orphan `snapshots` branch (data only):
 - **Market pricing**, four times a weekday: fed funds and SOFR futures,
   every open Kalshi market in the configured series, Polymarket's Fed
   markets. Inputs only; probabilities are derived from them later.
+- **Consensus EPS**, each weekday evening: Yahoo's estimates (this and next
+  quarter and fiscal year) for every company VALUATION values. Free sources
+  publish only today's consensus, so this is the only way a forward P/E gets
+  a history: each company's and each index's and sector's forward P/E is
+  drawn from the recorded days, starting 2026-10-01. Until a year is
+  recorded it is compared across companies and with FactSet's index figure,
+  not with its own past.
+
+Forward P/E is price over next-twelve-months consensus EPS (this fiscal
+year's and next year's estimates, weighted by how much of each the coming
+twelve months covers). Yahoo's estimates are on the analysts' basis --
+adjusted EPS for most companies -- so a forward multiple is not the same
+measure as the trailing one on filed EPS. The S&P 500's own forward P/E,
+with its 5- and 10-year averages, comes from FactSet: the blog's articles in
+season and the weekly Earnings Insight PDF every Friday (its text, via
+pdftotext; the sector page is an image and is not read).
 
 `make snapshot-options` and `make snapshot-expectations` write the same files
 under `data/snapshots/` locally. The plan they serve is
