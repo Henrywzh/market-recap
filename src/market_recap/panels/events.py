@@ -287,17 +287,22 @@ def _guides(symbol: str, cik: int | None, reactions: list[dict], calendar: dict[
     if not cik or not reactions:
         return {}
     try:
-        block = sec.submissions_recent(cik)
         data = sec.filer(cik)
+        # The current registrant first, then any predecessor (Exxon, 2026).
+        blocks = [(c, sec.submissions_recent(c)) for c in data.ciks]
     except Exception:
         return {}
     out = {}
     for r in reactions[:count]:
         day = r["date"]
-        try:
-            found = releases.release_on(cik, day, block, fetch=budget["left"] > 0)
-        except Exception:
-            continue
+        found = None
+        for filer_cik, block in blocks:
+            try:
+                found = releases.release_on(filer_cik, day, block, fetch=budget["left"] > 0)
+            except Exception:
+                found = None
+            if found:
+                break
         if found is None:
             continue
         url, text, fresh = found

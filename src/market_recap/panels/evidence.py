@@ -129,6 +129,22 @@ def build(ctx) -> dict:
         announcements = (V.six_k_announcements(recent or {}, six_k["pattern"], six_k.get("timing", "bmo"))
                          if six_k else V.earnings_announcements(recent or {}, today=as_of))
         if cik and recent is not None and not six_k and len(announcements) < REACTIONS:
+            # After a holding-company reorganisation (Exxon, 2026) the new
+            # registrant holds a release or two; the rest are under the
+            # predecessor CIK the facts reader already follows.
+            try:
+                predecessors = sec.filer(cik).ciks[1:]
+            except Exception:
+                predecessors = ()
+            for older_cik in predecessors:
+                try:
+                    older = V.earnings_announcements(sec.submissions_recent(older_cik), today=as_of)
+                except Exception:
+                    continue
+                seen = {a["date"] for a in announcements}
+                announcements = sorted(announcements + [a for a in older if a["date"] not in seen],
+                                       key=lambda a: a["date"], reverse=True)
+        if cik and recent is not None and not six_k and len(announcements) < REACTIONS:
             # A heavy filer's recent block holds one year; read older pages
             # until eight releases are found or three years are covered.
             try:
