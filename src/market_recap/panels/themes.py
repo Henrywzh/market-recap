@@ -491,6 +491,100 @@ def _housing(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
     return out
 
 
+# --- BANKS & CONSUMER ---------------------------------------------------------------
+# FRED series in one shape: (label, short name, unit, frequency, release lag).
+# The lag says when an observation became public: ("days", n) after its FRED
+# date, or ("months", n, day) -- that day of the n-th month after the month it
+# covers. H.8 is published on Friday for the week ending nine days earlier;
+# claims on Thursday for the week ending the Saturday before; the bank call-
+# report delinquency rates about two months after the quarter; the loan
+# officer survey early in the second month of its quarter.
+BANKS_SERIES = {
+    "TOTLL": ("Loans and leases, all commercial banks ($bn)", "LOANS", "bn", "weekly", ("days", 9)),
+    "DPSACBW027SBOG": ("Deposits, all commercial banks ($bn)", "DEPOSITS", "bn", "weekly", ("days", 9)),
+    "T10Y2Y": ("10-year less 2-year Treasury yield", "2s10s", "rate", "daily", ("days", 0)),
+    "T10Y3M": ("10-year less 3-month Treasury yield", "3m10y", "rate", "daily", ("days", 0)),
+    "BAMLH0A0HYM2": ("High-yield option-adjusted spread (ICE BofA)", "HY OAS", "rate", "daily", ("days", 1)),
+    "DRALACBS": ("Delinquency rate, all loans, commercial banks", "DELINQ ALL", "rate", "quarterly", ("days", 146)),
+    "DRCCLACBS": ("Delinquency rate, credit cards", "DELINQ CARDS", "rate", "quarterly", ("days", 146)),
+    "DRCRELEXFACBS": ("Delinquency rate, commercial real estate ex-farmland", "DELINQ CRE", "rate", "quarterly", ("days", 146)),
+    "DRTSCILM": ("Loan officer survey: net % of banks tightening C&I standards (large & mid firms)", "SLOOS C&I", "pct", "quarterly", ("days", 36)),
+}
+CONSUMER_SERIES = {
+    "RSAFS": ("Retail and food services sales ($m, SA)", "RETAIL SALES", "m", "monthly", ("months", 1, 16)),
+    "RSFSXMV": ("Retail sales ex motor vehicles ($m, SA)", "EX AUTOS", "m", "monthly", ("months", 1, 16)),
+    "PCEC96": ("Real personal consumption expenditures (chained $bn, SAAR)", "REAL PCE", "bn", "monthly", ("months", 1, 28)),
+    "PSAVERT": ("Personal saving rate", "SAVING RATE", "rate", "monthly", ("months", 1, 28)),
+    "TOTALSL": ("Consumer credit outstanding ($m)", "CREDIT", "m", "monthly", ("months", 2, 8)),
+    "UMCSENT": ("University of Michigan consumer sentiment", "SENTIMENT", "index", "monthly", ("months", 0, 28)),
+    "ICSA": ("Initial jobless claims", "CLAIMS", "count", "weekly", ("days", 5)),
+    "CCSA": ("Continuing jobless claims", "CONTINUING", "count", "weekly", ("days", 12)),
+}
+FRED_KEEP = {"daily": 1260, "weekly": 520, "monthly": 120, "quarterly": 60}
+# A rate or a spread changes in points; anything else in percent.
+POINTS_UNITS = {"rate", "pct"}
+
+
+def _months_later(month: str, n: int, day: int) -> str:
+    year, m = (int(p) for p in month.split("-"))
+    m += n
+    year, m = year + (m - 1) // 12, (m - 1) % 12 + 1
+    return date(year, m, min(day, 28)).isoformat()
+
+
+def _available(stamp: pd.Timestamp, lag: tuple) -> str:
+    if lag[0] == "days":
+        return (stamp + pd.Timedelta(days=lag[1])).strftime("%Y-%m-%d")
+    return _months_later(stamp.strftime("%Y-%m"), lag[1], lag[2])
+
+
+def _series_section(series_id: str, meta: tuple) -> dict:
+    label, short, unit, freq, lag = meta
+    frame, _ = fred.fetch_series(series_id)
+    full = frame.set_index("date")["value"]
+    s = full.iloc[-FRED_KEEP[freq]:]
+    last, stamp = float(s.iloc[-1]), s.index[-1]
+    year_ago = full.asof(stamp - pd.Timedelta(days=364 if freq != "monthly" else 360))
+    prior = float(s.iloc[-2]) if len(s) > 1 else None
+    if unit in POINTS_UNITS:
+        change = None if prior is None else round(last - prior, 3)
+        yoy = None if pd.isna(year_ago) else round(last - float(year_ago), 3)
+    else:
+        change = None if not prior else round((last / prior - 1) * 100, 2)
+        yoy = None if pd.isna(year_ago) or not year_ago else round((last / float(year_ago) - 1) * 100, 2)
+    return {"id": series_id, "label": label, "short": short, "unit": unit, "freq": freq,
+            "dates": [d.strftime("%Y-%m-%d") for d in s.index], "values": [round(float(v), 3) for v in s],
+            "available": [_available(d, lag) for d in s.index],
+            "latest": {"date": stamp.strftime("%Y-%m-%d"), "value": round(last, 3), "change": change, "yoy": yoy,
+                       "available": _available(stamp, lag)}}
+
+
+def _fred_daily_change(series_id: str, scale: float = 100.0) -> pd.Series:
+    frame, _ = fred.fetch_series(series_id)
+    return frame.set_index("date")["value"].diff() * scale
+
+
+def _banks(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
+    out: dict = {"series": {sid: _section(lambda sid=sid, meta=meta: _series_section(sid, meta)) for sid, meta in BANKS_SERIES.items()}}
+    drivers = {"curve": _fred_daily_change("T10Y2Y"), "ten_year": _fred_daily_change("DGS10"), "hy_oas": _fred_daily_change("BAMLH0A0HYM2")}
+    out["sensitivity"] = {"drivers": {"curve": "2s10s, per 1bp", "ten_year": "10-year yield, per 1bp", "hy_oas": "HY spread, per 1bp"},
+                          "rows": _sensitivities(excess, [spec.get("etf") or ""] + list(spec.get("bellwethers") or []), drivers)}
+    out["next"] = {"h8": eia.next_release(as_of, 4).isoformat()}
+    return out
+
+
+def _consumer(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
+    out: dict = {"series": {sid: _section(lambda sid=sid, meta=meta: _series_section(sid, meta)) for sid, meta in CONSUMER_SERIES.items()}}
+    futures = _futures_closes()
+    drivers = {"ten_year": _fred_daily_change("DGS10"),
+               "gasoline": futures["RB=F"].pct_change(fill_method=None) * 100 if "RB=F" in futures.columns else pd.Series(dtype=float),
+               "hy_oas": _fred_daily_change("BAMLH0A0HYM2")}
+    out["sensitivity"] = {"drivers": {"ten_year": "10-year yield, per 1bp", "gasoline": "RBOB gasoline, per 1%", "hy_oas": "HY spread, per 1bp"},
+                          "rows": _sensitivities(excess, [spec.get("etf") or ""] + list(spec.get("bellwethers") or []), drivers)}
+    out["next"] = {"claims": eia.next_release(as_of, 3).isoformat()}
+    return out
+
+
 # --- Drivers: the industry series in one shape, for the event cards ---------------
 # Each series lists its points with the date it became public ("available"),
 # so a card can say what has been released since the company last reported.
@@ -518,7 +612,8 @@ def _monthly(rows: list[dict], value: str, day: int, released: str | None = None
     return out
 
 
-def _drivers(cloud: dict, semis: dict, energy: dict | None = None, housing: dict | None = None) -> list[dict]:
+def _drivers(cloud: dict, semis: dict, energy: dict | None = None, housing: dict | None = None,
+             banks: dict | None = None, consumer: dict | None = None) -> list[dict]:
     """kind 'yoy': the value is a year-on-year change, compared as is; 'level':
     a level, compared as a % change since the report; 'pp': a rate or a gap
     already in percent, compared in points."""
@@ -549,6 +644,16 @@ def _drivers(cloud: dict, semis: dict, energy: dict | None = None, housing: dict
             # A month's figure is public in the middle to late part of the next.
             out.append(_driver(f"fred_{sid.lower()}", f"{section['label'].split(',')[0]}, y/y", ["housing"], "yoy", "pct",
                                [{"period": d[:7], "available": _after_month(d[:7], 26), "value": v} for d, v in zip(dates, yoy)]))
+    for theme, section, wanted in (("banks", banks, BANK_DRIVERS), ("consumer", consumer, CONSUMER_DRIVERS)):
+        for sid, kind in wanted.items():
+            series = ((section or {}).get("series") or {}).get(sid)
+            if series and "unavailable" not in series:
+                out.append(_series_driver(series, [theme], kind))
+    gas = (energy or {}).get("retail_gasoline")
+    if gas:
+        # EIA's Monday survey, public the same afternoon.
+        out.append(_driver("retail_gasoline", "US regular gasoline, $/gal", ["consumer"], "level", "usd",
+                           [{"period": d, "available": d, "value": v} for d, v in zip(gas["dates"], gas["values"])]))
     # A failed section is {"unavailable": ...}, not a list.
     listed = lambda x: x if isinstance(x, list) else []  # noqa: E731
     for tw in listed(semis.get("tw")):
@@ -584,6 +689,31 @@ def _drivers(cloud: dict, semis: dict, energy: dict | None = None, housing: dict
                        [{"period": m, "available": _after_month(m, 15), "value": v}
                         for m, v in zip(ramp.get("months") or [], ramp.get("median_pepm") or [])]))
     return [d for d in out if d]
+
+
+# Which bank and consumer series reach the event cards, and how they compare:
+# 'yoy' turns a level into its change on a year earlier first.
+BANK_DRIVERS = {"TOTLL": "yoy", "DPSACBW027SBOG": "yoy", "T10Y2Y": "pp", "BAMLH0A0HYM2": "pp", "DRALACBS": "pp", "DRTSCILM": "pp"}
+CONSUMER_DRIVERS = {"RSAFS": "yoy", "PCEC96": "yoy", "TOTALSL": "yoy", "UMCSENT": "level", "ICSA": "level", "PSAVERT": "pp"}
+PERIODS_PER_YEAR = {"daily": 252, "weekly": 52, "monthly": 12, "quarterly": 4}
+
+
+def _series_driver(series: dict, themes: list[str], kind: str) -> dict | None:
+    values, dates = series["values"], series["dates"]
+    label, unit = series["label"], series["unit"]
+    if kind == "yoy":
+        lag = PERIODS_PER_YEAR[series["freq"]]
+        values = [None if i < lag or not values[i - lag] else round((values[i] / values[i - lag] - 1) * 100, 2) for i in range(len(values))]
+        label, unit = f"{label.split(' (')[0]}, y/y", "pct"
+    if series["freq"] == "daily":
+        # A daily series is weekly on a card: the count of new releases would be noise.
+        keep = list(range(len(dates) - 1, -1, -5))[::-1]
+        dates, values, available = [dates[i] for i in keep], [values[i] for i in keep], [series["available"][i] for i in keep]
+    else:
+        available = series["available"]
+    period = (lambda d: d[:7]) if series["freq"] in ("monthly", "quarterly") else (lambda d: d)
+    return _driver(f"fred_{series['id'].lower()}", label, themes, kind, unit,
+                   [{"period": period(d), "available": a, "value": v} for d, a, v in zip(dates, available, values)])
 
 
 def _quarter_public(quarter: str) -> str:
@@ -631,18 +761,20 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     specs = {g["key"]: g for g in settings["groups"]}
     energy = _section(lambda: _energy(specs.get("energy", {}), excess, as_of))
     housing = _section(lambda: _housing(specs.get("housing", {}), excess, as_of))
+    banks = _section(lambda: _banks(specs.get("banks", {}), excess, as_of))
+    consumer = _section(lambda: _consumer(specs.get("consumer", {}), excess, as_of))
     _data_dates(groups, cloud, semis, as_of, settings)
-    _weekly_dates(groups, energy, housing, as_of)
+    _weekly_dates(groups, energy, housing, banks, as_of)
     _log(ctx, cloud, semis)
-    _log_more(ctx, energy, housing)
+    _log_more(ctx, energy, housing, banks, consumer)
     for g in groups:
         g["calendar"].sort(key=lambda e: (e["date"], {"data": 0, "macro": 1, "earnings": 2}[e["kind"]]))
     return {"as_of": ctx.as_of, "calendar_days": int(settings.get("calendar_days", 42)), "groups": groups,
             "heatmap": _heatmap(catalysts, as_of, int(settings.get("heatmap_days", 21))),
             "membership": _membership(ctx, settings, excess),
             "member_corr": float(settings.get("member_corr", 0.55)),
-            "cloud": cloud, "semis": semis, "energy": energy, "housing": housing,
-            "drivers": _section(lambda: _drivers(cloud, semis, energy, housing))}
+            "cloud": cloud, "semis": semis, "energy": energy, "housing": housing, "banks": banks, "consumer": consumer,
+            "drivers": _section(lambda: _drivers(cloud, semis, energy, housing, banks, consumer))}
 
 
 def _heatmap(catalysts: dict, as_of: date, days: int) -> dict:
@@ -715,18 +847,19 @@ def _data_dates(groups: list[dict], cloud: dict, semis: dict, as_of: date, setti
     add("semis", "Korea exports, 1st-of-month release (semis first)", flash.get("due"))
 
 
-def _weekly_dates(groups: list[dict], energy: dict, housing: dict, as_of: date) -> None:
+def _weekly_dates(groups: list[dict], energy: dict, housing: dict, banks: dict, as_of: date) -> None:
     """The next weekly release of each, on its group's calendar. The petroleum
-    report is already there from the macro calendar ("petroleum")."""
+    report and jobless claims are already there from the macro calendar."""
     by_key = {g["key"]: g for g in groups}
     items = [("energy", (energy.get("next") or {}).get("gas_storage"), "EIA natural gas storage, 10:30"),
-             ("housing", (housing.get("next") or {}).get("mortgage_rate"), "Freddie Mac mortgage rate")]
+             ("housing", (housing.get("next") or {}).get("mortgage_rate"), "Freddie Mac mortgage rate"),
+             ("banks", (banks.get("next") or {}).get("h8"), "Fed H.8 bank loans & deposits, 16:15")]
     for key, day, title in items:
         if day and key in by_key:
             by_key[key]["calendar"].append({"date": day, "kind": "data", "title": title, "late": False})
 
 
-def _log_more(ctx, energy: dict, housing: dict) -> None:
+def _log_more(ctx, energy: dict, housing: dict, banks: dict, consumer: dict) -> None:
     failed = [k for k, v in (energy.get("eia") or {}).items() if "unavailable" in v]
     ctx.log.add(SourceRecord(
         "eia_weekly", "EIA weekly petroleum and natural gas storage (history pages)", eia.PAGE_URL,
@@ -742,6 +875,18 @@ def _log_more(ctx, energy: dict, housing: dict) -> None:
         rows=len(series) - len(bad), policy="monthly_release",
         status="error" if "unavailable" in housing else ("partial" if bad else "ok"),
         error=housing.get("unavailable") or (", ".join(bad) or None)))
+    for source_id, label, section in (
+            ("fred_banks", "Bank series (FRED: Fed H.8, Treasury curve, ICE BofA HY OAS, call-report delinquencies, SLOOS)", banks),
+            ("fred_consumer", "Consumer series (FRED: Census retail sales, BEA PCE, Fed G.19, UMich sentiment, DOL claims)", consumer)):
+        series = section.get("series") or {}
+        bad = [k for k, v in series.items() if "unavailable" in v]
+        first = next(iter(series), "TOTLL")
+        ctx.log.add(SourceRecord(
+            source_id, label, fred.CSV_URL.format(series_id=first),
+            None if "unavailable" in section else max((v["latest"]["date"] for v in series.values() if "latest" in v), default=None),
+            rows=len(series) - len(bad), policy="monthly_release",
+            status="error" if "unavailable" in section or (series and len(bad) == len(series)) else ("partial" if bad else "ok"),
+            error=section.get("unavailable") or (", ".join(bad) or None)))
 
 
 def _log(ctx, cloud: dict, semis: dict) -> None:

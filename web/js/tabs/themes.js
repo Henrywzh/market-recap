@@ -1,6 +1,6 @@
 // THEMES (under CATALYSTS): what is coming for each group of names that
-// trades together, and the industry data behind CLOUD, SEMIS, ENERGY and
-// HOUSING. Built by
+// trades together, and the industry data behind CLOUD, SEMIS, ENERGY,
+// HOUSING, BANKS and CONSUMER. Built by
 // the THEMES panel; every figure carries its source and date, and a source
 // that failed leaves its reason in its own card.
 
@@ -544,6 +544,101 @@ function housingCards(h) {
     + 'Release days are on the calendar above.')].filter(Boolean);
 }
 
+// --- BANKS & CONSUMER ---------------------------------------------------------------
+
+const POINTS = new Set(['rate', 'pct']);
+
+function fredValue(unit, v) {
+  if (v === null || v === undefined) return DASH;
+  if (unit === 'bn') return `$${num(v / 1000, 2)}T`;
+  if (unit === 'm') return v >= 1e6 ? `$${num(v / 1e6, 2)}T` : `$${num(v / 1000, 1)}bn`;
+  if (unit === 'rate') return `${num(v, 2)}%`;
+  if (unit === 'pct') return `${num(v, 1)}%`;
+  if (unit === 'count') return `${num(v / 1000, 0)}k`;
+  return num(v, 1);
+}
+
+// A rate or spread moves in basis points, a net-percent survey in points, a level in percent.
+function fredChange(unit, v) {
+  if (v === null || v === undefined) return DASH;
+  if (unit === 'rate') return `${v > 0 ? '+' : ''}${num(v * 100, 0)}bp`;
+  if (unit === 'pct') return `${v > 0 ? '+' : ''}${num(v, 1)}pp`;
+  return `${v > 0 ? '+' : ''}${num(v, 1)}%`;
+}
+
+function fredViews(x) {
+  const kind = POINTS.has(x.unit) ? 'diff' : 'pct';
+  if (x.freq === 'daily') return [{ id: 'RAW' }, { id: 'Δ 1M', lag: 21, kind: 'diff' }, { id: 'Δ 3M', lag: 63, kind: 'diff' }, { id: 'Δ 1Y', lag: 252, kind: 'diff' }];
+  if (x.freq === 'weekly') return [{ id: 'RAW' }, { id: '4W', lag: 4, kind }, { id: '13W', lag: 13, kind }, { id: 'YoY', lag: 52, kind }];
+  if (x.freq === 'quarterly') return [{ id: 'RAW' }, { id: 'QoQ', lag: 1, kind }, { id: 'YoY', lag: 4, kind }];
+  return VIEWS.monthly(kind);
+}
+
+const STEP = { daily: 'd/d', weekly: 'w/w', monthly: 'm/m', quarterly: 'q/q' };
+
+// One stat per series (latest, its change on the prior print and on a year
+// earlier), then each series' chart behind a picker. `tone(id, x)` colours a
+// stat: 'up' when it helps the names, 'down' when it hurts, '' when neutral.
+function fredCards(section, order, title, chartTitle, note, tone, right) {
+  if (!section || section.unavailable) return [card(title, null, unavailable(section))];
+  const s = section.series || {};
+  const ids = order.filter((id) => s[id] && !s[id].unavailable);
+  const failed = order.filter((id) => s[id]?.unavailable);
+  const strip = el('div', { class: 'stat-strip' }, ids.map((id) => {
+    const x = s[id];
+    const l = x.latest;
+    return stat(x.short, fredValue(x.unit, l.value),
+      `${fredChange(x.unit, l.change)} ${STEP[x.freq]} · ${fredChange(x.unit, l.yoy)} y/y · ${x.freq === 'monthly' || x.freq === 'quarterly' ? l.date.slice(0, 7) : l.date.slice(5)}`,
+      tone(id, x));
+  }));
+  const entries = ids.map((id) => {
+    const x = s[id];
+    const monthly = x.freq === 'monthly' || x.freq === 'quarterly';
+    return { id: x.short, chart: () => viewChart({ dates: monthly ? x.dates.map((d) => d.slice(0, 7)) : x.dates, views: fredViews(x),
+      fmt: (v) => fredValue(x.unit, v), series: [{ name: x.label, values: x.values, color: (p) => p.text, width: 1.6 }] }) };
+  });
+  return [
+    card(title, right, [strip, failed.length ? gap(`Not built this time: ${failed.join(', ')}`) : null]),
+    pickerCard(chartTitle, null, entries, note),
+  ];
+}
+
+const BANK_ORDER = ['TOTLL', 'DPSACBW027SBOG', 'T10Y2Y', 'T10Y3M', 'BAMLH0A0HYM2', 'DRALACBS', 'DRCCLACBS', 'DRCRELEXFACBS', 'DRTSCILM'];
+const CONSUMER_ORDER = ['RSAFS', 'RSFSXMV', 'PCEC96', 'PSAVERT', 'TOTALSL', 'UMCSENT', 'ICSA', 'CCSA'];
+
+function bankTone(id, x) {
+  const l = x.latest;
+  if (id === 'TOTLL' || id === 'DPSACBW027SBOG') return l.yoy > 0 ? 'up' : 'down';
+  if (id === 'T10Y2Y' || id === 'T10Y3M') return l.value > 0 ? 'up' : 'down';      // banks lend long, fund short
+  if (id.startsWith('DR') || id === 'BAMLH0A0HYM2') return l.yoy > 0 ? 'down' : 'up'; // wider, more delinquent, tighter: worse
+  return '';
+}
+
+function consumerTone(id, x) {
+  const l = x.latest;
+  if (id === 'ICSA' || id === 'CCSA') return l.yoy > 0 ? 'down' : 'up';
+  if (id === 'PSAVERT' || id === 'TOTALSL') return '';
+  return l.yoy > 0 ? 'up' : 'down';
+}
+
+function banksCards(b) {
+  const next = b?.next || {};
+  return fredCards(b, BANK_ORDER, 'BANK LENDING, CURVE & CREDIT', 'BANKS · CHART',
+    'Fed H.8 (all commercial banks, seasonally adjusted; Fridays 16:15 ET for the week ended nine days before), Treasury curve spreads (FRED T10Y2Y, T10Y3M), ICE BofA US high-yield OAS, '
+    + 'call-report delinquency rates (quarterly, about two months after the quarter) and the Senior Loan Officer Survey (net % of banks tightening C&I standards; positive is tightening), via FRED -- the current vintage. '
+    + 'Green helps the banks (loans and deposits growing, a positive curve, spreads, delinquencies and standards easing on the year), red hurts.',
+    bankTone, el('span', { class: 'dim', text: `next H.8: ${next.h8 || DASH}` }));
+}
+
+function consumerCards(c) {
+  const next = c?.next || {};
+  return fredCards(c, CONSUMER_ORDER, 'CONSUMER SPENDING, CREDIT & JOBS', 'CONSUMER · CHART',
+    'Census advance retail sales (nominal, about the 16th of the next month), BEA real PCE and saving rate (end of the next month), Fed G.19 consumer credit (about the 8th, two months on), '
+    + 'University of Michigan sentiment (final, late in the month -- FRED carries it a month behind) and Labor Department claims (Thursdays 08:30), via FRED -- the current vintage. '
+    + 'Pump prices are on ENERGY. Green: up on the year (claims: down).',
+    consumerTone, el('span', { class: 'dim', text: `next claims: ${next.claims || DASH}` }));
+}
+
 function industry(key, data) {
   if (key === 'cloud') {
     const c = data.cloud;
@@ -568,6 +663,14 @@ function industry(key, data) {
     const h = data.housing;
     return [...housingCards(h), sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', h.sensitivity,
       'Correlation and beta (% per 1bp) of each name\'s daily return beyond the S&P 500 with the daily change in the 10-year Treasury yield (FRED DGS10). Negative: the names fall when rates rise.')].filter(Boolean);
+  }
+  if (key === 'banks' && data.banks) {
+    return [...banksCards(data.banks), sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', data.banks.sensitivity,
+      'Correlation and beta (% per 1bp) of each name\'s daily return beyond the S&P 500 with the daily change in the 2s10s curve, the 10-year yield and the high-yield spread. History, not a forecast.')].filter(Boolean);
+  }
+  if (key === 'consumer' && data.consumer) {
+    return [...consumerCards(data.consumer), sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', data.consumer.sensitivity,
+      'Correlation and beta of each name\'s daily return beyond the S&P 500 with the daily change in the 10-year yield (per 1bp), RBOB gasoline futures (per 1%) and the high-yield spread (per 1bp). History, not a forecast.')].filter(Boolean);
   }
   return [];
 }

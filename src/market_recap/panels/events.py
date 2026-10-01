@@ -335,7 +335,8 @@ def _since(drivers: list[dict], themes: list[str], day: str | None) -> list[dict
         if d["kind"] == "level" and then["value"]:
             row["change_pct"] = round((now["value"] / then["value"] - 1) * 100, 1)
         else:
-            row["change_pp"] = round(now["value"] - then["value"], 1)
+            # A rate moves in hundredths: the card shows it in basis points.
+            row["change_pp"] = round(now["value"] - then["value"], 2 if d["unit"] == "rate" else 1)
         out.append(row)
     return out
 

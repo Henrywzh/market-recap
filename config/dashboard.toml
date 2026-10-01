@@ -278,7 +278,7 @@ key = "consumer"
 label = "CONSUMER"
 etf = "XRT"
 bellwethers = ["WMT", "COST", "AMZN", "HD", "TGT", "NKE", "MCD", "SBUX", "LULU"]
-macro = ["Retail sales", "PCE", "Employment report", "CPI"]
+macro = ["Retail sales", "PCE", "Employment report", "CPI", "jobless claims"]
 
 [[themes.groups]]
 key = "housing"

@@ -293,3 +293,29 @@ def test_sensitivity_and_crack():
     idx = pd.bdate_range("2026-01-01", periods=2)
     crack = T.crack_321(pd.Series([90.0, 92.0], idx), pd.Series([3.0, 3.1], idx), pd.Series([4.0, 4.2], idx))
     assert crack.iloc[0] == pytest.approx((2 * 3.0 * 42 + 4.0 * 42 - 270) / 3)
+
+
+def test_fred_release_lags_date_each_observation():
+    from market_recap.panels import themes as P
+    # H.8: the week ending Wednesday 9/16 is published Friday 9/25.
+    assert P._available(pd.Timestamp("2026-09-16"), ("days", 9)) == "2026-09-25"
+    # Consumer credit for July: about the 8th, two months on; December rolls the year.
+    assert P._available(pd.Timestamp("2026-07-01"), ("months", 2, 8)) == "2026-09-08"
+    assert P._available(pd.Timestamp("2026-12-01"), ("months", 1, 16)) == "2027-01-16"
+    # Sentiment's final reading is the same month.
+    assert P._available(pd.Timestamp("2026-08-01"), ("months", 0, 28)) == "2026-08-28"
+
+
+def test_series_driver_turns_levels_into_year_on_year_and_thins_daily():
+    from market_recap.panels import themes as P
+    weekly = {"id": "TOTLL", "label": "Loans ($bn)", "unit": "bn", "freq": "weekly",
+              "dates": [f"w{i}" for i in range(60)], "available": [f"a{i}" for i in range(60)],
+              "values": [100.0] * 4 + [110.0] * 56}
+    d = P._series_driver(weekly, ["banks"], "yoy")
+    assert d["label"] == "Loans, y/y" and d["unit"] == "pct"
+    assert d["points"][-1]["value"] == 0.0 and d["points"][0]["value"] == 10.0   # first with a base: w52 vs w0
+    daily = {"id": "T10Y2Y", "label": "2s10s", "unit": "rate", "freq": "daily",
+             "dates": [f"d{i:02d}" for i in range(12)], "available": [f"d{i:02d}" for i in range(12)],
+             "values": [float(i) for i in range(12)]}
+    d = P._series_driver(daily, ["banks"], "pp")
+    assert [p["value"] for p in d["points"]] == [1.0, 6.0, 11.0]                # every fifth session, ending on the last
