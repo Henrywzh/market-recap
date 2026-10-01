@@ -34,7 +34,7 @@ from ..compute import capex as X
 from ..compute import events as E
 from ..compute import themes as T
 from .. import cache
-from ..sources import adata, altdata, dart, korea_customs, mops, motie, pcpartpicker, releases, sec, yahoo
+from ..sources import adata, altdata, dart, eia, fred, korea_customs, mops, motie, pcpartpicker, releases, sec, yahoo
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, describe_error, history_payload
 from .financials import cik_for
 
@@ -397,6 +397,100 @@ def _pcpp() -> dict:
     return out
 
 
+# --- ENERGY -------------------------------------------------------------------------
+# EIA's weekly inventories against the same week of the last five years,
+# front-month futures and the 3-2-1 crack, and how each bellwether's excess
+# return has moved with oil, gas and the crack over the last year.
+ENERGY_FUTURES = {"CL=F": "WTI crude", "BZ=F": "Brent crude", "NG=F": "Henry Hub gas",
+                  "RB=F": "RBOB gasoline", "HO=F": "Heating oil"}
+EIA_WEEKS = 260
+
+
+def _futures_closes() -> pd.DataFrame:
+    """Kept apart from the members' price cache, like the Korean closes: a
+    futures session is not an equity session."""
+    return cache.frame("themes", "energy-futures", lambda: yahoo.fetch_closes(list(ENERGY_FUTURES), period="5y", use_cache=False),
+                       kind="daily_file")
+
+
+def _eia_section(key: str) -> dict:
+    _, _, label, unit = eia.SERIES[key]
+    frame = eia.seasonal(eia.fetch(key)).iloc[-EIA_WEEKS:]
+    last = frame.iloc[-1]
+    num = lambda v: None if pd.isna(v) else round(float(v), 2)  # noqa: E731
+    return {"label": label, "unit": unit, "dates": [d.strftime("%Y-%m-%d") for d in frame.index],
+            "value": [num(v) for v in frame["value"]], "avg5": [num(v) for v in frame["avg5"]],
+            "latest": {"date": frame.index[-1].strftime("%Y-%m-%d"), "value": num(last["value"]), "change": num(last["change"]),
+                       "avg5": num(last["avg5"]), "vs_avg5_pct": num(last["vs_avg5_pct"])}}
+
+
+def _sensitivities(excess: pd.DataFrame, names: list[str], drivers: dict[str, pd.Series]) -> list[dict]:
+    rows = []
+    for name in names:
+        if name not in excess.columns:
+            continue
+        row = {"symbol": name}
+        for key, driver in drivers.items():
+            row[key] = T.sensitivity(excess[name], driver)
+        rows.append(row)
+    return rows
+
+
+def _energy(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
+    out: dict = {"eia": {key: _section(lambda key=key: _eia_section(key)) for key in eia.SERIES}}
+    futures = _futures_closes()
+    prices = {}
+    for symbol, label in ENERGY_FUTURES.items():
+        if symbol in futures.columns:
+            s = futures[symbol].dropna().iloc[-756:]
+            prices[symbol] = {"label": label, "dates": [d.strftime("%Y-%m-%d") for d in s.index], "values": [round(float(v), 3) for v in s]}
+    crack = T.crack_321(futures.get("CL=F"), futures.get("RB=F"), futures.get("HO=F")) if {"CL=F", "RB=F", "HO=F"} <= set(futures.columns) else pd.Series(dtype=float)
+    if not crack.empty:
+        c = crack.iloc[-756:]
+        prices["crack"] = {"label": "3-2-1 crack ($/bbl)", "dates": [d.strftime("%Y-%m-%d") for d in c.index], "values": [round(float(v), 2) for v in c]}
+    out["prices"] = prices
+    gas, _ = fred.fetch_series("GASREGW")
+    gas = gas.set_index("date")["value"].iloc[-260:]
+    out["retail_gasoline"] = {"dates": [d.strftime("%Y-%m-%d") for d in gas.index], "values": [round(float(v), 3) for v in gas]}
+    drivers = {"wti": futures["CL=F"].pct_change(fill_method=None) * 100 if "CL=F" in futures.columns else pd.Series(dtype=float),
+               "gas": futures["NG=F"].pct_change(fill_method=None) * 100 if "NG=F" in futures.columns else pd.Series(dtype=float),
+               "crack": crack.diff()}
+    out["sensitivity"] = {"drivers": {"wti": "WTI, per 1% move", "gas": "Henry Hub, per 1% move", "crack": "3-2-1 crack, per $1 move"},
+                          "rows": _sensitivities(excess, [spec.get("etf") or ""] + list(spec.get("bellwethers") or []), drivers)}
+    out["next"] = {"petroleum": eia.next_release(as_of, 2).isoformat(), "gas_storage": eia.next_release(as_of, 3).isoformat()}
+    return out
+
+
+# --- HOUSING ------------------------------------------------------------------------
+HOUSING_SERIES = {
+    "MORTGAGE30US": ("30-year mortgage rate (Freddie Mac)", "pct", "weekly"),
+    "HOUST": ("Housing starts, SAAR (thousands)", "k", "monthly"),
+    "HOUST1F": ("Single-family starts, SAAR (thousands)", "k", "monthly"),
+    "PERMIT": ("Building permits, SAAR (thousands)", "k", "monthly"),
+    "HSN1F": ("New home sales, SAAR (thousands)", "k", "monthly"),
+    "MSACSR": ("New homes for sale, months' supply", "months", "monthly"),
+    "CSUSHPINSA": ("Case-Shiller US home price index", "index", "monthly"),
+}
+
+
+def _fred_section(series_id: str, label: str, unit: str, freq: str) -> dict:
+    frame, _ = fred.fetch_series(series_id)
+    s = frame.set_index("date")["value"].iloc[-(520 if freq == "weekly" else 120):]
+    return {"id": series_id, "label": label, "unit": unit, "freq": freq,
+            "dates": [d.strftime("%Y-%m-%d") for d in s.index], "values": [round(float(v), 3) for v in s]}
+
+
+def _housing(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
+    out: dict = {"series": {sid: _section(lambda sid=sid, meta=meta: _fred_section(sid, *meta)) for sid, meta in HOUSING_SERIES.items()}}
+    ten, _ = fred.fetch_series("DGS10")
+    ten = ten.set_index("date")["value"]
+    drivers = {"ten_year": ten.diff() * 100}          # basis points a day
+    out["sensitivity"] = {"drivers": {"ten_year": "10-year yield, per 1bp move"},
+                          "rows": _sensitivities(excess, [spec.get("etf") or ""] + list(spec.get("bellwethers") or []), drivers)}
+    out["next"] = {"mortgage_rate": eia.next_release(as_of, 3).isoformat()}
+    return out
+
+
 # --- Drivers: the industry series in one shape, for the event cards ---------------
 # Each series lists its points with the date it became public ("available"),
 # so a card can say what has been released since the company last reported.
@@ -424,10 +518,37 @@ def _monthly(rows: list[dict], value: str, day: int, released: str | None = None
     return out
 
 
-def _drivers(cloud: dict, semis: dict) -> list[dict]:
+def _drivers(cloud: dict, semis: dict, energy: dict | None = None, housing: dict | None = None) -> list[dict]:
     """kind 'yoy': the value is a year-on-year change, compared as is; 'level':
-    a level, compared as a % change since the report."""
+    a level, compared as a % change since the report; 'pp': a rate or a gap
+    already in percent, compared in points."""
     out = []
+    for key, section in ((energy or {}).get("eia") or {}).items():
+        if "unavailable" in section:
+            continue
+        # A week is public the Wednesday (gas: Thursday) after it ends.
+        lag = 6 if key == "gas_storage" else 5
+        out.append(_driver(f"eia_{key}_vs5y", f"{section['label']}, vs 5-year average", ["energy"], "pp", "pct",
+                           [{"period": d, "available": (pd.Timestamp(d) + pd.Timedelta(days=lag)).strftime("%Y-%m-%d"), "value": v}
+                            for d, v in zip(section["dates"], [None if a is None or v is None else round((v / a - 1) * 100, 2)
+                                                               for v, a in zip(section["value"], section["avg5"])])]))
+    for key in ("CL=F", "NG=F", "crack"):
+        p = ((energy or {}).get("prices") or {}).get(key)
+        if p:
+            out.append(_driver(f"px_{key}", p["label"], ["energy"], "level", "usd",
+                               [{"period": d, "available": d, "value": v} for d, v in zip(p["dates"], p["values"])]))
+    for sid, section in ((housing or {}).get("series") or {}).items():
+        if "unavailable" in section:
+            continue
+        if sid == "MORTGAGE30US":
+            out.append(_driver("mortgage30", section["label"], ["housing"], "pp", "rate",
+                               [{"period": d, "available": d, "value": v} for d, v in zip(section["dates"], section["values"])]))
+        elif sid in ("HOUST", "HSN1F", "PERMIT"):
+            values, dates = section["values"], section["dates"]
+            yoy = [None if i < 12 or not values[i - 12] else round((values[i] / values[i - 12] - 1) * 100, 1) for i in range(len(values))]
+            # A month's figure is public in the middle to late part of the next.
+            out.append(_driver(f"fred_{sid.lower()}", f"{section['label'].split(',')[0]}, y/y", ["housing"], "yoy", "pct",
+                               [{"period": d[:7], "available": _after_month(d[:7], 26), "value": v} for d, v in zip(dates, yoy)]))
     # A failed section is {"unavailable": ...}, not a list.
     listed = lambda x: x if isinstance(x, list) else []  # noqa: E731
     for tw in listed(semis.get("tw")):
@@ -507,15 +628,21 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         "adata": _section(lambda: {"notes": adata.fetch_recent(as_of, 6)}),
         "pcpp": _section(_pcpp),
     }
+    specs = {g["key"]: g for g in settings["groups"]}
+    energy = _section(lambda: _energy(specs.get("energy", {}), excess, as_of))
+    housing = _section(lambda: _housing(specs.get("housing", {}), excess, as_of))
     _data_dates(groups, cloud, semis, as_of, settings)
+    _weekly_dates(groups, energy, housing, as_of)
     _log(ctx, cloud, semis)
+    _log_more(ctx, energy, housing)
     for g in groups:
         g["calendar"].sort(key=lambda e: (e["date"], {"data": 0, "macro": 1, "earnings": 2}[e["kind"]]))
     return {"as_of": ctx.as_of, "calendar_days": int(settings.get("calendar_days", 42)), "groups": groups,
             "heatmap": _heatmap(catalysts, as_of, int(settings.get("heatmap_days", 21))),
             "membership": _membership(ctx, settings, excess),
             "member_corr": float(settings.get("member_corr", 0.55)),
-            "cloud": cloud, "semis": semis, "drivers": _section(lambda: _drivers(cloud, semis))}
+            "cloud": cloud, "semis": semis, "energy": energy, "housing": housing,
+            "drivers": _section(lambda: _drivers(cloud, semis, energy, housing))}
 
 
 def _heatmap(catalysts: dict, as_of: date, days: int) -> dict:
@@ -586,6 +713,35 @@ def _data_dates(groups: list[dict], cloud: dict, semis: dict, as_of: date, setti
     add("semis", "Korea IC exports (customs, confirmed)", korea.get("due"))
     flash = semis.get("korea_flash") or {}
     add("semis", "Korea exports, 1st-of-month release (semis first)", flash.get("due"))
+
+
+def _weekly_dates(groups: list[dict], energy: dict, housing: dict, as_of: date) -> None:
+    """The next weekly release of each, on its group's calendar. The petroleum
+    report is already there from the macro calendar ("petroleum")."""
+    by_key = {g["key"]: g for g in groups}
+    items = [("energy", (energy.get("next") or {}).get("gas_storage"), "EIA natural gas storage, 10:30"),
+             ("housing", (housing.get("next") or {}).get("mortgage_rate"), "Freddie Mac mortgage rate")]
+    for key, day, title in items:
+        if day and key in by_key:
+            by_key[key]["calendar"].append({"date": day, "kind": "data", "title": title, "late": False})
+
+
+def _log_more(ctx, energy: dict, housing: dict) -> None:
+    failed = [k for k, v in (energy.get("eia") or {}).items() if "unavailable" in v]
+    ctx.log.add(SourceRecord(
+        "eia_weekly", "EIA weekly petroleum and natural gas storage (history pages)", eia.PAGE_URL,
+        None if "unavailable" in energy else max((v["latest"]["date"] for v in (energy.get("eia") or {}).values() if "latest" in v), default=None),
+        rows=len(energy.get("eia") or {}) - len(failed), policy="weekly_article",
+        status="error" if "unavailable" in energy or len(failed) == len(eia.SERIES) else ("partial" if failed else "ok"),
+        error=(energy.get("unavailable") or "; ".join(f"{k}: {energy['eia'][k]['unavailable'][:80]}" for k in failed[:3])) or None))
+    series = housing.get("series") or {}
+    bad = [k for k, v in series.items() if "unavailable" in v]
+    ctx.log.add(SourceRecord(
+        "fred_housing", "Housing series (FRED: Freddie Mac, Census, S&P Case-Shiller)", fred.CSV_URL.format(series_id="HOUST"),
+        None if "unavailable" in housing else max((v["dates"][-1] for v in series.values() if "dates" in v), default=None),
+        rows=len(series) - len(bad), policy="monthly_release",
+        status="error" if "unavailable" in housing else ("partial" if bad else "ok"),
+        error=housing.get("unavailable") or (", ".join(bad) or None)))
 
 
 def _log(ctx, cloud: dict, semis: dict) -> None:

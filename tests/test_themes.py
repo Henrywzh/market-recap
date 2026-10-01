@@ -4,6 +4,7 @@ from datetime import date
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from market_recap.compute import capex as X
 from market_recap.compute import png
@@ -253,3 +254,42 @@ def test_heatmap_sums_index_weight_by_sector_and_day():
     fin = next(r for r in out["rows"] if r["sector"] == "Financials")
     assert fin["cells"][0] == {"w": 1.8, "top": ["JPM", "GS"], "n": 2} and fin["cells"][1] is None
     assert out["day_totals"] == [1.8, 1.0]
+
+
+# --- ENERGY & HOUSING -----------------------------------------------------------------
+
+EIA_PAGE = """<table><tr><td class="B6">2026-Aug </td><td class="B5">08/28</td><td class="B3">420,100</td>
+<td class="B5"></td><td class="B3"></td></tr>
+<tr><td class="B6">2026-Sep </td><td class="B5">09/04</td><td class="B3">424,069</td><td class="B5">09/11</td><td class="B3">423,429</td></tr></table>"""
+
+
+def test_eia_history_page_parses_week_ending_dates():
+    from market_recap.sources import eia
+
+    s = eia.parse(EIA_PAGE)
+    assert list(s.index.strftime("%Y-%m-%d")) == ["2026-08-28", "2026-09-04", "2026-09-11"]
+    assert s.iloc[-1] == 423429.0
+
+
+def test_eia_seasonal_compares_the_same_week_over_five_prior_years():
+    from market_recap.sources import eia
+
+    weeks = pd.date_range("2018-01-05", "2026-09-25", freq="W-FRI")
+    s = pd.Series([100.0 + (d.year - 2018) * 10 for d in weeks], index=weeks)
+    f = eia.seasonal(s)
+    last = f.iloc[-1]
+    assert last["avg5"] == pytest.approx(sum(100.0 + (y - 2018) * 10 for y in range(2021, 2026)) / 5)
+    assert last["change"] == 0.0
+    assert pd.isna(f.loc["2021-03-05", "avg5"])          # only three prior years: no average
+    assert eia.next_release(date(2026, 9, 30), 2) == date(2026, 10, 7)   # Wednesday after a Wednesday
+
+
+def test_sensitivity_and_crack():
+    driver = pd.Series(np.random.default_rng(0).normal(0, 1, 300), index=pd.bdate_range("2025-01-01", periods=300))
+    excess = 0.5 * driver + 0.01
+    got = T.sensitivity(excess, driver)
+    assert got["beta"] == pytest.approx(0.5) and got["corr"] == pytest.approx(1.0) and got["n"] == 252
+    assert T.sensitivity(excess.iloc[:100], driver.iloc[:100]) is None
+    idx = pd.bdate_range("2026-01-01", periods=2)
+    crack = T.crack_321(pd.Series([90.0, 92.0], idx), pd.Series([3.0, 3.1], idx), pd.Series([4.0, 4.2], idx))
+    assert crack.iloc[0] == pytest.approx((2 * 3.0 * 42 + 4.0 * 42 - 270) / 3)

@@ -310,6 +310,7 @@ function driverValue(unit, v) {
   if (unit === 'pct') return signed(v, 1);
   if (unit === 'usd') return `$${num(v, 2)}`;
   if (unit === 'bn') return `${num(v / 1000, 1)}T`;
+  if (unit === 'rate') return `${num(v, 2)}%`;
   return num(v, 1);
 }
 

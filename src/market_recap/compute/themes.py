@@ -82,3 +82,22 @@ def yoy_monthly(rows: list[dict], value: str) -> list[dict]:
         yoy = round(100 * (r[value] / prior[value] - 1), 1) if prior and prior.get(value) and r.get(value) is not None else None
         out.append({**r, "yoy_pct": r.get("yoy_pct") if r.get("yoy_pct") is not None else yoy})
     return out
+
+
+# --- What moves a basket ------------------------------------------------------------
+
+def sensitivity(excess: pd.Series, driver: pd.Series, *, sessions: int = 252, min_sessions: int = 150) -> dict | None:
+    """How a name's daily excess return has moved with a driver's daily change
+    over the last ``sessions``: beta (excess % per unit of driver change),
+    correlation, and the sessions both had."""
+    both = pd.concat([excess.rename("y"), driver.rename("x")], axis=1).dropna().iloc[-sessions:]
+    if len(both) < min_sessions or both["x"].var() == 0:
+        return None
+    beta = float(both["x"].cov(both["y"]) / both["x"].var())
+    return {"beta": round(beta, 3), "corr": round(float(both["x"].corr(both["y"])), 2), "n": int(len(both))}
+
+
+def crack_321(crude: pd.Series, gasoline: pd.Series, heating_oil: pd.Series) -> pd.Series:
+    """The 3-2-1 crack, $/bbl: two barrels of gasoline and one of heating oil
+    (quoted $/gal, 42 gal a barrel) less three barrels of crude, per barrel."""
+    return ((2 * gasoline * 42 + heating_oil * 42 - 3 * crude) / 3).dropna()

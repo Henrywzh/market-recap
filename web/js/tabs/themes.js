@@ -1,5 +1,6 @@
 // THEMES (under CATALYSTS): what is coming for each group of names that
-// trades together, and the industry data behind CLOUD and SEMIS. Built by
+// trades together, and the industry data behind CLOUD, SEMIS, ENERGY and
+// HOUSING. Built by
 // the THEMES panel; every figure carries its source and date, and a source
 // that failed leaves its reason in its own card.
 
@@ -414,6 +415,135 @@ function adataCard(a) {
 
 // --- page --------------------------------------------------------------------------
 
+// --- ENERGY & HOUSING ---------------------------------------------------------------
+
+// One card, a series picker over it: each series keeps its own chart views.
+function pickerCard(title, right, entries, note) {
+  const ids = entries.map((e) => e.id);
+  let active = ids[0];
+  const host = el('div', {});
+  const draw = () => host.replaceChildren(entries.find((e) => e.id === active).chart());
+  draw();
+  const picker = ids.length > 1 ? periodSwitch(ids, active, (id) => { active = id; draw(); }) : null;
+  return card(title, el('span', { class: 'tag-row' }, [right, picker]), [host, note ? el('div', { class: 'field-note', text: note }) : null]);
+}
+
+const EIA_ORDER = ['crude_stocks', 'gasoline_stocks', 'distillate_stocks', 'gas_storage', 'refinery_utilization', 'crude_production'];
+const EIA_SHORT = { crude_stocks: 'CRUDE', gasoline_stocks: 'GASOLINE', distillate_stocks: 'DISTILLATE', gas_storage: 'NAT GAS',
+  refinery_utilization: 'REFINERY UTIL', crude_production: 'PRODUCTION' };
+
+function eiaValue(unit, v) {
+  if (v === null || v === undefined) return DASH;
+  if (unit === 'mb') return `${num(v / 1000, 1)} mb`;
+  if (unit === 'pct') return `${num(v, 1)}%`;
+  if (unit === 'kbd') return `${num(v / 1000, 2)} mb/d`;
+  return `${num(v, 0)} bcf`;
+}
+
+function eiaCard(e) {
+  if (!e || e.unavailable) return card('EIA WEEKLY', null, unavailable(e));
+  const keys = EIA_ORDER.filter((k) => e.eia[k] && !e.eia[k].unavailable);
+  const strip = el('div', { class: 'stat-strip' }, keys.map((k) => {
+    const x = e.eia[k];
+    const l = x.latest;
+    const change = x.unit === 'pct' ? `${l.change > 0 ? '+' : ''}${num(l.change, 1)}pp w/w` : `${l.change > 0 ? '+' : ''}${eiaValue(x.unit, l.change)} w/w`;
+    return stat(EIA_SHORT[k], eiaValue(x.unit, l.value),
+      `${change} · ${l.vs_avg5_pct === null ? DASH : `${l.vs_avg5_pct > 0 ? '+' : ''}${num(l.vs_avg5_pct, 1)}% vs 5y`} · wk ${l.date.slice(5)}`,
+      // Inventories above the seasonal norm weigh on prices, below support them.
+      k.endsWith('stocks') || k === 'gas_storage' ? (l.vs_avg5_pct > 0 ? 'down' : 'up') : '');
+  }));
+  const entries = keys.map((k) => {
+    const x = e.eia[k];
+    const fmt = (v) => eiaValue(x.unit, v);
+    return { id: EIA_SHORT[k], chart: () => viewChart({
+      dates: x.dates, fmt, views: [{ id: 'RAW' }, { id: 'WoW', lag: 1, kind: x.unit === 'pct' ? 'diff' : 'pct' }, { id: 'YoY', lag: 52, kind: x.unit === 'pct' ? 'diff' : 'pct' },
+        { id: 'VS 5Y AVG', series: [{ name: `${x.label} vs 5-year average, %`, values: x.value.map((v, i) => (v === null || !x.avg5[i] ? null : Math.round((v / x.avg5[i] - 1) * 1000) / 10)), color: (p) => p.accent }] }],
+      series: [{ name: x.label, values: x.value, color: (p) => p.text, width: 1.6 },
+        { name: 'same week, 5-year average', values: x.avg5, color: (p) => p.dim }],
+    }) };
+  });
+  const next = e.next || {};
+  return el('div', {}, [
+    card('EIA WEEKLY · INVENTORIES AGAINST THE SAME WEEK OF THE LAST 5 YEARS', el('span', { class: 'dim', text: `next: petroleum ${next.petroleum || DASH} · gas ${next.gas_storage || DASH}` }), [strip]),
+    pickerCard('EIA WEEKLY · CHART', null, entries,
+      'EIA Weekly Petroleum Status Report (Wednesdays 10:30 ET) and Natural Gas Storage Report (Thursdays 10:30 ET), from EIA\'s history pages; week-ending dates. '
+      + '5-year average: the same week of the year over the five years before, as EIA compares it. Inventory above it is coloured red (weighs on prices), below green.'),
+  ]);
+}
+
+function pricesCard(e) {
+  if (!e || e.unavailable || !e.prices) return null;
+  const p = e.prices;
+  const series = (key, color) => (p[key] ? { name: p[key].label, values: p[key].values, color } : null);
+  const dated = (key) => p[key]?.dates || [];
+  const entries = [];
+  if (p['CL=F']) {
+    entries.push({ id: 'CRUDE', chart: () => viewChart({ dates: dated('CL=F'), views: VIEWS.daily(), fmt: (v) => `$${num(v, 0)}`,
+      series: [series('CL=F', (c) => c.text), p['BZ=F'] && p['BZ=F'].dates.length === p['CL=F'].dates.length ? series('BZ=F', (c) => c.accent) : null].filter(Boolean) }) });
+  }
+  if (p['NG=F']) entries.push({ id: 'NAT GAS', chart: () => viewChart({ dates: dated('NG=F'), views: VIEWS.daily(), fmt: (v) => `$${num(v, 2)}`, series: [series('NG=F', (c) => c.blue)] }) });
+  if (p.crack) entries.push({ id: '3-2-1 CRACK', chart: () => viewChart({ dates: dated('crack'), views: [{ id: 'RAW' }, { id: 'WoW', lag: 5, kind: 'diff' }, { id: '4W', lag: 20, kind: 'diff' }], fmt: (v) => `$${num(v, 0)}`, series: [series('crack', (c) => c.accent)] }) });
+  if (e.retail_gasoline) entries.push({ id: 'PUMP PRICE', chart: () => viewChart({ dates: e.retail_gasoline.dates, views: VIEWS.weekly(), fmt: (v) => `$${num(v, 2)}`, series: [{ name: 'US regular gasoline, $/gal', values: e.retail_gasoline.values, color: (c) => c.text }] }) });
+  const last = (key) => (p[key] ? p[key].values[p[key].values.length - 1] : null);
+  const right = el('span', { class: 'dim', text: [last('CL=F') !== null ? `WTI $${num(last('CL=F'), 2)}` : null, last('NG=F') !== null ? `HH $${num(last('NG=F'), 2)}` : null,
+    last('crack') !== null ? `crack $${num(last('crack'), 1)}` : null].filter(Boolean).join(' · ') });
+  return pickerCard('OIL, GAS & REFINING MARGIN', right, entries,
+    'Front-month futures (Yahoo: CL, BZ, NG, RB, HO). 3-2-1 crack = (2 bbl gasoline + 1 bbl heating oil − 3 bbl crude) / 3, $/bbl -- the refiners\' margin. Pump price: EIA weekly US regular, via FRED.');
+}
+
+// How each name's excess return over the S&P 500 has moved with each driver
+// over the last year: it says which data the basket actually trades on.
+function sensitivityCard(title, s, note) {
+  if (!s || !s.rows?.length) return null;
+  const keys = Object.keys(s.drivers);
+  const rows = s.rows.map((r) => el('tr', {}, [
+    el('td', {}, [link(r.symbol)]),
+    ...keys.flatMap((k) => {
+      const x = r[k];
+      return [el('td', { class: !x ? 'dim' : Math.abs(x.corr) >= 0.5 ? 'accent-text' : Math.abs(x.corr) < 0.2 ? 'dim' : '', text: x ? num(x.corr, 2) : DASH }),
+        el('td', { class: 'dim', text: x ? num(x.beta, 3) : DASH })];
+    }),
+  ]));
+  const head = ['NAME', ...keys.flatMap((k) => [`${k.toUpperCase().replace('_', ' ')} CORR`, 'BETA'])];
+  return card(title, el('span', { class: 'dim', text: keys.map((k) => s.drivers[k]).join(' · ') }), [
+    table(head, rows), el('div', { class: 'field-note', text: note }),
+  ]);
+}
+
+function housingCards(h) {
+  if (!h || h.unavailable) return [card('HOUSING DATA', null, unavailable(h))];
+  const s = h.series;
+  const ok = (id) => s[id] && !s[id].unavailable;
+  const mortgage = ok('MORTGAGE30US') ? (() => {
+    const m = s.MORTGAGE30US;
+    const last = m.values[m.values.length - 1];
+    const yearAgo = m.values[m.values.length - 53];
+    return card('30-YEAR MORTGAGE RATE · WEEKLY', el('span', { class: 'tag-row' }, [
+      tag(`${num(last, 2)}% · ${m.dates[m.dates.length - 1]}`, 'dim'),
+      yearAgo ? tag(`${last - yearAgo > 0 ? '+' : ''}${num(last - yearAgo, 2)}pp y/y`, last > yearAgo ? 'down' : 'up') : null,
+      el('span', { class: 'dim', text: `next ${h.next?.mortgage_rate || DASH}` }),
+    ]), [viewChart({ dates: m.dates, views: [{ id: 'RAW' }, { id: 'Δ 4W', lag: 4, kind: 'diff' }, { id: 'Δ 13W', lag: 13, kind: 'diff' }, { id: 'Δ YoY', lag: 52, kind: 'diff' }],
+      fmt: (v) => `${num(v, 2)}%`, series: [{ name: '30-year fixed, %', values: m.values, color: (p) => p.accent }] })]);
+  })() : null;
+  const monthly = (ids, fmt) => {
+    const first = s[ids[0]];
+    return () => viewChart({ dates: first.dates.map((d) => d.slice(0, 7)), views: VIEWS.monthly(), fmt,
+      series: ids.filter(ok).map((id, i) => ({ name: s[id].label, values: s[id].values, color: i ? (p) => p.dim : (p) => p.text })) });
+  };
+  const entries = [];
+  if (ok('HOUST')) entries.push({ id: 'STARTS', chart: monthly(['HOUST', 'HOUST1F'], (v) => num(v, 0)) });
+  if (ok('PERMIT')) entries.push({ id: 'PERMITS', chart: monthly(['PERMIT'], (v) => num(v, 0)) });
+  if (ok('HSN1F')) entries.push({ id: 'NEW HOME SALES', chart: monthly(['HSN1F'], (v) => num(v, 0)) });
+  if (ok('MSACSR')) entries.push({ id: 'MONTHS SUPPLY', chart: monthly(['MSACSR'], (v) => num(v, 1)) });
+  if (ok('CSUSHPINSA')) entries.push({ id: 'CASE-SHILLER', chart: monthly(['CSUSHPINSA'], (v) => num(v, 0)) });
+  const latest = (id) => (ok(id) ? s[id].values[s[id].values.length - 1] : null);
+  const right = el('span', { class: 'dim', text: [latest('HOUST') !== null ? `starts ${num(latest('HOUST'), 0)}k` : null,
+    latest('HSN1F') !== null ? `new sales ${num(latest('HSN1F'), 0)}k` : null, latest('MSACSR') !== null ? `${num(latest('MSACSR'), 1)} months' supply` : null].filter(Boolean).join(' · ') });
+  return [mortgage, pickerCard('HOUSING ACTIVITY & PRICES · MONTHLY', right, entries,
+    'Census (starts, permits, new home sales, months\' supply; SAAR, thousands) and S&P CoreLogic Case-Shiller (not seasonally adjusted), via FRED -- the current vintage, so revised months show their revised value. '
+    + 'Release days are on the calendar above.')].filter(Boolean);
+}
+
 function industry(key, data) {
   if (key === 'cloud') {
     const c = data.cloud;
@@ -428,6 +558,16 @@ function industry(key, data) {
       koreaFlashCard(s.korea_flash)]),
     koreaCard(s.korea),
     adataCard(s.adata), pcppCard(s.pcpp)];
+  }
+  if (key === 'energy' && data.energy) {
+    const e = data.energy;
+    return [eiaCard(e), pricesCard(e), sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', e.sensitivity,
+      'Correlation and beta of each name\'s daily return beyond the S&P 500 with the driver\'s daily change. Producers trade on crude; refiners also on the crack; services on neither as much. History, not a forecast.')].filter(Boolean);
+  }
+  if (key === 'housing' && data.housing) {
+    const h = data.housing;
+    return [...housingCards(h), sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', h.sensitivity,
+      'Correlation and beta (% per 1bp) of each name\'s daily return beyond the S&P 500 with the daily change in the 10-year Treasury yield (FRED DGS10). Negative: the names fall when rates rise.')].filter(Boolean);
   }
   return [];
 }
