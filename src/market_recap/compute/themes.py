@@ -101,3 +101,58 @@ def crack_321(crude: pd.Series, gasoline: pd.Series, heating_oil: pd.Series) -> 
     """The 3-2-1 crack, $/bbl: two barrels of gasoline and one of heating oil
     (quoted $/gal, 42 gal a barrel) less three barrels of crude, per barrel."""
     return ((2 * gasoline * 42 + heating_oil * 42 - 3 * crude) / 3).dropna()
+
+
+def release_study(releases: pd.DataFrame, excess: pd.Series, *, headline: str, trend: int = 12, min_trend: int = 6,
+                  recent: int = 8) -> dict | None:
+    """How a theme's proxy moved, beyond the S&P 500, on the session of each
+    release of one series.
+
+    ``releases``: one row per release -- released (the day), value (the new
+    print as first published) and prior (its predecessor as known that day).
+    ``headline``: 'pct' (the change in percent, as a level series reports it)
+    or 'diff' (the change in units). With no free history of consensus, the
+    surprise is the headline less the median of the ``trend`` headlines before
+    it -- an above-trend print, not a beat.
+
+    The session is the first one on or after the release day: these all come
+    out before or during the session they move. Every other session in the
+    same span is the baseline, so ``attention`` near 1 means the release day
+    looks like any other day for the proxy."""
+    move = excess.dropna()
+    if move.empty or releases.empty:
+        return None
+    sessions = move.index
+    rows = []
+    for r in releases.sort_values("released").itertuples(index=False):
+        if r.prior is None or pd.isna(r.prior) or (headline == "pct" and not r.prior):
+            continue
+        at = sessions.searchsorted(pd.Timestamp(r.released))
+        if at >= len(sessions) or (sessions[at] - pd.Timestamp(r.released)).days > 3:
+            continue
+        value = (r.value / r.prior - 1) * 100 if headline == "pct" else r.value - r.prior
+        rows.append({"period": pd.Timestamp(r.date).strftime("%Y-%m-%d"), "released": pd.Timestamp(r.released).strftime("%Y-%m-%d"),
+                     "session": sessions[at], "headline": value, "move": float(move.iloc[at])})
+    if not rows:
+        return None
+    frame = pd.DataFrame(rows).drop_duplicates("session", keep="last").reset_index(drop=True)
+    base = frame["headline"].shift(1).rolling(trend, min_periods=min_trend).median()
+    frame["surprise"] = frame["headline"] - base
+    scored = frame.dropna(subset=["surprise"])
+    span = move.loc[frame["session"].min():]
+    other = span.drop(index=frame["session"], errors="ignore")
+    release_abs, other_abs = float(frame["move"].abs().mean()), float(other.abs().mean()) if len(other) else None
+    above, below = scored[scored["surprise"] > 0], scored[scored["surprise"] < 0]
+    share = lambda part: None if part.empty else round(float((part["move"] > 0).mean()) * 100)  # noqa: E731
+    corr = scored["surprise"].rank().corr(scored["move"].rank()) if len(scored) >= 12 else None
+    tail = frame.iloc[-recent:][::-1]
+    return {
+        "n": int(len(frame)), "scored": int(len(scored)), "since": frame["released"].iloc[0],
+        "abs_move": round(release_abs, 2), "abs_other": None if other_abs is None else round(other_abs, 2),
+        "attention": None if not other_abs else round(release_abs / other_abs, 2),
+        "corr": None if corr is None or pd.isna(corr) else round(float(corr), 2),
+        "up_above": share(above), "n_above": int(len(above)), "up_below": share(below), "n_below": int(len(below)),
+        "recent": [{"period": r["period"], "released": r["released"], "headline": round(float(r["headline"]), 3),
+                    "surprise": None if pd.isna(r["surprise"]) else round(float(r["surprise"]), 3), "move": round(r["move"], 2)}
+                   for _, r in tail.iterrows()],
+    }

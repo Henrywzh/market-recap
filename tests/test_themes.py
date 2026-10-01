@@ -319,3 +319,37 @@ def test_series_driver_turns_levels_into_year_on_year_and_thins_daily():
              "values": [float(i) for i in range(12)]}
     d = P._series_driver(daily, ["banks"], "pp")
     assert [p["value"] for p in d["points"]] == [1.0, 6.0, 11.0]                # every fifth session, ending on the last
+
+
+def test_release_study_scores_the_session_of_each_release_against_trend():
+    sessions = pd.bdate_range("2024-01-01", periods=400)
+    excess = pd.Series(0.1, index=sessions)
+    days = sessions[20::20][:18]
+    values = [100.0]
+    for i in range(18):
+        values.append(values[-1] * (1.02 if i % 2 else 1.0))          # alternating +2% and flat prints
+    releases = pd.DataFrame({"date": days - pd.Timedelta(days=30), "released": days, "value": values[1:], "prior": values[:-1]})
+    for day, v, p in zip(days, values[1:], values[:-1]):
+        excess[day] = 1.0 if v > p else -1.0                           # the proxy follows the print
+    out = T.release_study(releases, excess, headline="pct")
+    assert out["n"] == 18 and out["scored"] == 18 - 6
+    assert out["attention"] == 10.0                                    # |1.0| on release days against |0.1|
+    assert out["up_above"] == 100 and out["up_below"] == 0
+    assert out["corr"] > 0.9                                          # ranks: the flat prints tie
+    assert out["recent"][0]["released"] == days[-1].strftime("%Y-%m-%d") and len(out["recent"]) == 8
+
+
+def test_alfred_releases_take_the_prior_as_known_on_the_day():
+    from market_recap.sources import alfred
+    t = pd.Timestamp
+    frame = pd.DataFrame([
+        # March first printed 100 on 4/15, revised to 102 on 5/15.
+        {"date": t("2026-03-01"), "value": 100.0, "realtime_start": t("2026-04-15"), "realtime_end": t("2026-05-14")},
+        {"date": t("2026-03-01"), "value": 102.0, "realtime_start": t("2026-05-15"), "realtime_end": t("2262-04-01")},
+        {"date": t("2026-04-01"), "value": 103.0, "realtime_start": t("2026-05-15"), "realtime_end": t("2262-04-01")},
+    ])
+    out = alfred.releases(frame)
+    april = out[out["date"] == t("2026-04-01")].iloc[0]
+    assert april["released"] == t("2026-05-15") and april["prior"] == 102.0     # the revised March, as the release said
+    march = out[out["date"] == t("2026-03-01")].iloc[0]
+    assert march["value"] == 100.0 and pd.isna(march["prior"])

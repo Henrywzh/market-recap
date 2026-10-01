@@ -34,7 +34,7 @@ from ..compute import capex as X
 from ..compute import events as E
 from ..compute import themes as T
 from .. import cache
-from ..sources import adata, altdata, dart, eia, fred, korea_customs, mops, motie, pcpartpicker, releases, sec, yahoo
+from ..sources import adata, alfred, altdata, dart, eia, fred, korea_customs, mops, motie, pcpartpicker, releases, sec, yahoo
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, describe_error, history_payload
 from .financials import cik_for
 
@@ -473,11 +473,34 @@ HOUSING_SERIES = {
 }
 
 
+def _release_dates(series_id: str) -> dict[str, str]:
+    """Observation date -> the day it was first public, from ALFRED; empty
+    without a key or when ALFRED fails, and the caller's lag stands in."""
+    if not alfred.available():
+        return {}
+    try:
+        first = alfred.first_releases(series_id)
+    except Exception:  # noqa: BLE001 -- a dating refinement, never a reason to drop the series
+        return {}
+    return {d.strftime("%Y-%m-%d"): r.strftime("%Y-%m-%d") for d, r in zip(first["date"], first["released"])}
+
+
+def _dated(series_id: str, index: pd.DatetimeIndex, lag: tuple) -> tuple[list[str], str]:
+    exact = _release_dates(series_id)
+    dates = [d.strftime("%Y-%m-%d") for d in index]
+    out = [exact.get(d) or _available(d_, lag) for d, d_ in zip(dates, index)]
+    return out, ("alfred" if dates and dates[-1] in exact else "approximate")
+
+
 def _fred_section(series_id: str, label: str, unit: str, freq: str) -> dict:
     frame, _ = fred.fetch_series(series_id)
     s = frame.set_index("date")["value"].iloc[-(520 if freq == "weekly" else 120):]
+    # Freddie Mac's weekly rate is dated by its release; Census's months are
+    # public in the second half of the next month.
+    available, dated = _dated(series_id, s.index, ("days", 0) if freq == "weekly" else ("months", 1, 26))
     return {"id": series_id, "label": label, "unit": unit, "freq": freq,
-            "dates": [d.strftime("%Y-%m-%d") for d in s.index], "values": [round(float(v), 3) for v in s]}
+            "dates": [d.strftime("%Y-%m-%d") for d in s.index], "values": [round(float(v), 3) for v in s],
+            "available": available, "dated": dated}
 
 
 def _housing(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
@@ -552,11 +575,12 @@ def _series_section(series_id: str, meta: tuple) -> dict:
     else:
         change = None if not prior else round((last / prior - 1) * 100, 2)
         yoy = None if pd.isna(year_ago) or not year_ago else round((last / float(year_ago) - 1) * 100, 2)
+    available, dated = _dated(series_id, s.index, lag) if freq != "daily" else ([_available(d, lag) for d in s.index], "market")
     return {"id": series_id, "label": label, "short": short, "unit": unit, "freq": freq,
             "dates": [d.strftime("%Y-%m-%d") for d in s.index], "values": [round(float(v), 3) for v in s],
-            "available": [_available(d, lag) for d in s.index],
+            "available": available, "dated": dated,
             "latest": {"date": stamp.strftime("%Y-%m-%d"), "value": round(last, 3), "change": change, "yoy": yoy,
-                       "available": _available(stamp, lag)}}
+                       "available": available[-1]}}
 
 
 def _fred_daily_change(series_id: str, scale: float = 100.0) -> pd.Series:
@@ -582,6 +606,57 @@ def _consumer(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
     out["sensitivity"] = {"drivers": {"ten_year": "10-year yield, per 1bp", "gasoline": "RBOB gasoline, per 1%", "hy_oas": "HY spread, per 1bp"},
                           "rows": _sensitivities(excess, [spec.get("etf") or ""] + list(spec.get("bellwethers") or []), drivers)}
     out["next"] = {"claims": eia.next_release(as_of, 3).isoformat()}
+    return out
+
+
+# --- Release-day studies ---------------------------------------------------------
+# How each theme's ETF moved beyond the S&P 500 on the session of each release
+# of the series that bear on it. Release days and first prints from ALFRED
+# (what the release itself said, prior month as known that day); EIA's
+# weekly report is dated the Wednesday after the week (a holiday week, a day
+# later, is not shifted).
+# group: [(series, label, headline: 'pct' change | 'diff' change, unit)]
+STUDIES = {
+    "energy": [("eia:crude_stocks", "EIA crude stocks, weekly change", "diff", "mb")],
+    "banks": [("PAYEMS", "Nonfarm payrolls", "diff", "k"), ("CPILFESL", "Core CPI, m/m", "pct", "pct")],
+    "consumer": [("RSAFS", "Retail sales, m/m", "pct", "pct"), ("ICSA", "Initial jobless claims, w/w", "diff", "count"),
+                 ("PAYEMS", "Nonfarm payrolls", "diff", "k")],
+    "housing": [("HOUST", "Housing starts, m/m", "pct", "pct"), ("HSN1F", "New home sales, m/m", "pct", "pct"),
+                ("CPILFESL", "Core CPI, m/m", "pct", "pct")],
+}
+EIA_RELEASE_LAG = 5
+
+
+def _study_releases(series: str) -> pd.DataFrame:
+    if series.startswith("eia:"):
+        s = eia.fetch(series[4:])
+        return pd.DataFrame({"date": s.index[1:], "released": s.index[1:] + pd.Timedelta(days=EIA_RELEASE_LAG),
+                             "value": s.to_numpy()[1:], "prior": s.to_numpy()[:-1]})
+    return alfred.releases(alfred.vintages(series))
+
+
+def _studies(groups: list[dict], excess: pd.DataFrame) -> dict:
+    out: dict = {"keyed": alfred.available()}
+    cache_: dict[str, pd.DataFrame] = {}
+    for g in groups:
+        etf = g.get("proxy") if g.get("proxy_is_etf") else None
+        if g["key"] not in STUDIES or not etf or etf not in excess.columns:
+            continue
+        rows = []
+        for series, label, headline, unit in STUDIES[g["key"]]:
+            if not series.startswith("eia:") and not out["keyed"]:
+                rows.append({"series": series, "label": label, "unavailable": "no FRED_API_KEY: ALFRED release days need one"})
+                continue
+            try:
+                if series not in cache_:
+                    cache_[series] = _study_releases(series)
+                study = T.release_study(cache_[series], excess[etf], headline=headline)
+            except Exception as exc:  # noqa: BLE001 -- one study's failure is its own row
+                rows.append({"series": series, "label": label, "unavailable": describe_error(exc)[:ERROR_DETAIL_CHARS]})
+                continue
+            if study:
+                rows.append({"series": series, "label": label, "headline": headline, "unit": unit, **study})
+        out[g["key"]] = {"proxy": etf, "rows": rows}
     return out
 
 
@@ -635,15 +710,15 @@ def _drivers(cloud: dict, semis: dict, energy: dict | None = None, housing: dict
     for sid, section in ((housing or {}).get("series") or {}).items():
         if "unavailable" in section:
             continue
+        available = section.get("available") or section["dates"]
         if sid == "MORTGAGE30US":
             out.append(_driver("mortgage30", section["label"], ["housing"], "pp", "rate",
-                               [{"period": d, "available": d, "value": v} for d, v in zip(section["dates"], section["values"])]))
+                               [{"period": d, "available": a, "value": v} for d, a, v in zip(section["dates"], available, section["values"])]))
         elif sid in ("HOUST", "HSN1F", "PERMIT"):
             values, dates = section["values"], section["dates"]
             yoy = [None if i < 12 or not values[i - 12] else round((values[i] / values[i - 12] - 1) * 100, 1) for i in range(len(values))]
-            # A month's figure is public in the middle to late part of the next.
             out.append(_driver(f"fred_{sid.lower()}", f"{section['label'].split(',')[0]}, y/y", ["housing"], "yoy", "pct",
-                               [{"period": d[:7], "available": _after_month(d[:7], 26), "value": v} for d, v in zip(dates, yoy)]))
+                               [{"period": d[:7], "available": a, "value": v} for d, a, v in zip(dates, available, yoy)]))
     for theme, section, wanted in (("banks", banks, BANK_DRIVERS), ("consumer", consumer, CONSUMER_DRIVERS)):
         for sid, kind in wanted.items():
             series = ((section or {}).get("series") or {}).get(sid)
@@ -763,17 +838,19 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     housing = _section(lambda: _housing(specs.get("housing", {}), excess, as_of))
     banks = _section(lambda: _banks(specs.get("banks", {}), excess, as_of))
     consumer = _section(lambda: _consumer(specs.get("consumer", {}), excess, as_of))
+    studies = _section(lambda: _studies(groups, excess))
     _data_dates(groups, cloud, semis, as_of, settings)
     _weekly_dates(groups, energy, housing, banks, as_of)
     _log(ctx, cloud, semis)
     _log_more(ctx, energy, housing, banks, consumer)
+    _log_studies(ctx, studies)
     for g in groups:
         g["calendar"].sort(key=lambda e: (e["date"], {"data": 0, "macro": 1, "earnings": 2}[e["kind"]]))
     return {"as_of": ctx.as_of, "calendar_days": int(settings.get("calendar_days", 42)), "groups": groups,
             "heatmap": _heatmap(catalysts, as_of, int(settings.get("heatmap_days", 21))),
             "membership": _membership(ctx, settings, excess),
             "member_corr": float(settings.get("member_corr", 0.55)),
-            "cloud": cloud, "semis": semis, "energy": energy, "housing": housing, "banks": banks, "consumer": consumer,
+            "cloud": cloud, "semis": semis, "energy": energy, "housing": housing, "banks": banks, "consumer": consumer, "studies": studies,
             "drivers": _section(lambda: _drivers(cloud, semis, energy, housing, banks, consumer))}
 
 
@@ -887,6 +964,18 @@ def _log_more(ctx, energy: dict, housing: dict, banks: dict, consumer: dict) -> 
             rows=len(series) - len(bad), policy="monthly_release",
             status="error" if "unavailable" in section or (series and len(bad) == len(series)) else ("partial" if bad else "ok"),
             error=section.get("unavailable") or (", ".join(bad) or None)))
+
+
+def _log_studies(ctx, studies: dict) -> None:
+    rows = [r for k, v in studies.items() if isinstance(v, dict) for r in v.get("rows", [])]
+    bad = [r["series"] for r in rows if "unavailable" in r]
+    keyed = studies.get("keyed")
+    ctx.log.add(SourceRecord(
+        "alfred_releases", "Release days and first prints (ALFRED, FRED's vintage archive)", alfred.page_url("RSAFS"),
+        None if "unavailable" in studies or not rows else max((r["recent"][0]["released"] for r in rows if r.get("recent")), default=None),
+        rows=len(rows) - len(bad), policy="monthly_release",
+        status="error" if "unavailable" in studies or not keyed else ("partial" if bad else "ok"),
+        error=studies.get("unavailable") or (None if keyed else "no FRED_API_KEY: release days approximated") or (", ".join(bad) or None)))
 
 
 def _log(ctx, cloud: dict, semis: dict) -> None:
