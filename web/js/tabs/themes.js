@@ -627,7 +627,7 @@ function banksCards(b) {
     'Fed H.8 (all commercial banks, seasonally adjusted; Fridays 16:15 ET for the week ended nine days before), Treasury curve spreads (FRED T10Y2Y, T10Y3M), ICE BofA US high-yield OAS, '
     + 'call-report delinquency rates (quarterly, about two months after the quarter) and the Senior Loan Officer Survey (net % of banks tightening C&I standards; positive is tightening), via FRED -- the current vintage. '
     + 'Green helps the banks (loans and deposits growing, a positive curve, spreads, delinquencies and standards easing on the year), red hurts.',
-    bankTone, el('span', { class: 'dim', text: `next H.8: ${next.h8 || DASH}` }));
+    bankTone, el('span', { class: 'dim', text: `next H.8: ${next.h8 || DASH}${next.sloos ? ` · loan officer survey ~${next.sloos}` : ''}` }));
 }
 
 function consumerCards(c) {

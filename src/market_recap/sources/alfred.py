@@ -127,3 +127,29 @@ def releases(frame: pd.DataFrame) -> pd.DataFrame:
                     "prior": None if prior is None else float(prior["value"])})
     return pd.DataFrame(out)
 
+
+
+def as_published(frame: pd.DataFrame, freq: str) -> pd.DataFrame:
+    """One row per observation, as its first release said it: date, released,
+    value (the first print) and year_ago (the observation a year earlier, as
+    known that same day) -- so a year-on-year change is the one the release
+    reported, not one rebuilt from later revisions.
+
+    ``freq``: 'weekly' looks 364 days back (the same weekday), anything else
+    a calendar year. ``frame`` is ``vintages``' output."""
+    frame = frame.sort_values(["date", "realtime_start"])
+    first = frame.groupby("date", as_index=False).first()
+    back = pd.Timedelta(days=364) if freq == "weekly" else pd.DateOffset(years=1)
+    out = []
+    for row in first.itertuples(index=False):
+        day = row.realtime_start
+        if day < row.date:
+            continue
+        target = row.date - back
+        known = frame[(frame["date"] >= target - pd.Timedelta(days=3)) & (frame["date"] <= target + pd.Timedelta(days=3))
+                      & (frame["realtime_start"] <= day) & (frame["realtime_end"] >= day)]
+        year_ago = None
+        if not known.empty:
+            year_ago = float(known.loc[(known["date"] - target).abs().idxmin(), "value"])
+        out.append({"date": row.date, "released": day, "value": float(row.value), "year_ago": year_ago})
+    return pd.DataFrame(out, columns=["date", "released", "value", "year_ago"])

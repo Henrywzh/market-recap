@@ -324,15 +324,16 @@ export function sinceCard(payload) {
   // Periods on hover: a half-width card has no room for them in the cells.
   const body = rows.map((r) => el('tr', {}, [
     el('td', { text: r.label }),
-    el('td', { class: 'dim', text: driverValue(r.unit, r.then.value), title: `${r.then.period}, public ${r.then.available}` }),
-    el('td', { text: driverValue(r.unit, r.now.value), title: `${r.now.period}, public ${r.now.available}` }),
+    el('td', { class: 'dim', text: `${driverValue(r.unit, r.then.value)}${r.then.revised !== undefined ? '*' : ''}`,
+      title: `${r.then.period}, public ${r.then.available}${r.then.as ? ', as first published' : ''}${r.then.revised !== undefined ? `; since revised to ${driverValue(r.unit, r.then.revised)}` : ''}` }),
+    el('td', { text: driverValue(r.unit, r.now.value), title: `${r.now.period}, public ${r.now.available}${r.now.as ? ', as first published' : ''}` }),
     el('td', { class: dirClass(r.change_pct ?? r.change_pp), text: r.change_pct !== undefined ? signed(r.change_pct)
       : r.unit === 'rate' ? signed(Math.round(r.change_pp * 100), 0, 'bp') : signed(r.change_pp, 1, 'pp') }),
     el('td', { class: 'dim', text: String(r.releases) }),
   ]));
   return card(`SINCE THE LAST REPORT${last ? ` · ${last}` : ''}`, el('span', { class: 'dim', text: 'the industry data of its themes' }), [
     table(['SERIES', 'THEN', 'NOW', 'CHANGE', 'NEW'], body),
-    el('div', { class: 'field-note', text: 'THEN: each series as it was public on the report day (a month\'s figure dates from its publisher\'s release). NOW: its latest. NEW: releases since. y/y series change in pp, rates and spreads in bp, levels in %. Hover a value for its period; series and sources are on THEMES.' }),
+    el('div', { class: 'field-note', text: 'THEN: each series as it was public on the report day (a month\'s figure dates from its publisher\'s release). NOW: its latest. FRED series show what each release first said (ALFRED), y/y against the year-earlier figure as then known -- not today\'s revised history; * marks a figure since revised (hover for the revised value). NEW: releases since. y/y series change in pp, rates and spreads in bp, levels in %. Hover a value for its period; series and sources are on THEMES.' }),
   ]);
 }
 

@@ -485,6 +485,27 @@ def _release_dates(series_id: str) -> dict[str, str]:
     return {d.strftime("%Y-%m-%d"): r.strftime("%Y-%m-%d") for d, r in zip(first["date"], first["released"])}
 
 
+PUBLISHED_SINCE = "2014-01-01"
+
+
+def _published(series_id: str, freq: str, start: pd.Timestamp) -> dict | None:
+    """Each observation as its first release said it, from ``start``: the
+    first print and the year-earlier value as known that day. What a stock
+    card compares against a report date; the charts keep the current vintage."""
+    if freq == "daily" or not alfred.available():
+        return None
+    try:
+        frame = alfred.as_published(alfred.vintages(series_id, since=PUBLISHED_SINCE), freq)
+    except Exception:  # noqa: BLE001 -- the card falls back to the current vintage
+        return None
+    frame = frame[frame["date"] >= start]
+    if frame.empty:
+        return None
+    num = lambda v: None if v is None or pd.isna(v) else round(float(v), 3)  # noqa: E731
+    return {"dates": [d.strftime("%Y-%m-%d") for d in frame["date"]], "available": [d.strftime("%Y-%m-%d") for d in frame["released"]],
+            "values": [num(v) for v in frame["value"]], "year_ago": [num(v) for v in frame["year_ago"]]}
+
+
 def _dated(series_id: str, index: pd.DatetimeIndex, lag: tuple) -> tuple[list[str], str]:
     exact = _release_dates(series_id)
     dates = [d.strftime("%Y-%m-%d") for d in index]
@@ -500,7 +521,7 @@ def _fred_section(series_id: str, label: str, unit: str, freq: str) -> dict:
     available, dated = _dated(series_id, s.index, ("days", 0) if freq == "weekly" else ("months", 1, 26))
     return {"id": series_id, "label": label, "unit": unit, "freq": freq,
             "dates": [d.strftime("%Y-%m-%d") for d in s.index], "values": [round(float(v), 3) for v in s],
-            "available": available, "dated": dated}
+            "available": available, "dated": dated, "published": _published(series_id, freq, s.index[0])}
 
 
 def _housing(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
@@ -578,7 +599,7 @@ def _series_section(series_id: str, meta: tuple) -> dict:
     available, dated = _dated(series_id, s.index, lag) if freq != "daily" else ([_available(d, lag) for d in s.index], "market")
     return {"id": series_id, "label": label, "short": short, "unit": unit, "freq": freq,
             "dates": [d.strftime("%Y-%m-%d") for d in s.index], "values": [round(float(v), 3) for v in s],
-            "available": available, "dated": dated,
+            "available": available, "dated": dated, "published": _published(series_id, freq, s.index[0]),
             "latest": {"date": stamp.strftime("%Y-%m-%d"), "value": round(last, 3), "change": change, "yoy": yoy,
                        "available": available[-1]}}
 
@@ -586,6 +607,22 @@ def _series_section(series_id: str, meta: tuple) -> dict:
 def _fred_daily_change(series_id: str, scale: float = 100.0) -> pd.Series:
     frame, _ = fred.fetch_series(series_id)
     return frame.set_index("date")["value"].diff() * scale
+
+
+# The loan officer survey has no published schedule; its results come out the
+# Monday after the FOMC meeting that closes January, April, July and October
+# (the July 2026 survey: FOMC 7/29, released Monday 8/3).
+SLOOS_MONTHS = (1, 4, 7, 10)
+
+
+def sloos_expected(catalysts: dict, as_of: date) -> str | None:
+    for e in sorted(catalysts.get("events") or [], key=lambda e: e["date"]):
+        day = date.fromisoformat(e["date"])
+        if e["title"].startswith("FOMC decision") and day.month in SLOOS_MONTHS and day.day >= 20:
+            monday = day + timedelta(days=(7 - day.weekday()) % 7 or 7)
+            if monday > as_of:
+                return monday.isoformat()
+    return None
 
 
 def _banks(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
@@ -710,15 +747,11 @@ def _drivers(cloud: dict, semis: dict, energy: dict | None = None, housing: dict
     for sid, section in ((housing or {}).get("series") or {}).items():
         if "unavailable" in section:
             continue
-        available = section.get("available") or section["dates"]
         if sid == "MORTGAGE30US":
-            out.append(_driver("mortgage30", section["label"], ["housing"], "pp", "rate",
-                               [{"period": d, "available": a, "value": v} for d, a, v in zip(section["dates"], available, section["values"])]))
+            out.append(_driver("mortgage30", section["label"], ["housing"], "pp", "rate", _points(section, "pp")))
         elif sid in ("HOUST", "HSN1F", "PERMIT"):
-            values, dates = section["values"], section["dates"]
-            yoy = [None if i < 12 or not values[i - 12] else round((values[i] / values[i - 12] - 1) * 100, 1) for i in range(len(values))]
             out.append(_driver(f"fred_{sid.lower()}", f"{section['label'].split(',')[0]}, y/y", ["housing"], "yoy", "pct",
-                               [{"period": d[:7], "available": a, "value": v} for d, a, v in zip(dates, available, yoy)]))
+                               _points(section, "yoy")))
     for theme, section, wanted in (("banks", banks, BANK_DRIVERS), ("consumer", consumer, CONSUMER_DRIVERS)):
         for sid, kind in wanted.items():
             series = ((section or {}).get("series") or {}).get(sid)
@@ -773,22 +806,42 @@ CONSUMER_DRIVERS = {"RSAFS": "yoy", "PCEC96": "yoy", "TOTALSL": "yoy", "UMCSENT"
 PERIODS_PER_YEAR = {"daily": 252, "weekly": 52, "monthly": 12, "quarterly": 4}
 
 
-def _series_driver(series: dict, themes: list[str], kind: str) -> dict | None:
-    values, dates = series["values"], series["dates"]
-    label, unit = series["label"], series["unit"]
+def _points(series: dict, kind: str) -> list[dict]:
+    """A series' card points. As first published when ALFRED has them (the
+    value the release said, its y/y against the year-earlier figure as known
+    that day); otherwise the current vintage, y/y against the revised year."""
+    period = (lambda d: d[:7]) if series["freq"] in ("monthly", "quarterly") else (lambda d: d)  # noqa: E731
+    values, dates, available = series["values"], series["dates"], series.get("available") or series["dates"]
     if kind == "yoy":
         lag = PERIODS_PER_YEAR[series["freq"]]
         values = [None if i < lag or not values[i - lag] else round((values[i] / values[i - lag] - 1) * 100, 2) for i in range(len(values))]
-        label, unit = f"{label.split(' (')[0]}, y/y", "pct"
+    pub = series.get("published")
+    if pub:
+        current = dict(zip(dates, values))
+        first = pub["values"]
+        if kind == "yoy":
+            first = [None if v is None or not y else round((v / y - 1) * 100, 2) for v, y in zip(first, pub["year_ago"])]
+        out = []
+        for d, a, v in zip(pub["dates"], pub["available"], first):
+            point = {"period": period(d), "available": a, "value": v, "as": "published"}
+            now = current.get(d)
+            # Revised since: a card says so, or a benchmark revision reads as news.
+            if v is not None and now is not None and abs(now - v) > max(0.05, abs(v) * 0.005):
+                point["revised"] = now
+            out.append(point)
+        return out
     if series["freq"] == "daily":
         # A daily series is weekly on a card: the count of new releases would be noise.
         keep = list(range(len(dates) - 1, -1, -5))[::-1]
-        dates, values, available = [dates[i] for i in keep], [values[i] for i in keep], [series["available"][i] for i in keep]
-    else:
-        available = series["available"]
-    period = (lambda d: d[:7]) if series["freq"] in ("monthly", "quarterly") else (lambda d: d)
-    return _driver(f"fred_{series['id'].lower()}", label, themes, kind, unit,
-                   [{"period": period(d), "available": a, "value": v} for d, a, v in zip(dates, available, values)])
+        dates, values, available = [dates[i] for i in keep], [values[i] for i in keep], [available[i] for i in keep]
+    return [{"period": period(d), "available": a, "value": v} for d, a, v in zip(dates, available, values)]
+
+
+def _series_driver(series: dict, themes: list[str], kind: str) -> dict | None:
+    label, unit = series["label"], series["unit"]
+    if kind == "yoy":
+        label, unit = f"{label.split(' (')[0]}, y/y", "pct"
+    return _driver(f"fred_{series['id'].lower()}", label, themes, kind, unit, _points(series, kind))
 
 
 def _quarter_public(quarter: str) -> str:
@@ -837,6 +890,8 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     energy = _section(lambda: _energy(specs.get("energy", {}), excess, as_of))
     housing = _section(lambda: _housing(specs.get("housing", {}), excess, as_of))
     banks = _section(lambda: _banks(specs.get("banks", {}), excess, as_of))
+    if "unavailable" not in banks:
+        banks["next"]["sloos"] = sloos_expected(catalysts, as_of)
     consumer = _section(lambda: _consumer(specs.get("consumer", {}), excess, as_of))
     studies = _section(lambda: _studies(groups, excess))
     _data_dates(groups, cloud, semis, as_of, settings)
@@ -846,12 +901,17 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     _log_studies(ctx, studies)
     for g in groups:
         g["calendar"].sort(key=lambda e: (e["date"], {"data": 0, "macro": 1, "earnings": 2}[e["kind"]]))
+    drivers = _section(lambda: _drivers(cloud, semis, energy, housing, banks, consumer))
+    # The first prints live on in the drivers; the charts read the current vintage.
+    for section in (housing, banks, consumer):
+        for series in (section.get("series") or {}).values():
+            series.pop("published", None)
     return {"as_of": ctx.as_of, "calendar_days": int(settings.get("calendar_days", 42)), "groups": groups,
             "heatmap": _heatmap(catalysts, as_of, int(settings.get("heatmap_days", 21))),
             "membership": _membership(ctx, settings, excess),
             "member_corr": float(settings.get("member_corr", 0.55)),
             "cloud": cloud, "semis": semis, "energy": energy, "housing": housing, "banks": banks, "consumer": consumer, "studies": studies,
-            "drivers": _section(lambda: _drivers(cloud, semis, energy, housing, banks, consumer))}
+            "drivers": drivers}
 
 
 def _heatmap(catalysts: dict, as_of: date, days: int) -> dict:
@@ -930,7 +990,8 @@ def _weekly_dates(groups: list[dict], energy: dict, housing: dict, banks: dict, 
     by_key = {g["key"]: g for g in groups}
     items = [("energy", (energy.get("next") or {}).get("gas_storage"), "EIA natural gas storage, 10:30"),
              ("housing", (housing.get("next") or {}).get("mortgage_rate"), "Freddie Mac mortgage rate"),
-             ("banks", (banks.get("next") or {}).get("h8"), "Fed H.8 bank loans & deposits, 16:15")]
+             ("banks", (banks.get("next") or {}).get("h8"), "Fed H.8 bank loans & deposits, 16:15"),
+             ("banks", (banks.get("next") or {}).get("sloos"), "Senior Loan Officer Survey (expected: the Monday after the FOMC)")]
     for key, day, title in items:
         if day and key in by_key:
             by_key[key]["calendar"].append({"date": day, "kind": "data", "title": title, "late": False})

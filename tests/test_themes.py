@@ -353,3 +353,26 @@ def test_alfred_releases_take_the_prior_as_known_on_the_day():
     assert april["released"] == t("2026-05-15") and april["prior"] == 102.0     # the revised March, as the release said
     march = out[out["date"] == t("2026-03-01")].iloc[0]
     assert march["value"] == 100.0 and pd.isna(march["prior"])
+
+
+def test_loan_officer_survey_expected_the_monday_after_the_quarter_closing_fomc():
+    from market_recap.panels import themes as P
+    events = {"events": [{"date": "2026-09-16", "title": "FOMC decision (statement)"},
+                         {"date": "2026-10-28", "title": "FOMC press conference"},
+                         {"date": "2026-10-28", "title": "FOMC decision (statement)"}]}
+    assert P.sloos_expected(events, date(2026, 10, 1)) == "2026-11-02"
+    assert P.sloos_expected(events, date(2026, 11, 2)) is None
+
+
+def test_as_published_reads_the_year_earlier_value_as_known_on_release_day():
+    from market_recap.sources import alfred
+    t = pd.Timestamp
+    end = t("2262-04-01")
+    frame = pd.DataFrame([
+        {"date": t("2025-08-01"), "value": 100.0, "realtime_start": t("2025-09-16"), "realtime_end": t("2026-09-27")},
+        {"date": t("2025-08-01"), "value": 95.0, "realtime_start": t("2026-09-28"), "realtime_end": end},   # annual revision
+        {"date": t("2026-08-01"), "value": 106.0, "realtime_start": t("2026-09-16"), "realtime_end": t("2026-09-27")},
+        {"date": t("2026-08-01"), "value": 101.0, "realtime_start": t("2026-09-28"), "realtime_end": end},
+    ])
+    row = alfred.as_published(frame, "monthly").set_index("date").loc[t("2026-08-01")]
+    assert row["released"] == t("2026-09-16") and row["value"] == 106.0 and row["year_ago"] == 100.0
