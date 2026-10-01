@@ -144,12 +144,22 @@ def _split_factor(splits, symbol: str, after: str | None) -> float:
     return float(ratios[ratios.index > after].prod()) if not ratios.empty else 1.0
 
 
+# A market cap from Yahoo stands in only where the filings give no total share
+# count; such a row's per-share EPS may be in another class's shares
+# (Berkshire's is per Class A), so it is kept out of the index aggregates.
+YAHOO_CAP_BASIS = "Yahoo market cap: the filings count shares class by class, never in total"
+
+
 def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices: list[str], splits,
-         history: dict | None, ntm: dict | None = None) -> dict:
+         history: dict | None, ntm: dict | None = None, fallback_cap: float | None = None) -> dict:
     snapshot = data.trailing
     factor = _split_factor(splits, symbol, snapshot["shares_as_of"])
     shares = snapshot["shares"] * factor if snapshot["shares"] else None
     market_cap = price * shares if price is not None and shares else None
+    shares_basis = snapshot["shares_basis"] + (f", x{factor:g} for a split since" if factor != 1 else "")
+    if market_cap is None and fallback_cap and price is not None:
+        market_cap, shares_basis = fallback_cap, YAHOO_CAP_BASIS
+    has_history = history is not None
     ev = V.enterprise_value(market_cap, snapshot)
     metrics = V.compute(V.Inputs(snapshot, data.rows, market_cap, ev), sector=meta.get("sector"))
     _, tested = V.piotroski(data.rows)
@@ -168,7 +178,7 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         "period_end": snapshot["period_end"],
         "filed": snapshot["filed"],
         "cik": data.ciks[0],
-        "shares_basis": snapshot["shares_basis"] + (f", x{factor:g} for a split since" if factor != 1 else ""),
+        "shares_basis": shares_basis,
         "debt_basis": debt_basis,
         # Lines taken from the quarter before the latest, because the latest 10-Q did not tag them.
         "lagged": snapshot.get("lagged") or [],
@@ -180,7 +190,7 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         "book_yield": clean_float(V._pct(snapshot["balance"].get("equity"), market_cap), 4),
         "pe_forward": clean_float(V.forward_pe(price, ntm), 2),
         "eps_ntm": clean_float(ntm["eps"], 4) if ntm else None,
-        "pe_history": history is not None,
+        "pe_history": has_history,
         # The reported history's latest point checks the table's P/E (both are
         # reported); the percentile is on the history's leading basis.
         "pe_history_current": clean_float(reported.get("current"), 2),
@@ -345,10 +355,12 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         ntm = V.ntm_eps(trends.get(symbol), today)
         forward = _forward_series(symbol, ctx.prices.get(symbol), recorded, today, ntm)
         history = _history(symbol, data, ctx.prices.get(symbol), symbol_splits, sector, forward)
-        row = _row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history, ntm)
+        fallback_cap = estimates.market_cap(symbol) if not data.trailing["shares"] and price is not None else None
+        row = _row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history, ntm, fallback_cap)
         rows.append(row)
         prices = ctx.prices.get(symbol)
-        if prices is not None and data.eps_history and row["market_cap"] and price and row["cik"] not in companies:
+        if (prices is not None and data.eps_history and row["market_cap"] and price and row["cik"] not in companies
+                and row["shares_basis"] != YAHOO_CAP_BASIS):
             companies.add(row["cik"])
             shares = row["market_cap"] / price
             caps[symbol] = prices * shares

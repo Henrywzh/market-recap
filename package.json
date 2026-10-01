@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Deploy tooling for the market-recap dashboard. Pinned so the nightly job does not resolve a version over the network.",
   "devDependencies": {
+    "playwright-core": "1.63.0",
     "wrangler": "4.136.3"
   }
 }

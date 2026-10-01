@@ -5,7 +5,7 @@ SITE_URL = https://market-recap-b5p.pages.dev
 WRANGLER_DEPLOY = ./node_modules/.bin/wrangler pages deploy dist --project-name market-recap --branch main --commit-dirty=true
 export PYTHONPATH := src
 
-.PHONY: help install refresh refresh-fast validate site serve serve-live deploy deploy-only test lock prune clean status run-now snapshot-options snapshot-expectations
+.PHONY: help install refresh refresh-fast validate site serve serve-live deploy deploy-only test smoke lock prune clean status run-now snapshot-options snapshot-expectations
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -23,9 +23,13 @@ refresh-fast: ## Same, without the SEC panels (FINANCIALS, VALUATION, DCF)
 validate: ## Re-check the artifacts already on disk
 	$(PYTHON) -m market_recap.cli validate
 
-test: ## Run the test suite (Python, and the browser-side maths under node)
+test: ## Run the test suite (Python, and the browser-side maths under node) and pyflakes
+	$(PYTHON) -m pyflakes src tests scripts
 	$(PYTHON) -m pytest tests/ -q
 	node --test 'tests/js/*.test.mjs'
+
+smoke: site ## Open every page of the built site in headless Chrome; fail on any error
+	node scripts/smoke.mjs dist
 
 site: ## Assemble dist/ from the artifacts already on disk
 	$(PYTHON) -m market_recap.cli site

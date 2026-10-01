@@ -51,6 +51,8 @@ jobs:
         run: |
           python -m pip install -r requirements.lock
           python -m pip install --no-deps -e .
+          # Pinned here, not in the lock: the lock's hash keys the data cache.
+          python -m pip install pyflakes==4.0.0
           npm ci
 
       - name: Test
@@ -120,6 +122,15 @@ jobs:
           path: data/cache
           key: data-cache-${{ hashFiles('requirements.lock') }}-${{ github.run_id }}
 
+      # Every page of the built site opened in headless Chrome (the runner's
+      # own): a page that throws, logs an error, renders nothing or shows NaN
+      # blocks the deploy like a failed build.
+      - name: Smoke test the site
+        id: smoke
+        if: always()
+        continue-on-error: true
+        run: make smoke PYTHON=python
+
       # Only a build that passed --strict is published -- or one whose sole
       # finding is a MONITOR ledger carried forward unchanged, so one panel
       # cannot freeze the whole site -- and never one dated earlier than the
@@ -127,7 +138,9 @@ jobs:
       - name: Deploy gate
         id: gate
         run: |
-          if [ "${{ steps.refresh.outcome }}" = "success" ]; then
+          if [ "${{ steps.smoke.outcome }}" != "success" ]; then
+            echo "deployable=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.refresh.outcome }}" = "success" ]; then
             echo "deployable=true" >> "$GITHUB_OUTPUT"
           else
             python scripts/deploy_gate.py
@@ -148,9 +161,9 @@ jobs:
       # A carried MONITOR was published above; the run still fails so a red
       # run emails the owner, as any failed build does.
       - name: Fail a failed build
-        if: steps.refresh.outcome != 'success'
+        if: steps.refresh.outcome != 'success' || steps.smoke.outcome != 'success'
         run: |
-          echo "::error::Refresh failed (see its log); deploy gate said '${{ steps.gate.outputs.deployable }}'"
+          echo "::error::Refresh: ${{ steps.refresh.outcome }}, smoke test: ${{ steps.smoke.outcome }} (see their logs); deploy gate said '${{ steps.gate.outputs.deployable }}'"
           exit 1
 
       - name: Summary

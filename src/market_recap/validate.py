@@ -28,7 +28,7 @@ SEVERITIES = ("error", "warning", "notice")
 # down must not hold back the prices every other tab needs.
 OPTIONAL_SOURCES = re.compile(r"^(catalysts_\w+|(ssga|ishares|vanguard|invesco)_xray_holdings|yahoo_estimates(_quarter)?|factset_insight(_pdf)?|earnings_season_nasdaq"
                               # THEMES' industry data: each is one card's content, never the page's.
-                              r"|sec_capex|sec_releases(_guidance)?|nasdaq_earnings_history|mops_revenue|korea_customs|motie_trade|eia_weekly|fred_(housing|banks|consumer)|alfred_releases|adata_market_watch|pcpartpicker|altdata_\w+)$")
+                              r"|sec_capex|sec_releases(_guidance)?|nasdaq_earnings_history|mops_revenue|korea_customs|motie_trade|eia_weekly|fred_(housing|banks|consumer)|alfred_releases|tradingview_forecasts|adata_market_watch|pcpartpicker|altdata_\w+)$")
 
 
 @dataclass(frozen=True)

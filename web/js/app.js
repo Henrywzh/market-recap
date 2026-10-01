@@ -162,6 +162,8 @@ async function select(id, { silent = false, arg = null } = {}) {
     await render(main, payload, state.manifest, context(view, state.arg));
   } catch (error) {
     if (state.active !== id) return;
+    // The reader gets a sentence; the console (and the smoke test) the error.
+    console.error(`${view.id} failed to render:`, error);
     main.innerHTML = '';
     main.append(el('div', { class: 'gap' }, [
       `${view.label} is unavailable: ${error.message}. `,
@@ -189,7 +191,7 @@ function renderFooter(manifest) {
   ]));
 
   const sources = (manifest.sources || []).map((source) => {
-    const cls = source.status === 'ok' ? 'src-ok' : source.status === 'partial' ? 'src-partial' : 'src-error';
+    const cls = source.status === 'ok' ? 'src-ok' : source.status === 'partial' ? 'src-partial' : source.status === 'skipped' ? 'dim' : 'src-error';
     return el('span', {}, [
       el('span', { class: cls, text: source.label }),
       el('span', { class: 'dim', text: ` (${source.freshness}${source.observed_date ? `, ${source.observed_date}` : ''})` }),

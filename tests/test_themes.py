@@ -376,3 +376,40 @@ def test_as_published_reads_the_year_earlier_value_as_known_on_release_day():
     ])
     row = alfred.as_published(frame, "monthly").set_index("date").loc[t("2026-08-01")]
     assert row["released"] == t("2026-09-16") and row["value"] == 106.0 and row["year_ago"] == 100.0
+
+
+def test_pcpartpicker_is_skipped_not_failed_on_the_cloud_build(monkeypatch):
+    from market_recap.panels import themes as P
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(P.pcpartpicker, "fetch", lambda kind: pytest.fail("the cloud build must not ask PCPartPicker"))
+    assert P._pcpp() == {"skipped": P.PCPP_SKIP_REASON}
+
+
+def test_tv_surprises_take_actual_less_forecast_on_the_new_york_day():
+    rows = [{"title": "Retail Sales MoM", "date": "2026-09-16T12:30:00.000Z", "actual": 1.2, "forecast": 0.8},
+            {"title": "Retail Sales Ex Autos MoM", "date": "2026-09-16T12:30:00.000Z", "actual": 1.0, "forecast": 0.5},
+            {"title": "Housing Starts", "date": "2016-10-19T12:30:00.000Z", "actual": 1047, "forecast": 1175},
+            {"title": "Retail Sales MoM", "date": "2026-08-14T12:30:00.000Z", "actual": 0.5, "forecast": None}]
+    retail = T.tv_surprises(rows, r"^Retail Sales MoM$", "diff")
+    assert len(retail) == 1 and retail["surprise"].iloc[0] == pytest.approx(0.4)
+    assert retail["released"].iloc[0] == pd.Timestamp("2026-09-16")
+    starts = T.tv_surprises(rows, r"^Housing Starts$", "pct")
+    assert starts["surprise"].iloc[0] == pytest.approx((1047 / 1175 - 1) * 100)
+
+
+def test_release_study_scores_on_forecasts_when_they_cover_most_releases():
+    sessions = pd.bdate_range("2024-01-01", periods=400)
+    excess = pd.Series(0.0, index=sessions)
+    days = sessions[20::20][:18]
+    releases = pd.DataFrame({"date": days - pd.Timedelta(days=30), "released": days,
+                             "value": [101.0] * 18, "prior": [100.0] * 18})        # a flat +1% every month: no trend signal
+    beats = [1.0 if i % 2 else -1.0 for i in range(18)]
+    for day, b in zip(days, beats):
+        excess[day] = b                                                            # the proxy follows the beat
+    forecasts = pd.DataFrame({"released": days, "actual": 0.0, "forecast": 0.0, "surprise": beats})
+    out = T.release_study(releases, excess, headline="pct", forecasts=forecasts)
+    assert out["basis"] == "forecast" and out["with_forecast"] == 18
+    assert out["up_above"] == 100 and out["up_below"] == 0
+    assert out["recent"][0]["vs_forecast"] == beats[-1]
+    sparse = forecasts.iloc[:5]
+    assert T.release_study(releases, excess, headline="pct", forecasts=sparse)["basis"] == "trend"

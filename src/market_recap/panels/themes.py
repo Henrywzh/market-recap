@@ -25,6 +25,7 @@ page and the rest renders.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+import os
 import re
 import statistics
 
@@ -35,6 +36,7 @@ from ..compute import events as E
 from ..compute import themes as T
 from .. import cache
 from ..sources import adata, alfred, altdata, dart, eia, fred, korea_customs, mops, motie, pcpartpicker, releases, sec, yahoo
+from ..sources import expectations as expectations_source
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, describe_error, history_payload
 from .financials import cik_for
 
@@ -373,7 +375,15 @@ def _family(title: str) -> str:
     return next((key for key in ("DDR5", "DDR4", "AMD", "Intel") if title.startswith(key)), "other")
 
 
+# PCPartPicker's Cloudflare refuses cloud servers (HTTP 403) and is not worked
+# around: the scheduled build does not ask, and says so, instead of logging
+# the same refusal as an error every night. A local build still reads it.
+PCPP_SKIP_REASON = "not fetched by the cloud build: PCPartPicker refuses cloud servers (HTTP 403); a local build reads it"
+
+
 def _pcpp() -> dict:
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        return {"skipped": PCPP_SKIP_REASON}
     out: dict = {"failed": []}
     for kind in ("memory", "cpu"):
         charts, failed = pcpartpicker.fetch(kind)
@@ -655,14 +665,21 @@ def _consumer(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
 # (what the release itself said, prior month as known that day); EIA's
 # weekly report is dated the Wednesday after the week (a holiday week, a day
 # later, is not shifted).
-# group: [(series, label, headline: 'pct' change | 'diff' change, unit)]
+# The surprise is the actual less TradingView's published forecast where its
+# calendar has one for most releases (back to 2016 for these lines), else the
+# print against its own trend.
+# group: [(series, label, headline: 'pct' change | 'diff' change, unit,
+#          TradingView line, its surprise: 'diff' | 'pct', the surprise's unit)]
 STUDIES = {
-    "energy": [("eia:crude_stocks", "EIA crude stocks, weekly change", "diff", "mb")],
-    "banks": [("PAYEMS", "Nonfarm payrolls", "diff", "k"), ("CPILFESL", "Core CPI, m/m", "pct", "pct")],
-    "consumer": [("RSAFS", "Retail sales, m/m", "pct", "pct"), ("ICSA", "Initial jobless claims, w/w", "diff", "count"),
-                 ("PAYEMS", "Nonfarm payrolls", "diff", "k")],
-    "housing": [("HOUST", "Housing starts, m/m", "pct", "pct"), ("HSN1F", "New home sales, m/m", "pct", "pct"),
-                ("CPILFESL", "Core CPI, m/m", "pct", "pct")],
+    "energy": [("eia:crude_stocks", "EIA crude stocks, weekly change", "diff", "mb", r"^EIA Crude Oil Stocks Change$", "diff", "mbbl")],
+    "banks": [("PAYEMS", "Nonfarm payrolls", "diff", "k", r"^Non Farm Payrolls$", "diff", "k"),
+              ("CPILFESL", "Core CPI, m/m", "pct", "pct", r"^Core Inflation Rate MoM$", "diff", "pp")],
+    "consumer": [("RSAFS", "Retail sales, m/m", "pct", "pct", r"^Retail Sales MoM$", "diff", "pp"),
+                 ("ICSA", "Initial jobless claims, w/w", "diff", "count", r"^Initial Jobless Claims$", "diff", "k"),
+                 ("PAYEMS", "Nonfarm payrolls", "diff", "k", r"^Non Farm Payrolls$", "diff", "k")],
+    "housing": [("HOUST", "Housing starts, m/m", "pct", "pct", r"^Housing Starts$", "pct", "%"),
+                ("HSN1F", "New home sales, m/m", "pct", "pct", r"^New Home Sales$", "pct", "%"),
+                ("CPILFESL", "Core CPI, m/m", "pct", "pct", r"^Core Inflation Rate MoM$", "diff", "pp")],
 }
 EIA_RELEASE_LAG = 5
 
@@ -675,27 +692,34 @@ def _study_releases(series: str) -> pd.DataFrame:
     return alfred.releases(alfred.vintages(series))
 
 
-def _studies(groups: list[dict], excess: pd.DataFrame) -> dict:
+def _studies(groups: list[dict], excess: pd.DataFrame, as_of: date) -> dict:
     out: dict = {"keyed": alfred.available()}
     cache_: dict[str, pd.DataFrame] = {}
+    try:
+        calendar, missing = expectations_source.tradingview_history(excess.index[0].date(), as_of)
+        out["forecast_months_missing"] = missing
+    except Exception as exc:  # noqa: BLE001 -- the studies fall back to the trend
+        calendar, out["forecast_error"] = [], describe_error(exc)[:ERROR_DETAIL_CHARS]
     for g in groups:
         etf = g.get("proxy") if g.get("proxy_is_etf") else None
         if g["key"] not in STUDIES or not etf or etf not in excess.columns:
             continue
         rows = []
-        for series, label, headline, unit in STUDIES[g["key"]]:
+        for series, label, headline, unit, tv_title, tv_mode, surprise_unit in STUDIES[g["key"]]:
             if not series.startswith("eia:") and not out["keyed"]:
                 rows.append({"series": series, "label": label, "unavailable": "no FRED_API_KEY: ALFRED release days need one"})
                 continue
             try:
                 if series not in cache_:
                     cache_[series] = _study_releases(series)
-                study = T.release_study(cache_[series], excess[etf], headline=headline)
+                study = T.release_study(cache_[series], excess[etf], headline=headline,
+                                        forecasts=T.tv_surprises(calendar, tv_title, tv_mode))
             except Exception as exc:  # noqa: BLE001 -- one study's failure is its own row
                 rows.append({"series": series, "label": label, "unavailable": describe_error(exc)[:ERROR_DETAIL_CHARS]})
                 continue
             if study:
-                rows.append({"series": series, "label": label, "headline": headline, "unit": unit, **study})
+                rows.append({"series": series, "label": label, "headline": headline, "unit": unit,
+                             "surprise_unit": surprise_unit if study["basis"] == "forecast" else unit, **study})
         out[g["key"]] = {"proxy": etf, "rows": rows}
     return out
 
@@ -896,7 +920,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     if "unavailable" not in banks:
         banks["next"]["sloos"] = sloos_expected(catalysts, as_of)
     consumer = _section(lambda: _consumer(specs.get("consumer", {}), excess, as_of))
-    studies = _section(lambda: _studies(groups, excess))
+    studies = _section(lambda: _studies(groups, excess, as_of))
     _data_dates(groups, cloud, semis, as_of, settings)
     _weekly_dates(groups, energy, housing, banks, as_of)
     _log(ctx, cloud, semis)
@@ -1032,6 +1056,14 @@ def _log_more(ctx, energy: dict, housing: dict, banks: dict, consumer: dict) -> 
 
 def _log_studies(ctx, studies: dict) -> None:
     rows = [r for k, v in studies.items() if isinstance(v, dict) for r in v.get("rows", [])]
+    scored = [r for r in rows if r.get("basis") == "forecast"]
+    missing = studies.get("forecast_months_missing") or []
+    ctx.log.add(SourceRecord(
+        "tradingview_forecasts", "Release forecasts and actuals (TradingView economic calendar)", expectations_source.TV_URL,
+        max((x["released"] for r in scored for x in r.get("recent", []) if x.get("vs_forecast") is not None), default=None),
+        rows=len(scored), policy="weekly_release",
+        status="error" if studies.get("forecast_error") or (rows and not scored) else ("partial" if missing else "ok"),
+        error=studies.get("forecast_error") or (f"months not answered: {', '.join(missing[:6])}" if missing else None)))
     bad = [r["series"] for r in rows if "unavailable" in r]
     keyed = studies.get("keyed")
     ctx.log.add(SourceRecord(
@@ -1075,6 +1107,10 @@ def _log(ctx, cloud: dict, semis: dict) -> None:
     record("adata_market_watch", "ADATA Memory & Flash Market Watch", "https://industrial.adata.com/en/edm", notes,
            None if "unavailable" in notes or not notes["notes"] else notes["notes"][0]["month"] + "-01", "monthly_release")
     pc = semis["pcpp"]
-    record("pcpartpicker", "PCPartPicker UK price trends (memory, CPU)", "https://uk.pcpartpicker.com/trends/", pc,
-           None if "unavailable" in pc else max((r["image_date"] for k in ("memory", "cpu") for r in pc.get(k, {}).get("rows", [])), default=None),
-           "daily_close")
+    if "skipped" in pc:
+        ctx.log.add(SourceRecord("pcpartpicker", "PCPartPicker UK price trends (memory, CPU)", "https://uk.pcpartpicker.com/trends/",
+                                 None, status="skipped", error=pc["skipped"], policy="daily_close"))
+    else:
+        record("pcpartpicker", "PCPartPicker UK price trends (memory, CPU)", "https://uk.pcpartpicker.com/trends/", pc,
+               None if "unavailable" in pc else max((r["image_date"] for k in ("memory", "cpu") for r in pc.get(k, {}).get("rows", [])), default=None),
+               "daily_close")

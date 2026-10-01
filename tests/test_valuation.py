@@ -369,3 +369,19 @@ def test_ntm_eps_weights_this_and_next_year_by_what_is_left():
 def test_group_forward_pe_is_cap_over_ntm_earnings_with_coverage():
     out = V.aggregate_forward({"A": 100.0, "B": 300.0, "C": 100.0}, {"A": 5.0, "B": 15.0})
     assert out["pe"] == pytest.approx(400.0 / 20.0) and out["coverage"] == pytest.approx(0.8)
+
+
+def test_row_takes_yahoo_cap_only_without_a_share_count_and_flags_history_truthfully():
+    from market_recap.sources import sec
+    ttm = {"net_income": 80e9, "revenue": 370e9}
+    trailing = {"shares": None, "shares_as_of": None, "shares_basis": "no complete share count filed",
+                "ttm": ttm, "ttm_prior": {}, "balance": {"equity": 650e9}, "balance_prior": {},
+                "period_end": "2026-06-30", "filed": "2026-08-10", "lagged": [], "debt_includes_current": False}
+    data = sec.Filer("Berkshire", (1067983,), ("us-gaap",), (), trailing)
+    row = panel._row("BRK-B", {"sector": "Financials"}, data, 500.0, ["SPX"], pd.DataFrame(), None, fallback_cap=1.07e12)
+    assert row["market_cap"] == 1.07e12 and row["shares_basis"] == panel.YAHOO_CAP_BASIS
+    assert row["pe"] == pytest.approx(1.07e12 / 80e9, rel=1e-3)
+    assert row["pe_history"] is False                                  # no history was built: none to fetch
+    filed = dict(trailing, shares=2e9, shares_as_of="2026-07-31", shares_basis="cover page shares outstanding")
+    row = panel._row("X", {}, sec.Filer("X", (1,), ("us-gaap",), (), filed), 10.0, [], pd.DataFrame(), {}, fallback_cap=9e12)
+    assert row["market_cap"] == 2e10 and row["pe_history"] is True    # the filings' count wins

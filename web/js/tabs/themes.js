@@ -359,6 +359,9 @@ function koreaFlashCard(k) {
 }
 
 function pcppCard(pc) {
+  if (pc.skipped) {
+    return card('RETAIL PRICES · PCPARTPICKER UK', null, gap('PCPartPicker refuses requests from cloud servers (HTTP 403), so the scheduled build does not ask; a build run from a home connection includes these prices. Its bot protection is not worked around.'));
+  }
   if (pc.unavailable) {
     // PCPartPicker's Cloudflare answers cloud servers with 403; it is read
     // from a home connection only, and not worked around.
@@ -656,41 +659,59 @@ function studyValue(unit, v, signedOut = true) {
 // How the theme's ETF moved beyond the S&P 500 on each release's session:
 // whether the market cares (|move| on the day against any other day) and
 // whether it moved with the print.
+// A surprise in its own unit: against the forecast, TradingView's (pp for a %
+// change, thousands, million barrels, % off a level); against the trend, the
+// print's own.
+function surpriseValue(unit, v) {
+  if (v === null || v === undefined) return DASH;
+  const sign = v > 0 ? '+' : '';
+  if (unit === 'pp') return `${sign}${num(v, 2)}pp`;
+  if (unit === 'k') return `${sign}${num(v, 0)}k`;
+  if (unit === 'mbbl') return `${sign}${num(v, 2)} mb`;
+  if (unit === '%') return `${sign}${num(v, 1)}%`;
+  return studyValue(unit, v);
+}
+
 function studyCard(study, failed) {
   if (failed) return card('RELEASE DAYS', null, unavailable(failed));
   if (!study?.rows?.length) return null;
-  const head = ['RELEASE', 'SINCE', 'N', '|ETF−SPX| ON THE DAY', 'VS OTHER DAYS', 'UP · ABOVE TREND', 'UP · BELOW TREND', 'RANK CORR', 'LAST PRINT'];
+  const head = ['RELEASE', 'SINCE', 'N', '|ETF−SPX| ON THE DAY', 'VS OTHER DAYS', 'SURPRISE', 'UP · ABOVE', 'UP · BELOW', 'RANK CORR', 'LAST PRINT'];
   const rows = study.rows.map((r) => {
-    if (r.unavailable) return el('tr', {}, [el('td', { text: r.label }), el('td', { class: 'dim', colspan: '8', text: r.unavailable })]);
+    if (r.unavailable) return el('tr', {}, [el('td', { text: r.label }), el('td', { class: 'dim', colspan: '9', text: r.unavailable })]);
     const last = r.recent?.[0];
+    const onForecast = r.basis === 'forecast';
     return el('tr', {}, [
       el('td', { text: r.label }),
       el('td', { class: 'dim', text: r.since.slice(0, 7) }),
       el('td', { text: String(r.n) }),
       el('td', { text: `${num(r.abs_move, 2)}%` }),
       el('td', { class: r.attention >= 1.3 ? 'accent-text' : r.attention < 1.1 ? 'dim' : '', text: r.attention ? `${num(r.attention, 2)}×` : DASH }),
+      el('td', { class: onForecast ? '' : 'dim', text: onForecast ? `vs forecast (${r.with_forecast} of ${r.n})` : 'vs own trend' }),
       el('td', { text: r.up_above === null ? DASH : `${r.up_above}% of ${r.n_above}` }),
       el('td', { text: r.up_below === null ? DASH : `${r.up_below}% of ${r.n_below}` }),
       el('td', { class: r.corr === null ? 'dim' : Math.abs(r.corr) >= 0.2 ? 'accent-text' : 'dim', text: r.corr === null ? DASH : num(r.corr, 2) }),
       el('td', {}, last ? [`${last.released.slice(5)} ${studyValue(r.unit, last.headline)} `,
-        el('span', { class: 'dim', text: `(${studyValue(r.unit, last.surprise)} vs trend) ` }), el('span', { class: dirClass(last.move), text: pct(last.move, 2) })] : [DASH]),
+        el('span', { class: 'dim', text: `(${surpriseValue(r.surprise_unit, last.surprise)} vs ${onForecast ? 'forecast' : 'trend'}) ` }),
+        el('span', { class: dirClass(last.move), text: pct(last.move, 2) })] : [DASH]),
     ]);
   });
   const details = study.rows.filter((r) => r.recent?.length).map((r) => el('details', { class: 'method-fold' }, [
     el('summary', { text: `${r.label.toUpperCase()} · LAST ${r.recent.length}` }),
-    table(['PERIOD', 'RELEASED', 'PRINT', 'VS TREND', `${study.proxy} − SPX`], r.recent.map((x) => el('tr', {}, [
+    table(['PERIOD', 'RELEASED', 'PRINT', 'VS FORECAST', 'VS TREND', `${study.proxy} − SPX`], r.recent.map((x) => el('tr', {}, [
       el('td', { text: r.unit === 'pct' || r.unit === 'k' ? x.period.slice(0, 7) : x.period }),
       el('td', { class: 'dim', text: x.released }),
       el('td', { text: studyValue(r.unit, x.headline) }),
-      el('td', { class: 'dim', text: studyValue(r.unit, x.surprise) }),
+      el('td', { text: surpriseValue(r.basis === 'forecast' ? r.surprise_unit : null, x.vs_forecast) }),
+      el('td', { class: 'dim', text: studyValue(r.unit, x.vs_trend) }),
       el('td', { class: dirClass(x.move), text: pct(x.move, 2) }),
     ]))),
   ]));
   return card(`RELEASE DAYS · WHAT ${study.proxy} DID AGAINST THE S&P 500`, el('span', { class: 'dim', text: 'history, not a forecast' }), [
     table(head, rows), ...details,
     el('div', { class: 'field-note', text: 'Each release\'s session (all come out before or during it): the ETF\'s return less the S&P 500\'s. VS OTHER DAYS: its average size against every other session since -- near 1×, the release day looks like any other. '
-      + 'With no free consensus history, a print is "above trend" when its change beats the median of the 12 before it, not when it beats forecasts. RANK CORR: between that and the move. '
-      + 'Release days and first prints (the prior month as it stood that day) from ALFRED, FRED\'s vintage archive; EIA on the Wednesday after the week. Other news the same day counts too.' }),
+      + 'SURPRISE: the actual less the forecast on TradingView\'s economic calendar (back to 2016; % off the forecast for a level such as starts) where it covers most releases, else the print\'s change against the median of the 12 before it. '
+      + 'UP · ABOVE / BELOW: how often the ETF beat the S&P 500 after a print above or below that mark. RANK CORR: between the surprise and the move. '
+      + 'Release days from ALFRED and TradingView; EIA\'s on the day it came out. Other news the same day counts too.' }),
   ]);
 }
 

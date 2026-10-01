@@ -42,7 +42,7 @@ def _json(url: str, *, headers: dict | None = None, timeout: float = 30.0, retri
     return json.loads(get_text(url, headers=headers, timeout=timeout, retries=retries, user_agent=user_agent))
 
 
-def fetch_tradingview(start: date, end: date, *, use_cache: bool = True) -> list[dict]:
+def fetch_tradingview(start: date, end: date, *, use_cache: bool = True, kind: str = "daily_file") -> list[dict]:
     query = urlencode({
         "from": f"{start.isoformat()}T00:00:00.000Z",
         "to": f"{end.isoformat()}T23:59:59.000Z",
@@ -52,9 +52,31 @@ def fetch_tradingview(start: date, end: date, *, use_cache: bool = True) -> list
         NAMESPACE, f"tradingview-{start.isoformat()}-{end.isoformat()}",
         lambda: get_text(f"{TV_URL}?{query}", timeout=30.0, retries=1,
                          headers={"Origin": "https://www.tradingview.com", "Accept": "application/json"}),
-        kind="daily_file", suffix=".json", use_cache=use_cache,
+        kind=kind, suffix=".json", use_cache=use_cache,
     )
     return json.loads(text).get("result") or []
+
+
+# A month that ended this long ago has its actuals and forecasts settled.
+SETTLED_DAYS = 10
+
+
+def tradingview_history(start: date, today: date, *, use_cache: bool = True) -> tuple[list[dict], list[str]]:
+    """Every US calendar row from ``start`` to ``today``, month by month: a
+    settled month is kept a year (it does not change), the rest a session.
+    Returns the rows and the months that did not answer."""
+    rows, failed = [], []
+    month = date(start.year, start.month, 1)
+    while month <= today:
+        nxt = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
+        end = nxt - timedelta(days=1)
+        settled = (today - end).days > SETTLED_DAYS
+        try:
+            rows.extend(fetch_tradingview(month, end, use_cache=use_cache, kind="archive" if settled else "daily_file"))
+        except Exception:  # noqa: BLE001 -- a month missing leaves its releases unscored, not the study
+            failed.append(month.strftime("%Y-%m"))
+        month = nxt
+    return rows, failed
 
 
 def fetch_nasdaq_page(day: date, *, use_cache: bool = True) -> list[dict]:

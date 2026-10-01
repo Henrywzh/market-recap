@@ -127,3 +127,28 @@ def fetch_trends(symbols: list[str], *, use_cache: bool = True) -> tuple[dict[st
     with ThreadPoolExecutor(WORKERS) as pool:
         list(pool.map(one, symbols))
     return found, failed
+
+
+def _fetch_price_module(symbol: str) -> str:
+    import yfinance as yf
+
+    payload = yf.Ticker(symbol)._quote._fetch(["price"])
+    if not payload:
+        raise RuntimeError("empty quoteSummary answer")
+    return json.dumps(payload)
+
+
+def market_cap(symbol: str, *, use_cache: bool = True) -> float | None:
+    """Yahoo's market capitalisation, every share class included.
+
+    Only for a company whose filings carry no total share count: one that
+    reports its cover-page shares class by class (Berkshire, Hershey, Ares)
+    has none in SEC's company facts. None on any failure."""
+    try:
+        text = cache.fetch_text("yahoo-price", symbol.replace("/", "_"), lambda: _fetch_price_module(symbol),
+                                kind="daily_file", suffix=".json", use_cache=use_cache)
+        price = json.loads(text)["quoteSummary"]["result"][0]["price"]
+    except Exception:  # noqa: BLE001 - optional: the row keeps no market cap
+        return None
+    value = _raw(price.get("marketCap"))
+    return value if value and value > 0 else None
