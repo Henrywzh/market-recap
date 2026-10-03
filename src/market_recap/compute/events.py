@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 import math
+import re
 
 import pandas as pd
 
@@ -39,14 +40,28 @@ def daily_excess(closes: pd.DataFrame, index_close: pd.Series) -> pd.DataFrame:
     return returns.sub(market, axis=0)
 
 
-def candidates(corr: pd.DataFrame, symbol: str, *, count: int, same_issuer: set[str]) -> list[tuple[str, float]]:
-    """The ``count`` names most correlated with ``symbol``, another share
-    class of the same issuer excluded (GOOG moves with GOOGL by construction)."""
+def candidates(corr: pd.DataFrame, symbol: str, *, count: int, same_issuer: set[str],
+               linked: dict[str, str] | None = None, strong_corr: float = 0.45) -> list[tuple[str, float, str]]:
+    """Up to ``count`` peers, most correlated first, each with why it is one.
+
+    A peer needs a reason beyond the correlation itself: the same industry or
+    a shared theme (``linked``: symbol -> reason), or a correlation of at least
+    ``strong_corr``. Ranking the whole index by correlation alone handed Apple
+    GoDaddy and Hershey at 0.28 -- the best of a crowd of chance matches. Another
+    share class of the same issuer is left out (GOOG moves with GOOGL by
+    construction)."""
     if symbol not in corr.columns:
         return []
+    linked = linked or {}
     row = corr[symbol].drop(labels=[symbol, *same_issuer], errors="ignore").dropna()
-    row = row[row > 0].sort_values(ascending=False).head(count)
-    return [(str(s), float(v)) for s, v in row.items()]
+    out = []
+    for peer, value in row[row > 0].sort_values(ascending=False).items():
+        reason = linked.get(str(peer)) or (f"trades with it (corr {value:.2f})" if value >= strong_corr else None)
+        if reason:
+            out.append((str(peer), float(value), reason))
+        if len(out) >= count:
+            break
+    return out
 
 
 def co_move(leader: list[float | None], follower: list[float | None], *, min_reports: int) -> dict | None:
@@ -59,9 +74,15 @@ def co_move(leader: list[float | None], follower: list[float | None], *, min_rep
     if denominator == 0:
         return None
     signed = [(a, b) for a, b in pairs if a != 0 and b != 0]
+    beta = sum(a * b for a, b in pairs) / denominator
+    # The beta's t-statistic (a regression through the origin): how far it
+    # stands above what eight noisy sessions give by chance.
+    residual = sum((b - beta * a) ** 2 for a, b in pairs) / max(len(pairs) - 1, 1)
+    t = beta / math.sqrt(residual / denominator) if residual > 0 else None
     return {
         "n": len(pairs),
-        "beta": round(sum(a * b for a, b in pairs) / denominator, 2),
+        "beta": round(beta, 2),
+        "t": None if t is None else round(t, 2),
         "hit": round(sum((a > 0) == (b > 0) for a, b in signed) / len(signed), 2) if signed else None,
         "mean_abs": round(sum(abs(b) for _, b in pairs) / len(pairs), 2),
     }
@@ -338,3 +359,170 @@ def revision_table(trend: dict | None) -> list[dict]:
                      "up_30d": row.get("up_30d"), "down_30d": row.get("down_30d"), "analysts": row.get("analysts"),
                      "spread_pct": None if spread is None else round(spread, 1)})
     return rows
+
+
+# --- Large moves and what explains them ---------------------------------------
+# A move is large against the name's own recent volatility, not a fixed size:
+# 4% is noise for a memory maker and an event for a utility.
+MOVE_Z = 2.5
+MOVE_MIN_PCT = 2.0
+MOVE_VOL_SESSIONS = 60
+
+
+def big_moves(excess: pd.Series, *, since: str, skip: set[str], z: float = MOVE_Z, min_pct: float = MOVE_MIN_PCT,
+              vol_sessions: int = MOVE_VOL_SESSIONS) -> list[dict]:
+    """Sessions since ``since`` whose move beyond the S&P 500 was at least ``z``
+    times the standard deviation of the ``vol_sessions`` before it, and at
+    least ``min_pct``; ``skip`` (report sessions) left out. Oldest first."""
+    series = excess.dropna()
+    if len(series) <= vol_sessions:
+        return []
+    vol = series.rolling(vol_sessions, min_periods=int(vol_sessions * 0.8)).std().shift(1)
+    out = []
+    for day, value in series.loc[since:].items():
+        sd = vol.get(day)
+        key = day.strftime("%Y-%m-%d")
+        if key in skip or sd is None or pd.isna(sd) or sd == 0:
+            continue
+        score = value / sd
+        if abs(score) >= z and abs(value) >= min_pct:
+            out.append({"date": key, "excess_pct": round(float(value), 2), "z": round(float(score), 1)})
+    return out
+
+
+_ROUNDUP = re.compile(r"stocks? making|market today|stock market|movers|biggest|top \d+|\d+ stocks|these stocks|week ahead|"
+                      r"this week|wrap|midday|premarket|pre-market|after-hours|morning brief|futures|dow |s&p 500|nasdaq composite", re.I)
+_EXPLAINS = re.compile(r"^why |shares? (?:jump|soar|surge|rise|rall|climb|gain|fall|drop|sink|slide|tumble|plunge|slump)|"
+                       r"stock (?:jump|soar|surge|rise|rall|climb|gain|fall|drop|sink|slide|tumble|plunge|slump)|"
+                       r"upgrade|downgrade|guidance|outlook|acqui|merger|deal|lawsuit|probe|investigat|recall|ceo|"
+                       r"contract|order|approval|fda|tariff|ban|export", re.I)
+_TRUSTED = {"reuters", "bloomberg", "cnbc", "wsj", "dow jones", "barrons", "barron's", "marketwatch", "financial times",
+            "ft", "the information", "associated press", "yahoo"}
+
+
+def short_name(name: str | None, symbol: str) -> str:
+    """'Micron Technology Inc' -> 'Micron': the word a headline uses."""
+    words = re.sub(r"[^A-Za-z0-9&.\- ]", " ", name or "").split()
+    return words[0] if words and len(words[0]) > 2 else symbol
+
+
+def rank_headlines(rows: list[dict], symbol: str, name: str | None, start_ts: float, end_ts: float,
+                   keep: int = 3) -> list[dict]:
+    """The headlines most likely to explain one session's move: published
+    after the previous close and before this close, naming the company, saying
+    why it moved, and not a market roundup."""
+    word = short_name(name, symbol).lower()
+    ticker = re.compile(rf"\b{re.escape(symbol.replace('-', '.'))}\b")
+    scored = []
+    seen = set()
+    for r in rows:
+        when, headline = r.get("datetime") or 0, (r.get("headline") or "").strip()
+        if not headline or not start_ts <= when <= end_ts or headline.lower() in seen:
+            continue
+        seen.add(headline.lower())
+        text = headline.lower()
+        # A bank or a broker is named as often as the commentator as the subject:
+        # "AVGO jumps -- JPMorgan says buy" is Broadcom's story, not JPMorgan's.
+        # Only analyst phrasing: "raises", "sees" or "warns" is as often the
+        # company's own news ("Micron raises outlook").
+        voice = re.search(rf"\b{re.escape(word)}(?:'s)?\s+(?:analysts?|strategists?|economists?|upgrades?|downgrades?|initiates|"
+                          r"reiterates|says investors|price target)\b", text)
+        other = re.match(r"^([A-Z]{1,5})\b(?i: stock| shares)", headline)
+        if voice or (other and other.group(1) != symbol.split("-")[0]):
+            continue
+        score = (3 if word in text or ticker.search(headline) else 0) + (2 if _EXPLAINS.search(headline) else 0) \
+            + (1 if (r.get("source") or "").lower() in _TRUSTED else 0) - (3 if _ROUNDUP.search(headline) else 0)
+        if score >= 3:
+            scored.append((score, when, {"headline": headline, "source": r.get("source"), "url": r.get("url"),
+                                         "time": pd.Timestamp(when, unit="s", tz="UTC").tz_convert("America/New_York").strftime("%Y-%m-%d %H:%M")}))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [x[2] for x in scored[:keep]]
+
+
+def move_reasons(day: str, timeline: list[dict], peer_reports: dict[str, list[str]], releases: dict[str, list[str]]) -> list[dict]:
+    """What else happened on ``day``: the name's own dated events (that day or
+    an after-close filing the evening before), linked peers' report sessions,
+    and its themes' data released that day."""
+    before = (pd.Timestamp(day) - pd.tseries.offsets.BDay(1)).strftime("%Y-%m-%d")
+    out = []
+    for i in timeline:
+        if i["kind"] == "earnings":
+            continue
+        if i["date"] == day or (i["kind"] == "filing" and i["date"] == before):
+            if i["kind"] == "rating":
+                what = {"up": "upgrade", "down": "downgrade", "init": "initiation"}.get(i.get("action"), "target change")
+                out.append({"kind": "rating", "text": f"{i.get('firm')}: {what}" + (f" to {i['to']}" if i.get("to") else "")
+                            + (f", target {i['prior_target']:.0f} → {i['target']:.0f}" if i.get("target") and i.get("prior_target") else "")})
+            elif i["kind"] == "filing":
+                out.append({"kind": "filing", "text": "8-K: " + ", ".join(i["labels"]), "url": i.get("url")})
+            elif i["kind"] == "insider_buy":
+                out.append({"kind": "insider", "text": f"insider buy: {i.get('owner')}"})
+    for peer, sessions in peer_reports.items():
+        if day in sessions:
+            out.append({"kind": "peer", "text": f"{peer} reported", "symbol": peer})
+    for label in releases.get(day, []):
+        out.append({"kind": "data", "text": f"{label} released"})
+    return out
+
+
+# --- Company events announced ahead -------------------------------------------
+# No free feed lists investor days, product events or FDA dates, but companies
+# announce them, and the announcement names the date. A sentence counts only
+# when it has both an event phrase and a date still ahead; the source line is
+# kept so every event can be checked.
+EVENT_KINDS = (
+    ("investor day", re.compile(r"\b(?:investor|analyst|capital markets?|strategy) (?:day|update|meeting|event)\b", re.I)),
+    ("FDA decision", re.compile(r"\bPDUFA\b|\btarget action date\b|\badvisory committee\b", re.I)),
+    ("product event", re.compile(r"\b(?:keynote|launch event|product event|unveil\w*|developer conference|GTC|WWDC|re:Invent|"
+                                 r"Google I/O|Build conference|Dreamforce|Ignite|Tesla AI Day|Capital Markets Day)\b", re.I)),
+    ("shareholder meeting", re.compile(r"\b(?:annual (?:general |share(?:holder|owner)s?'? |stockholders?'? )?meeting|special meeting)\b", re.I)),
+    ("trial or ruling", re.compile(r"\b(?:trial (?:begins|starts|set)|verdict|ruling (?:is )?(?:expected|due)|remedies (?:ruling|decision)|"
+                                   r"hearing (?:is )?(?:set|scheduled))\b", re.I)),
+)
+_MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), start=1)}
+_DATE = re.compile(r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sept?(?:ember)?|"
+                   r"Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.? (\d{1,2})(?:st|nd|rd|th)?(?:,? (20\d\d))?\b")
+_SENTENCE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _dates_in(text: str, published: date, horizon_end: date) -> list[date]:
+    out = []
+    for m in _DATE.finditer(text):
+        month, day = _MONTHS[m.group(1)[:3].lower()], int(m.group(2))
+        year = int(m.group(3)) if m.group(3) else published.year
+        try:
+            when = date(year, month, day)
+        except ValueError:
+            continue
+        if not m.group(3) and when < published:
+            when = date(year + 1, month, day) if month < published.month else when
+        if published < when <= horizon_end:
+            out.append(when)
+    return out
+
+
+def announced_events(rows: list[dict], symbol: str, name: str | None, today: date, horizon_days: int = 180) -> list[dict]:
+    """Dated company events still ahead, from headlines and summaries that
+    name the company: {date, kind, text, source, url, published}, soonest
+    first, one per (date, kind)."""
+    word = short_name(name, symbol).lower()
+    ticker = re.compile(rf"\b{re.escape(symbol.replace('-', '.'))}\b")
+    end = today + timedelta(days=horizon_days)
+    found: dict[tuple[str, str], dict] = {}
+    for r in rows:
+        headline, summary = (r.get("headline") or "").strip(), (r.get("summary") or "").strip()
+        if not (word in headline.lower() or ticker.search(headline) or word in summary.lower()[:300]):
+            continue
+        published = pd.Timestamp(r.get("datetime") or 0, unit="s", tz="UTC").tz_convert("America/New_York").date()
+        for sentence in [headline, *_SENTENCE.split(summary)][:6]:
+            for kind, pattern in EVENT_KINDS:
+                if not pattern.search(sentence):
+                    continue
+                for when in _dates_in(sentence, published, end):
+                    if when <= today:
+                        continue
+                    key = (when.isoformat(), kind)
+                    if key not in found or published.isoformat() > found[key]["published"]:
+                        found[key] = {"date": when.isoformat(), "kind": kind, "text": sentence[:240], "source": r.get("source"),
+                                      "url": r.get("url"), "published": published.isoformat()}
+    return sorted(found.values(), key=lambda e: e["date"])

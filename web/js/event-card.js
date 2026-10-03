@@ -127,34 +127,43 @@ function hitCell(hit) {
   return el('td', { class: hit === null || hit === undefined ? 'dim' : hit >= 0.75 ? 'up' : hit < 0.5 ? 'down' : '', text: hit === null || hit === undefined ? DASH : `${Math.round(hit * 100)}%` });
 }
 
+// The reason a name is a peer, short enough for a cell (the full one on hover).
+function linkShort(reason) {
+  if (!reason) return DASH;
+  if (reason.startsWith('theme: ')) return reason.slice(7).split(' ')[0];
+  if (reason.startsWith('same industry')) return 'industry';
+  return reason.replace('trades with it ', '');
+}
+
 function withTable(rt, limit) {
   const rows = (rt.with || []).slice(0, limit).map((r) => el('tr', {}, [
-    el('td', {}, [link(r.symbol)]),
-    el('td', { class: 'dim', text: num(r.corr, 2) }),
+    el('td', { title: r.link || '' }, [link(r.symbol)]),
+    el('td', { class: 'dim', text: linkShort(r.link), title: r.link || '' }),
     betaCell(r.beta),
     hitCell(r.hit),
     el('td', { class: 'dim', text: `±${num(r.mean_abs, 1)}%` }),
-    el('td', { class: 'dim', text: String(r.n) }),
+    el('td', { class: 'dim', text: `${r.n} · t ${num(r.t, 1)}` }),
   ]));
   if (rt.sector_etf) {
     const s = rt.sector_etf;
     rows.push(el('tr', { class: 'dim' }, [el('td', { text: s.symbol }), el('td', { text: 'sector' }), betaCell(s.beta), hitCell(s.hit),
       el('td', { text: `±${num(s.mean_abs, 1)}%` }), el('td', { text: String(s.n) })]));
   }
-  return rows.length ? table(['PEER', 'CORR', 'BETA', 'SAME WAY', 'AVG |MOVE|', 'N'], rows)
-    : el('div', { class: 'dim', text: `Too few past reports to measure (${rt.reports || 0}).` });
+  return rows.length ? table(['PEER', 'WHY', 'BETA', 'SAME WAY', 'AVG |MOVE|', 'N · T'], rows)
+    : el('div', { class: 'dim', text: (rt.reports || 0) < 4 ? `Too few past reports to measure (${rt.reports || 0}).`
+      : `No linked peer moved reliably on its ${rt.reports} reports (of ${rt.candidates ?? 0} checked).` });
 }
 
 function intoTable(rt, limit, asOf) {
   const rows = (rt.into || []).slice(0, limit).map((r) => el('tr', {}, [
-    el('td', {}, [link(r.symbol)]),
+    el('td', { title: r.link || '' }, [link(r.symbol), el('span', { class: 'dim', text: ` ${linkShort(r.link)}` })]),
     el('td', { class: r.next ? '' : 'dim', text: r.next ? `${r.next} ${(r.timing || '').toUpperCase()}` : 'not in 30 days' }),
     betaCell(r.beta),
     hitCell(r.hit),
-    el('td', { class: 'dim', text: String(r.n) }),
+    el('td', { class: 'dim', text: `${r.n} · t ${num(r.t, 1)}` }),
   ]));
-  return rows.length ? table(['REPORTER', 'NEXT REPORT', 'BETA', 'SAME WAY', 'N'], rows)
-    : el('div', { class: 'dim', text: 'No correlated name with enough past reports.' });
+  return rows.length ? table(['REPORTER', 'NEXT REPORT', 'BETA', 'SAME WAY', 'N · T'], rows)
+    : el('div', { class: 'dim', text: 'No linked name whose reports have moved it reliably.' });
 }
 
 // The full card on TICKER; `compact` is the CATALYSTS lead strip's version.
@@ -188,7 +197,8 @@ export function eventCard(payload, asOf, { compact = false } = {}) {
     el('div', {}, [el('div', { class: 'card-title', text: 'REPORTS THAT MOVE IT' }), intoTable(rt, 5, asOf)]),
   ]));
   body.push(el('div', { class: 'field-note', text:
-    'Peers: the 12 names whose daily moves beyond the S&P 500 tracked this one most closely over the last year, then scored on report days only. '
+    'Peers: names with a reason to move together -- the same GICS industry, a shared theme, or daily moves beyond the S&P 500 correlated at 0.45 or more over the last year -- scored on report days only, '
+    + 'and shown only where the report-day beta is positive with a t-statistic of 2 or more (T): with eight reports, chance alone produces plenty of striking betas. '
     + 'BETA = the peer\'s excess move per 1% excess move of the reporter; SAME WAY = share of those sessions both went the same direction. '
     + 'History, not a forecast; N is small. Index impact = index weight × the implied move (the straddle to the first expiry after the report, so it covers more than the report).' }));
   return card(title, right, body);
@@ -366,8 +376,17 @@ function futureItems(payload, macro, asOf, days) {
     label: `${r.symbol} reports ${(r.timing || '').toUpperCase()} · moved ${payload.symbol} β${num(r.beta, 2)}, same way ${Math.round((r.hit || 0) * 100)}% of ${r.n}`,
     tone: r.beta >= 0.3 ? 'info' : 'dim',
   }));
-  (macro || []).filter((m) => m.date > asOf && m.date <= end).forEach((m) => items.push({
-    date: m.date, kind: 'macro', label: `${m.title}${m.time ? ` ${m.time} ET` : ''}`, tone: 'dim',
+  const macroKeys = new Set();
+  (macro || []).filter((m) => m.date > asOf && m.date <= end).forEach((m) => {
+    macroKeys.add(`${m.date}|${m.title}`);
+    items.push({ date: m.date, kind: 'macro', label: `${m.title}${m.time ? ` ${m.time} ET` : ''}`, tone: 'dim' });
+  });
+  (payload.company_events || []).filter((e) => e.date > asOf && e.date <= end).forEach((e) => items.push({
+    date: e.date, kind: 'company', label: `${e.kind.toUpperCase()}: ${e.text}`, url: e.url, tone: 'warn',
+  }));
+  // The industry's own calendar: the data and releases its theme trades on.
+  (payload.theme_dates || []).filter((t) => t.date > asOf && t.date <= end && !macroKeys.has(`${t.date}|${t.title}`)).forEach((t) => items.push({
+    date: t.date, kind: 'theme', label: `${t.title}${t.time ? ` ${t.time} ET` : ''} · ${t.theme}${t.late ? ' (late)' : ''}`, tone: t.kind === 'data' ? 'up' : 'dim',
   }));
   return items.sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -382,6 +401,11 @@ function pastLabel(item) {
     return `${item.firm}: ${what}${target}`;
   }
   if (item.kind === 'insider_buy') return `Insider buy: ${item.owner} $${num((item.value || 0) / 1e6, 1)}m`;
+  if (item.kind === 'filing') return `8-K: ${item.labels.join(', ')} (item ${item.items.join(', ')})`;
+  if (item.kind === 'move') {
+    const why = [...(item.reasons || []).map((r) => escapeHtml(r.text)), ...(item.news || []).slice(0, 2).map((n) => `“${escapeHtml(n.headline)}” (${escapeHtml(n.source || '')})`)];
+    return `Large move: ${pct(item.excess_pct, 1)} vs S&P (${num(Math.abs(item.z), 1)}σ of its own)<br>${why.length ? why.join('<br>') : 'nothing on record explains it'}`;
+  }
   return item.kind;
 }
 
@@ -411,7 +435,12 @@ export function timelineCard(payload, prices, macro, asOf, { daysAhead = 45 } = 
         earnings: (i) => ({ symbol: 'circle', symbolSize: 11, color: i.move_pct >= 0 ? p.up : p.down }),
         rating: (i) => ({ symbol: 'triangle', symbolRotate: i.tone === 'down' ? 180 : 0, symbolSize: 7, color: i.tone === 'up' ? p.up : i.tone === 'down' ? p.down : p.dim }),
         insider_buy: () => ({ symbol: 'diamond', symbolSize: 9, color: p.blue }),
+        filing: () => ({ symbol: 'rect', symbolSize: 7, color: p.accent }),
       };
+      const moveMarkers = (payload.moves || []).filter((m) => m.date >= start).map((m) => ({
+        value: [m.date, at(m.date)], item: { ...m, kind: 'move' }, symbol: 'emptyCircle', symbolSize: Math.min(6 + Math.abs(m.z) * 1.5, 16),
+        itemStyle: { color: m.excess_pct >= 0 ? p.up : p.down, borderWidth: 1.5 }, label: { show: false },
+      }));
       const markers = shown.map((i) => {
         const style = kindStyle[i.kind]?.(i) || { symbol: 'circle', symbolSize: 6, color: p.dim };
         return {
@@ -424,8 +453,10 @@ export function timelineCard(payload, prices, macro, asOf, { daysAhead = 45 } = 
       // dates are faint rules, named in the tooltip and the list below.
       const lines = future.filter((f) => f.kind !== 'peer' || f.tone === 'info').map((f) => ({
         xAxis: f.date,
-        lineStyle: { color: f.kind === 'report' ? p.accent : f.kind === 'peer' ? p.blue : p.faint, type: f.kind === 'report' ? 'solid' : 'dashed', width: f.kind === 'report' ? 1.5 : 1, opacity: f.kind === 'macro' ? 0.6 : 1 },
-        label: { show: f.kind !== 'macro', formatter: f.kind === 'report' ? 'EARN' : f.symbol, color: f.kind === 'report' ? p.accent : p.blue, fontSize: 9, position: 'end', rotate: 0 },
+        lineStyle: { color: f.kind === 'report' || f.kind === 'company' ? p.accent : f.kind === 'peer' ? p.blue : f.kind === 'theme' && f.tone === 'up' ? p.up : p.faint,
+          type: f.kind === 'report' ? 'solid' : 'dashed', width: f.kind === 'report' ? 1.5 : 1, opacity: f.kind === 'macro' || f.kind === 'theme' ? 0.6 : 1 },
+        label: { show: f.kind === 'report' || f.kind === 'peer' || f.kind === 'company', formatter: f.kind === 'report' ? 'EARN' : f.kind === 'company' ? 'EVENT' : f.symbol,
+          color: f.kind === 'report' || f.kind === 'company' ? p.accent : p.blue, fontSize: 9, position: 'end', rotate: 0 },
       }));
       const areas = [];
       if (c) {
@@ -440,7 +471,7 @@ export function timelineCard(payload, prices, macro, asOf, { daysAhead = 45 } = 
           ...option.tooltip,
           trigger: 'item',
           formatter: (q) => {
-            if (q.seriesIndex === 1 && q.data?.item) return `<b>${q.data.item.date}</b><br>${pastLabel(q.data.item)}`;
+            if ((q.seriesIndex === 1 || q.seriesIndex === 2) && q.data?.item) return `<b>${q.data.item.date}</b><br>${pastLabel(q.data.item)}`;
             if (q.componentType === 'markLine') {
               const f = future.find((x) => x.date === q.data.xAxis);
               return f ? `<b>${f.date}</b><br>${future.filter((x) => x.date === f.date).map((x) => x.label).join('<br>')}` : '';
@@ -454,24 +485,131 @@ export function timelineCard(payload, prices, macro, asOf, { daysAhead = 45 } = 
           { type: 'line', name: 'close', data: dates.map((d, i) => [d, values[i]]), showSymbol: false, lineStyle: { color: p.text, width: 1.2 }, itemStyle: { color: p.text },
             markLine: { silent: false, symbol: 'none', data: lines }, markArea: { silent: true, data: areas } },
           { type: 'scatter', name: 'events', data: markers, z: 5 },
+          { type: 'scatter', name: 'moves', data: moveMarkers, z: 4 },
         ],
       };
     });
   };
   const head = el('div', { class: 'chart-head' }, [
-    el('span', { class: 'tag-row' }, [tag('● REPORT', 'dim'), tag('▲▼ RATING', 'dim'), tag('◆ INSIDER BUY', 'info'), tag('| PEER / MACRO AHEAD', 'dim')]),
+    el('span', { class: 'tag-row' }, [tag('● REPORT', 'dim'), tag('▲▼ RATING', 'dim'), tag('◆ INSIDER BUY', 'info'), tag('■ 8-K', 'warn'), tag('○ LARGE MOVE', 'dim'), tag('| PEER / MACRO / INDUSTRY DATA AHEAD', 'dim')]),
     ranges.length > 1 ? Object.assign(periodSwitch(ranges, active, (r) => { active = r; draw(); }), { className: 'period-switch range-switch' }) : null,
   ]);
   requestAnimationFrame(draw);
   const list = future.length ? table(['DATE', 'AHEAD'], future.map((f) => el('tr', {}, [
     el('td', { text: f.date }),
-    el('td', {}, [f.kind === 'peer' ? el('span', {}, [link(f.symbol), ` ${f.label.slice(f.symbol.length)}`]) : el('span', { class: f.kind === 'report' ? 'accent-text' : 'dim', text: f.label })]),
+    el('td', {}, [f.kind === 'peer' ? el('span', {}, [link(f.symbol), ` ${f.label.slice(f.symbol.length)}`])
+      : f.kind === 'company' && f.url ? el('a', { class: 'accent-text', href: f.url, target: '_blank', rel: 'noopener', text: f.label })
+      : el('span', { class: f.kind === 'report' || f.kind === 'company' ? 'accent-text' : f.kind === 'theme' && f.tone === 'up' ? '' : 'dim', text: f.label })]),
+  ]))) : null;
+  const events = (payload.company_events || []).filter((e) => e.date > asOf);
+  const eventList = events.length ? table(['DATE', 'COMPANY EVENT', 'SOURCE'], events.map((e) => el('tr', {}, [
+    el('td', { text: e.date }),
+    el('td', {}, [el('span', { class: 'accent-text', text: `${e.kind.toUpperCase()} ` }), e.text]),
+    el('td', { class: 'dim' }, [e.url ? el('a', { href: e.url, target: '_blank', rel: 'noopener', text: e.source || 'link' }) : (e.source || DASH),
+      e.origin === 'announced' ? ` · ${e.published}` : ' · hand-kept']),
   ]))) : null;
   return card('TIMELINE', el('span', { class: 'dim', text: `past events on the price · next ${daysAhead} days shaded` }), [
     head, node,
     list ? el('div', { class: 'card-title', text: `NEXT ${daysAhead} DAYS` }) : null, list,
-    el('div', { class: 'field-note', text: 'Blackout: an estimated buyback quiet period from 30 days before to 2 days after the report -- a common convention, not this company\'s policy. Peers ahead are the correlated names whose reports have moved this one (REPORTS THAT MOVE IT). Ratings and insider buys cover the names EVIDENCE tracks in depth.' }),
+    eventList ? el('div', { class: 'card-title', text: 'COMPANY EVENTS AHEAD · NEXT 6 MONTHS' }) : null, eventList,
+    el('div', { class: 'field-note', text: 'Blackout: an estimated buyback quiet period from 30 days before to 2 days after the report -- a common convention, not this company\'s policy. Peers ahead are the linked names whose reports have moved this one (REPORTS THAT MOVE IT). Industry data: the releases and macro dates of the themes the name belongs to (THEMES). 8-K: material filings -- agreements, acquisitions, restructuring, impairments, restatements, officer changes, equity sales. Company events: dated investor days, product events, FDA dates, meetings and rulings found in the company\'s recent headlines (each with its source; check it), and the hand-kept list in the config. Ratings and insider buys cover the names EVIDENCE tracks in depth.' }),
   ]);
+}
+
+// Where the name stands now, in the market's own numbers: what the street
+// expects, how fast that has moved, what multiple it pays for it, how the
+// stock has taken good news, and where the price sits. Facts with short
+// readings -- the reader draws the conclusion.
+export function situationCard(payload, row, prices) {
+  const rev = Object.fromEntries((payload.revisions || []).map((r) => [r.period, r]));
+  const thisYear = rev['0y'];
+  const nextYear = rev['+1y'];
+  const hs = payload.history_summary || {};
+  const stats = [];
+  const reads = [];
+  if (thisYear?.eps && nextYear?.eps) {
+    const growth = (nextYear.eps / thisYear.eps - 1) * 100;
+    stats.push(stat('STREET EXPECTS', `${pct(growth, 0)} EPS`, `FY to ${nextYear.end?.slice(0, 7)}: ${num(nextYear.eps, 2)} vs ${num(thisYear.eps, 2)} (${thisYear.end?.slice(0, 7)})`, dirClass(growth)));
+  }
+  const drift = nextYear?.changes?.['90d'];
+  if (drift !== undefined && drift !== null) {
+    stats.push(stat('NEXT-YEAR EPS · 90D', pct(drift, 1), `this year ${pct(thisYear?.changes?.['90d'], 1)} · ${nextYear.up_30d ?? 0}↑ ${nextYear.down_30d ?? 0}↓ revisions in 30d`, dirClass(drift)));
+    if (drift >= 10) reads.push(['estimates rising fast', 'up']);
+    else if (drift <= -10) reads.push(['estimates falling fast', 'down']);
+  }
+  if (row?.pe_forward) {
+    const trailing = row.pe_operating ?? row.pe;
+    stats.push(stat('FORWARD P/E', `${num(row.pe_forward, 1)}×`, trailing ? `trailing ${num(trailing, 1)}×${row.pe_percentile !== null && row.pe_percentile !== undefined ? ` (${Math.round(row.pe_percentile)}th pct of own 10y)` : ''}` : 'next twelve months'));
+    if (trailing && row.pe_forward < 0.5 * trailing) reads.push(['forward multiple under half the trailing: earnings expected to jump', 'info']);
+    if (trailing && row.pe_forward > 1.2 * trailing) reads.push(['forward above trailing: earnings expected to fall', 'warn']);
+  }
+  if (hs.measured) {
+    stats.push(stat('ON ITS REPORTS', `beat ${hs.beats}/${hs.measured}`, `fell after ${hs.beat_and_fell} of the beats · up ${hs.up} of ${hs.reports}`));
+    if (hs.beats >= 4 && hs.beat_and_fell >= hs.beats / 2) reads.push([`beats have been priced in: fell after ${hs.beat_and_fell} of ${hs.beats}`, 'warn']);
+  }
+  if (prices?.close?.length > 252) {
+    const close = prices.close;
+    const last = close[close.length - 1];
+    const yearAgo = close[close.length - 253];
+    const high = Math.max(...close.slice(-252).filter((v) => v !== null));
+    const off = (last / high - 1) * 100;
+    stats.push(stat('PRICE', pct((last / yearAgo - 1) * 100, 0), `1Y · ${off > -1 ? 'at its 52-week high' : `${pct(off, 0)} from its 52-week high`}`, dirClass(last - yearAgo)));
+    if (off <= -25) reads.push([`${pct(off, 0)} from its high`, 'down']);
+  }
+  if (!stats.length) return null;
+  return card('SITUATION · WHAT THE MARKET HAS PRICED', el('span', { class: 'tag-row' }, reads.map(([text, tone]) => tag(text, tone))), [
+    el('div', { class: 'stat-strip event-stats' }, stats),
+    el('div', { class: 'field-note', text: 'Street expects: next fiscal year\'s consensus EPS against this one\'s (Yahoo). 90D: how far that consensus has moved in 90 days. Forward P/E: price over the next twelve months\' consensus EPS; trailing on the operating basis where the filings allow. '
+      + 'On its reports: beats of consensus and the share followed by a fall -- a pattern where good news was already in the price. The story behind it is in TIMELINE and WHAT MOVED IT below.' }),
+  ]);
+}
+
+// Every report reaction and every large move, newest first, each with what was
+// happening: the run of events that made the market's view of the name.
+export function storyCard(payload) {
+  const reports = (payload.timeline || []).filter((i) => i.kind === 'earnings').map((i) => ({ ...i, sort: i.date }));
+  const history = new Map((payload.history || []).map((h) => [h.date, h]));
+  const moves = (payload.moves || []).map((m) => ({ ...m, kind: 'move', sort: m.date }));
+  const rows = [...reports, ...moves].sort((a, b) => b.sort.localeCompare(a.sort));
+  if (!rows.length) return null;
+  const body = rows.map((r) => {
+    if (r.kind === 'earnings') {
+      const h = history.get(r.report) || {};
+      const bits = [h.eps_surprise_pct !== undefined && h.eps_surprise_pct !== null ? `EPS ${pct(h.eps_surprise_pct, 1)} vs consensus` : null,
+        h.guide_text || null].filter(Boolean);
+      return el('tr', {}, [
+        el('td', { text: r.date }),
+        el('td', { class: dirClass(r.excess_pct), text: pct(r.excess_pct, 1) }),
+        el('td', {}, [el('span', { class: 'accent-text', text: `REPORT ${(r.timing || '').toUpperCase()}` }), el('span', { class: 'dim', text: bits.length ? ` · ${bits.join(' · ')}` : '' })]),
+      ]);
+    }
+    const reasons = (r.reasons || []).map((x) => (x.url ? el('a', { href: x.url, target: '_blank', rel: 'noopener', text: x.text })
+      : x.symbol ? el('span', {}, [link(x.symbol), x.text.slice(x.symbol.length)]) : el('span', { text: x.text })));
+    const headlines = (r.news || []).slice(0, 2).map((n) => el('div', { class: 'dim' }, [
+      el('a', { href: n.url, target: '_blank', rel: 'noopener', text: n.headline }), ` · ${n.source || ''}`]));
+    const none = !reasons.length && !headlines.length;
+    return el('tr', {}, [
+      el('td', { text: r.date }),
+      el('td', { class: dirClass(r.excess_pct), text: pct(r.excess_pct, 1), title: `${num(Math.abs(r.z), 1)}σ of its own volatility` }),
+      el('td', {}, [
+        reasons.length ? el('div', {}, reasons.flatMap((n, i) => (i ? [' · ', n] : [n]))) : null,
+        ...headlines,
+        none ? el('span', { class: 'dim', text: r.news_checked ? 'unexplained: no filing, rating, peer report, data release or company headline that day'
+          : 'unexplained by filings, ratings, peers or data; headlines not checked (older than a year, or not yet fetched)' }) : null,
+      ]),
+    ]);
+  });
+  const unexplained = moves.filter((m) => !(m.reasons || []).length && !(m.news || []).length).length;
+  return card('WHAT MOVED IT · REPORTS AND LARGE MOVES', el('span', { class: 'dim', text: `${reports.length} reports · ${moves.length} large moves · ${unexplained} unexplained` }), [
+    table(['SESSION', 'VS S&P', 'WHAT HAPPENED'], body),
+    el('div', { class: 'field-note', text: 'Large move: a session whose return beyond the S&P 500 was at least 2.5 times the standard deviation of its previous 60 sessions, and at least 2% -- report days are listed as reports. '
+      + 'What happened: the name\'s own 8-Ks (that day or the evening before), rating changes and insider buys, linked peers\' reports, its themes\' data released that day, and up to two company headlines (Finnhub, last year only) published between the previous close and this one, roundups left out. '
+      + 'A match is a coincidence in time, not proof of cause.' }),
+  ]);
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 export async function loadEvents(symbol) {

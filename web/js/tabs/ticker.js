@@ -11,7 +11,7 @@ import { render } from '../charts.js';
 import { renderPeHistory } from './valuation.js';
 import { renderStatements } from './financials.js';
 import { renderSingleTicker } from './technicals.js';
-import { eventCard, outcomeCard, timelineCard, loadEvents, historyCard, revisionsCard, sinceCard, filingsCard } from '../event-card.js';
+import { eventCard, outcomeCard, timelineCard, loadEvents, historyCard, revisionsCard, sinceCard, filingsCard, storyCard, situationCard } from '../event-card.js';
 import { resolveTicker } from '../routes.js';
 
 const BILLION = 1e9;
@@ -330,10 +330,18 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   // the last session traded on, sits right under the header.
   const [eventPayload, prices] = await Promise.all([loadEvents(symbol), loadPrices(symbol)]);
   const asOf = events?.as_of || eventPayload?.as_of;
+  // The story first: where the name stands, then the report that moves it
+  // next, then how it got here and what is ahead.
+  const situation = eventPayload ? situationCard(eventPayload, row, prices) : null;
+  if (situation) root.append(situation);
   const outcome = eventPayload ? outcomeCard(eventPayload) : null;
   if (outcome) root.append(outcome);
   const upcoming = eventPayload ? eventCard(eventPayload, asOf) : null;
   if (upcoming) root.append(upcoming);
+  const timeline = eventPayload ? timelineCard(eventPayload, prices, events?.macro, asOf) : null;
+  if (timeline) root.append(timeline);
+  const story = eventPayload ? storyCard(eventPayload) : null;
+  if (story) root.append(story);
   // What the report is measured against: its own record, where estimates
   // are moving, and what the industry data did since it last reported.
   const history = eventPayload ? historyCard(eventPayload) : null;
@@ -359,8 +367,6 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   } else {
     root.append(card('PRICE & TREND', null, gap(`${symbol} has no baked price history in this build.`)));
   }
-  const timeline = eventPayload ? timelineCard(eventPayload, prices, events?.macro, asOf) : null;
-  if (timeline) root.append(timeline);
   const filings = eventPayload ? filingsCard(eventPayload) : null;
   if (filings) root.append(filings);
   if (row) {

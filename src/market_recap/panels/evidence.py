@@ -116,6 +116,19 @@ def build(ctx) -> dict:
     started = time.monotonic()
     budget = float(settings.get("form4_budget_seconds", 300))
     form4_fetched, form4_skipped = 0, 0
+    # Index pages read for a release's exact acceptance time: at most this many
+    # new ones a build (kept for good), so the first backfill spreads over a
+    # few nights instead of outrunning the job. An unread one falls back to
+    # the submissions stamp checked against the filing date.
+    index_budget = {"left": int(settings.get("acceptance_pages_per_build", 700))}
+
+    def _exact(cik: int, accession: str) -> str | None:
+        cached = sec.accepted_eastern(cik, accession, fetch=False)
+        if cached or index_budget["left"] <= 0:
+            return cached
+        index_budget["left"] -= 1
+        return sec.accepted_eastern(cik, accession)
+
     for symbol in symbols:
         cik = cik_for(symbol, cik_map)
         recent = None
@@ -125,16 +138,17 @@ def build(ctx) -> dict:
             except Exception:
                 submissions_missing += 1
         closes = ctx.closes[symbol] if symbol in ctx.closes.columns else pd.Series(dtype=float)
+        exact = (lambda accession, cik=cik: _exact(cik, accession)) if cik else None
         six_k = (settings.get("six_k") or {}).get(symbol)
         announcements = (V.six_k_announcements(recent or {}, six_k["pattern"], six_k.get("timing", "bmo"))
-                         if six_k else V.earnings_announcements(recent or {}, today=as_of))
+                         if six_k else V.earnings_announcements(recent or {}, today=as_of, exact=exact))
         if cik and recent is not None and not six_k and len(announcements) < REACTIONS:
             # A heavy filer's recent block holds one year; read older pages
             # until eight releases are found or three years are covered.
             try:
                 block = sec.submissions_until(cik, lambda b: len(V.earnings_announcements(b)) >= REACTIONS + 1,
                                               since=(as_of - timedelta(days=3 * 365)).isoformat())
-                announcements = V.earnings_announcements(block, today=as_of)
+                announcements = V.earnings_announcements(block, today=as_of, exact=exact)
             except Exception:
                 pass
         if cik and recent is not None and not six_k and len(announcements) < REACTIONS:

@@ -28,7 +28,7 @@ from ..compute import events as E
 from ..compute import evidence as V
 from ..config import EVENTS_ARTIFACT_DIR
 from .. import cache
-from ..sources import estimates, nasdaq, releases, sec, snapshot_store
+from ..sources import estimates, finnhub, nasdaq, releases, sec, snapshot_store
 from ..util import SourceRecord, clean_float, describe_error, prune_stale, write_json
 from .catalysts import _universe
 from .financials import cik_for
@@ -55,32 +55,55 @@ def _sessions_of(reactions: list[dict]) -> list[str]:
     return [r["session"] for r in reactions or [] if r.get("session")]
 
 
+def _links(symbol: str, industry: dict[str, str], membership: dict[str, list[dict]]) -> dict[str, str]:
+    """Peers with an economic tie to ``symbol``: its GICS industry, or a theme
+    it belongs to; peer -> the reason, a theme first."""
+    out: dict[str, str] = {}
+    mine = industry.get(symbol)
+    if mine and mine != "-":
+        out.update({s: f"same industry ({mine})" for s, i in industry.items() if i == mine and s != symbol})
+    themes = {m["key"]: m["label"] for m in membership.get(symbol) or []}
+    for peer, rows in membership.items():
+        shared = [themes[m["key"]] for m in rows if m["key"] in themes]
+        if shared and peer != symbol:
+            out[peer] = f"theme: {shared[0]}"
+    return out
+
+
 def _readthrough(symbol: str, excess: pd.DataFrame, corr: pd.DataFrame, reactions: dict[str, list[dict]],
                  next_report: dict[str, dict], meta: dict, sector_etf: str | None, issuers: dict[str, set[str]],
-                 settings: dict) -> dict:
-    """Who has moved on this name's reports, and whose reports have moved it."""
+                 settings: dict, links: dict[str, str] | None = None) -> dict:
+    """Who has moved on this name's reports, and whose reports have moved it:
+    peers with a reason to (``links``, or a strong correlation), kept only
+    where the report-day beta clears ``readthrough_min_t``."""
     min_reports = int(settings.get("readthrough_min_reports", 4))
     show = int(settings.get("readthrough_show", 5))
+    min_t = float(settings.get("readthrough_min_t", 2.0))
     picks = E.candidates(corr, symbol, count=int(settings.get("readthrough_candidates", 12)),
-                         same_issuer=issuers.get(symbol, set()))
+                         same_issuer=issuers.get(symbol, set()), linked=links,
+                         strong_corr=float(settings.get("readthrough_strong_corr", 0.45)))
     own_sessions = _sessions_of(reactions.get(symbol))
     own = E.moves_on(excess, symbol, own_sessions)
     moves_with, moves_it = [], []
-    for peer, correlation in picks:
-        base = {"symbol": peer, "name": meta.get(peer, {}).get("name"), "corr": round(correlation, 2)}
+    # Same direction only: a read-through is a peer moving with the report. A
+    # negative beta among a dozen candidates on eight reports is chance far
+    # more often than a share shift.
+    reliable = lambda stats: stats and stats["t"] is not None and stats["t"] >= min_t  # noqa: E731
+    for peer, correlation, reason in picks:
+        base = {"symbol": peer, "name": meta.get(peer, {}).get("name"), "corr": round(correlation, 2), "link": reason}
         stats = E.co_move(own, E.moves_on(excess, peer, own_sessions), min_reports=min_reports)
-        if stats:
+        if reliable(stats):
             moves_with.append({**base, **stats})
         peer_sessions = _sessions_of(reactions.get(peer))
         stats = E.co_move(E.moves_on(excess, peer, peer_sessions), E.moves_on(excess, symbol, peer_sessions),
                           min_reports=min_reports)
-        if stats:
+        if reliable(stats):
             upcoming = next_report.get(peer)
             moves_it.append({**base, **stats, "next": upcoming["date"] if upcoming else None,
                              "timing": upcoming.get("timing") if upcoming else None})
-    moves_with.sort(key=lambda r: -r["beta"])
-    moves_it.sort(key=lambda r: -r["beta"])
-    out = {"reports": len(own_sessions), "with": moves_with[:show], "into": moves_it[:show]}
+    moves_with.sort(key=lambda r: -r["t"])
+    moves_it.sort(key=lambda r: -r["t"])
+    out = {"reports": len(own_sessions), "with": moves_with[:show], "into": moves_it[:show], "candidates": len(picks)}
     if sector_etf and sector_etf in excess.columns:
         stats = E.co_move(own, E.moves_on(excess, sector_etf, own_sessions), min_reports=min_reports)
         if stats:
@@ -274,6 +297,103 @@ def _filings(block: dict | None, since: str, cik: int | None, limit: int = 12) -
     return out
 
 
+# The 8-K items worth a marker on the price: what changes the company, not the
+# routine (Reg FD slides, bylaws, the annual vote, a new note).
+MARKER_ITEMS = ("1.01", "1.02", "1.05", "2.01", "2.05", "2.06", "3.02", "4.02", "5.02")
+FILING_ITEMS["1.05"] = "cybersecurity incident"
+
+
+def _filing_markers(block: dict | None, cik: int | None, since: str) -> list[dict]:
+    """Material 8-Ks since ``since`` (as far back as the filer's recent block
+    reaches), for the timeline: one marker per filing."""
+    if not block or not cik:
+        return []
+    out = []
+    forms, items = block.get("form") or [], block.get("items") or []
+    for i, form in enumerate(forms):
+        filed = block["filingDate"][i]
+        if filed < since:
+            break
+        if form not in ("8-K", "8-K/A"):
+            continue
+        codes = [c.strip() for c in str(items[i] if i < len(items) else "").split(",") if c.strip()]
+        material = [c for c in codes if c in MARKER_ITEMS]
+        if not material:
+            continue
+        acc = block["accessionNumber"][i]
+        out.append({"kind": "filing", "date": filed, "items": material, "labels": [FILING_ITEMS[c] for c in material],
+                    "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}/{acc}-index.html"})
+    return out
+
+
+def _theme_dates(groups: list[dict], keys: list[str], as_of: str, days: int) -> list[dict]:
+    """The coming data releases and macro dates of the name's themes -- what
+    moves the industry it trades with -- one row per date and title."""
+    end = (date.fromisoformat(as_of) + timedelta(days=days)).isoformat()
+    seen, out = set(), []
+    for g in groups:
+        if g.get("key") not in keys:
+            continue
+        for e in g.get("calendar") or []:
+            if e.get("kind") not in ("data", "macro") or not as_of < e["date"] <= end:
+                continue
+            key = (e["date"], e.get("title"))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"date": e["date"], "kind": e["kind"], "title": e.get("title"), "time": e.get("time"),
+                        "theme": g.get("label"), "late": bool(e.get("late"))})
+    return sorted(out, key=lambda e: e["date"])
+
+
+# Industry series whose points are market prints, not releases: a point every
+# session (or every fifth) would "explain" every move.
+NOT_RELEASES = ("px_", "fred_t10y", "fred_bamlh", "openrouter", "pcpp_")
+
+
+# One publication carries several series: EIA's weekly report, the Fed's H.8.
+PUBLICATIONS = (("eia_gas_storage", "EIA natural gas storage report"), ("eia_", "EIA weekly petroleum status report"),
+                ("fred_totll", "Fed H.8 (bank loans and deposits)"), ("fred_dpsacbw027sbog", "Fed H.8 (bank loans and deposits)"),
+                ("fred_houst", "Census housing starts and permits"), ("fred_permit", "Census housing starts and permits"))
+
+
+def _releases_by_day(drivers: list[dict], keys: list[str]) -> dict[str, list[str]]:
+    """{day: [publications released that day]} for the name's themes."""
+    out: dict[str, list[str]] = {}
+    for d in drivers:
+        if d["key"].startswith(NOT_RELEASES) or not set(d["themes"]) & set(keys):
+            continue
+        name = next((label for prefix, label in PUBLICATIONS if d["key"].startswith(prefix)), d["label"])
+        for p in d["points"]:
+            day = out.setdefault(p["available"], [])
+            if name not in day:
+                day.append(name)
+    return out
+
+
+def _news_window(excess_index: pd.DatetimeIndex, day: str) -> tuple[date, date, float, float]:
+    """The request dates and the timestamps between the previous session's
+    close and this one's (16:00 New York): the news a close-to-close move saw."""
+    at = excess_index.searchsorted(pd.Timestamp(day))
+    prev = excess_index[at - 1] if at > 0 else pd.Timestamp(day) - pd.Timedelta(days=1)
+    close = lambda d: pd.Timestamp(d.strftime("%Y-%m-%d") + " 16:00", tz="America/New_York").timestamp()  # noqa: E731
+    return prev.date(), date.fromisoformat(day), close(prev), close(pd.Timestamp(day))
+
+
+def _kept_events(entries: list[dict], as_of: str) -> list[dict]:
+    """The config's hand-kept company and industry events still ahead, each
+    with its source: {date, kind, text, url, symbols, themes, origin}."""
+    out = []
+    for e in entries:
+        day = str(e.get("date") or "")
+        if day <= as_of or not e.get("title"):
+            continue
+        out.append({"date": day, "kind": e.get("kind", "event"), "text": e["title"], "url": e.get("url"),
+                    "source": e.get("source"), "symbols": list(e.get("symbols") or []), "themes": list(e.get("themes") or []),
+                    "origin": "kept"})
+    return out
+
+
 def _revenue_before(quarters: tuple, day: str) -> float | None:
     """The last quarterly revenue filed by ``day``: the scale a guide is checked against."""
     known = [q for q in quarters if q["filed"] <= day and q.get("value")]
@@ -415,7 +535,12 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     themes = inputs.get("themes") or {}
     drivers = themes.get("drivers") if isinstance(themes.get("drivers"), list) else []
     membership = themes.get("membership") or {}
+    industry = {row.yahoo_symbol: str(row.sub_sector) for frame in ctx.members.values()
+                for row in frame.itertuples() if hasattr(row, "sub_sector")}
     since_day = (as_of - timedelta(days=int(settings.get("filings_days", 120)))).isoformat()
+    marker_since = (as_of - timedelta(days=int(settings.get("timeline_filings_days", 730)))).isoformat()
+    theme_groups = themes.get("groups") if isinstance(themes.get("groups"), list) else []
+    bellwethers = {g["key"]: list(g.get("bellwethers") or []) for g in ctx.config.get("themes", {}).get("groups", [])}
     recent_events = (catalysts.get("recent") or {}).get("earnings_reacted") or []
     recent_symbols = {e["symbol"] for e in recent_events}
 
@@ -436,6 +561,53 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         guides_by_symbol[symbol] = _guides(symbol, cik_for(symbol, cik_map) if cik_map else None, reactions.get(symbol) or [],
                                            rows, int(settings.get("guide_reports", 4)), guide_budget)
 
+    # Large moves: found for every name; headlines asked for within a budget,
+    # the names whose cards matter first and the newest moves first. A day's
+    # news is kept a year once settled, so the backlog clears over a few builds.
+    move_since = (as_of - timedelta(days=int(settings.get("moves_days", 730)))).isoformat()
+    news_since = (as_of - timedelta(days=int(settings.get("news_days", 365)))).isoformat()
+    moves_by_symbol = {s: E.big_moves(excess[s], since=move_since, skip=set(_sessions_of(reactions.get(s))))
+                       for s in everyone if s in excess.columns}
+    news: dict[tuple[str, str], list[dict]] = {}
+    news_state = {"asked": 0, "failed": 0, "budget": int(settings.get("news_budget", 250)), "keyed": finnhub.available()}
+    if news_state["keyed"]:
+        wanted = sorted(((priority(s), m["date"], s) for s, ms in moves_by_symbol.items() for m in ms if m["date"] >= news_since),
+                        key=lambda x: (x[0][1], x[0][2], -int(x[1].replace("-", "")), x[0][3]))
+        for _, day, symbol in wanted:
+            start, end, start_ts, end_ts = _news_window(excess.index, day)
+            asked = symbol.replace("-", ".")
+            if not finnhub.is_cached(asked, start, end, as_of):
+                if news_state["asked"] >= news_state["budget"]:
+                    continue
+                news_state["asked"] += 1
+            try:
+                rows = finnhub.company_news(asked, start, end, as_of)
+            except Exception:
+                news_state["failed"] += 1
+                continue
+            news[(symbol, day)] = E.rank_headlines(rows, symbol, meta.get(symbol, {}).get("name"), start_ts, end_ts)
+
+    # Company events announced ahead: the deep names' last weeks of headlines,
+    # read for a dated investor day, product event, FDA date, meeting or
+    # ruling; plus the hand-kept list in the config.
+    announced: dict[str, list[dict]] = {}
+    event_state = {"asked": 0, "failed": 0, "budget": int(settings.get("event_news_budget", 150))}
+    if news_state["keyed"]:
+        lookback = as_of - timedelta(days=int(settings.get("event_news_days", 45)))
+        for symbol in sorted(deep, key=priority):
+            asked = symbol.replace("-", ".")
+            if not finnhub.is_cached(asked, lookback, as_of, as_of):
+                if event_state["asked"] >= event_state["budget"]:
+                    continue
+                event_state["asked"] += 1
+            try:
+                rows = finnhub.company_news(asked, lookback, as_of, as_of)
+            except Exception:
+                event_state["failed"] += 1
+                continue
+            announced[symbol] = E.announced_events(rows, symbol, meta.get(symbol, {}).get("name"), as_of)
+    kept_events = _kept_events(settings.get("company_events") or [], ctx.as_of)
+
     snapshot = snapshot_store.latest_options_summary(as_of)
     history = snapshot_store.options_summaries(as_of - timedelta(days=400), as_of) if snapshot else pd.DataFrame()
 
@@ -445,7 +617,8 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         entry = names.get(symbol) or {}
         sector_etf = sector_etfs.get(info.get("sector") or "")
         try:
-            readthrough = _readthrough(symbol, excess, corr, reactions, next_report, meta, sector_etf, issuers, settings)
+            readthrough = _readthrough(symbol, excess, corr, reactions, next_report, meta, sector_etf, issuers, settings,
+                                       _links(symbol, industry, membership))
         except Exception as exc:  # one name must not fail the rest
             readthrough = {"unavailable": describe_error(exc)}
         payload = {
@@ -469,6 +642,22 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         except Exception:
             block = None
         payload["filings"] = _filings(block, since_day, cik)
+        payload["timeline"] = sorted(payload["timeline"] + _filing_markers(block, cik, marker_since), key=lambda i: i["date"])
+        theme_keys = [m["key"] for m in membership.get(symbol) or []]
+        payload["theme_dates"] = _theme_dates(theme_groups, theme_keys, ctx.as_of, int(settings.get("timeline_days_ahead", 45)))
+        payload["company_events"] = sorted(
+            [{**e, "origin": "announced"} for e in announced.get(symbol, [])]
+            + [e for e in kept_events if symbol in e["symbols"] or set(e["themes"]) & set(theme_keys)],
+            key=lambda e: e["date"])
+        # Peers whose reports have moved it (REPORTS THAT MOVE IT), and the
+        # bellwethers of its themes -- not every name in its industry.
+        movers = {r["symbol"] for r in readthrough.get("into") or []} | {
+            b for g in theme_groups if g.get("key") in theme_keys for b in bellwethers.get(g["key"], [])}
+        peer_reports = {p: _sessions_of(reactions.get(p)) for p in movers - {symbol} if reactions.get(p)}
+        releases_on = _releases_by_day(drivers, theme_keys)
+        payload["moves"] = [{**m, "reasons": E.move_reasons(m["date"], payload["timeline"], peer_reports, releases_on),
+                             "news": news.get((symbol, m["date"]), []), "news_checked": (symbol, m["date"]) in news}
+                            for m in moves_by_symbol.get(symbol, [])]
         payload["since"] = _since(drivers, [m["key"] for m in membership.get(symbol) or []], own[0]["date"] if own else None)
         event = next_report.get(symbol)
         if event and symbol in carded:
@@ -494,6 +683,13 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     cards.sort(key=lambda c: (c["card"]["date"], {"bmo": 0, "intraday": 1, "amc": 2}.get(c["card"]["timing"], 3),
                               -max(c["weights"].values(), default=0)))
     outcomes.sort(key=lambda c: -max(c["weights"].values(), default=0))
+    ctx.log.add(SourceRecord(
+        "finnhub_news", "Company news headlines on large-move days (Finnhub)", finnhub.PAGE_URL,
+        ctx.as_of if news else None, rows=len(news),
+        status="skipped" if not news_state["keyed"] else ("partial" if news_state["failed"] or news_state["asked"] >= news_state["budget"] else "ok"),
+        error=("no FINNHUB_API_KEY: moves explained without headlines" if not news_state["keyed"]
+               else f"{news_state['failed']} failed; budget {news_state['asked']}/{news_state['budget']} new requests" if news_state["failed"] or news_state["asked"] >= news_state["budget"] else None),
+        policy="daily_close"))
     ctx.log.add(SourceRecord("sec_releases_guidance", "Guidance stated in earnings releases (8-K Item 2.02, EX-99)",
                              "https://www.sec.gov/cgi-bin/browse-edgar", ctx.as_of,
                              rows=sum(1 for s in written if (s in carded or s in focus)),

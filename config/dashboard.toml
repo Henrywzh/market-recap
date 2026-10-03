@@ -201,9 +201,76 @@ lead_min_ndx_weight = 0.5
 readthrough_lookback_sessions = 252
 readthrough_candidates = 12
 readthrough_min_reports = 4
+# A peer needs the same GICS industry, a shared theme, or this correlation;
+# and a positive report-day beta whose t-statistic reaches readthrough_min_t
+# (about 1 chance pass in 12 candidates at eight reports).
+readthrough_strong_corr = 0.45
+readthrough_min_t = 2.0
 readthrough_show = 5
 # High-importance macro dates carried onto every timeline.
 timeline_days_ahead = 45
+# Large moves (2.5 sigma of the name's own, at least 2%) over moves_days, with
+# Finnhub headlines for the last news_days, at most news_budget new requests a
+# build (60 a minute; a settled day is kept a year).
+moves_days = 730
+news_days = 365
+news_budget = 250
+# Company events announced ahead, read from the deep names' last
+# event_news_days of headlines (event_news_budget requests a build).
+event_news_days = 45
+event_news_budget = 150
+# Hand-kept company and industry events, each with the page that states its
+# date. symbols and/or themes say whose timelines carry it.
+#   [[events.company_events]]
+#   date = "2026-12-01"
+#   title = "AWS re:Invent keynote"
+#   kind = "product event"
+#   symbols = ["AMZN"]
+#   themes = ["cloud"]
+#   url = "https://..."
+# Each date checked on the page given (2026-10-03).
+[[events.company_events]]
+date = "2026-11-17"
+title = "Microsoft Ignite (Nov 17-20, San Francisco)"
+kind = "product event"
+symbols = ["MSFT"]
+themes = ["cloud"]
+url = "https://moscone.com/events/microsoft-ignite-2026"
+source = "Moscone Center"
+
+[[events.company_events]]
+date = "2026-11-29"
+title = "42nd OPEC and non-OPEC Ministerial Meeting"
+kind = "industry meeting"
+themes = ["energy"]
+url = "https://opec.org/pr-detail/605-7-june-2026.html"
+source = "OPEC"
+
+[[events.company_events]]
+date = "2026-11-30"
+title = "AWS re:Invent (Nov 30-Dec 4, Las Vegas)"
+kind = "product event"
+symbols = ["AMZN"]
+themes = ["cloud"]
+url = "https://aws.amazon.com/events/reinvent"
+source = "AWS"
+
+[[events.company_events]]
+date = "2027-01-06"
+title = "CES 2027 (Jan 6-9, Las Vegas)"
+kind = "product event"
+themes = ["semis"]
+url = "https://www.ces.tech/"
+source = "CTA"
+
+[[events.company_events]]
+date = "2027-03-15"
+title = "NVIDIA GTC 2027 (Mar 15-18, San Jose)"
+kind = "product event"
+symbols = ["NVDA"]
+themes = ["semis", "cloud"]
+url = "https://www.nvidia.com/gtc/"
+source = "NVIDIA"
 
 [themes]
 # CATALYSTS -> THEMES. Groups of names that move together, not GICS sectors.

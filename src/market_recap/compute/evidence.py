@@ -30,34 +30,54 @@ CONSTANT_MATURITY_DAYS = 30
 
 # --- earnings ----------------------------------------------------------------------
 
-# SEC serves a filing accepted in the last day with its Eastern wall-clock
-# time marked "Z" -- Micron's 16:02 release of 2026-09-30 read
-# "16:02:22.000Z" that evening, its 16:02 release in June reads "20:02:01Z"
-# -- and corrects it later. Read as UTC, an after-close report became 12:02
-# "intraday" and was given a same-day move of 0.0%. A stamp this recent is
-# read as Eastern: if SEC has already corrected it, an after-close report is
-# still after the close, and before-open and intraday trade the same session.
+# SEC's submissions stamp cannot be taken at face value. Micron's release
+# accepted 16:02:22 Eastern on 2026-09-30 (the filing's index page) read
+# "16:02:22Z" that evening -- Eastern time marked UTC; by 2026-10-03 every
+# stamp checked ran twice the Eastern offset late (Micron's June 16:02:01
+# release "00:02:01Z" the next day, JPMorgan's 06:30 releases "14:30Z", Apple's
+# January 16:30 release "02:30Z"). So a release filed in the last EXACT_DAYS
+# -- the eight reports measured -- takes the index page's time (``exact``, from the
+# caller, fetched once and kept); otherwise, of the two readings of the stamp
+# (UTC, or Eastern marked Z), the one whose date is the filing date, and if
+# both are, Eastern while the stamp is fresh and UTC after.
 FRESH_STAMP_DAYS = 1
+EXACT_DAYS = 760          # eight quarterly reports and a margin: the reactions measured
 
 
-def _accepted(stamp: str, fresh_after: date | None):
+def _accepted(stamp: str, fresh_after: date | None, filed: str | None = None):
     moment = pd.Timestamp(stamp)
+    as_utc = (moment.tz_localize("UTC") if moment.tzinfo is None else moment).tz_convert(NEW_YORK)
+    as_eastern = moment.tz_localize(None).tz_localize(NEW_YORK)
+    if filed:
+        utc_ok, eastern_ok = as_utc.date().isoformat() == filed, as_eastern.date().isoformat() == filed
+        if utc_ok != eastern_ok:
+            return as_utc if utc_ok else as_eastern
     if fresh_after is not None and moment.date() >= fresh_after:
-        return moment.tz_localize(None).tz_localize(NEW_YORK)
-    return (moment.tz_localize("UTC") if moment.tzinfo is None else moment).tz_convert(NEW_YORK)
+        return as_eastern
+    return as_utc
 
 
-def earnings_announcements(recent: dict, *, since: date | None = None, today: date | None = None) -> list[dict]:
-    """Earnings releases from a submissions index's recent block, newest first."""
+def earnings_announcements(recent: dict, *, since: date | None = None, today: date | None = None,
+                           exact=None) -> list[dict]:
+    """Earnings releases from a submissions index's recent block, newest first.
+    ``exact(accession)`` returns a filing's Eastern acceptance time from its
+    index page; it is asked only for releases filed in the last EXACT_DAYS."""
     forms = recent.get("form") or []
     items = recent.get("items") or [""] * len(forms)
     accepted = recent.get("acceptanceDateTime") or [None] * len(forms)
+    filed_on = recent.get("filingDate") or [None] * len(forms)
+    accessions = recent.get("accessionNumber") or [None] * len(forms)
     fresh_after = today - timedelta(days=FRESH_STAMP_DAYS) if today else None
+    exact_after = (today - timedelta(days=EXACT_DAYS)).isoformat() if today else None
     out, seen = [], set()
-    for form, item, stamp in zip(forms, items, accepted):
+    for form, item, stamp, filed, accession in zip(forms, items, accepted, filed_on, accessions):
         if form != "8-K" or "2.02" not in str(item or "") or not stamp:
             continue
-        moment = _accepted(stamp, fresh_after)
+        moment = None
+        if exact and accession and filed and exact_after and filed >= exact_after:
+            wall = exact(accession)
+            moment = pd.Timestamp(wall).tz_localize(NEW_YORK) if wall else None
+        moment = moment if moment is not None else _accepted(stamp, fresh_after, filed)
         day = moment.date()
         if day in seen or (since and day < since):
             continue

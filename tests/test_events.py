@@ -27,8 +27,23 @@ def test_candidates_drop_the_name_itself_and_its_other_share_class():
         "META": base + rng.normal(scale=0.5, size=300), "XOM": rng.normal(size=300),
     })
     picks = E.candidates(frame.corr(), "GOOGL", count=5, same_issuer={"GOOG"})
-    assert [s for s, _ in picks][0] == "META"
-    assert "GOOG" not in dict(picks) and "GOOGL" not in dict(picks)
+    assert [p[0] for p in picks] == ["META"]                                   # XOM: no tie and no correlation
+    assert picks[0][2].startswith("trades with it")
+
+
+def test_candidates_need_a_link_or_a_strong_correlation():
+    corr = pd.DataFrame({"AAPL": [1.0, 0.28, 0.20, 0.50], "GDDY": [0.28, 1, 0, 0], "DELL": [0.20, 0, 1, 0],
+                         "MSFT": [0.50, 0, 0, 1]}, index=["AAPL", "GDDY", "DELL", "MSFT"])
+    picks = E.candidates(corr, "AAPL", count=5, same_issuer=set(), linked={"DELL": "same industry (Hardware)"})
+    assert [(p[0], p[2]) for p in picks] == [("MSFT", "trades with it (corr 0.50)"), ("DELL", "same industry (Hardware)")]
+
+
+def test_co_move_reports_the_betas_t_statistic():
+    lead = [2.0, -3.0, 1.5, -1.0, 4.0, -2.5, 1.0, -2.0]
+    tight = E.co_move(lead, [x * 0.5 + 0.05 for x in lead], min_reports=4)
+    noisy = E.co_move(lead, [0.5, 0.4, -0.9, 0.7, -0.3, 0.2, -0.6, 0.1], min_reports=4)
+    assert tight["beta"] == pytest.approx(0.5, abs=0.02) and tight["t"] > 10
+    assert abs(noisy["t"]) < 1.5
 
 
 def test_daily_excess_keeps_a_missing_print_missing():
@@ -215,3 +230,68 @@ def test_consensus_snapshot_rows():
     rows = C.rows_for("2026-10-01T23:50:00Z", "AAA", trend)
     assert [(r["period"], r["eps"]) for r in rows] == [("0q", 1.5), ("+1y", 7.0)]
     assert set(rows[0]) == set(C.COLUMNS)
+
+
+def test_big_moves_are_large_against_the_names_own_volatility():
+    rng = np.random.default_rng(1)
+    days = pd.bdate_range("2025-01-01", periods=200)
+    excess = pd.Series(rng.normal(scale=0.5, size=200), index=days)   # 2.5 sigma is under the 2% floor: only the spikes count
+    excess.iloc[150] = 6.0
+    excess.iloc[160] = -5.5
+    excess.iloc[170] = 6.0                                   # a report session: skipped
+    out = E.big_moves(excess, since="2025-03-01", skip={days[170].strftime("%Y-%m-%d")})
+    assert [m["date"] for m in out] == [days[150].strftime("%Y-%m-%d"), days[160].strftime("%Y-%m-%d")]
+    assert out[0]["z"] > 2.5 and out[1]["excess_pct"] == -5.5
+    calm = pd.Series(rng.normal(scale=0.3, size=200), index=days)
+    calm.iloc[150] = 1.5                                     # five sigmas but under the 2% floor
+    assert E.big_moves(calm, since="2025-03-01", skip=set()) == []
+
+
+def test_headlines_that_name_and_explain_the_move_rank_first():
+    start, end = 1_000_000.0, 1_100_000.0
+    rows = [
+        {"datetime": 1_050_000, "headline": "Stocks making the biggest moves midday: Micron, Nike", "source": "CNBC", "url": "a"},
+        {"datetime": 1_050_100, "headline": "Why Micron Stock Soared Today", "source": "Yahoo", "url": "b"},
+        {"datetime": 1_050_200, "headline": "Micron raises outlook on AI memory demand", "source": "Reuters", "url": "c"},
+        {"datetime": 1_200_000, "headline": "Micron shares slide after hours", "source": "Reuters", "url": "d"},   # after the close
+        {"datetime": 1_050_300, "headline": "Fed minutes due Wednesday", "source": "Reuters", "url": "e"},
+    ]
+    out = E.rank_headlines(rows, "MU", "Micron Technology Inc", start, end)
+    assert sorted(h["url"] for h in out) == ["b", "c"]                  # the roundup, the after-close story and the unrelated one left out
+
+
+def test_move_reasons_collect_what_happened_that_day():
+    timeline = [{"kind": "rating", "date": "2026-03-10", "firm": "Citi", "action": "up", "to": "Buy", "target": 150, "prior_target": 120},
+                {"kind": "filing", "date": "2026-03-09", "labels": ["material agreement"], "url": "u"},
+                {"kind": "earnings", "date": "2026-03-10"}]
+    out = E.move_reasons("2026-03-10", timeline, {"LRCX": ["2026-03-10"], "AMAT": ["2026-02-01"]},
+                         {"2026-03-10": ["TSMC monthly revenue, y/y"]})
+    assert [r["kind"] for r in out] == ["rating", "filing", "peer", "data"]
+    assert out[0]["text"] == "Citi: upgrade to Buy, target 120 → 150" and out[2]["symbol"] == "LRCX"
+
+
+def test_announced_events_need_an_event_phrase_and_a_date_ahead():
+    import calendar
+    import time
+    ts = lambda d: calendar.timegm(time.strptime(d + " 15", "%Y-%m-%d %H"))  # noqa: E731
+    rows = [
+        {"datetime": ts("2026-09-20"), "headline": "Micron to host Investor Day on November 18, 2026", "summary": "", "source": "BW", "url": "u1"},
+        {"datetime": ts("2026-09-22"), "headline": "Micron's investor day in March 2025, a recap", "summary": "", "source": "x", "url": "u3"},
+        {"datetime": ts("2026-09-23"), "headline": "Micron stock rises", "summary": "Micron will hold its annual shareholder meeting on January 15.", "source": "x", "url": "u4"},
+        {"datetime": ts("2026-09-24"), "headline": "Samsung plans investor day on November 3", "summary": "", "source": "x", "url": "u5"},
+    ]
+    out = E.announced_events(rows, "MU", "Micron Technology Inc", date(2026, 10, 3))
+    assert [(e["date"], e["kind"], e["url"]) for e in out] == [("2026-11-18", "investor day", "u1"),
+                                                               ("2027-01-15", "shareholder meeting", "u4")]
+    fda = [{"datetime": ts("2026-09-21"), "headline": "Vertex: FDA sets PDUFA target action date of Jan. 9", "summary": "", "source": "R", "url": "v"}]
+    assert E.announced_events(fda, "VRTX", "Vertex Pharmaceuticals", date(2026, 10, 3))[0]["date"] == "2027-01-09"
+
+
+def test_a_name_quoted_as_the_commentator_is_not_the_story():
+    start, end = 0.0, 10.0
+    rows = [{"datetime": 1, "headline": "AVGO Stock Jumps — JPMorgan Says Investors Should Be Aggressive Buyers", "source": "Yahoo", "url": "a"},
+            {"datetime": 2, "headline": "JPMorgan CEO Sees Hyperscaler Spending Hitting $1 Trillion", "source": "Yahoo", "url": "b"},
+            {"datetime": 3, "headline": "JPMorgan shares fall after trading revenue warning", "source": "Reuters", "url": "c"}]
+    assert "a" not in [h["url"] for h in E.rank_headlines(rows, "JPM", "JPMorgan Chase & Co", start, end)]
+    analyst = [{"datetime": 1, "headline": "JPMorgan analysts upgrade Nvidia to overweight", "source": "Reuters", "url": "d"}]
+    assert E.rank_headlines(analyst, "JPM", "JPMorgan Chase & Co", start, end) == []

@@ -135,3 +135,17 @@ def test_a_same_day_sec_stamp_is_eastern_wall_clock():
     # Once SEC has corrected it, reading it as Eastern still says after the close.
     recent["acceptanceDateTime"][0] = "2026-09-30T20:02:22.000Z"
     assert V.earnings_announcements(recent, today=date(2026, 10, 1))[0]["timing"] == "amc"
+
+
+def test_release_time_comes_from_the_index_page_then_the_filing_date():
+    """By 2026-10-03 SEC's stamps ran twice the Eastern offset late."""
+    recent = {"form": ["8-K", "8-K"], "items": ["2.02", "2.02"],
+              "acceptanceDateTime": ["2026-10-01T00:02:22.000Z", "2026-07-14T14:30:38.000Z"],
+              "filingDate": ["2026-09-30", "2026-07-14"], "accessionNumber": ["a1", "a2"]}
+    index = {"a1": "2026-09-30 16:02:22", "a2": "2026-07-14 06:30:38"}
+    mu, jpm = V.earnings_announcements(recent, today=date(2026, 10, 3), exact=index.get)
+    assert (mu["date"], mu["time"], mu["timing"]) == ("2026-09-30", "16:02", "amc")
+    assert (jpm["time"], jpm["timing"]) == ("06:30", "bmo")
+    # No index page: the reading whose date is the filing date (UTC here).
+    mu = V.earnings_announcements(recent, today=date(2026, 10, 3))[0]
+    assert (mu["date"], mu["timing"]) == ("2026-09-30", "amc")

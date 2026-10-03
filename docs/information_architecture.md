@@ -205,6 +205,36 @@ Top to bottom:
    sector.
 8. **DCF.** Opens the model pre-filled.
 
+**As built (2026-10-03): the story first.** Under the header the page reads
+as the name's situation and what is ahead, then the detail:
+
+- **SITUATION · WHAT THE MARKET HAS PRICED.** Next fiscal year's consensus
+  EPS against this one's, its 90-day revision, the forward P/E against the
+  trailing one and the own-history percentile, how the stock took its beats
+  (beat and fell), and the price against a year ago and its 52-week high --
+  with short tags where a pattern is plain (estimates rising fast; forward
+  multiple under half the trailing; beats priced in).
+- **The next report** (event card) or the one just traded (outcome card).
+- **TIMELINE.** The price with its own dated events (reports, rating changes,
+  insider buys, material 8-Ks, large moves) and, ahead, its report, the
+  linked peers whose reports have moved it, the macro dates, its themes'
+  data releases, and company events -- announced in its recent headlines
+  (investor days, product events, FDA dates, meetings, rulings; each with
+  its source) or hand-kept in `[events.company_events]` with the page that
+  states the date.
+- **WHAT MOVED IT.** Every report reaction and every large move (2.5 sigma of
+  its own, at least 2%) over two years, newest first, each with what
+  happened that session: its filings, ratings, insider buys, peers'
+  reports, its themes' data, and up to two company headlines (Finnhub, last
+  year). A match in time, not proof of cause; the rest is marked unexplained.
+- Then the report history, estimate revisions, the industry since the last
+  report, technicals, filings, P/E history and the statements.
+
+Read-through peers need a reason -- the same GICS industry, a shared theme,
+or a daily correlation of 0.45 -- and a positive report-day beta with a
+t-statistic of 2; ranking the whole index by correlation had handed Apple
+GoDaddy and Hershey.
+
 ### NAMES → Cross-listing
 
 The existing CROSS-LISTING panel, unchanged: a US line against its home

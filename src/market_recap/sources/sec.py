@@ -982,6 +982,29 @@ def submissions_recent(cik: int, *, use_cache: bool = True) -> dict:
     return json.loads(text).get("filings", {}).get("recent", {})
 
 
+INDEX_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{folder}/{accession}-index.html"
+_ACCEPTED = re.compile(r"Accepted\s*</div>\s*<div[^>]*>\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", re.I)
+_ACCEPTED_TEXT = re.compile(r"Accepted\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
+
+
+def accepted_eastern(cik: int, accession: str, *, fetch: bool = True) -> str | None:
+    """The acceptance time on the filing's EDGAR index page, Eastern wall
+    clock ('2026-09-30 16:02:22'). The submissions index's own stamp for a
+    recent filing is unreliable: Micron's 16:02 release of 2026-09-30 read
+    16:02:22Z that evening and 00:02:22Z two days later. Kept for good."""
+    folder = accession.replace("-", "")
+    if not fetch and not cache.is_fresh(cache.path_for(f"{NAMESPACE}/accepted", accession, ".html.gz"), "archive"):
+        return None             # not read yet, and this build's budget is spent
+    try:
+        html = cache.fetch_text(f"{NAMESPACE}/accepted", accession,
+                                lambda: _get(INDEX_URL.format(cik=cik, folder=folder, accession=accession), 30.0),
+                                kind="archive", suffix=".html", compress=True)
+    except Exception:  # noqa: BLE001 -- the caller falls back to the stamp
+        return None
+    m = _ACCEPTED.search(html) or _ACCEPTED_TEXT.search(re.sub(r"<[^>]+>", " ", html))
+    return m.group(1) if m else None
+
+
 OLDER_URL = "https://data.sec.gov/submissions/{name}"
 
 

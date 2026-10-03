@@ -100,6 +100,9 @@ jobs:
           # THEMES dates FRED series by their first release (ALFRED); without
           # it the release days are approximated and the studies left out.
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          # TICKER's headlines on large-move days and announced company
+          # events; without it moves are explained from filings and data only.
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
         # --strict: nobody reads an unattended run's output, so a warning is a
         # failure. A red run emails the repo owner; a stale page does not.
         run: make refresh REFRESH_FLAGS=--strict

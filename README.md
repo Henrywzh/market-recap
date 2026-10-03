@@ -44,7 +44,12 @@ probabilities from fed funds futures beside Kalshi and Polymarket, the path
 a week and a month ago, the SOFR path and every open Kalshi release ladder.
 
 **Ticker** (`#ticker/AAPL`) is one company on one page, reached from any
-ticker link: header readings, price and
+ticker link. It opens with the name's situation (what the street expects,
+how fast that moved, the multiple paid for it, how beats were taken), the
+next or last report, a timeline of its own events and what is ahead
+(peers' reports, macro dates, its themes' data releases, announced and
+hand-kept company events), and WHAT MOVED IT -- every report and large move
+with what happened that session, headlines included; then header readings, price and
 trend, P/E against its own ten years, valuation against the sector median,
 evidence (MONITOR's, plus insider buying from Form 4, short interest and
 rating changes for focus names), earnings reactions to the last eight 8-K
@@ -118,6 +123,8 @@ Every one of these is free and requires no account.
 | **Yahoo** front-month futures (CL, BZ, NG, RB, HO) | THEMES: oil, gas and the 3-2-1 crack | Cached apart from the members' prices |
 | **Yahoo** market cap (quoteSummary `price`) | VALUATION: the market cap of a company whose filings count shares only class by class (Berkshire, Hershey, Ares), so P/E, EV and yields exist for it | Labelled on the row's share basis; such a row stays out of the index and sector P/E aggregates, as its per-share EPS may be in another class's shares |
 | **FRED** housing series (MORTGAGE30US, HOUST, HOUST1F, PERMIT, HSN1F, MSACSR, CSUSHPINSA), GASREGW, DGS10 | THEMES: housing data, the pump price, rate sensitivity | Current vintage, keyless CSV |
+| **Finnhub** company news (`FINNHUB_API_KEY`) | TICKER: headlines on large-move days and company events announced ahead (investor days, product events, FDA dates) | Free tier: about a year of news, 60 requests a minute; a budget per build, settled days kept a year; without the key, moves are explained from filings, ratings, peers and data only |
+| **EDGAR filing index pages** | Earnings releases' acceptance time (Eastern), for the eight reports measured | The submissions JSON stamp ran twice the Eastern offset late in October 2026; fetched once per filing and kept |
 | **ALFRED** (FRED's vintage archive, `FRED_API_KEY`) | THEMES: the day each FRED observation was first published and its first print (with the year-earlier figure as then known), for the release-day studies and the stock cards' since-the-last-report table, which marks a figure revised since | Free key; GitHub secret in CI, alternative-data's `.config` locally; without it, release lags are approximated |
 | **FRED** bank and consumer series (TOTLL, DPSACBW027SBOG, T10Y2Y, T10Y3M, BAMLH0A0HYM2, DRALACBS, DRCCLACBS, DRCRELEXFACBS, DRTSCILM; RSAFS, RSFSXMV, PCEC96, PSAVERT, TOTALSL, UMCSENT, ICSA, CCSA) | THEMES: banks and consumer data, curve/credit sensitivity, stock-card drivers | Current vintage, keyless CSV; release dates approximated from each publisher's schedule (ICE BofA OAS: last three years only; Michigan sentiment a month behind) |
 | **alternative-data** (github.com/Henrywzh/alternative-data) normalized files | THEMES: OpenRouter daily tokens and estimated revenue; Ramp AI Index | Read from the public repo, with the commit that last touched each file |
