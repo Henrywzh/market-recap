@@ -130,7 +130,8 @@ def build(ctx, *, tickers: list[str] | None = None, use_cache: bool = True) -> d
             "https://data.sec.gov/api/xbrl/companyfacts/",
             observed_date=latest_filed,
             rows=len(baked),
-            policy="filings",
+            # The model's history is annual: its newest date is a 10-K's.
+            policy="annual_filings",
             status="ok" if not skipped else "partial",
             error=None if not skipped else f"{len(skipped)} tickers unavailable",
         )

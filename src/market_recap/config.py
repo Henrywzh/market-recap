@@ -95,6 +95,10 @@ FRESHNESS = {
     # The newest 10-K/10-Q across the whole universe. Some member files one in
     # almost every week of the year; three without any means the check broke.
     "filings": {"stale_after_calendar_days": 21},
+    # A 10-K, by contrast, comes once a year per company: among the largest
+    # 120 the gap between two runs to about 45 days (Cisco on 2026-09-10, then
+    # Micron in mid-October), so 21 days failed every build in between.
+    "annual_filings": {"stale_after_calendar_days": 75},
     # Vanguard publishes holdings monthly, a few weeks after month end.
     "monthly_holdings": {"stale_after_calendar_days": 60},
     # FactSet's Earnings Insight: weekly in season, less often between them.
