@@ -511,7 +511,7 @@ export function timelineCard(payload, prices, macro, asOf, { daysAhead = 45 } = 
   return card('TIMELINE', el('span', { class: 'dim', text: `past events on the price · next ${daysAhead} days shaded` }), [
     head, node,
     list ? el('div', { class: 'card-title', text: `NEXT ${daysAhead} DAYS` }) : null, list,
-    eventList ? el('div', { class: 'card-title', text: 'COMPANY EVENTS AHEAD · NEXT 6 MONTHS' }) : null, eventList,
+    eventList ? el('div', { class: 'card-title', text: 'COMPANY EVENTS AHEAD' }) : null, eventList,
     el('div', { class: 'field-note', text: 'Blackout: an estimated buyback quiet period from 30 days before to 2 days after the report -- a common convention, not this company\'s policy. Peers ahead are the linked names whose reports have moved this one (REPORTS THAT MOVE IT). Industry data: the releases and macro dates of the themes the name belongs to (THEMES). 8-K: material filings -- agreements, acquisitions, restructuring, impairments, restatements, officer changes, equity sales. Company events: dated investor days, product events, FDA dates, meetings and rulings found in the company\'s recent headlines (each with its source; check it), and the hand-kept list in the config. Ratings and insider buys cover the names EVIDENCE tracks in depth.' }),
   ]);
 }

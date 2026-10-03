@@ -230,6 +230,14 @@ event_news_budget = 150
 #   url = "https://..."
 # Each date checked on the page given (2026-10-03).
 [[events.company_events]]
+date = "2026-10-06"
+title = "Amazon Prime Big Deal Days (Oct 6-7)"
+kind = "sales event"
+symbols = ["AMZN"]
+url = "https://www.aboutamazon.com/news/retail/amazon-prime-big-deals-day-2026-when-october-6-7"
+source = "Amazon"
+
+[[events.company_events]]
 date = "2026-11-17"
 title = "Microsoft Ignite (Nov 17-20, San Francisco)"
 kind = "product event"
@@ -256,6 +264,22 @@ url = "https://aws.amazon.com/events/reinvent"
 source = "AWS"
 
 [[events.company_events]]
+date = "2026-12-01"
+title = "NVIDIA GTC Washington, D.C. keynote (event Nov 30-Dec 3)"
+kind = "product event"
+symbols = ["NVDA"]
+url = "https://www.nvidia.com/gtc/dc/"
+source = "NVIDIA"
+
+[[events.company_events]]
+date = "2026-12-08"
+title = "Microsoft annual shareholders meeting (virtual)"
+kind = "shareholder meeting"
+symbols = ["MSFT"]
+url = "https://news.microsoft.com/source/2026/09/15/microsoft-announces-quarterly-dividend-increase/"
+source = "Microsoft"
+
+[[events.company_events]]
 date = "2027-01-06"
 title = "CES 2027 (Jan 6-9, Las Vegas)"
 kind = "product event"
@@ -271,6 +295,15 @@ symbols = ["NVDA"]
 themes = ["semis", "cloud"]
 url = "https://www.nvidia.com/gtc/"
 source = "NVIDIA"
+
+[[events.company_events]]
+date = "2027-04-13"
+title = "Google Cloud Next 2027 (Apr 13-15, Las Vegas)"
+kind = "product event"
+symbols = ["GOOGL", "GOOG"]
+themes = ["cloud"]
+url = "https://www.googlecloudevents.com/next-vegas/faq"
+source = "Google Cloud"
 
 [themes]
 # CATALYSTS -> THEMES. Groups of names that move together, not GICS sectors.
