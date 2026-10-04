@@ -45,42 +45,55 @@ export function graphHeight(data) {
   return (Math.max(...Object.values(counts), 1) + 1.4) * ROW_PX + 40;
 }
 
-export function drawGraph(host, data, state) {
+// Where every company sits: one column per layer, each column centred on
+// the tallest; and a label node over each column. Shared with the replay.
+export function layout(data, p) {
   const layers = data.layers || [];
   const byLayer = new Map(layers.map((l) => [l.key, []]));
   (data.nodes || []).forEach((n) => byLayer.get(n.layer)?.push(n));
   const tallest = Math.max(...[...byLayer.values()].map((v) => v.length), 1);
+  const labels = [];
+  const places = [];
+  layers.forEach((layer, x) => {
+    labels.push({ id: `layer:${layer.key}`, name: layer.label, x: x * COL_PX, y: -1.4 * ROW_PX, symbol: 'rect', symbolSize: [NODE_W, 1],
+      // A node that only carries its column's label: ECharts draws no label on
+      // symbol 'none', and an item opacity of 0 hides the label with it.
+      itemStyle: { color: 'transparent', borderWidth: 0 },
+      label: { show: true, color: p.dim, fontSize: 9, fontWeight: 600, width: NODE_W, overflow: 'break' }, isLabel: true });
+    const column = byLayer.get(layer.key) || [];
+    const offset = (tallest - column.length) / 2;
+    column.forEach((n, i) => places.push({ node: n, x: x * COL_PX, y: (offset + i) * ROW_PX }));
+  });
+  return { labels, places };
+}
+
+export const NODE_SIZE = [NODE_W, NODE_H];
+export const GRAPH_SERIES = { type: 'graph', layout: 'none', roam: false, draggable: false,
+  left: NODE_W / 2 + 4, right: NODE_W / 2 + 4, top: 16, bottom: NODE_H / 2 + 4, emphasis: { disabled: true } };
+
+export function drawGraph(host, data, state) {
   const names = new Map((data.nodes || []).map((n) => [n.key, n]));
   const roles = state.selected ? new Map(linksOf(data, state.selected).map((l) => [l.key, l.role])) : new Map();
 
   return render(host, (option, p) => {
     const roleColor = { supplier: p.blue, customer: p.up, competitor: p.accent, partner: p.dim };
-    const nodes = [];
-    layers.forEach((layer, x) => {
-      nodes.push({ id: `layer:${layer.key}`, name: layer.label, x: x * COL_PX, y: -1.4 * ROW_PX, symbol: 'rect', symbolSize: [NODE_W, 1],
-        // A node that only carries its column's label: ECharts draws no label on
-        // symbol 'none', and an item opacity of 0 hides the label with it.
-        itemStyle: { color: 'transparent', borderWidth: 0 },
-        label: { show: true, color: p.dim, fontSize: 9, fontWeight: 600, width: NODE_W, overflow: 'break' }, isLabel: true });
-      const column = byLayer.get(layer.key) || [];
-      const offset = (tallest - column.length) / 2;
-      column.forEach((n, i) => {
-        const picked = n.key === state.selected;
-        const role = roles.get(n.key);
-        const faded = state.selected && !picked && !role;
-        nodes.push({
-          id: n.key, name: n.name, x: x * COL_PX, y: (offset + i) * ROW_PX, node: n,
-          symbol: 'roundRect', symbolSize: [NODE_W, NODE_H],
-          itemStyle: {
-            color: p.panel, borderWidth: picked ? 2 : 1,
-            borderColor: picked ? p.accent : role ? roleColor[role] : seasonColor(n, p),
-            opacity: faded ? 0.3 : 1,
-          },
-          label: { show: true, color: faded ? p.faint : p.text, fontSize: 10, width: NODE_W - 10, overflow: 'truncate',
-            formatter: () => n.name },
-        });
-      });
-    });
+    const { labels, places } = layout(data, p);
+    const nodes = [...labels, ...places.map(({ node: n, x, y }) => {
+      const picked = n.key === state.selected;
+      const role = roles.get(n.key);
+      const faded = state.selected && !picked && !role;
+      return {
+        id: n.key, name: n.name, x, y, node: n,
+        symbol: 'roundRect', symbolSize: [NODE_W, NODE_H],
+        itemStyle: {
+          color: p.panel, borderWidth: picked ? 2 : 1,
+          borderColor: picked ? p.accent : role ? roleColor[role] : seasonColor(n, p),
+          opacity: faded ? 0.3 : 1,
+        },
+        label: { show: true, color: faded ? p.faint : p.text, fontSize: 10, width: NODE_W - 10, overflow: 'truncate',
+          formatter: () => n.name },
+      };
+    })];
 
     const edges = (data.edges || []).filter((e) => (state.selected
       ? e.from === state.selected || e.to === state.selected
@@ -124,13 +137,7 @@ export function drawGraph(host, data, state) {
             + (r ? `${escape(data.season?.label || '')}: ${r.date} · EPS ${surpriseText(r.surprise)} · ${pct(r.move, 1)}` : `next ${n.next ? n.next.date : '—'}`);
         },
       },
-      series: [{
-        type: 'graph', layout: 'none', roam: false, draggable: false,
-        left: NODE_W / 2 + 4, right: NODE_W / 2 + 4, top: 16, bottom: NODE_H / 2 + 4,
-        data: nodes, links, edgeSymbol: ['none', 'none'],
-        emphasis: { disabled: true },
-        z: 2,
-      }],
+      series: [{ ...GRAPH_SERIES, data: nodes, links, edgeSymbol: ['none', 'none'] }],
     };
   });
 }

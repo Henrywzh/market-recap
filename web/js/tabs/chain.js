@@ -7,6 +7,7 @@ import { el, card, num, pct, tag, table, dirClass, sectionTitle, gap, metaRow, p
 import { chainCard, linksOf, nodeHref, surpriseText, ROLE_LABEL } from '../chain-card.js';
 import { drawGraph, attachClicks, graphHeight } from '../chain-graph.js';
 import { layersCard } from '../chain-layers.js';
+import { replayCard } from '../chain-replay.js';
 
 const PERIODS = { ALL: 'all', 'SINCE 2023': 'recent' };
 const CATEGORY_ORDER = ['from_customer', 'from_supplier', 'competitor', 'partner', 'unlinked'];
@@ -282,6 +283,8 @@ export default async function renderChain(root, data, _manifest, ctx = {}) {
   };
   root.append(host);
   draw();
+  const replay = replayCard(data);
+  if (replay) root.append(replay);
   const layers = layersCard(data);
   if (layers) root.append(layers);
   root.append(studyCard(data.study || {}));

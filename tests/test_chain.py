@@ -228,3 +228,16 @@ def test_the_layer_matrix_groups_pairs_by_where_lead_and_follower_sit():
     assert out["chips"]["cloud"]["reports"] == 3 and out["chips"]["cloud"]["mean"] == 1.0
     assert out["cloud"]["chips"]["mean"] == -0.5          # signed by the lead's move: against it
     assert out["chips"]["cloud"]["same_way_pct"] == 100
+
+
+def test_the_replay_carries_two_seasons_of_moves_and_reports():
+    days = pd.bdate_range("2026-04-01", "2026-10-02")
+    s = C.Series(pd.Series(0.5, index=days), US)
+    at = list(days).index(pd.Timestamp("2026-08-27"))
+    rep = C.Report(pd.Timestamp("2026-08-26T20:20Z"), 6.2, at, 0.5, "t")
+    out = P._replay({"NVDA": {}}, {"NVDA": s}, {"NVDA": [rep]}, date(2026, 10, 2))
+    assert [x["label"] for x in out] == ["CQ2 2026", "CQ1 2026"]
+    assert out[0]["dates"][0] == "2026-07-07" and out[0]["through"] == "2026-10-02"
+    assert len(out[0]["moves"]["NVDA"]) == len(out[0]["dates"])
+    assert out[0]["reports"] == [{"key": "NVDA", "day": "2026-08-27", "surprise": 6.2, "move": 0.5}]
+    assert out[1]["reports"] == []

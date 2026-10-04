@@ -938,3 +938,7 @@ table.data td.chain-quote { min-width: 280px; }
 .chain-graph-scroll { overflow-x: auto; }
 .chain-graph { min-width: 1180px; width: 100%; }
 .chain-layers { height: 440px; min-width: 640px; width: 100%; }
+.replay-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+.replay-slider { flex: 1 1 220px; min-width: 160px; accent-color: var(--accent); }
+.replay-day { font-size: 13px; white-space: nowrap; }
+.replay-log { display: grid; gap: 4px; margin-top: 6px; font-size: 12px; line-height: 1.45; min-height: 3em; }

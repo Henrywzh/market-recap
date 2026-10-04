@@ -245,6 +245,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
                   for k in nodes],
         "edges": edges,
         "season": season["summary"],
+        "replay": _replay(nodes, series, reports, as_of),
         "study": study,
         "evidence_checked": evidence.get("checked"),
         "failed": failed,
@@ -337,6 +338,44 @@ def _edges(edge_list: list[dict], rows: list[dict], evidence: dict) -> list[dict
                     "evidence": {k: ev.get(k) for k in ("strength", "filer", "form", "filed", "url", "text")} if ev.get("filer") else
                     ({"strength": "group"} if not e["named"] else {"strength": "unverified", "source": e.get("source")}),
                     "stats": stats})
+    return out
+
+
+# Seasons the replay carries: this one and the one before, so the early days
+# of a new season still have a whole season to play.
+REPLAY_SEASONS = 2
+
+
+def _replay(nodes: dict, series: dict[str, C.Series], reports: dict[str, list[C.Report]], as_of: date) -> list[dict]:
+    """Per season: its sessions (every market's, as dates), each company's
+    move beyond its home index on each, and each report on the session its
+    own market traded it."""
+    out = []
+    day = as_of
+    for _ in range(REPLAY_SEASONS):
+        start, end, label = C.season_window(day)
+        last = min(end, as_of)
+        lo, hi = pd.Timestamp(start), pd.Timestamp(last)
+        dates = sorted({d for s in series.values() for d in s.excess.index if lo <= d <= hi})
+        moves = {}
+        for key, s in series.items():
+            window = s.excess.loc[lo:hi].reindex(dates)
+            moves[key] = [None if pd.isna(v) else round(float(v), 2) for v in window]
+        reported = []
+        for key, reps in reports.items():
+            s = series.get(key)
+            for r in reps:
+                if r.own_at is None or s is None:
+                    continue
+                session = s.excess.index[r.own_at]
+                if lo <= session <= hi:
+                    reported.append({"key": key, "day": session.strftime("%Y-%m-%d"),
+                                     "surprise": None if r.surprise is None else round(r.surprise, 2),
+                                     "move": None if r.own_move is None else round(r.own_move, 2)})
+        out.append({"label": label, "start": start.isoformat(), "end": end.isoformat(), "through": last.isoformat(),
+                    "dates": [d.strftime("%Y-%m-%d") for d in dates], "moves": moves,
+                    "reports": sorted(reported, key=lambda r: (r["day"], r["key"]))})
+        day = start - timedelta(days=1)
     return out
 
 

@@ -32,3 +32,11 @@ test('the layer matrix lays rows as reporters and columns as followers, blanks w
   const cells = layerCells(matrix, layers, { key: 'rank_corr' });
   assert.deepEqual(cells.map((c) => c.value), [[0, 0, '-'], [1, 0, 0.2], [0, 1, '-'], [1, 1, '-']]);
 });
+
+test('the replay sums a season session by session, a missing session carrying the sum', async () => {
+  const { cumulative, fillFor } = await import('../../web/js/chain-replay.js');
+  assert.deepEqual(cumulative({ A: [null, 1.5, null, -0.5] }).A, [null, 1.5, 1.5, 1]);
+  assert.equal(fillFor(null, 5, '#00ff00', '#ff0000'), 'transparent');
+  assert.equal(fillFor(10, 5, '#00ff00', '#ff0000'), 'rgba(0,255,0,0.85)');
+  assert.equal(fillFor(-2.5, 5, '#00ff00', '#ff0000'), 'rgba(255,0,0,0.42)');
+});

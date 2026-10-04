@@ -574,6 +574,11 @@ The phased build put too much in front of the reader. After looking at it:
   same-session question as a heat map of reporting layer by moving layer
   (rank ρ or signed mean, all years or since 2023, each cell's firmest pairs
   on hover). THE CHAIN switches between the board and a GRAPH of the links.
+  SEASON REPLAY plays this season and the last session by session on the
+  graph: each company filled by its move that session (or since the season
+  began), the companies whose reports traded ringed by their surprise with
+  their links drawn, and a log of who reported and how its links moved;
+  play, step, jump to the next report, or drag the slider.
   The graph is today's,
   applied to every year, and labelled so. The graph is
   `config/ai_chain.toml`; its evidence `config/ai_chain_evidence.json`
