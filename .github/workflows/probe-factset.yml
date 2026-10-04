@@ -10,6 +10,12 @@
 name: probe-factset
 
 on:
+  # TEMPORARY: GitHub dispatches only workflows already on the default branch,
+  # so until this file is merged a push to this branch runs it. Remove with the
+  # first run's results.
+  push:
+    branches: [claude/dazzling-bardeen-ntnted]
+    paths: [.github/workflows/probe-factset.yml]
   workflow_dispatch:
     inputs:
       years:
@@ -37,7 +43,7 @@ jobs:
           sudo apt-get update -q && sudo apt-get install -y -q poppler-utils tesseract-ocr
 
       - name: Probe
-        run: python scripts/probe_factset_sector.py --years "${{ inputs.years }}" --out probes/factset --keep-newest
+        run: python scripts/probe_factset_sector.py --years "${{ inputs.years || '6' }}" --out probes/factset --keep-newest
 
       - uses: actions/upload-artifact@v7
         with:
