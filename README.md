@@ -136,6 +136,8 @@ Every one of these is free and requires no account.
 
 DRAMeXchange spot and contract prices are not on this site. Its terms forbid republication, and contract history sits behind the member login. scripts/refresh_dramexchange.py archives the public homepage on this machine only, under data/private/dramexchange/, which is gitignored and is not read by the build.
 
+The public alternatives have explicit reuse guidance: [BLS copyright information](https://www.bls.gov/opub/copyright-information.htm) places its published data in the public domain and requests source attribution. Korea Customs' [product-level trade-statistics dataset](https://www.data.go.kr/data/15101609/openapi.do) lists unrestricted permission (이용허락범위 제한 없음), and its [public-data policy](https://www.customs.go.kr/cvnci/cm/cntnts/cntntsView.do?mi=7613&cntntsId=2611) permits reuse including commercial purposes, excluding protected third-party information. The dashboard identifies both publishers and links to their data; export value per kilogram is a customs unit value, not a memory spot quote.
+
 
 **Identify yourself honestly.** FRED's edge accepts curl's own identifier
 instantly and stalls the identical request when it carries a Chrome
