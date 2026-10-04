@@ -9,9 +9,12 @@ answers four questions, measured from the machine that would run it:
 2. Which page carries the sector forward P/E, and is its text selectable or only
    pixels (``pdftotext`` per page; ``pdfimages -list`` for images on the page)?
 3. If only pixels, does OCR (``tesseract``, when installed) return a sector name
-   beside a number for at least ``MIN_SECTORS`` of the 11 sectors?
+   beside a number for at least ``EXTREMES_PER_WEEK`` sectors? (The first run found
+   the page is text and names only four sectors a week: the two with the highest
+   and the two with the lowest forward P/E.)
 4. Do the numbers read back agree with each other between weeks (a sector's
-   forward P/E should not move 30% in a week)?
+   forward P/E should not move 30% in a week)? Sectors appear only in the weeks they
+   are an extreme, so consecutive readings can be several weeks apart.
 
     python scripts/probe_factset_sector.py [--years 6] [--out data/probes/factset]
 
@@ -43,8 +46,13 @@ SECTORS = ("Communication Services", "Consumer Discretionary", "Consumer Staples
 MIN_SECTORS = 6
 # A week-to-week move in one sector's forward P/E beyond this is a misread.
 MAX_WEEKLY_MOVE = 0.30
-# P/E prints with one decimal; requiring it keeps years and page numbers out.
-NUMBER = r"(?<![\d.])(\d{1,2}\.\d)(?!\d)"
+# FactSet writes a sector's forward P/E as "Consumer Discretionary (22.6)", and
+# the same page prints "(+27.6%)" target-price upsides and "(70%)" buy shares
+# for the same sectors; only an unsigned one-decimal number straight after the
+# name, in brackets, is a P/E.
+NUMBER_AFTER_NAME = r"\s*\((\d{1,2}\.\d)\)"
+# The sentence names the two highest and two lowest sectors, so four a week.
+EXTREMES_PER_WEEK = 4
 
 
 def run(cmd: list[str], data: bytes | None = None) -> subprocess.CompletedProcess:
@@ -92,14 +100,14 @@ def sectors_named(text: str) -> list[str]:
 
 
 def read_pairs(text: str) -> dict[str, list[float]]:
-    """Every number on a line after a sector's name, per sector."""
+    """{sector: [forward P/E]} for every sector written as ``Name (12.3)``.
+    The text is flattened first: the sentence wraps lines mid-name."""
+    flat = re.sub(r"\s+", " ", text)
     out: dict[str, list[float]] = {}
-    for line in text.splitlines():
-        for sector in SECTORS:
-            if sector.lower() in line.lower():
-                numbers = [float(n) for n in re.findall(NUMBER, line.lower().split(sector.lower(), 1)[1])]
-                if numbers:
-                    out[sector] = numbers
+    for sector in SECTORS:
+        found = [float(v) for v in re.findall(re.escape(sector) + NUMBER_AFTER_NAME, flat, re.I)]
+        if found:
+            out[sector] = found
     return out
 
 
@@ -179,14 +187,16 @@ def main() -> int:
         print(f"{record['friday']}  {state}", flush=True)
     found = [r for r in records if r.get("found")]
     with_page = [r for r in found if r["sector_pages"]]
-    selectable = [r for r in with_page if any(len(c["text_pairs"]) >= MIN_SECTORS for c in r["sector_pages"])]
-    ocr_ok = [r for r in with_page if any(c.get("ocr_sectors_with_numbers", 0) >= MIN_SECTORS for c in r["sector_pages"])]
+    selectable = [r for r in with_page if any(len(c["text_pairs"]) >= EXTREMES_PER_WEEK for c in r["sector_pages"])]
+    ocr_ok = [r for r in with_page if any(c.get("ocr_sectors_with_numbers", 0) >= EXTREMES_PER_WEEK for c in r["sector_pages"])]
+    weeks_per_sector = {name: sum(1 for r in selectable for c in r["sector_pages"] if name in c["text_pairs"]) for name in SECTORS}
     summary = {
         "weeks_tried": len(records), "pdfs_found": len(found),
         "oldest_found": min((r["friday"] for r in found), default=None),
         "with_sector_page": len(with_page),
         "sector_numbers_selectable_as_text": len(selectable),
         "sector_numbers_read_by_ocr": len(ocr_ok), "tesseract": bool(shutil.which("tesseract")),
+        "weeks_per_sector": weeks_per_sector,
         "implausible_moves": implausible_moves(records),
     }
     (out_dir / "summary.json").write_text(json.dumps({"summary": summary, "weeks": records}, indent=2) + "\n")

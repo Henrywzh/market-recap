@@ -16,14 +16,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import probe_factset_sector as probe
 
 
-def test_read_pairs_takes_decimals_after_the_sector_name_only():
-    text = ("Forward 12-Month P/E Ratio, 2026 (page 14)\n"
-            "Information Technology   27.4   24.9   21.0\n"
-            "Real Estate              35.1   36.2\n"
-            "Energy and nothing else\n")
-    pairs = probe.read_pairs(text)
-    assert pairs == {"Information Technology": [27.4, 24.9, 21.0], "Real Estate": [35.1, 36.2]}
-    assert "Energy" not in pairs                          # a name with no number is not a reading
+def test_read_pairs_takes_only_a_bracketed_unsigned_pe_after_the_sector_name():
+    # FactSet's own wording (2026-10-02), wrapped mid-name as pdftotext leaves it.
+    text = ("At the sector level, the Consumer Discretionary (22.6) and Industrials (22.5) sectors have the highest forward 12-\n"
+            "month P/E ratios, while the Energy (13.0) and Financials (14.1) sectors have the lowest forward 12-month P/E ratios.\n"
+            "the Consumer Discretionary (+27.6%), Utilities (+26.8%), and Industrials (+26.5%) sectors are expected to see\n"
+            "the Communication Services (70%), Information Technology (70%), Energy (64%) sectors have the highest percentages\n")
+    assert probe.read_pairs(text) == {"Consumer Discretionary": [22.6], "Industrials": [22.5], "Energy": [13.0], "Financials": [14.1]}
 
 
 def test_fridays_start_at_the_latest_friday_and_step_back_a_week():
@@ -31,6 +30,10 @@ def test_fridays_start_at_the_latest_friday_and_step_back_a_week():
     assert days[0] == date(2026, 10, 2) and days[1] == date(2026, 9, 25)
     assert all(d.weekday() == 4 for d in days)
     assert len(days) in (52, 53)
+
+
+def test_a_sector_named_across_a_line_break_is_still_read():
+    assert probe.read_pairs("the Information\nTechnology (31.4) sector") == {"Information Technology": [31.4]}
 
 
 def test_a_thirty_percent_weekly_move_is_a_misread_not_a_market():
