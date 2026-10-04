@@ -447,7 +447,7 @@ function chipPricesCard(block) {
           el('span', { class: s.due && s.due.late ? 'down' : 'dim', text: s.due ? s.due.month + ' due ~' + s.due.due : '' }),
         ]),
         viewChart({
-          dates: s.months.map((m) => m.month), views: VIEWS.monthly(), tail: 36, connectNulls: false, fmt: (v) => num(v, 1),
+          dates: s.months.map((m) => m.month), views: VIEWS.monthly(), tail: 36, connectNulls: false, showSymbol: true, fmt: (v) => num(v, 1),
           series: [{ name: s.label, values: s.months.map((m) => m.value), width: 1.8 }],
         }),
         s.detail ? el('div', { class: 'field-note', text: s.detail }) : null,
