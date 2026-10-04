@@ -15,6 +15,7 @@ import { VIEWS } from '../web/js/routes.js';
 
 const ROOT = resolve(process.argv[2] || 'dist');
 const SETTLE_MS = 600;
+const RENDER_WAIT_MS = 8000;
 const PAGE_TIMEOUT_MS = 30000;
 const MIN_TEXT = 120;
 // The last: app.js's sentence for a view that failed to load or render.
@@ -61,7 +62,7 @@ async function routes() {
     .sort((a, b) => (b.weight || 0) - (a.weight || 0)).slice(0, 6).map((r) => r.ticker);
   const tickers = [...new Set([...top, 'BRK.B', 'SPY', '^GSPC'])];
   const out = VIEWS.filter((v) => !v.takesArg).map((v) => v.id);
-  out.push('valuation', 'technicals/SPY', 'trade/SPY', 'dcf');
+  out.push('valuation', 'technicals/SPY', 'trade/SPY', 'dcf', 'chain/NVDA', 'chain/000660.KS', 'chain/8035.T');
   tickers.forEach((t) => out.push(`ticker/${encodeURIComponent(t)}`));
   (themes?.groups || []).forEach((g) => out.push(`themes/${g.key.toUpperCase()}`));
   return out;
@@ -102,6 +103,11 @@ for (const route of list) {
   current = route;
   await page.evaluate((hash) => { window.location.hash = hash; }, route);
   await page.waitForLoadState('networkidle', { timeout: PAGE_TIMEOUT_MS }).catch(() => {});
+  // A heavy view (heat maps, a ticker's charts) can still be drawing after
+  // the network goes quiet: wait for its text, up to RENDER_WAIT_MS, before
+  // judging it empty -- a fixed pause flagged a different page each run.
+  await page.waitForFunction((min) => ((document.querySelector('main') || document.body).innerText || '').trim().length >= min,
+    MIN_TEXT, { timeout: RENDER_WAIT_MS }).catch(() => {});
   await page.waitForTimeout(SETTLE_MS);
   const text = await page.evaluate(() => (document.querySelector('main') || document.body).innerText);
   if (text.trim().length < MIN_TEXT) problems.push(`${route}: rendered almost nothing (${text.trim().length} characters)`);

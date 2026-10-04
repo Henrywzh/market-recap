@@ -908,3 +908,29 @@ tr.picked td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 .heatmap-table td.heat-total { text-align: center; }
 .heatmap-table td.heat-sector { white-space: nowrap; }
 .theme-tags { margin-top: 8px; } .theme-tags a.tag { text-decoration: none; }
+
+/* AI CHAIN: one column per layer, upstream to downstream. The board scrolls
+   inside its card on a narrow screen; the page never does. */
+.chain-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(124px, 1fr); gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.chain-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.chain-col-head { font-size: 10px; letter-spacing: 0.08em; color: var(--text-dim); font-weight: 600; min-height: 26px; border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+.chain-chip { text-align: left; background: var(--panel-alt); border: 1px solid var(--border); border-left-width: 3px; border-radius: 2px; padding: 4px 6px; color: var(--text); font: inherit; cursor: pointer; display: grid; gap: 1px; min-width: 0; }
+.chain-chip:hover { border-color: var(--border-strong); }
+.chain-chip-name { font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chain-chip-key, .chain-chip-status { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chain-chip.beat { border-left-color: var(--up); }
+.chain-chip.missed { border-left-color: var(--down); }
+.chain-chip.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.chain-chip.role-supplier { border-color: var(--blue); background: color-mix(in srgb, var(--blue) 12%, var(--panel-alt)); }
+.chain-chip.role-customer { border-color: var(--up); background: color-mix(in srgb, var(--up) 12%, var(--panel-alt)); }
+.chain-chip.role-competitor { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel-alt)); }
+.chain-chip.role-partner { border-color: var(--text-dim); }
+.chain-chip.faded { opacity: 0.38; }
+.chain-legend { margin-bottom: 6px; flex-wrap: wrap; }
+table.data td.num.strong { font-weight: 600; color: var(--text); }
+table.data td.chain-quote { font-size: 11px; max-width: 420px; }
+table.data td.chain-who { min-width: 220px; white-space: normal; }
+.chain-why { font-size: 11px; line-height: 1.35; margin-top: 2px; }
+table.chain-links td { vertical-align: top; }
+table.data.text-cols td.wrap-cell.dim { min-width: 160px; }
+table.data td.chain-quote { min-width: 280px; }

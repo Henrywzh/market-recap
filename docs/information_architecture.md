@@ -559,6 +559,22 @@ The phased build put too much in front of the reader. After looking at it:
   themes a name belongs to: named in the config, or trading with the
   theme's proxy (daily excess-return correlation >= 0.55 over a year).
   Groups live in `[[themes.groups]]` in the config.
+- **AI CHAIN** (CATALYSTS → AI CHAIN, `#chain/<key>`): the AI supply chain
+  as a board, one column per layer from IP and tools to the hyperscalers
+  (67 companies, US, Korea, Taiwan, Japan, the Netherlands, France,
+  Germany), each company marked by this season's report (EPS against
+  consensus, its move beyond its home index) or its next date. Picking one
+  lights its suppliers, customers, competitors and partners, and opens its
+  card: each link's reason and filing evidence, how the link reported this
+  season, and how its reports have moved this stock before (β, t, count) and
+  the other way. Below, the study: every report since 2016 paired with every
+  other company, by kind of link against the no-link baseline, on four
+  questions -- the same session, the follower's own next report, the drift
+  until then, and how much was priced in before it. The graph is today's,
+  applied to every year, and labelled so. The graph is
+  `config/ai_chain.toml`; its evidence `config/ai_chain_evidence.json`
+  (`scripts/chain_evidence.py`). TICKER carries the same card for a name in
+  the chain, after WHAT MOVED IT.
 - **Links to the ticker page** (`routes.tickerHref`) from MONITOR, SCREEN,
   HEAT MAPS tiles, SECTORS' contributor bars, EARNINGS movers and the
   CALENDAR's earnings rows. ETF X-RAY holdings are not linked yet.

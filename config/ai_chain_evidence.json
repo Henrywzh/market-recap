@@ -1,0 +1,1820 @@
+{
+ "checked": "2026-10-04",
+ "years": 3,
+ "forms": "10-K,20-F,40-F",
+ "search_failed": [],
+ "edges": {
+  "ARM>NVDA": {
+   "named": true,
+   "filer": "NVDA",
+   "form": "10-K",
+   "filed": "2026-02-25",
+   "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+   "text": "d software that incorporate accelerated or AI computing functionality as part of their internal solutions or platforms, such as Alibaba Group, Alphabet Inc., Amazon, Inc., or Amazon, Baidu, Inc., Huawei, and Microsoft Corporation, or Microsoft; • suppliers of Arm-based CPUs and companies that incorporate hardware and software for CPUs as part of their internal solutions or platforms, such as Amazon, Huawei, and Microsoft; • suppliers of hardware and software for SoC products that are used in servers or embedded into a",
+   "searched": "Arm",
+   "strength": "relationship"
+  },
+  "ARM>AMZN": {
+   "named": true,
+   "filer": "ARM",
+   "form": "20-F",
+   "filed": "2026-05-26",
+   "url": "https://www.sec.gov/Archives/edgar/data/1973239/000197323926000097/arm-20260331.htm",
+   "text": "Prior to those roles, he spent more than 11 years leading various global finance teams at Amazon and served as Chief Financial Officer of Amazon International.",
+   "searched": "Amazon",
+   "strength": "mention"
+  },
+  "ARM>MSFT": {
+   "named": true,
+   "missing": true
+  },
+  "ARM>GOOGL": {
+   "named": true,
+   "missing": true
+  },
+  "SNPS>NVDA": {
+   "named": true,
+   "filer": "SNPS",
+   "form": "10-K",
+   "filed": "2025-12-22",
+   "url": "https://www.sec.gov/Archives/edgar/data/883241/000088324125000028/snps-20251031.htm",
+   "text": "ued operations ( 0.03 ) 5.26 0.01 Diluted net income per share $ 8.04 $ 14.51 $ 7.92 Anti-dilutive employee stock-based awards excluded 427 229 475 Subsequent Event In December 2025, we entered into a securities purchase agreement for a private placement with NVIDIA Corporation, pursuant to which we sold an aggregate of approximately 4.8 million shares of our common stock at a price of $ 414.79 per share for net proceeds of $ 2.0 billion.",
+   "searched": "NVIDIA",
+   "strength": "mention"
+  },
+  "SNPS>AMD": {
+   "named": true,
+   "missing": true
+  },
+  "SNPS>AVGO": {
+   "named": true,
+   "missing": true
+  },
+  "SNPS>INTC": {
+   "named": true,
+   "filer": "INTC",
+   "form": "10-K",
+   "filed": "2024-01-26",
+   "url": "https://www.sec.gov/Archives/edgar/data/50863/000005086324000010/intc-20231230.htm",
+   "text": "We announced a multigenerational agreement with ARM and a definitive agreement with Synopsys.",
+   "searched": "Synopsys",
+   "strength": "stated"
+  },
+  "SNPS>MRVL": {
+   "named": true,
+   "missing": true
+  },
+  "CDNS>NVDA": {
+   "named": true,
+   "filer": "CDNS",
+   "form": "10-K",
+   "filed": "2026-02-19",
+   "url": "https://www.sec.gov/Archives/edgar/data/813672/000081367226000016/cdns-20251231.htm",
+   "text": "The M2000 is a specialized, AI-accelerated platform co-developed with NVIDIA to dramatically speed up complex simulations in fields like semiconductor design, aerospace and defense, and drug discovery.",
+   "searched": "NVIDIA",
+   "strength": "mention"
+  },
+  "CDNS>AMD": {
+   "named": true,
+   "missing": true
+  },
+  "CDNS>AVGO": {
+   "named": true,
+   "missing": true
+  },
+  "CDNS>INTC": {
+   "named": true,
+   "filer": "INTC",
+   "form": "10-K",
+   "filed": "2026-01-23",
+   "url": "https://www.sec.gov/Archives/edgar/data/50863/000005086326000011/intc-20251227.htm",
+   "text": "Tan previously served as Chief Executive Officer of Cadence Design Systems, a computational software company, from 2009 to December 2021, and as Executive Board Chair at Cadence from December 2021 to May 2023.",
+   "searched": "Cadence",
+   "strength": "mention"
+  },
+  "CDNS>MRVL": {
+   "named": true,
+   "missing": true
+  },
+  "SNPS>CDNS": {
+   "named": true,
+   "filer": "SNPS",
+   "form": "10-K",
+   "filed": "2024-12-19",
+   "url": "https://www.sec.gov/Archives/edgar/data/883241/000088324124000024/snps-20241031.htm",
+   "text": "Our competitors include EDA vendors that offer varying ranges of products and services, such as Cadence Design Systems, Inc.",
+   "searched": "Cadence",
+   "strength": "stated"
+  },
+  "ASML>TSM": {
+   "named": true,
+   "filer": "ASML",
+   "form": "20-F",
+   "filed": "2025-03-05",
+   "url": "https://www.sec.gov/Archives/edgar/data/937966/000093796625000009/asml-20241231.htm",
+   "text": "Focus area 2024 • Outcome of Supervisory Board evaluation • AGM agenda • Amendment to the Rules of Procedure Board of Management and Supervisory Board • AGM update • ESG oversight by Supervisory Board and Committees • Investor Day • Customer deep dive: TSMC • Customer visit: TSMC We regularly discussed ASML’s relationship with its shareholders, and Supervisory Board members engaged with shareholders throughout the year on topics such as ASML’s strategy and performance, governance and ESG.",
+   "searched": "Taiwan Semiconductor",
+   "strength": "relationship"
+  },
+  "ASML>005930.KS": {
+   "named": true,
+   "filer": "ASML",
+   "form": "20-F",
+   "filed": "2024-02-14",
+   "url": "https://www.sec.gov/Archives/edgar/data/937966/000093796624000008/exhibit21.htm",
+   "text": "In 2012, we issued shares to three key customers – Intel, TSMC and Samsung – as part of the customer co-investment program (CCIP) to accelerate ASML’s development of EUV.",
+   "searched": "Samsung",
+   "strength": "mention"
+  },
+  "ASML>INTC": {
+   "named": true,
+   "filer": "ASML",
+   "form": "20-F",
+   "filed": "2025-03-05",
+   "url": "https://www.sec.gov/Archives/edgar/data/937966/000093796625000009/asml-20241231.htm",
+   "text": "T wo more TWINSCAN EXE:5000 systems were assembled and installed at an Intel plant near Hillsboro, Oregon (US), and a fourth system was shipped to a customer in Asia .",
+   "searched": "Intel",
+   "strength": "relationship"
+  },
+  "ASML>000660.KS": {
+   "named": true,
+   "missing": true
+  },
+  "ASML>MU": {
+   "named": true,
+   "filer": "ASML",
+   "form": "20-F",
+   "filed": "2026-02-25",
+   "url": "https://www.sec.gov/Archives/edgar/data/937966/000162828026011378/asml-20251231.htm",
+   "text": "Before he joined ASML, Wayne served as Senior Vice President of Global Manufacturing Operations and as Vice President of Wafer Fabs at Micron Technology, Inc., the company where he began his career in 1987 as a production operator.",
+   "searched": "Micron",
+   "strength": "mention"
+  },
+  "AMAT>TSM": {
+   "named": true,
+   "filer": "AMAT",
+   "form": "10-K",
+   "filed": "2024-12-13",
+   "url": "https://www.sec.gov/Archives/edgar/data/6951/000000695124000044/amat-20241027.htm",
+   "text": "12% 15% Taiwan Semiconductor Manufacturing Company Limited 11% 19% 7 Table of Contents Competition The industries in which we operate are highly competitive and characterized by rapid technological change.",
+   "searched": "Taiwan Semiconductor",
+   "strength": "mention"
+  },
+  "AMAT>005930.KS": {
+   "named": true,
+   "filer": "AMAT",
+   "form": "10-K",
+   "filed": "2024-12-13",
+   "url": "https://www.sec.gov/Archives/edgar/data/6951/000000695124000044/amat-20241027.htm",
+   "text": "NOTES TO CONSOLIDATED FINANCIAL STATEMENTS — (Continued) The following customers accounted for at least 10 percent of our Net revenue in each fiscal year, which were for products and services in multiple reportable segments: 2024 2023 2022 Samsung Electronics Co., Ltd.",
+   "searched": "Samsung",
+   "strength": "relationship"
+  },
+  "AMAT>INTC": {
+   "named": true,
+   "filer": "AMAT",
+   "form": "10-K",
+   "filed": "2025-12-12",
+   "url": "https://www.sec.gov/Archives/edgar/data/6951/000162828025056742/amat-20251026.htm",
+   "text": "Hill served in various finance positions with Intel Corporation for 25 years, most recently as Corporate Vice President and Chief Financial Officer and Chief Operating Officer, Technology, Systems and Core Engineering Group.",
+   "searched": "Intel",
+   "strength": "mention"
+  },
+  "AMAT>000660.KS": {
+   "named": true,
+   "missing": true
+  },
+  "AMAT>MU": {
+   "named": true,
+   "missing": true
+  },
+  "LRCX>005930.KS": {
+   "named": true,
+   "filer": "LRCX",
+   "form": "10-K",
+   "filed": "2026-08-07",
+   "url": "https://www.sec.gov/Archives/edgar/data/707549/000070754926000037/lrcx-20260628.htm",
+   "text": "Our most significant customers during the fiscal years ending June 28, 2026, June 29, 2025, and June 30, 2024 included Micron Technology, Inc., Samsung Electronics Company, Ltd., SK hynix Inc., and Taiwan Semiconductor Manufacturing Company.",
+   "searched": "Samsung",
+   "strength": "stated"
+  },
+  "LRCX>000660.KS": {
+   "named": true,
+   "filer": "LRCX",
+   "form": "10-K",
+   "filed": "2026-08-07",
+   "url": "https://www.sec.gov/Archives/edgar/data/707549/000070754926000037/lrcx-20260628.htm",
+   "text": "Our most significant customers during the fiscal years ending June 28, 2026, June 29, 2025, and June 30, 2024 included Micron Technology, Inc., Samsung Electronics Company, Ltd., SK hynix Inc., and Taiwan Semiconductor Manufacturing Company.",
+   "searched": "SK hynix",
+   "strength": "stated"
+  },
+  "LRCX>MU": {
+   "named": true,
+   "filer": "LRCX",
+   "form": "10-K",
+   "filed": "2026-08-07",
+   "url": "https://www.sec.gov/Archives/edgar/data/707549/000070754926000037/lrcx-20260628.htm",
+   "text": "Our most significant customers during the fiscal years ending June 28, 2026, June 29, 2025, and June 30, 2024 included Micron Technology, Inc., Samsung Electronics Company, Ltd., SK hynix Inc., and Taiwan Semiconductor Manufacturing Company.",
+   "searched": "Micron",
+   "strength": "stated"
+  },
+  "LRCX>TSM": {
+   "named": true,
+   "filer": "LRCX",
+   "form": "10-K",
+   "filed": "2026-08-07",
+   "url": "https://www.sec.gov/Archives/edgar/data/707549/000070754926000037/lrcx-20260628.htm",
+   "text": "Our most significant customers during the fiscal years ending June 28, 2026, June 29, 2025, and June 30, 2024 included Micron Technology, Inc., Samsung Electronics Company, Ltd., SK hynix Inc., and Taiwan Semiconductor Manufacturing Company.",
+   "searched": "Taiwan Semiconductor",
+   "strength": "stated"
+  },
+  "KLAC>TSM": {
+   "named": true,
+   "filer": "KLAC",
+   "form": "10-K",
+   "filed": "2026-08-06",
+   "url": "https://www.sec.gov/Archives/edgar/data/319201/000031920126000027/klac-20260630.htm",
+   "text": "years ended June 30, 2026, 2025 and 2024, the following customers each accounted for more than 10% of total revenues, primarily in the Semiconductor Process Control segment: Year Ended June 30, 2026 2025 2024 Taiwan Semiconductor Manufacturing Company Limited Taiwan Semiconductor Manufacturing Company Limited Taiwan Semiconductor Manufacturing Company Limited 2 Table of Contents Sales, Service and Marketing Our sales, service and marketing efforts aim to build deep long-term relationships with our customers.",
+   "searched": "Taiwan Semiconductor",
+   "strength": "stated"
+  },
+  "KLAC>005930.KS": {
+   "named": true,
+   "filer": "KLAC",
+   "form": "10-K",
+   "filed": "2024-08-05",
+   "url": "https://www.sec.gov/Archives/edgar/data/319201/000031920124000021/klac-20240630.htm",
+   "text": "The following customers each accounted for more than 10% of net accounts receivable as of the dates indicated below: As of June 30, 2024 2023 Taiwan Semiconductor Manufacturing Company Limited Taiwan Semiconductor Manufacturing Company Limited Samsung Electronics Co., Ltd.",
+   "searched": "Samsung",
+   "strength": "stated"
+  },
+  "KLAC>INTC": {
+   "named": true,
+   "missing": true
+  },
+  "8035.T>TSM": {
+   "named": true,
+   "missing": true
+  },
+  "8035.T>005930.KS": {
+   "named": true,
+   "missing": true
+  },
+  "8035.T>000660.KS": {
+   "named": true,
+   "missing": true
+  },
+  "8035.T>MU": {
+   "named": true,
+   "missing": true
+  },
+  "8035.T>INTC": {
+   "named": true,
+   "missing": true
+  },
+  "ASM.AS>TSM": {
+   "named": true,
+   "missing": true
+  },
+  "ASM.AS>005930.KS": {
+   "named": true,
+   "missing": true
+  },
+  "ASM.AS>INTC": {
+   "named": true,
+   "missing": true
+  },
+  "6920.T>TSM": {
+   "named": true,
+   "missing": true
+  },
+  "6920.T>005930.KS": {
+   "named": true,
+   "missing": true
+  },
+  "6920.T>INTC": {
+   "named": true,
+   "missing": true
+  },
+  "6857.T>TSM": {
+   "named": true,
+   "missing": true
+  },
+  "6857.T>NVDA": {
+   "named": true,
+   "missing": true
+  },
+  "6857.T>000660.KS": {
+   "named": true,
+   "missing": true
+  },
+  "6857.T>005930.KS": {
+   "named": true,
+   "missing": true
+  },
+  "TER>TSM": {
+   "named": true,
+   "filer": "TER",
+   "form": "10-K",
+   "filed": "2024-02-22",
+   "url": "https://www.sec.gov/Archives/edgar/data/97210/000095017024018701/ter-20231231.htm",
+   "text": "We estimate consolidated revenues driven by one OEM customer, of our Semiconductor Test and Wireless Test segments, combining direct sales to that customer with sales to the customer’s OSATs (which include Taiwan Semiconductor Manufacturing Company Ltd.), accounted for 19% of our consolidated revenues in 2021.",
+   "searched": "Taiwan Semiconductor",
+   "strength": "stated"
+  },
+  "TER>MU": {
+   "named": true,
+   "missing": true
+  },
+  "BESI.AS>TSM": {
+   "named": true,
+   "missing": true
+  },
+  "6146.T>TSM": {
+   "named": true,
+   "missing": true
+  },
+  "6146.T>000660.KS": {
+   "named": true,
+   "missing": true
+  },
+  "ENTG>TSM": {
+   "named": true,
+   "filer": "ENTG",
+   "form": "10-K",
+   "filed": "2026-02-11",
+   "url": "https://www.sec.gov/Archives/edgar/data/1101302/000110130226000012/entg-20251231.htm",
+   "text": "8 Table of Contents 2025 2024 2023 Percentage of net sales to top customers: Taiwan Semiconductor Manufacturing Company (TSMC) 16% 16% 11% Remaining top ten customers 34% 32% 32% Total top ten customers 50% 48% 43% Percentage of net sales by market: Domestic/U.S.",
+   "searched": "Taiwan Semiconductor",
+   "strength": "stated"
+  },
+  "ENTG>005930.KS": {
+   "named": true,
+   "missing": true
+  },
+  "ENTG>INTC": {
+   "named": true,
+   "missing": true
+  },
+  "ENTG>MU": {
+   "named": true,
+   "missing": true
+  },
+  "4063.T>TSM": {
+   "named": true,
+   "filer": "TSM",
+   "form": "20-F",
+   "filed": "2024-04-18",
+   "url": "https://www.sec.gov/Archives/edgar/data/1046179/000119312524099840/d592628d20f.htm",
+   "text": "The principal suppliers for our wafers are Formosa SUMCO Technology Corporation of Taiwan, GlobalWafers of Taiwan, Shin-Etsu Handotai of Japan, Siltronic AG of Germany, Soitec Microelectronics of Singapore, and SUMCO Corporation of Japan.",
+   "searched": "Shin-Etsu",
+   "strength": "relationship"
+  },
+  "4063.T>005930.KS": {
+   "named": true,
+   "missing": true
+  },
+  "4063.T>INTC": {
+   "named": true,
+   "missing": true
+  },
+  "AMAT>LRCX": {
+   "named": true,
+   "filer": "LRCX",
+   "form": "10-K",
+   "filed": "2026-08-07",
+   "url": "https://www.sec.gov/Archives/edgar/data/707549/000070754926000037/lrcx-20260628.htm",
+   "text": "In the etch market, our primary competitors are Applied Materials, Inc.; Hitachi, Ltd.; and Tokyo Electron, Ltd., and our primary competitors in the wet clean market are Screen Holding Co., Ltd.; Semes Co., Ltd.; and Tokyo Electron, Ltd.",
+   "searched": "Applied Materials",
+   "strength": "stated"
+  },
+  "AMAT>8035.T": {
+   "named": true,
+   "missing": true
+  },
+  "LRCX>8035.T": {
+   "named": true,
+   "filer": "LRCX",
+   "form": "10-K",
+   "filed": "2026-08-07",
+   "url": "https://www.sec.gov/Archives/edgar/data/707549/000070754926000037/lrcx-20260628.htm",
+   "text": "In the etch market, our primary competitors are Applied Materials, Inc.; Hitachi, Ltd.; and Tokyo Electron, Ltd., and our primary competitors in the wet clean market are Screen Holding Co., Ltd.; Semes Co., Ltd.; and Tokyo Electron, Ltd.",
+   "searched": "Tokyo Electron",
+   "strength": "stated"
+  },
+  "KLAC>6920.T": {
+   "named": true,
+   "filer": "KLAC",
+   "form": "10-K",
+   "filed": "2026-08-06",
+   "url": "https://www.sec.gov/Archives/edgar/data/319201/000031920126000027/klac-20260630.htm",
+   "text": "In each of our product markets, we have many competitors, including companies such as Applied Materials, Inc., ASML Holding N.V., Hitachi High-Tech Corporation, Lasertec, Inc.",
+   "searched": "Lasertec",
+   "strength": "relationship"
+  },
+  "6857.T>TER": {
+   "named": true,
+   "filer": "TER",
+   "form": "10-K",
+   "filed": "2026-02-19",
+   "url": "https://www.sec.gov/Archives/edgar/data/97210/000119312526059002/ter-20251231.htm",
+   "text": "Competitors in the Semiconductor Test segment include, among others, Advantest Corporation, SPEA S.p.A., and Cohu, Inc.",
+   "searched": "Advantest",
+   "strength": "relationship"
+  },
+  "BESI.AS>ASM.AS": {
+   "named": true,
+   "missing": true
+  },
+  "TSM>NVDA": {
+   "named": true,
+   "filer": "NVDA",
+   "form": "10-K",
+   "filed": "2026-02-25",
+   "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+   "text": "We utilize foundries, such as Taiwan Semiconductor Manufacturing Company Limited, or TSMC, and Samsung Electronics Co., Ltd., or Samsung, to produce our semiconductor wafers.",
+   "searched": "Taiwan Semiconductor",
+   "strength": "stated"
+  },
+  "TSM>AMD": {
+   "named": true,
+   "filer": "AMD",
+   "form": "10-K",
+   "filed": "2026-02-04",
+   "url": "https://www.sec.gov/Archives/edgar/data/2488/000000248826000018/amd-20251227.htm",
+   "text": "Manufacturing Arrangements and Assembly and Test Facilities Third-Party Wafer Foundry Facilities We utilize Taiwan Semiconductor Manufacturing Company Limited (TSMC) for the production of wafers for our HPC, FPGA and adaptive SoC products and GLOBALFOUNDRIES Inc.",
+   "searched": "Taiwan Semiconductor",
+   "strength": "stated"
+  },
+  "TSM>AVGO": {
+   "named": true,
+   "filer": "TSM",
+   "form": "20-F",
+   "filed": "2025-04-17",
+   "url": "https://www.sec.gov/Archives/edgar/data/1046179/000119312525083423/d896993d20f.htm",
+   "text": "among our customers many of the world’s leading semiconductor companies, ranging from fabless semiconductor companies, system companies to integrated device manufacturers, including, but not limited to, Advanced Micro Devices, Inc., Amazon Web Services, Inc., Broadcom Inc., Intel Corporation, MediaTek Inc., NVIDIA Corporation, NXP Semiconductors N.V., Qualcomm Inc., Renesas Electronics Corporation and Sony Semiconductor Solutions Corporation.",
+   "searched": "Broadcom",
+   "strength": "relationship"
+  },
+  "TSM>MRVL": {
+   "named": true,
+   "missing": true
+  },
+  "TSM>ALAB": {
+   "named": true,
+   "filer": "ALAB",
+   "form": "10-K",
+   "filed": "2026-02-20",
+   "url": "https://www.sec.gov/Archives/edgar/data/1736297/000173629726000010/alab-20251231.htm",
+   "text": "In particular, if TSMC is unable to supply us with sufficient quantities of wafers to meet all of our requirements, we could have difficulties fulfilling our customer orders and our revenue could decline.",
+   "searched": "TSMC",
+   "strength": "relationship"
+  },
+  "TSM>CRDO": {
+   "named": true,
+   "filer": "CRDO",
+   "form": "10-K",
+   "filed": "2026-06-15",
+   "url": "https://www.sec.gov/Archives/edgar/data/1807794/000162828026043303/crdo-20260502.htm",
+   "text": "Except for our agreement with BizLink for the manufacture of certain AEC products, we do not maintain long-term supply contracts with TSMC or generally with any of our third-party contract manufacturers or other suppliers.",
+   "searched": "Taiwan Semiconductor",
+   "strength": "stated"
+  },
+  "ASX>NVDA": {
+   "named": true,
+   "filer": "ASX",
+   "form": "20-F",
+   "filed": "2026-04-01",
+   "url": "https://www.sec.gov/Archives/edgar/data/1122411/000119312526135585/d50802d20f.htm",
+   "text": "Semiconductor’s acquisition of Fairchild, NXP Semiconductors’s acquisition of Freescale Semiconductor, Avago Technologies’s acquisition of Broadcom, Infineon’s acquisition of Cypress, NXP Semiconductors’s acquisition of Marvell’s Wi-Fi Connectivity Business, NVIDIA’s acquisition of ARM Limited, Analog Devices’s acquisition of Maxim Integrated Products, AMD’s acquisition of Xilinx, Broadcom’s acquisition of VMware, Silver Lake’s acquisition of Altera, and Qualcomm’s acquisition of Alphawave Semi.",
+   "searched": "NVIDIA",
+   "strength": "mention"
+  },
+  "ASX>AMD": {
+   "named": true,
+   "filer": "ASX",
+   "form": "20-F",
+   "filed": "2026-04-01",
+   "url": "https://www.sec.gov/Archives/edgar/data/1122411/000119312526135585/d50802d20f.htm",
+   "text": "ductor, Avago Technologies’s acquisition of Broadcom, Infineon’s acquisition of Cypress, NXP Semiconductors’s acquisition of Marvell’s Wi-Fi Connectivity Business, NVIDIA’s acquisition of ARM Limited, Analog Devices’s acquisition of Maxim Integrated Products, AMD’s acquisition of Xilinx, Broadcom’s acquisition of VMware, Silver Lake’s acquisition of Altera, and Qualcomm’s acquisition of Alphawave Semi.",
+   "searched": "AMD",
+   "strength": "mention"
+  },
+  "ASX>AVGO": {
+   "named": true,
+   "filer": "AVGO",
+   "form": "10-K",
+   "filed": "2024-12-20",
+   "url": "https://www.sec.gov/Archives/edgar/data/1730168/000173016824000139/avgo-20241103.htm",
+   "text": "We use third-party contract manufacturers for a significant majority of our assembly and test operations, including TSMC, Advanced Semiconductor Engineering, Inc., Foxconn Technology Group, Amkor Technology, Inc.",
+   "searched": "Advanced Semiconductor Engineering",
+   "strength": "relationship"
+  },
+  "AMKR>NVDA": {
+   "named": true,
+   "missing": true
+  },
+  "AMKR>AMD": {
+   "named": true,
+   "missing": true
+  },
+  "TSM>005930.KS": {
+   "named": true,
+   "missing": true
+  },
+  "TSM>INTC": {
+   "named": true,
+   "filer": "INTC",
+   "form": "10-K",
+   "filed": "2024-01-26",
+   "url": "https://www.sec.gov/Archives/edgar/data/50863/000005086324000010/intc-20231230.htm",
+   "text": "As we pursue our strategy to establish IFS as a major provider of foundry capacity to manufacture semiconductors for others, we will face intense competition from well-established competitors such as TSMC, Samsung, Global Foundries (GF), United Microelectronics Corporation (UMC), and Semiconductor Manufacturing International Corporation (SMIC).",
+   "searched": "Taiwan Semiconductor",
+   "strength": "stated"
+  },
+  "ASX>AMKR": {
+   "named": true,
+   "filer": "AMKR",
+   "form": "10-K",
+   "filed": "2026-02-20",
+   "url": "https://www.sec.gov/Archives/edgar/data/1047127/000104712726000014/amkr-20251231.htm",
+   "text": "We face competition from established packaging and test service providers primarily located in Asia, including ASE Technology, JCET Group and Powertech Technology.",
+   "searched": "ASE Technology",
+   "strength": "relationship"
+  },
+  "000660.KS>NVDA": {
+   "named": true,
+   "filer": "NVDA",
+   "form": "10-K",
+   "filed": "2026-02-25",
+   "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+   "text": "We purchase memory from SK Hynix Inc., Micron Technology, Inc., and Samsung.",
+   "searched": "SK hynix",
+   "strength": "stated"
+  },
+  "000660.KS>AMD": {
+   "named": true,
+   "missing": true
+  },
+  "000660.KS>AVGO": {
+   "named": true,
+   "missing": true
+  },
+  "MU>NVDA": {
+   "named": true,
+   "filer": "NVDA",
+   "form": "10-K",
+   "filed": "2026-02-25",
+   "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+   "text": "We purchase memory from SK Hynix Inc., Micron Technology, Inc., and Samsung.",
+   "searched": "Micron",
+   "strength": "stated"
+  },
+  "MU>AMD": {
+   "named": true,
+   "missing": true
+  },
+  "005930.KS>NVDA": {
+   "named": true,
+   "filer": "NVDA",
+   "form": "10-K",
+   "filed": "2026-02-25",
+   "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+   "text": "We utilize foundries, such as Taiwan Semiconductor Manufacturing Company Limited, or TSMC, and Samsung Electronics Co., Ltd., or Samsung, to produce our semiconductor wafers.",
+   "searched": "Samsung",
+   "strength": "stated"
+  },
+  "005930.KS>AMD": {
+   "named": true,
+   "filer": "AMD",
+   "form": "10-K",
+   "filed": "2026-02-04",
+   "url": "https://www.sec.gov/Archives/edgar/data/2488/000000248826000018/amd-20251227.htm",
+   "text": "Additionally, we utilize TSMC, United Microelectronics Corporation (UMC) and Samsung Electronics Co., Ltd.",
+   "searched": "Samsung",
+   "strength": "stated"
+  },
+  "005930.KS>AVGO": {
+   "named": true,
+   "missing": true
+  },
+  "MU>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "MU>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "MU>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "MU>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "MU>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SNDK>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SNDK>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SNDK>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SNDK>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SNDK>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "WDC>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "WDC>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "WDC>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "WDC>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "WDC>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "STX>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "STX>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "STX>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "STX>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "STX>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "000660.KS>MU": {
+   "named": true,
+   "filer": "MU",
+   "form": "10-K",
+   "filed": "2025-10-03",
+   "url": "https://www.sec.gov/Archives/edgar/data/723125/000072312525000028/mu-20250828.htm",
+   "text": "Competitive Conditions We face intense competition in the semiconductor memory and storage markets from a number of companies, including Samsung Electronics Co., Ltd.; SK hynix Inc.; Kioxia Holdings Corporation; Sandisk Corporation; ChangXin Memory Technologies, Inc.",
+   "searched": "SK hynix",
+   "strength": "relationship"
+  },
+  "000660.KS>005930.KS": {
+   "named": true,
+   "missing": true
+  },
+  "MU>005930.KS": {
+   "named": true,
+   "filer": "MU",
+   "form": "10-K",
+   "filed": "2025-10-03",
+   "url": "https://www.sec.gov/Archives/edgar/data/723125/000072312525000028/mu-20250828.htm",
+   "text": "Competitive Conditions We face intense competition in the semiconductor memory and storage markets from a number of companies, including Samsung Electronics Co., Ltd.; SK hynix Inc.; Kioxia Holdings Corporation; Sandisk Corporation; ChangXin Memory Technologies, Inc.",
+   "searched": "Samsung",
+   "strength": "relationship"
+  },
+  "SNDK>285A.T": {
+   "named": true,
+   "filer": "SNDK",
+   "form": "10-K",
+   "filed": "2026-08-17",
+   "url": "https://www.sec.gov/Archives/edgar/data/2023554/000162828026057406/sndk-20260703.htm",
+   "text": "Although we and Kioxia have agreed to extend the operating period for each Flash Ventures entity since the start of Flash Ventures, there is a risk that we and Kioxia will be unable to agree on a further extension of one or more of the Flash Ventures entities.",
+   "searched": "Kioxia",
+   "strength": "stated"
+  },
+  "SNDK>005930.KS": {
+   "named": true,
+   "filer": "SNDK",
+   "form": "10-K",
+   "filed": "2026-08-17",
+   "url": "https://www.sec.gov/Archives/edgar/data/2023554/000162828026057406/sndk-20260703.htm",
+   "text": "We compete with vertically-integrated suppliers such as Kioxia, Micron Technology, Inc., Samsung Electronics Co., Ltd., SK Hynix, Inc., Yangtze Memory Technologies Co., Ltd.",
+   "searched": "Samsung",
+   "strength": "stated"
+  },
+  "SNDK>000660.KS": {
+   "named": true,
+   "filer": "SNDK",
+   "form": "10-K",
+   "filed": "2026-08-17",
+   "url": "https://www.sec.gov/Archives/edgar/data/2023554/000162828026057406/sndk-20260703.htm",
+   "text": "We compete with vertically-integrated suppliers such as Kioxia, Micron Technology, Inc., Samsung Electronics Co., Ltd., SK Hynix, Inc., Yangtze Memory Technologies Co., Ltd.",
+   "searched": "SK hynix",
+   "strength": "stated"
+  },
+  "WDC>STX": {
+   "named": true,
+   "filer": "WDC",
+   "form": "10-K",
+   "filed": "2026-08-14",
+   "url": "https://www.sec.gov/Archives/edgar/data/106040/000162828026057139/wdc-20260703.htm",
+   "text": "Our competitors include HDD competitors such as Seagate Technology Holdings plc, and Toshiba Electronic Devices & Storage Corporation along with NAND flash suppliers that provide and enable alternative storage technologies, as well as storage systems and solutions providers.",
+   "searched": "Seagate",
+   "strength": "stated"
+  },
+  "NVDA>MSFT": {
+   "named": true,
+   "filer": "NVDA",
+   "form": "10-K",
+   "filed": "2026-02-25",
+   "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+   "text": "companies with internal teams designing hardware and software that incorporate accelerated or AI computing functionality as part of their internal solutions or platforms, such as Alibaba Group, Alphabet Inc., Amazon, Inc., or Amazon, Baidu, Inc., Huawei, and Microsoft Corporation, or Microsoft; • suppliers of Arm-based CPUs and companies that incorporate hardware and software for CPUs as part of their internal solutions or platforms, such as Amazon, Huawei, and Microsoft; • suppliers of hardware and software for SoC produc",
+   "searched": "Microsoft",
+   "strength": "relationship"
+  },
+  "NVDA>GOOGL": {
+   "named": true,
+   "filer": "NVDA",
+   "form": "10-K",
+   "filed": "2026-02-25",
+   "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+   "text": "r Huawei, and Intel Corporation, or Intel; • large cloud services companies with internal teams designing hardware and software that incorporate accelerated or AI computing functionality as part of their internal solutions or platforms, such as Alibaba Group, Alphabet Inc., Amazon, Inc., or Amazon, Baidu, Inc., Huawei, and Microsoft Corporation, or Microsoft; • suppliers of Arm-based CPUs and companies that incorporate hardware and software for CPUs as part of their internal solutions or platforms, such as Amazon, Huawei,",
+   "searched": "Alphabet",
+   "strength": "relationship"
+  },
+  "NVDA>AMZN": {
+   "named": true,
+   "filer": "NVDA",
+   "form": "10-K",
+   "filed": "2026-02-25",
+   "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+   "text": "or Intel; • large cloud services companies with internal teams designing hardware and software that incorporate accelerated or AI computing functionality as part of their internal solutions or platforms, such as Alibaba Group, Alphabet Inc., Amazon, Inc., or Amazon, Baidu, Inc., Huawei, and Microsoft Corporation, or Microsoft; • suppliers of Arm-based CPUs and companies that incorporate hardware and software for CPUs as part of their internal solutions or platforms, such as Amazon, Huawei, and Microsoft; • suppliers of",
+   "searched": "Amazon",
+   "strength": "relationship"
+  },
+  "NVDA>META": {
+   "named": true,
+   "missing": true
+  },
+  "NVDA>ORCL": {
+   "named": true,
+   "missing": true
+  },
+  "NVDA>CRWV": {
+   "named": true,
+   "filer": "CRWV",
+   "form": "10-K",
+   "filed": "2026-03-02",
+   "url": "https://www.sec.gov/Archives/edgar/data/1769628/000176962826000104/crwv-20251231.htm",
+   "text": "For example, NVIDIA relies on suppliers such as Taiwan Semiconductor Manufacturing Company for semiconductor fabrication and other manufacturers for compute and networking components.",
+   "searched": "NVIDIA",
+   "strength": "stated"
+  },
+  "NVDA>NBIS": {
+   "named": true,
+   "filer": "NBIS",
+   "form": "20-F",
+   "filed": "2026-04-30",
+   "url": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926052948/nbis-20251231x20f.htm",
+   "text": "​ Equity Investment with NVIDIA ​ On March 11, 2026, we entered into a securities purchase agreement with NVIDIA Corporation (“NVIDIA”), pursuant to which we sold, in a private placement for aggregate gross proceeds of approximately $2 billion, a pre-funded Class A shares purchase warrant (the “Warrant”), exercisable to purchase an aggregate of 21,065,936 Class A shares",
+   "searched": "NVIDIA",
+   "strength": "stated"
+  },
+  "NVDA>SMCI": {
+   "named": true,
+   "filer": "SMCI",
+   "form": "10-K",
+   "filed": "2026-08-31",
+   "url": "https://www.sec.gov/Archives/edgar/data/1375365/000137536526000022/smci-20260630.htm",
+   "text": "In particular, during the fiscal year ended June 30, 2026 (“fiscal year 2026”): • We delivered a comprehensive portfolio of AI-focused solutions specifically designed to support the latest AI workloads, including products compatible with NVIDIA's Blackwell and Blackwell Ultra generation platforms, such as the NVIDIA GB300 NVL72, GB200 NVL72, and HGX B300 and B200 systems, in air-cooled and liquid-cooled configurations; SMCI | 2026 Form 10-K | 2 Table of Contents • We continued to scale our DCBBS, wh",
+   "searched": "NVIDIA",
+   "strength": "mention"
+  },
+  "NVDA>DELL": {
+   "named": true,
+   "missing": true
+  },
+  "NVDA>HPE": {
+   "named": true,
+   "filer": "HPE",
+   "form": "10-K",
+   "filed": "2025-12-18",
+   "url": "https://www.sec.gov/Archives/edgar/data/1645590/000164559025000130/hpe-20251031.htm",
+   "text": "In some instances, our single-source suppliers (e.g., Intel and AMD as suppliers of certain x86 processors Broadcom and others for industry standard Application-Specific Standard Product, or NVIDIA for Graphics Processing Units) are also the single-source suppliers for the entire market; disruptions with these suppliers would result in industry-wide dislocations and therefore would not disproportionately disadvantage us relative to our competitors.",
+   "searched": "NVIDIA",
+   "strength": "relationship"
+  },
+  "NVDA>2317.TW": {
+   "named": true,
+   "filer": "NVDA",
+   "form": "10-K",
+   "filed": "2026-02-25",
+   "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+   "text": "We engage with independent subcontractors and contract manufacturers such as Hon Hai Precision Industry Co., Ltd., Wistron Corporation, and Fabrinet to perform assembly, testing and packaging of our final products.",
+   "searched": "Hon Hai",
+   "strength": "stated"
+  },
+  "NVDA>2382.TW": {
+   "named": true,
+   "missing": true
+  },
+  "NVDA>6669.TW": {
+   "named": true,
+   "missing": true
+  },
+  "NVDA>3231.TW": {
+   "named": true,
+   "filer": "NVDA",
+   "form": "10-K",
+   "filed": "2026-02-25",
+   "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+   "text": "We engage with independent subcontractors and contract manufacturers such as Hon Hai Precision Industry Co., Ltd., Wistron Corporation, and Fabrinet to perform assembly, testing and packaging of our final products.",
+   "searched": "Wistron",
+   "strength": "stated"
+  },
+  "AMD>MSFT": {
+   "named": true,
+   "filer": "AMD",
+   "form": "10-K",
+   "filed": "2026-02-04",
+   "url": "https://www.sec.gov/Archives/edgar/data/2488/000000248826000018/amd-20251227.htm",
+   "text": "ess of our semi-custom SoC products in our Client and Gaming segment is dependent on securing customers for our semi-custom design pipeline and consumer market conditions, including the success of game console systems and next generation consoles for Sony and Microsoft.",
+   "searched": "Microsoft",
+   "strength": "relationship"
+  },
+  "AMD>META": {
+   "named": true,
+   "missing": true
+  },
+  "AMD>ORCL": {
+   "named": true,
+   "missing": true
+  },
+  "AMD>DELL": {
+   "named": true,
+   "missing": true
+  },
+  "AMD>HPE": {
+   "named": true,
+   "filer": "HPE",
+   "form": "10-K",
+   "filed": "2025-12-18",
+   "url": "https://www.sec.gov/Archives/edgar/data/1645590/000164559025000130/hpe-20251031.htm",
+   "text": "In some instances, our single-source suppliers (e.g., Intel and AMD as suppliers of certain x86 processors Broadcom and others for industry standard Application-Specific Standard Product, or NVIDIA for Graphics Processing Units) are also the single-source suppliers for the entire market; disruptions with these suppliers would",
+   "searched": "AMD",
+   "strength": "relationship"
+  },
+  "AMD>SMCI": {
+   "named": true,
+   "filer": "SMCI",
+   "form": "10-K",
+   "filed": "2026-08-31",
+   "url": "https://www.sec.gov/Archives/edgar/data/1375365/000137536526000022/smci-20260630.htm",
+   "text": "IA HGX Rubin NVL8 systems, and introduced DCBBS Blueprints for these platforms designed to scale AI data centers from a 5 megawatt (“MW”) to a 1 gigawatt (\"GW\") power envelope; • We introduced new products supporting Intel Xeon 6 and Intel Xeon 6+ processors, AMD EPYC processors, and AMD Instinct™ MI350 series GPUs (MI350X and MI355X), and expanded our portfolio with Arm®-based platforms and additional Open Compute Project (“OCP”) ORv3-compliant systems; • We announced support for AMD’s next–generation Helios platform",
+   "searched": "Advanced Micro Devices",
+   "strength": "mention"
+  },
+  "AVGO>GOOGL": {
+   "named": true,
+   "missing": true
+  },
+  "AVGO>META": {
+   "named": true,
+   "missing": true
+  },
+  "AVGO>ANET": {
+   "named": true,
+   "filer": "ANET",
+   "form": "10-K",
+   "filed": "2026-02-17",
+   "url": "https://www.sec.gov/Archives/edgar/data/1596532/000159653226000013/anet-20251231.htm",
+   "text": "Our product development efforts also depend upon continued collaboration with our key suppliers, such as Broadcom.",
+   "searched": "Broadcom",
+   "strength": "stated"
+  },
+  "MRVL>AMZN": {
+   "named": true,
+   "missing": true
+  },
+  "ALAB>NVDA": {
+   "named": true,
+   "missing": true
+  },
+  "ALAB>AMZN": {
+   "named": true,
+   "filer": "ALAB",
+   "form": "10-K",
+   "filed": "2026-02-20",
+   "url": "https://www.sec.gov/Archives/edgar/data/1736297/000173629726000010/alab-20251231.htm",
+   "text": "Common Stock Warrants In October 2022, the Company issued a warrant to Amazon NV Investment Holdings LLC (“Holder”) to purchase an aggregate of up to 1,484,230 shares of Common Stock at an exercise price of $ 20.34 per share (the “Customer Warrant”).",
+   "searched": "Amazon",
+   "strength": "stated"
+  },
+  "CRDO>AMZN": {
+   "named": true,
+   "missing": true
+  },
+  "CRDO>MSFT": {
+   "named": true,
+   "filer": "CRDO",
+   "form": "10-K",
+   "filed": "2026-06-15",
+   "url": "https://www.sec.gov/Archives/edgar/data/1807794/000162828026043303/crdo-20260502.htm",
+   "text": "CM) solutions • Production shipments of SerDes Chiplets, including two versions of 3.2Tbps Chiplets • Shipping industrial temperature (iTemp) PAM4 DSP for 5G market • First to deliver 40G PAM3 SerDes • Created switch cable and open-sourced implementation with Microsoft to realize their vision for a highly reliable network-managed dual-ToR architecture • Created ZeroFlap Optics with enhanced reliability, telemetry and in-band messaging with Oracle to support their need for more reliable optical interconnect • Created the Omn",
+   "searched": "Microsoft",
+   "strength": "mention"
+  },
+  "INTC>DELL": {
+   "named": true,
+   "filer": "INTC",
+   "form": "10-K",
+   "filed": "2025-01-31",
+   "url": "https://www.sec.gov/Archives/edgar/data/50863/000005086325000009/intc-20241228.htm",
+   "text": "and Italian affiliates of customers Dell, HP, and HPE, accusing Intel's Ice Lake (server and client), Tiger Lake, Alder Lake, and Raptor Lake processors of infringing its patent, and requesting that its suit be consolidated with Intel Corporation Italia S.P.A.'s suit.",
+   "searched": "Dell",
+   "strength": "relationship"
+  },
+  "INTC>HPE": {
+   "named": true,
+   "filer": "HPE",
+   "form": "10-K",
+   "filed": "2024-12-19",
+   "url": "https://www.sec.gov/Archives/edgar/data/1645590/000164559024000139/hpe-20241031.htm",
+   "text": "In some instances, our single-source suppliers (e.g., Intel and AMD as suppliers of certain x86 processors) are also the single-source suppliers for the entire market; disruptions with these suppliers would result in industry-wide dislocations and therefore would not disproportionately disadvantage us relative to our",
+   "searched": "Intel",
+   "strength": "relationship"
+  },
+  "NVDA>AMD": {
+   "named": true,
+   "filer": "NVDA",
+   "form": "10-K",
+   "filed": "2026-02-25",
+   "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+   "text": "Our current competitors include: • suppliers and licensors of hardware and software for discrete and integrated GPUs, custom chips and other accelerated computing solutions, including solutions offered for AI, such as Advanced Micro Devices, Inc., or AMD, Huawei Technologies Co.",
+   "searched": "Advanced Micro Devices",
+   "strength": "stated"
+  },
+  "AVGO>MRVL": {
+   "named": true,
+   "filer": "AVGO",
+   "form": "10-K",
+   "filed": "2024-12-20",
+   "url": "https://www.sec.gov/Archives/edgar/data/1730168/000173016824000139/avgo-20241103.htm",
+   "text": "uch as Advanced Micro Devices, Inc., Amlogic Inc., Analog Devices, Inc., Cisco Systems, Inc., Coherent Corp., Hamamatsu Photonics K.K., Heidenhain Corporation, iC-Haus GmbH, Intel Corporation, Lumentum Holdings Inc., MACOM Technology Solutions Holdings, Inc., Marvell Technology, Inc., MaxLinear, Inc., MediaTek Inc., Microchip Technology Incorporated, Mitsubishi Electric Corporation, Murata Manufacturing Co., Ltd., NVIDIA Corporation, NXP Semiconductors N.V., ON Semiconductor Corporation, OSRAM Licht AG, Qorvo, Inc., Qualc",
+   "searched": "Marvell",
+   "strength": "mention"
+  },
+  "AMD>INTC": {
+   "named": true,
+   "filer": "INTC",
+   "form": "10-K",
+   "filed": "2025-01-31",
+   "url": "https://www.sec.gov/Archives/edgar/data/50863/000005086325000009/intc-20241228.htm",
+   "text": "Our competitors include hardware vendors such as AMD that compete with us across the full spectrum of CPUs, GPUs, accelerators, and other products; providers of GPU systems such as NVIDIA; companies developing their own custom silicon; and new entrants and incumbents developing ARM- and RISC-V-based products cu",
+   "searched": "Advanced Micro Devices",
+   "strength": "stated"
+  },
+  "ALAB>CRDO": {
+   "named": true,
+   "filer": "ALAB",
+   "form": "10-K",
+   "filed": "2026-02-20",
+   "url": "https://www.sec.gov/Archives/edgar/data/1736297/000173629726000010/alab-20251231.htm",
+   "text": "Our principal competitors include Broadcom, Inc., Credo Technology Group Holding Ltd., Marvell Technology, Inc., Microchip Technology Inc., Montage Technology, Parade Technologies, Ltd., and Rambus, Inc.",
+   "searched": "Credo",
+   "strength": "stated"
+  },
+  "ANET>MSFT": {
+   "named": true,
+   "filer": "ANET",
+   "form": "10-K",
+   "filed": "2025-02-19",
+   "url": "https://www.sec.gov/Archives/edgar/data/1596532/000159653225000028/anet-20241231.htm",
+   "text": "Meta Platforms and Microsoft, two of our Cloud and AI Titan end customers, each accounted for more than 10% of our total revenue for the years ended December 31, 2024, and December 31, 2023.",
+   "searched": "Microsoft",
+   "strength": "stated"
+  },
+  "ANET>META": {
+   "named": true,
+   "filer": "ANET",
+   "form": "10-K",
+   "filed": "2025-02-19",
+   "url": "https://www.sec.gov/Archives/edgar/data/1596532/000159653225000028/anet-20241231.htm",
+   "text": "Meta Platforms and Microsoft, two of our Cloud and AI Titan end customers, each accounted for more than 10% of our total revenue for the years ended December 31, 2024, and December 31, 2023.",
+   "searched": "Meta Platforms",
+   "strength": "stated"
+  },
+  "CSCO>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "CSCO>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "CSCO>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "CSCO>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "CSCO>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "CIEN>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "CIEN>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "CIEN>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "CIEN>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "CIEN>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "COHR>NVDA": {
+   "named": true,
+   "filer": "COHR",
+   "form": "10-K",
+   "filed": "2026-08-14",
+   "url": "https://www.sec.gov/Archives/edgar/data/820318/000082031826000020/iivi-20260630.htm",
+   "text": "During fiscal 2026, we announced the expansion of our Sherman, Texas, manufacturing facility, entered into a strategic multi-year supply agreement with NVIDIA for advanced lasers and optical networking products supporting next-generation AI infrastructure, and received a $50 million preliminary memorandum of terms under the CHIPS and Science Act to support the Sherman expansion.",
+   "searched": "NVIDIA",
+   "strength": "stated"
+  },
+  "COHR>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "COHR>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "COHR>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "COHR>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "COHR>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "LITE>NVDA": {
+   "named": true,
+   "filer": "LITE",
+   "form": "10-K",
+   "filed": "2026-08-17",
+   "url": "https://www.sec.gov/Archives/edgar/data/1633978/000162828026057358/lite-20260627.htm",
+   "text": "Equity Series A Convertible Preferred Stock On March 2, 2026, we completed the issuance and sale of approximately 2.9 million shares of our Series A Convertible Preferred Stock, par value $ 0.001 per share (the “Preferred Stock”) to NVIDIA Corporation (“NVIDIA”), in a private placement pursuant to a Securities Purchase Agreement.",
+   "searched": "NVIDIA",
+   "strength": "relationship"
+  },
+  "LITE>CIEN": {
+   "named": true,
+   "filer": "LITE",
+   "form": "10-K",
+   "filed": "2024-08-21",
+   "url": "https://www.sec.gov/Archives/edgar/data/1633978/000162828024038024/lite-20240629.htm",
+   "text": "22, net revenue generated from a single customer which represented 10% or more of our total net revenue of the applicable fiscal year is summarized in the table below: Years Ended June 29, 2024 July 1, 2023 July 2, 2022 Google 18.9 % * * Apple * 12.1 % 28.7 % Ciena 11.4 % 15.3 % 12.6 % Nokia * 10.5 % * *Represents less than 10% of total net revenue 5 Table of Contents Trends The convergence of cloud computing and artificial intelligence (AI) is driving rapid innovation and expansion in optical hardware for hyperscale cl",
+   "searched": "Ciena",
+   "strength": "relationship"
+  },
+  "LITE>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "LITE>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "LITE>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "LITE>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "LITE>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "FN>NVDA": {
+   "named": true,
+   "filer": "NVDA",
+   "form": "10-K",
+   "filed": "2026-02-25",
+   "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+   "text": "We engage with independent subcontractors and contract manufacturers such as Hon Hai Precision Industry Co., Ltd., Wistron Corporation, and Fabrinet to perform assembly, testing and packaging of our final products.",
+   "searched": "Fabrinet",
+   "strength": "stated"
+  },
+  "FN>CIEN": {
+   "named": true,
+   "missing": true
+  },
+  "FN>AMZN": {
+   "named": true,
+   "filer": "FN",
+   "form": "10-K",
+   "filed": "2026-08-18",
+   "url": "https://www.sec.gov/Archives/edgar/data/1408710/000140871026000028/fn-20260626.htm",
+   "text": "Customer Warrant On March 12, 2025, the Company issued a warrant (the “Warrant”) to Amazon.com NV Investment Holdings LLC to acquire up to 381,922 ordinary shares (the “Warrant Shares”) of the Company at an exercise price of $ 208.48 per share.",
+   "searched": "Amazon",
+   "strength": "relationship"
+  },
+  "APH>NVDA": {
+   "named": true,
+   "missing": true
+  },
+  "APH>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "APH>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "APH>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "APH>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "APH>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "GLW>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "GLW>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "GLW>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "GLW>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "GLW>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "ANET>CSCO": {
+   "named": true,
+   "filer": "ANET",
+   "form": "10-K",
+   "filed": "2026-02-17",
+   "url": "https://www.sec.gov/Archives/edgar/data/1596532/000159653226000013/anet-20251231.htm",
+   "text": "In the NDR market, our Arista NDR offerings compete with other network security vendors including Cisco, Darktrace, and ExtraHop.",
+   "searched": "Cisco",
+   "strength": "stated"
+  },
+  "COHR>LITE": {
+   "named": true,
+   "filer": "COHR",
+   "form": "10-K",
+   "filed": "2026-08-14",
+   "url": "https://www.sec.gov/Archives/edgar/data/820318/000082031826000020/iivi-20260630.htm",
+   "text": "The Company’s peer group includes IPG Photonics Corp., Wolfspeed Inc., Lumentum Holdings, Inc., Corning, Inc., MKS Instruments, Inc., and Honeywell International, Inc.",
+   "searched": "Lumentum",
+   "strength": "mention"
+  },
+  "SMCI>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SMCI>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SMCI>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SMCI>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SMCI>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SMCI>CRWV": {
+   "named": true,
+   "missing": true
+  },
+  "DELL>CRWV": {
+   "named": true,
+   "filer": "CRWV",
+   "form": "10-K",
+   "filed": "2026-03-02",
+   "url": "https://www.sec.gov/Archives/edgar/data/1769628/000176962826000104/ex10311.htm",
+   "text": "greement that (1) are executed between the same parties to the Master Services Agreement (or their respective affiliates), (2) provide for bare metal compute services for OpenAI, (3) the performance of which will be effected principally by assets constituting Dell GPU Servers or Collateral and (4) make reference to the Interparty Agreement, together with any amendments, modifications or supplements to any of the foregoing.",
+   "searched": "Dell",
+   "strength": "relationship"
+  },
+  "DELL>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "DELL>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "DELL>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "DELL>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "DELL>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "HPE>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "HPE>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "HPE>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "HPE>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "HPE>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "CLS>GOOGL": {
+   "named": true,
+   "filer": "CLS",
+   "form": "10-K",
+   "filed": "2026-02-27",
+   "url": "https://www.sec.gov/Archives/edgar/data/1030894/000103089426000011/cls-20251231.htm",
+   "text": "Our CCS segment customers include Amazon Fulfillment Services, Inc., Meta Platforms, Inc., Google Inc., Ciena Corporation, Dell Technologies, Hewlett-Packard Enterprise, and IBM Corporation, Inc.",
+   "searched": "Google",
+   "strength": "stated"
+  },
+  "CLS>META": {
+   "named": true,
+   "filer": "CLS",
+   "form": "10-K",
+   "filed": "2026-02-27",
+   "url": "https://www.sec.gov/Archives/edgar/data/1030894/000103089426000011/cls-20251231.htm",
+   "text": "Our CCS segment customers include Amazon Fulfillment Services, Inc., Meta Platforms, Inc., Google Inc., Ciena Corporation, Dell Technologies, Hewlett-Packard Enterprise, and IBM Corporation, Inc.",
+   "searched": "Meta Platforms",
+   "strength": "stated"
+  },
+  "2317.TW>MSFT": {
+   "named": true,
+   "missing": true
+  },
+  "2317.TW>AMZN": {
+   "named": true,
+   "missing": true
+  },
+  "2317.TW>GOOGL": {
+   "named": true,
+   "missing": true
+  },
+  "2317.TW>ORCL": {
+   "named": true,
+   "missing": true
+  },
+  "2382.TW>MSFT": {
+   "named": true,
+   "missing": true
+  },
+  "2382.TW>GOOGL": {
+   "named": true,
+   "missing": true
+  },
+  "2382.TW>AMZN": {
+   "named": true,
+   "missing": true
+  },
+  "2382.TW>META": {
+   "named": true,
+   "missing": true
+  },
+  "6669.TW>MSFT": {
+   "named": true,
+   "missing": true
+  },
+  "6669.TW>META": {
+   "named": true,
+   "missing": true
+  },
+  "3231.TW>DELL": {
+   "named": true,
+   "missing": true
+  },
+  "SMCI>DELL": {
+   "named": true,
+   "filer": "SMCI",
+   "form": "10-K",
+   "filed": "2026-08-31",
+   "url": "https://www.sec.gov/Archives/edgar/data/1375365/000137536526000022/smci-20260630.htm",
+   "text": "We believe our principal competitors include: • global technology vendors, such as Cisco, Dell, Hewlett-Packard Enterprise, and Lenovo; and • ODMs, such as Foxconn, Quanta Computer, and Wiwynn Corporation.",
+   "searched": "Dell",
+   "strength": "stated"
+  },
+  "SMCI>HPE": {
+   "named": true,
+   "filer": "HPE",
+   "form": "10-K",
+   "filed": "2025-12-18",
+   "url": "https://www.sec.gov/Archives/edgar/data/1645590/000164559025000130/hpe-20251031.htm",
+   "text": "Our primary competitors in data center infrastructure are technology vendors, such as Dell Technologies Inc., Super Micro Computer, Inc., Cisco Systems, Inc., and Lenovo Group Ltd.",
+   "searched": "Super Micro",
+   "strength": "stated"
+  },
+  "2317.TW>2382.TW": {
+   "named": true,
+   "missing": true
+  },
+  "2317.TW>6669.TW": {
+   "named": true,
+   "missing": true
+  },
+  "2317.TW>3231.TW": {
+   "named": true,
+   "missing": true
+  },
+  "VRT>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "VRT>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "VRT>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "VRT>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "VRT>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "VRT>EQIX": {
+   "named": true,
+   "filer": "VRT",
+   "form": "10-K",
+   "filed": "2026-02-13",
+   "url": "https://www.sec.gov/Archives/edgar/data/1674101/000167410126000008/vrt-20251231.htm",
+   "text": "Examples of companies in this space include Digital Realty, Equinix, Compass, and QTS.",
+   "searched": "Equinix",
+   "strength": "mention"
+  },
+  "VRT>DLR": {
+   "named": true,
+   "filer": "VRT",
+   "form": "10-K",
+   "filed": "2026-02-13",
+   "url": "https://www.sec.gov/Archives/edgar/data/1674101/000167410126000008/vrt-20251231.htm",
+   "text": "Examples of companies in this space include Digital Realty, Equinix, Compass, and QTS.",
+   "searched": "Digital Realty",
+   "strength": "mention"
+  },
+  "VRT>CRWV": {
+   "named": true,
+   "filer": "VRT",
+   "form": "10-K",
+   "filed": "2026-02-13",
+   "url": "https://www.sec.gov/Archives/edgar/data/1674101/000167410126000008/vrt-20251231.htm",
+   "text": "Examples of companies in this space include CoreWeave and Nebius.",
+   "searched": "CoreWeave",
+   "strength": "mention"
+  },
+  "VRT>NVDA": {
+   "named": true,
+   "filer": "VRT",
+   "form": "10-K",
+   "filed": "2026-02-13",
+   "url": "https://www.sec.gov/Archives/edgar/data/1674101/000167410126000008/vrt-20251231.htm",
+   "text": "Our partnership with NVIDIA supports the development of advanced power and thermal infrastructure aligned with next-generation AI and high-performance computing architectures, while our collaboration with Oklo reflects exploration of alternative energy solutions that could support futur",
+   "searched": "NVIDIA",
+   "strength": "relationship"
+  },
+  "ETN>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "ETN>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "ETN>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "ETN>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "ETN>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "ETN>EQIX": {
+   "named": true,
+   "missing": true
+  },
+  "ETN>DLR": {
+   "named": true,
+   "missing": true
+  },
+  "SU.PA>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SU.PA>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SU.PA>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SU.PA>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SU.PA>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "SU.PA>EQIX": {
+   "named": true,
+   "missing": true
+  },
+  "SU.PA>DLR": {
+   "named": true,
+   "missing": true
+  },
+  "2308.TW>NVDA": {
+   "named": true,
+   "missing": true
+  },
+  "2308.TW>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "2308.TW>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "2308.TW>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "2308.TW>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "2308.TW>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "GEV>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "GEV>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "GEV>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "GEV>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "GEV>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "ENR.DE>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "ENR.DE>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "ENR.DE>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "ENR.DE>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "ENR.DE>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "PWR>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "PWR>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "PWR>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "PWR>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "PWR>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "CEG>MSFT": {
+   "named": true,
+   "filer": "CEG",
+   "form": "10-K",
+   "filed": "2026-02-24",
+   "url": "https://www.sec.gov/Archives/edgar/data/1868275/000186827526000032/ceg-20251231.htm",
+   "text": "The restart is supported by a 20-year PPA with Microsoft to purchase the output generated from the renewed plant.",
+   "searched": "Microsoft",
+   "strength": "stated"
+  },
+  "CEG>META": {
+   "named": true,
+   "filer": "CEG",
+   "form": "10-K",
+   "filed": "2026-02-24",
+   "url": "https://www.sec.gov/Archives/edgar/data/1868275/000186827526000032/ceg-20251231.htm",
+   "text": "The rapid expansion of data centers continues to accelerate, driven by widespread adoption of AI technologies and large-scale infrastructure investments by major hyperscalers such as Microsoft, Google, Meta, and Amazon.",
+   "searched": "Meta Platforms",
+   "strength": "mention"
+  },
+  "VST>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "VST>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "VST>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "VST>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "VST>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "VRT>SU.PA": {
+   "named": true,
+   "filer": "VRT",
+   "form": "10-K",
+   "filed": "2026-02-13",
+   "url": "https://www.sec.gov/Archives/edgar/data/1674101/000167410126000008/vrt-20251231.htm",
+   "text": "Across our three geographic segments, we encounter two principal types of competitors: niche players (e.g., Delta Electronics, Inc., Stulz GmbH, Johnson Controls International PLC, and Socomec Holding SA) and large-scale global competitors (e.g., Schneider Electric, S.E., Eaton Corporation Plc, Legrand SA, and Huawei Investment & Holding Co., Ltd.) We believe we differentiate ourselves through: (i) application expertise and customer collaboration to envision and build future-ready infrastructure; (ii) most complete port",
+   "searched": "Schneider Electric",
+   "strength": "relationship"
+  },
+  "VRT>ETN": {
+   "named": true,
+   "filer": "VRT",
+   "form": "10-K",
+   "filed": "2026-02-13",
+   "url": "https://www.sec.gov/Archives/edgar/data/1674101/000167410126000008/vrt-20251231.htm",
+   "text": "ree geographic segments, we encounter two principal types of competitors: niche players (e.g., Delta Electronics, Inc., Stulz GmbH, Johnson Controls International PLC, and Socomec Holding SA) and large-scale global competitors (e.g., Schneider Electric, S.E., Eaton Corporation Plc, Legrand SA, and Huawei Investment & Holding Co., Ltd.) We believe we differentiate ourselves through: (i) application expertise and customer collaboration to envision and build future-ready infrastructure; (ii) most complete portfolio and con",
+   "searched": "Eaton",
+   "strength": "relationship"
+  },
+  "VRT>2308.TW": {
+   "named": true,
+   "filer": "VRT",
+   "form": "10-K",
+   "filed": "2026-02-13",
+   "url": "https://www.sec.gov/Archives/edgar/data/1674101/000167410126000008/vrt-20251231.htm",
+   "text": "Across our three geographic segments, we encounter two principal types of competitors: niche players (e.g., Delta Electronics, Inc., Stulz GmbH, Johnson Controls International PLC, and Socomec Holding SA) and large-scale global competitors (e.g., Schneider Electric, S.E., Eaton Corporation Plc, Legrand SA, and Huawei Investment & Holding Co., Ltd.) We believe we differentiate oursel",
+   "searched": "Delta Electronics",
+   "strength": "relationship"
+  },
+  "GEV>ENR.DE": {
+   "named": true,
+   "filer": "GEV",
+   "form": "10-K",
+   "filed": "2026-01-29",
+   "url": "https://www.sec.gov/Archives/edgar/data/1996810/000199681026000015/gev-20251231.htm",
+   "text": "Key Power segment competitors include Siemens Energy, Mitsubishi Power, Westinghouse , Framatome, and Rolls-Royce.",
+   "searched": "Siemens Energy",
+   "strength": "stated"
+  },
+  "CEG>VST": {
+   "named": true,
+   "filer": "VST",
+   "form": "10-K",
+   "filed": "2026-02-27",
+   "url": "https://www.sec.gov/Archives/edgar/data/1692819/000169281926000006/vistra-20251231.htm",
+   "text": "District Court for the District of Maryland against Human Resources Consultants, LLC, Accelerant Technologies, Constellation Energy Corporation and 25 other companies, including Vistra Corp.",
+   "searched": "Constellation",
+   "strength": "mention"
+  },
+  "EQIX>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "EQIX>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "EQIX>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "EQIX>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "EQIX>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "DLR>MSFT": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "DLR>GOOGL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "DLR>AMZN": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "DLR>META": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "DLR>ORCL": {
+   "named": false,
+   "group": "hyperscalers"
+  },
+  "CRWV>MSFT": {
+   "named": true,
+   "filer": "CRWV",
+   "form": "10-K",
+   "filed": "2026-03-02",
+   "url": "https://www.sec.gov/Archives/edgar/data/1769628/000176962826000104/crwv-20251231.htm",
+   "text": "We recognized an aggregate of approximately 67% of our revenue from our top customer, Microsoft, for the year ended December 31, 2025.",
+   "searched": "Microsoft",
+   "strength": "stated"
+  },
+  "NBIS>MSFT": {
+   "named": true,
+   "filer": "NBIS",
+   "form": "20-F",
+   "filed": "2026-04-30",
+   "url": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926052948/nbis-20251231xex4d4.htm",
+   "text": "Supplier may subcontract with any third party to furnish any Goods, Services or Cloud Services without Microsoft’s prior written consent.",
+   "searched": "Microsoft",
+   "strength": "stated"
+  },
+  "EQIX>DLR": {
+   "named": true,
+   "filer": "DLR",
+   "form": "10-K",
+   "filed": "2026-02-13",
+   "url": "https://www.sec.gov/Archives/edgar/data/1297996/000110465926015365/dlr-20251231x10k.htm",
+   "text": "​ Competition We compete with numerous data center providers globally, many of whom own or operate properties similar to ours in some of the same metropolitan areas where our data centers are located, including Equinix, Inc.",
+   "searched": "Equinix",
+   "strength": "stated"
+  },
+  "CRWV>NBIS": {
+   "named": true,
+   "filer": "NBIS",
+   "form": "20-F",
+   "filed": "2026-04-30",
+   "url": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926052948/nbis-20251231x20f.htm",
+   "text": "For our core AI infrastructure business, our key competitors are specialized cloud service providers focused on AI, including CoreWeave, Crusoe and Lambda.",
+   "searched": "CoreWeave",
+   "strength": "stated"
+  },
+  "MSFT>GOOGL": {
+   "named": true,
+   "filer": "MSFT",
+   "form": "10-K",
+   "filed": "2024-07-30",
+   "url": "https://www.sec.gov/Archives/edgar/data/789019/000095017024087843/msft-20240630.htm",
+   "text": "Our AI offerings compete with AI products from hyperscalers such as Amazon and Google, as well as products from other emerging competitors, including Anthropic, OpenAI, Meta, and other open source offerings, many of which are also current or potential partners.",
+   "searched": "Google",
+   "strength": "stated"
+  },
+  "MSFT>AMZN": {
+   "named": true,
+   "filer": "MSFT",
+   "form": "10-K",
+   "filed": "2024-07-30",
+   "url": "https://www.sec.gov/Archives/edgar/data/789019/000095017024087843/msft-20240630.htm",
+   "text": "Our AI offerings compete with AI products from hyperscalers such as Amazon and Google, as well as products from other emerging competitors, including Anthropic, OpenAI, Meta, and other open source offerings, many of which are also current or potential partners.",
+   "searched": "Amazon",
+   "strength": "stated"
+  },
+  "MSFT>ORCL": {
+   "named": true,
+   "filer": "MSFT",
+   "form": "10-K",
+   "filed": "2024-07-30",
+   "url": "https://www.sec.gov/Archives/edgar/data/789019/000095017024087843/msft-20240630.htm",
+   "text": "IBM and Oracle lead a group of companies that compete with our enterprise-wide computing solutions.",
+   "searched": "Oracle",
+   "strength": "stated"
+  },
+  "GOOGL>AMZN": {
+   "named": true,
+   "missing": true
+  },
+  "GOOGL>ORCL": {
+   "named": true,
+   "filer": "ORCL",
+   "form": "10-K",
+   "filed": "2026-06-22",
+   "url": "https://www.sec.gov/Archives/edgar/data/1341439/000119312526277521/orcl-20260531.htm",
+   "text": "Our enterprise cloud, software and hardware offerings compete directly with certain offerings from some of the largest and most competitive companies in the world, including Adobe Systems Incorporated, Alphabet Inc., Amazon.com, Inc., Cisco Systems, Inc., Intel Corporation, International Business Machines Corporation, Microsoft Corporation, Salesforce, Inc.",
+   "searched": "Google",
+   "strength": "relationship"
+  },
+  "AMZN>ORCL": {
+   "named": true,
+   "filer": "ORCL",
+   "form": "10-K",
+   "filed": "2026-06-22",
+   "url": "https://www.sec.gov/Archives/edgar/data/1341439/000119312526277521/orcl-20260531.htm",
+   "text": "Our enterprise cloud, software and hardware offerings compete directly with certain offerings from some of the largest and most competitive companies in the world, including Adobe Systems Incorporated, Alphabet Inc., Amazon.com, Inc., Cisco Systems, Inc., Intel Corporation, International Business Machines Corporation, Microsoft Corporation, Salesforce, Inc.",
+   "searched": "Amazon",
+   "strength": "relationship"
+  }
+ }
+}

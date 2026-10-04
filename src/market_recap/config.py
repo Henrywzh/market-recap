@@ -20,6 +20,10 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = REPO_ROOT / "config" / "dashboard.toml"
+# The AI supply chain the CHAIN panel reads, and the filing evidence for each
+# link (scripts/chain_evidence.py writes it).
+CHAIN_PATH = REPO_ROOT / "config" / "ai_chain.toml"
+CHAIN_EVIDENCE_PATH = REPO_ROOT / "config" / "ai_chain_evidence.json"
 
 CACHE_DIR = REPO_ROOT / "data" / "cache"
 ARTIFACT_DIR = REPO_ROOT / "artifacts"

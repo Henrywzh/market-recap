@@ -13,6 +13,7 @@ import { renderStatements } from './financials.js';
 import { renderSingleTicker } from './technicals.js';
 import { eventCard, outcomeCard, timelineCard, loadEvents, historyCard, revisionsCard, sinceCard, filingsCard, storyCard, situationCard } from '../event-card.js';
 import { resolveTicker } from '../routes.js';
+import { chainCard } from '../chain-card.js';
 
 const BILLION = 1e9;
 // The multiples shown in the header block, in this order. The full set is on
@@ -300,8 +301,8 @@ async function section(root, title, draw) {
 }
 
 export default async function renderTicker(root, valuation, _manifest, ctx) {
-  const [monitor, technicals, financials, dcf, crossListing, evidence, events, themes] = await Promise.all(
-    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events', 'themes'].map((name) => optional(ctx, name)),
+  const [monitor, technicals, financials, dcf, crossListing, evidence, events, themes, chain] = await Promise.all(
+    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events', 'themes', 'chain'].map((name) => optional(ctx, name)),
   );
   const rows = valuation?.rows || [];
   const universe = new Map(rows.map((r) => [r.ticker, r.name]));
@@ -342,6 +343,10 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   if (timeline) root.append(timeline);
   const story = eventPayload ? storyCard(eventPayload) : null;
   if (story) root.append(story);
+  // Its suppliers, customers and rivals in the AI chain, and how their
+  // reports this season have landed on it.
+  const chainLinks = chain ? chainCard(chain, symbol, { compact: true }) : null;
+  if (chainLinks) root.append(chainLinks);
   // What the report is measured against: its own record, where estimates
   // are moving, and what the industry data did since it last reported.
   const history = eventPayload ? historyCard(eventPayload) : null;
