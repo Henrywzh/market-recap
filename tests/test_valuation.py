@@ -435,3 +435,66 @@ def test_scenario_grid_is_price_equals_multiple_times_eps():
     assert grid[2][2] == pytest.approx((22 / 20 * 1.1 - 1) * 100)
     assert V.scenario_grid(None, [0.0], [0.0]) == [[None]]
     assert V.scenario_grid(1.0, [-2.0], [0.0]) == [[None]]   # a negative multiple is not a price
+
+
+def _fin(ticker, sub):
+    return {"ticker": ticker, "sector": "Financials", "sub_sector": sub}
+
+
+def test_assign_subgroups_reports_what_it_cannot_place():
+    rows = [_fin("A", "Diversified Banks"), _fin("B", "Diversified Banks"), _fin("C", "Diversified Banks"),
+            _fin("D", "Regional Banks"), _fin("E", "Multi-Sector Holdings"),
+            {"ticker": "Z", "sector": "Energy", "sub_sector": "Oil & Gas"}]
+    specs = [{"sector": "Financials", "key": "banks", "label": "Banks", "sub_industries": ["Diversified Banks"]},
+             {"sector": "Financials", "key": "regional", "label": "Regional", "sub_industries": ["Regional Banks"]},
+             {"sector": "Financials", "key": "ins", "label": "Insurance", "sub_industries": ["Reinsurance"]}]
+    out = V.assign_subgroups(rows, specs, min_members=3)
+    assert [g["key"] for g in out["groups"]] == ["banks"] and out["groups"][0]["tickers"] == ["A", "B", "C"]
+    assert out["groups"][0]["parent"] == "Financials"
+    assert out["too_small"] == [{"key": "regional", "label": "Regional", "companies": 1}]
+    assert out["unmatched"] == ["Financials: Reinsurance"]            # configured, but no company carries it
+    assert out["unassigned"] == [{"sector": "Financials", "sub_industry": "Multi-Sector Holdings", "tickers": ["E"]}]
+    # Energy is not divided, so its sub-industry is not an unassigned remainder.
+
+
+def test_a_sub_industry_in_two_groups_is_a_config_error():
+    specs = [{"sector": "Financials", "key": "a", "label": "A", "sub_industries": ["Regional Banks"]},
+             {"sector": "Financials", "key": "b", "label": "B", "sub_industries": ["Regional Banks"]}]
+    with pytest.raises(ValueError, match="both"):
+        V.assign_subgroups([], specs, min_members=1)
+
+
+def test_the_shipped_subgroups_are_well_formed():
+    from market_recap.config import load_config
+    settings = load_config()["valuation"]
+    specs = settings["subgroups"]
+    assert settings["subgroup_min_members"] >= 1
+    assert len({s["key"] for s in specs}) == len(specs)
+    assert all(s["sub_industries"] and s["label"] for s in specs)
+    V.assign_subgroups([], specs, settings["subgroup_min_members"])   # raises on a sub-industry claimed twice
+
+
+def test_aggregates_draw_each_financials_group_beside_the_sector():
+    import types
+    from market_recap.config import load_config
+    days = pd.bdate_range("2026-01-01", periods=V.MIN_HISTORY_SESSIONS + 60)
+    subs = {"B1": "Diversified Banks", "B2": "Diversified Banks", "B3": "Diversified Banks",
+            "I1": "Investment Banking & Brokerage", "I2": "Investment Banking & Brokerage", "I3": "Investment Banking & Brokerage",
+            "BRK": "Multi-Sector Holdings"}
+    rows = [{"ticker": t, "sector": "Financials", "sub_sector": sub, "indices": ["SPX"], "market_cap": 100.0, "price": 10.0,
+             "eps_ntm": 1.1, "eps_fy0": 1.0, "eps_fy1": 1.2, "eps_fy_prev": 0.8} for t, sub in subs.items()]
+    caps = {t: pd.Series(100.0, index=days) for t in subs}
+    earn = {V.OPERATING: {t: pd.Series(10.0 if t.startswith("B") else 5.0, index=days) for t in subs},
+            V.REPORTED: {t: pd.Series(5.0, index=days) for t in subs}}
+    ctx = types.SimpleNamespace(indices=[types.SimpleNamespace(key="SPX", label="S&P 500")],
+                                primary=types.SimpleNamespace(key="SPX"), config=load_config())
+    out = panel._aggregates(ctx, rows, caps, earn, {})
+    by_key = {s["key"]: s for s in out["series"]}
+    assert by_key["Financials"]["kind"] == "sector" and by_key["Financials"]["companies"] == 7
+    banks, brokers = by_key["fin-diversified-banks"], by_key["fin-investment-banks"]
+    assert banks["kind"] == "subsector" and banks["parent"] == "Financials" and banks["companies"] == 3
+    assert banks["stats"]["current"] == pytest.approx(10.0) and brokers["stats"]["current"] == pytest.approx(20.0)
+    assert "fin-regional-banks" not in by_key                              # no regional bank in the data
+    report = out["subgroups"]
+    assert any("Regional Banks" in name for name in report["unmatched"])   # configured, carried by no company
+    assert report["unassigned"] == [{"sector": "Financials", "sub_industry": "Multi-Sector Holdings", "tickers": ["BRK"]}]

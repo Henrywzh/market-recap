@@ -343,6 +343,17 @@ with its 5- and 10-year averages, comes from FactSet: the blog's articles in
 season and the weekly Earnings Insight PDF every Friday (its text, via
 pdftotext; the sector page is an image and is not read).
 
+**Financials, divided.** A sector can be opened beside its parts: the P/E
+chart's SECTORS / FINANCIALS switch compares Financials with diversified
+banks, regional banks, investment banks and brokers, asset managers, insurers,
+payments and consumer finance, and exchanges. The split is `[[valuation.subgroups]]`
+in `config/dashboard.toml` -- a GICS sub-industry (the S&P 500 labels on
+Wikipedia) belongs to one group, never a ticker -- and each group is
+aggregated exactly as a sector is, with a path and a grid of its own. What the
+config cannot place is printed under the chart, not guessed: a configured
+sub-industry no company carries (a renamed label), a group under
+`subgroup_min_members`, and sub-industries in no group.
+
 **Valuation path and a forward P/E's missing past.** MARKET → SECTORS adds,
 for each index and sector, its multiple at four points on the same analyst
 basis -- last fiscal year's actual, this fiscal year, the next twelve months

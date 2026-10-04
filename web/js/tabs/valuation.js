@@ -18,6 +18,8 @@ const AXIS_PERCENTILES = [0.05, 0.95];
 const ALL = '';
 // The P/E history's earnings bases, as the switch names them.
 const BASIS_NAMES = { operating: 'OPERATING', ex_gains: 'EX GAINS', reported: 'REPORTED' };
+// The scope switch's first option: the index and every sector, no sub-sector group.
+const SECTORS_SCOPE = 'SECTORS';
 // The valuation path's stages, in order (compute/valuation.py PATH_STAGES).
 const PATH_LABELS = { fy_prev: 'LAST FISCAL YEAR (actual)', fy0: 'THIS FISCAL YEAR', ntm: 'NEXT 12 MONTHS', fy1: 'NEXT FISCAL YEAR' };
 
@@ -265,10 +267,30 @@ export function renderAggregates(root, data) {
       + 'Both are trailing, not FactSet\'s forward operating P/E (on EARNINGS), so they run higher and move more around recessions. Percentile and band are over the last ten years of sessions, each on its own basis.',
     'VALUATION PATH: total market cap over total consensus EPS at last fiscal year (the actual, as Yahoo carries it), this fiscal year, the next twelve months and next fiscal year -- all on the analysts\' basis, so a step is earnings growth, not a change of accounting, and the same companies count at every stage. A group is drawn only when they hold at least '
       + `${num(agg.min_coverage * 100, 0)}% of its market cap. Each company's fiscal year is its own, so a sector mixes year-ends. These multiples are not comparable with the trailing P/E above (filed EPS, a different basis), and a sector's forward P/E has no history of its own until consensus has been recorded for a year.`,
+    'SUB-SECTOR GROUPS: a sector the config divides (Financials) can be opened beside its parts -- diversified banks, regional banks, investment banks and brokers, asset managers, insurers, payments and consumer finance, exchanges -- each a total of its own members\' market cap over their earnings, on the same bases and with the same member and weight caveats as a sector. A company sits in one group by its current GICS sub-industry (the S&P 500 labels on Wikipedia); the groups need not add up to the sector.',
     'WHAT YOU WOULD NEED TO BELIEVE: price = multiple x EPS, so a forward P/E moved by some turns with next-twelve-months EPS revised by some percent implies the price change shown. The axes are set in config/dashboard.toml. It is arithmetic on today\'s multiple; neither the multiple nor the revision is forecast.',
   ]));
   root.append(aggregateSection(data));
+  root.append(...subgroupNotes(agg.subgroups));
   return true;
+}
+
+// What the config's split of a sector could not place, said where the groups
+// are drawn: a group that vanished because of a renamed label must not vanish quietly.
+function subgroupNotes(report) {
+  if (!report) return [];
+  const notes = [];
+  if (report.unmatched?.length) {
+    notes.push(notice(`Configured sub-industries that no company carries (check the GICS spelling in config): ${report.unmatched.join(' · ')}.`));
+  }
+  if (report.too_small?.length) {
+    notes.push(notice(`Groups under ${report.min_members} companies, not drawn: ${report.too_small.map((g) => `${g.label} (${g.companies})`).join(' · ')}.`));
+  }
+  if (report.unassigned?.length) {
+    notes.push(el('div', { class: 'dim', text: 'SUB-INDUSTRIES IN NO GROUP (still in their sector\'s total): '
+      + report.unassigned.map((u) => `${u.sector} · ${u.sub_industry} (${u.tickers.join(', ')})`).join(' · ') }));
+  }
+  return notes;
 }
 
 function aggregateSection(data) {
@@ -276,6 +298,12 @@ function aggregateSection(data) {
   if (!agg || !agg.series?.length) return null;
   const primary = agg.series.find((s) => s.kind === 'index') || agg.series[0];
   let selected = primary.key;
+  // The bars compare the index and the sectors; a divided sector (Financials)
+  // can be opened to compare it with its own parts instead.
+  const parents = [...new Set(agg.series.filter((s) => s.kind === 'subsector').map((s) => s.parent))];
+  let scope = SECTORS_SCOPE;
+  const inScope = (s) => (scope === SECTORS_SCOPE ? s.kind !== 'subsector'
+    : (s.kind === 'sector' && s.label === scope) || (s.kind === 'subsector' && s.parent === scope));
   const barsNode = el('div', { class: 'chart tall' });
   const lineNode = el('div', { class: 'chart tall' });
   const lineTitle = el('span', { class: 'dim' });
@@ -302,7 +330,8 @@ function aggregateSection(data) {
     return { name: basis === 'REPORTED' ? 'operating' : 'reported', pe: s[`pe${suffix}`] };
   };
   const draw = () => {
-    const shown = agg.series.map(view);
+    const shown = agg.series.map(view).filter(inScope);
+    if (!shown.some((x) => x.key === selected)) selected = (shown.find((x) => x.kind === 'index') || shown[0]).key;
     const s = shown.find((x) => x.key === selected);
     percentileChart(barsNode, shown, selected, (key) => { selected = key; draw(); });
     lineTitle.textContent = `${s.label} · ${s.companies} companies · weekly · ${basis.toLowerCase()} earnings`;
@@ -324,9 +353,10 @@ function aggregateSection(data) {
     drawScenario(s, agg.scenario, scenarioNode);
   };
   const basisSwitch = bases.length > 1 ? periodSwitch(bases, basis, (b) => { basis = b; draw(); }) : null;
+  const scopeSwitch = parents.length ? periodSwitch([SECTORS_SCOPE, ...parents], scope, (v) => { scope = v; draw(); }) : null;
   const section = el('div', { class: 'grid two val-agg' }, [
     card('P/E VS OWN 10 YEARS · INDICES & SECTORS', el('span', { class: 'tag-row' }, [
-      el('span', { class: 'dim', text: 'percentile · red ≥ 80th · green ≤ 20th · click to chart' }), basisSwitch]), [barsNode]),
+      el('span', { class: 'dim', text: 'percentile · red ≥ 80th · green ≤ 20th · click to chart' }), scopeSwitch, basisSwitch]), [barsNode]),
     card('P/E · 10 YEARS', lineTitle, [stats, lineNode]),
   ]);
   requestAnimationFrame(draw);

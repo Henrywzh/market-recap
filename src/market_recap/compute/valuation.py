@@ -540,6 +540,48 @@ def forward_pe(price: float | None, ntm: dict | None) -> float | None:
     return price / ntm["eps"]
 
 
+# --- Sub-sector groups ------------------------------------------------------------
+def assign_subgroups(rows: list[dict], specs: list[dict], min_members: int) -> dict:
+    """Split sectors into the groups the config names, by GICS sub-industry.
+
+    ``rows`` carry ``ticker``, ``sector`` and ``sub_sector``; each spec has a
+    ``key``, a ``label``, the ``sector`` it divides and the ``sub_industries``
+    it takes. The config is the only place a sub-industry is assigned, so what
+    the split cannot place is reported instead of guessed:
+
+    - ``unmatched``: a configured sub-industry no row carries (a renamed GICS
+      label would otherwise empty a group without a word);
+    - ``too_small``: a group with some companies, but fewer than ``min_members``;
+    - ``unassigned``: sub-industries of a divided sector that no group claims.
+
+    A sub-industry named by two groups is a config error and raises.
+    """
+    claimed: dict[tuple[str, str], str] = {}
+    for spec in specs:
+        for name in spec["sub_industries"]:
+            other = claimed.setdefault((spec["sector"], name), spec["key"])
+            if other != spec["key"]:
+                raise ValueError(f"sub-industry {name!r} of {spec['sector']} is in both {other!r} and {spec['key']!r}")
+    present: dict[tuple[str, str], list[str]] = {}
+    for row in rows:
+        present.setdefault((row["sector"], row["sub_sector"]), []).append(row["ticker"])
+    groups, unmatched, too_small = [], [], []
+    for spec in specs:
+        tickers = sorted(t for name in spec["sub_industries"] for t in present.get((spec["sector"], name), []))
+        unmatched += [f"{spec['sector']}: {name}" for name in spec["sub_industries"] if (spec["sector"], name) not in present]
+        if not tickers:
+            continue                                                  # ``unmatched`` already says why
+        if len(tickers) < min_members:
+            too_small.append({"key": spec["key"], "label": spec["label"], "companies": len(tickers)})
+            continue
+        groups.append({"key": spec["key"], "label": spec["label"], "parent": spec["sector"], "tickers": tickers})
+    divided = {spec["sector"] for spec in specs}
+    unassigned = [{"sector": sector, "sub_industry": str(name), "tickers": sorted(tickers)}
+                  for (sector, name), tickers in sorted(present.items(), key=lambda kv: (kv[0][0], str(kv[0][1])))
+                  if sector in divided and (sector, name) not in claimed]
+    return {"groups": groups, "unmatched": unmatched, "too_small": too_small, "unassigned": unassigned}
+
+
 # --- Valuation path ---------------------------------------------------------------
 # One group's multiple at four points on the same analyst-consensus basis: the
 # fiscal year just reported (Yahoo's ``yearAgoEps``, the actual), this fiscal

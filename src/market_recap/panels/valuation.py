@@ -172,6 +172,7 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         "ticker": symbol,
         "name": meta.get("name"),
         "sector": meta.get("sector"),
+        "sub_sector": meta.get("sub_sector"),
         "indices": indices,
         "price": clean_float(price, 2),
         "market_cap": clean_float(market_cap, 0),
@@ -255,17 +256,27 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
     scenario = ctx.config["valuation"]["scenario"]
     cap_frame = pd.DataFrame(caps)
     frames = {key: pd.DataFrame(values) for key, values in earnings.items()}
-    groups = [(spec.key, spec.label, "index", [r["ticker"] for r in rows if spec.key in r["indices"]])
+    groups = [(spec.key, spec.label, "index", None, [r["ticker"] for r in rows if spec.key in r["indices"]])
               for spec in ctx.indices]
     primary = [r for r in rows if ctx.primary.key in r["indices"] and r["sector"]]
     for sector in sorted({r["sector"] for r in primary}):
-        groups.append((sector, sector, "sector", [r["ticker"] for r in primary if r["sector"] == sector]))
+        groups.append((sector, sector, "sector", None, [r["ticker"] for r in primary if r["sector"] == sector]))
+    # A divided sector's parts, by the config's sub-industry assignment. Companies
+    # outside the price/earnings frames drop out below, so the parts can sum to
+    # less than the sector; what no group claims is reported on the artifact.
+    settings = ctx.config["valuation"]
+    split = V.assign_subgroups([r for r in primary if r.get("sub_sector")], settings.get("subgroups") or [],
+                               settings["subgroup_min_members"])
+    for part in split["groups"]:
+        groups.append((part["key"], part["label"], "subsector", part["parent"], part["tickers"]))
     dates, series = None, []
-    for key, label, kind, tickers in groups:
+    for key, label, kind, parent, tickers in groups:
         columns = [t for t in tickers if t in cap_frame.columns]
         if not columns:
             continue
         entry = {"key": key, "label": label, "kind": kind, "companies": len(columns)}
+        if parent:
+            entry["parent"] = parent
         members = [r for r in rows if r["ticker"] in columns and r.get("market_cap")]
         forward = V.aggregate_forward({r["ticker"]: r["market_cap"] for r in members},
                                       {r["ticker"]: r["eps_ntm"] * r["market_cap"] / r["price"]
@@ -302,6 +313,8 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
         "window_sessions": V.HISTORY_SESSIONS,
         "min_coverage": V.AGGREGATE_MIN_COVERAGE,
         "scenario": {"multiple_turns": scenario["multiple_turns"], "eps_change_pct": scenario["eps_change_pct"]},
+        "subgroups": {"min_members": settings["subgroup_min_members"], "unmatched": split["unmatched"],
+                      "too_small": split["too_small"], "unassigned": split["unassigned"]},
     }
 
 
@@ -344,7 +357,8 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     meta, indices = {}, {}
     for key, frame in ctx.members.items():
         for row in frame.drop_duplicates("yahoo_symbol").itertuples():
-            meta.setdefault(row.yahoo_symbol, {"name": str(row.name).title(), "sector": row.sector})
+            meta.setdefault(row.yahoo_symbol, {"name": str(row.name).title(), "sector": row.sector,
+                                               "sub_sector": getattr(row, "sub_sector", None)})
             indices.setdefault(row.yahoo_symbol, []).append(key)
 
     if use_cache:
