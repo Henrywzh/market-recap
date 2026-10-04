@@ -5,6 +5,7 @@
 # no deploy, no cache save.
 #
 # Second run, 2026-10-04: after the profiled hotspots were fixed (compare panel_seconds with the first).
+# Third run: with the tangible-book fixes and MOTIE read three at a time.
 #
 # Read panel_seconds in manifest.json, profile/<panel>.txt for the hottest
 # functions, refresh.log for what validation said, and valuation.json for the

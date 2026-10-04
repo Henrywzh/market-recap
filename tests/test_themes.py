@@ -413,3 +413,41 @@ def test_release_study_scores_on_forecasts_when_they_cover_most_releases():
     assert out["recent"][0]["vs_forecast"] == beats[-1]
     sparse = forecasts.iloc[:5]
     assert T.release_study(releases, excess, headline="pct", forecasts=sparse)["basis"] == "trend"
+
+
+# --- MOTIE's pages are read a few at a time, with the same answer as one at a time ---------
+def _list_html(*releases):
+    return "".join(f"<a onclick=\"article.view('{ident}')\">{title}</a>" for title, ident in releases)
+
+
+def test_motie_fetch_keeps_the_order_and_failures_of_the_serial_reader(monkeypatch):
+    import time
+    from market_recap.sources import motie
+    pages = {("수출입 동향", 1): _list_html(("2026년 8월 수출입 동향", "108"), ("2026년 7월 수출입 동향", "107")),
+             ("수출입 동향", 2): _list_html(("2026년 6월 수출입 동향", "106")),
+             ("수출입동향", 1): _list_html(("2026년 8월 수출입 동향", "999"), ("2026년 5월 수출입 동향", "105"))}
+
+    def page(keyword, number, use_cache):
+        time.sleep(0.02 if (keyword, number) != ("수출입 동향", 1) else 0.08)      # the first page is the slowest
+        if (keyword, number) == ("수출입동향", 3):
+            return None, "list '수출입동향' page 3: empty reply"
+        return pages.get((keyword, number), ""), None
+    monkeypatch.setattr(motie, "_list_page", page)
+
+    def article(ident, use_cache):
+        if ident == "106":
+            raise RuntimeError("no PDF attached")
+        return {"id": ident, "url": f"u/{ident}", "total_bn": 60.0, **({"semis_bn": 19.0} if ident != "105" else {})}
+    monkeypatch.setattr(motie, "_article", article)
+    rows, failed = motie.fetch(__import__("datetime").date(2026, 9, 1), months=13)
+    assert [r["month"] for r in rows] == ["2026-07", "2026-08"]               # oldest first
+    assert [r["id"] for r in rows] == ["107", "108"]                          # the first list to name a month decides it (108, not 999)
+    assert failed == ["list '수출입동향' page 3: empty reply", "2026-05: semiconductor line not found",
+                      "2026-06: no PDF attached"]
+
+
+def test_motie_fetch_with_no_readable_list_page_still_says_so(monkeypatch):
+    from market_recap.sources import motie
+    monkeypatch.setattr(motie, "_list_page", lambda keyword, number, use_cache: (None, f"{keyword} {number}: down"))
+    with pytest.raises(RuntimeError, match="no list page could be read"):
+        motie.fetch(__import__("datetime").date(2026, 9, 1))

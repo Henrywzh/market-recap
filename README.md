@@ -227,6 +227,22 @@ exported/imported. The cache key
 includes `requirements.lock`'s hash: files written by other library versions
 are not reused.
 
+### Where the time goes
+
+The manifest's `panel_seconds` and the build log say how long each panel took, and
+`MARKET_RECAP_PROFILE_DIR=profile make refresh` writes each panel's hottest
+functions to `profile/<panel>.txt`. `.github/workflows/profile-build.yml` runs the
+nightly job's refresh on a branch, with the same cache and secrets and nothing
+published, and uploads both: measure there before optimising, because the cost
+was nowhere a reading of the code suggested. The first profile (1,823 s with
+cProfile) found EVENTS alone at 1,111 s -- the same earnings releases parsed
+again every build and Finnhub's rate limit waited out after the work instead of
+beside it -- and Treasury's curve downloaded eight times. After fixing those and
+a handful of smaller ones (the split-factor lookup, the SEC filer cache keyed two
+ways, MONITOR re-normalising every peer's prices) the same profile took 990 s.
+What is left is mostly waiting: Finnhub's 400 requests a build at 60 a minute
+(`news_budget`, `event_news_budget`) and the Korean ministry's slow server.
+
 ### Deploying
 
 ```bash
