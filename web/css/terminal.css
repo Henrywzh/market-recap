@@ -934,3 +934,6 @@ table.data td.chain-who { min-width: 220px; white-space: normal; }
 table.chain-links td { vertical-align: top; }
 table.data.text-cols td.wrap-cell.dim { min-width: 160px; }
 table.data td.chain-quote { min-width: 280px; }
+/* The graph keeps its columns legible: below this width it scrolls in its card. */
+.chain-graph-scroll { overflow-x: auto; }
+.chain-graph { min-width: 1180px; width: 100%; }

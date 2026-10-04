@@ -5,6 +5,7 @@
 
 import { el, card, num, pct, tag, table, dirClass, sectionTitle, gap, metaRow, periodSwitch, DASH } from '../fmt.js';
 import { chainCard, linksOf, nodeHref, surpriseText, ROLE_LABEL } from '../chain-card.js';
+import { drawGraph, attachClicks, graphHeight } from '../chain-graph.js';
 
 const PERIODS = { ALL: 'all', 'SINCE 2023': 'recent' };
 const CATEGORY_ORDER = ['from_customer', 'from_supplier', 'competitor', 'partner', 'unlinked'];
@@ -60,20 +61,52 @@ function chip(node, state) {
   ]);
 }
 
-function board(data, state) {
+// The view the reader last chose, kept in this browser only.
+const MODE_KEY = 'chain-view';
+const WIDE_PX = 900;
+
+function savedMode() {
+  try {
+    const mode = localStorage.getItem(MODE_KEY);
+    if (mode === 'BOARD' || mode === 'GRAPH') return mode;
+  } catch { /* storage refused: fall through to the default */ }
+  return window.innerWidth >= WIDE_PX ? 'GRAPH' : 'BOARD';
+}
+
+function saveMode(mode) {
+  try { localStorage.setItem(MODE_KEY, mode); } catch { /* not kept; fine */ }
+}
+
+function boardColumns(data, state) {
   const byLayer = new Map((data.layers || []).map((l) => [l.key, []]));
   (data.nodes || []).forEach((n) => byLayer.get(n.layer)?.push(n));
-  const columns = (data.layers || []).map((l) => el('div', { class: 'chain-col' }, [
+  return el('div', { class: 'chain-board' }, (data.layers || []).map((l) => el('div', { class: 'chain-col' }, [
     el('div', { class: 'chain-col-head', text: l.label }),
     ...(byLayer.get(l.key) || []).map((n) => chip(n, state)),
-  ]));
+  ])));
+}
+
+function graphView(data, state) {
+  const canvas = el('div', { class: 'chain-graph', style: `height:${graphHeight(data)}px` });
+  requestAnimationFrame(() => {
+    state.chart = drawGraph(canvas, data, state);
+    attachClicks(state.chart, state);
+  });
+  return el('div', { class: 'chain-graph-scroll' }, [canvas]);
+}
+
+function board(data, state) {
   const legend = el('div', { class: 'tag-row chain-legend' }, [
     el('span', { class: 'stat-label', text: 'THIS SEASON' }),
     tag('BEAT', 'up'), tag('MISSED', 'down'), tag('NOT YET', 'dim'),
     el('span', { class: 'stat-label', text: state.selected ? `LINKS OF ${state.selected}` : 'PICK A COMPANY' }),
     tag('SUPPLIER', 'info'), tag('CUSTOMER', 'up'), tag('COMPETITOR', 'warn'), tag('PARTNER', 'dim'),
   ]);
-  return card('THE CHAIN', null, [legend, el('div', { class: 'chain-board' }, columns)]);
+  const note = state.mode === 'GRAPH' ? el('div', { class: 'field-note', text: state.selected
+    ? 'Every link of the company picked: line width is how firmly one side\'s reports have moved the other (|t|), dashed below 2; arrows follow the goods. Hover a line for the numbers and the filing; click a company to move to it, the same company again to clear.'
+    : 'With nothing picked, only the backbone: links where one side\'s reports have moved the other with t ≥ 3. Click a company for all its links.' }) : null;
+  const toggle = periodSwitch(['GRAPH', 'BOARD'], state.mode, (mode) => { state.mode = mode; saveMode(mode); state.redraw(); });
+  return card('THE CHAIN', toggle, [legend, note, state.mode === 'GRAPH' ? graphView(data, state) : boardColumns(data, state)]);
 }
 
 function studyCell(value, digits, unit = '') {
@@ -230,13 +263,17 @@ export default async function renderChain(root, data, _manifest, ctx = {}) {
   root.append(seasonStrip(data));
   const wanted = ctx.arg && data.nodes.some((n) => n.key === ctx.arg) ? ctx.arg : null;
   const host = el('div', {});
-  const state = { selected: wanted, roles: new Map() };
+  const state = { selected: wanted, roles: new Map(), mode: savedMode() };
   state.pick = (key) => {
     state.selected = state.selected === key ? null : key;
     ctx.setArg?.(state.selected);
     draw();
   };
   const draw = () => {
+    state.redraw = draw;
+    // The last graph is dropped before its node leaves the page.
+    if (state.chart && !state.chart.isDisposed()) state.chart.dispose();
+    state.chart = null;
     state.roles = new Map(state.selected ? linksOf(data, state.selected).map((l) => [l.key, l.role]) : []);
     host.replaceChildren(board(data, state));
     const detail = state.selected ? chainCard(data, state.selected) : null;
