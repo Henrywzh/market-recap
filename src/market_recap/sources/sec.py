@@ -762,6 +762,7 @@ def eps_history(facts: dict) -> list[dict]:
     eps = _vintages(facts, item, days)
     core = {key: _vintages(facts, ITEMS_BY_KEY[key], days) for key in CORE_KEYS + ("shares",)}
     core |= {item.key: _vintages(facts, item, days) for item in CORE_EXTRA}
+    book = {item.key: _vintages(facts, item, days) for item in BOOK_BALANCE}
     history = []
     for end in sorted(first_filed):
         filed = first_filed[end]
@@ -772,6 +773,8 @@ def eps_history(facts: dict) -> list[dict]:
                 "filed": filed,
                 "parts": [(entry["value"], entry["filed"], sign) for entry, sign in parts],
                 "core": core_inputs({key: vintage[filed] for key, vintage in core.items()}, end),
+                # The balance sheet at quarter end as filed that day, for tangible book per share.
+                "book": {key: _instant_near(vintage[filed], end) for key, vintage in book.items()},
             })
     return history
 
@@ -804,6 +807,9 @@ BOOK_ITEMS: tuple[LineItem, ...] = (
         "PreferredStockValue", "PreferredStockIncludingAdditionalPaidInCapital"), "balance"),
     LineItem("income_to_common", "Net income to common holders", ("NetIncomeLossAvailableToCommonStockholdersBasic",), "income"),
 )
+# The balance-sheet lines of tangible book, read as they stood the day each
+# quarter was filed (``eps_history``'s ``book``).
+BOOK_BALANCE: tuple[LineItem, ...] = (ITEMS_BY_KEY["equity"],) + tuple(i for i in BOOK_ITEMS if i.instant)
 # A share count is an average over a period; anything shorter is a stub.
 MIN_SHARE_PERIOD_DAYS = 80
 

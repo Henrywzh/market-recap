@@ -189,7 +189,7 @@ const SECTOR_SHORT = {
 
 // Where each index and sector P/E sits in its own ten years, most expensive
 // on top; a click draws that group's decade beside it.
-function percentileChart(node, series, selected, onPick) {
+function percentileChart(node, series, selected, onPick, measure = 'P/E') {
   const shown = series.filter((s) => s.stats && s.stats.percentile !== null)
     .sort((a, b) => a.stats.percentile - b.stats.percentile);
   const chart = render(node, (option, p) => ({
@@ -201,7 +201,7 @@ function percentileChart(node, series, selected, onPick) {
       axisPointer: undefined,
       formatter: (q) => {
         const s = shown[q.dataIndex];
-        return `<b>${s.label}</b> · ${s.companies} companies<br>P/E ${num(s.stats.current, 1)}x · 10Y median ${num(s.stats.median, 1)}x`
+        return `<b>${s.label}</b> · ${s.companies} companies<br>${measure} ${num(s.stats.current, 1)}x · 10Y median ${num(s.stats.median, 1)}x`
           + `<br>${num(s.stats.percentile, 0)}th percentile of its own ten years`;
       },
     },
@@ -270,7 +270,7 @@ export function renderAggregates(root, data) {
     'VALUATION PATH: total market cap over total consensus EPS at last fiscal year (the actual, as Yahoo carries it), this fiscal year, the next twelve months and next fiscal year -- all on the analysts\' basis, so a step is earnings growth, not a change of accounting, and the same companies count at every stage. A group is drawn only when they hold at least '
       + `${num(agg.min_coverage * 100, 0)}% of its market cap. Each company's fiscal year is its own, so a sector mixes year-ends. These multiples are not comparable with the trailing P/E above (filed EPS, a different basis), and a sector's forward P/E has no history of its own until consensus has been recorded for a year.`,
     'SUB-SECTOR GROUPS: a sector the config divides (Financials) can be opened beside its parts -- diversified banks, regional banks, investment banks and brokers, asset managers, insurers, payments and consumer finance, exchanges -- each a total of its own members\' market cap over their earnings, on the same bases and with the same member and weight caveats as a sector. A company sits in one group by its current GICS sub-industry (the S&P 500 labels on Wikipedia); the groups need not add up to the sector.',
-    'P / TANGIBLE BOOK and ROTCE: market cap over total common tangible book (shareholders\' equity less preferred stock, goodwill and other intangibles, from the latest 10-Q), and total TTM income to common over total average tangible book. Latest filings only -- there is no ten-year history of either yet. A company that tags neither goodwill nor intangibles has no tangible book, one that tags no preferred stock is taken as having none (said on its row), and deferred tax on intangibles and mortgage-servicing rights are not adjusted, so a bank\'s own reported tangible book per share can differ. A company counts only with a positive tangible book; the figure is drawn when those companies hold the minimum share of the group\'s cap, which most non-financial groups do not. Beside P / TBV on the table, the scatter can set it against ROTCE: what a bank earns on tangible equity is what its multiple should follow.',
+    'P / TANGIBLE BOOK and ROTCE: market cap over total common tangible book (shareholders\' equity less preferred stock, goodwill and other intangibles, from the latest 10-Q), and total TTM income to common over total average tangible book. The P/TBV switch draws its ten years: the same total over time, each quarter\'s tangible book per share only from the balance sheet filed by that day (on today\'s share basis, over the quarter\'s diluted count, which for a company that buys back stock runs a little above the period-end count), weights and members today\'s, as for P/E. ROTCE has no history yet. A company that tags neither goodwill nor intangibles has no tangible book, one that tags no preferred stock is taken as having none (said on its row), and deferred tax on intangibles and mortgage-servicing rights are not adjusted, so a bank\'s own reported tangible book per share can differ. A company counts only with a positive tangible book; the figure is drawn when those companies hold the minimum share of the group\'s cap, which most non-financial groups do not. Beside P / TBV on the table, the scatter can set it against ROTCE: what a bank earns on tangible equity is what its multiple should follow.',
     'WHAT YOU WOULD NEED TO BELIEVE: price = multiple x EPS, so a forward P/E moved by some turns with next-twelve-months EPS revised by some percent implies the price change shown. The axes are set in config/dashboard.toml. It is arithmetic on today\'s multiple; neither the multiple nor the revision is forecast.',
   ]));
   root.append(aggregateSection(data));
@@ -323,12 +323,17 @@ function aggregateSection(data) {
   // Older artifacts carry only the reported series, under the plain keys.
   const bases = agg.alternate ? [BASIS_NAMES[agg.basis], BASIS_NAMES[agg.alternate]] : ['REPORTED'];
   let basis = bases[0];
+  // P / tangible book has its own ten years where the build had the balance sheets for it.
+  const MEASURES = ['P/E', 'P/TBV'];
+  const hasBook = agg.series.some((s) => s.stats_ptbv);
+  let measure = MEASURES[0];
   const view = (s) => {
+    if (measure === 'P/TBV') return { ...s, stats: s.stats_ptbv, pe: s.ptbv, coverage: s.coverage_ptbv };
     const suffix = basis === 'REPORTED' && agg.alternate ? `_${agg.alternate}` : '';
     return { ...s, stats: s[`stats${suffix}`], pe: s[`pe${suffix}`], coverage: s[`coverage${suffix}`] };
   };
   const other = (s) => {
-    if (!agg.alternate) return null;
+    if (!agg.alternate || measure === 'P/TBV') return null;
     const suffix = basis === 'REPORTED' ? '' : `_${agg.alternate}`;
     return { name: basis === 'REPORTED' ? 'operating' : 'reported', pe: s[`pe${suffix}`] };
   };
@@ -336,19 +341,26 @@ function aggregateSection(data) {
     const shown = agg.series.map(view).filter(inScope);
     if (!shown.some((x) => x.key === selected)) selected = (shown.find((x) => x.kind === 'index') || shown[0]).key;
     const s = shown.find((x) => x.key === selected);
-    percentileChart(barsNode, shown, selected, (key) => { selected = key; draw(); });
-    lineTitle.textContent = `${s.label} · ${s.companies} companies · weekly · ${basis.toLowerCase()} earnings`;
+    percentileChart(barsNode, shown, selected, (key) => { selected = key; draw(); }, measure);
+    const book = measure === 'P/TBV';
+    barsTitle.textContent = `${measure} VS OWN 10 YEARS · INDICES & SECTORS`;
+    lineCardTitle.textContent = `${measure} · 10 YEARS`;
+    if (basisSwitch) basisSwitch.style.display = book ? 'none' : '';
+    lineTitle.textContent = book
+      ? `${s.label} · ${s.companies} companies · weekly · common tangible book as filed`
+      : `${s.label} · ${s.companies} companies · weekly · ${basis.toLowerCase()} earnings`;
     if (s.stats) {
       const cap = s.stats.max > s.stats.p90 * AGGREGATE_AXIS_CAP ? s.stats.p90 * AGGREGATE_AXIS_CAP : null;
-      historyChart(lineNode, { dates: agg.dates, pe: s.pe, stats: s.stats, name: basis.toLowerCase() }, { cap, compare: other(agg.series.find((x) => x.key === selected)) });
+      historyChart(lineNode, { dates: agg.dates, pe: s.pe, stats: s.stats, name: book ? 'p/tbv' : basis.toLowerCase() }, { cap, compare: other(agg.series.find((x) => x.key === selected)) });
     }
     const st = s.stats || {};
     stats.replaceChildren(
-      stat(`P/E (TTM, ${basis.toLowerCase()})`, present(st.current) ? `${num(st.current, 1)}x` : DASH, s.label),
+      stat(book ? 'P / TANGIBLE BOOK (as filed)' : `P/E (TTM, ${basis.toLowerCase()})`, present(st.current) ? `${num(st.current, 1)}x` : DASH, s.label),
       stat('OWN 10Y PERCENTILE', present(st.percentile) ? `${num(st.percentile, 0)}th` : DASH, `range ${num(st.min, 1)}x – ${num(st.max, 1)}x`,
         st.percentile >= 80 ? 'down' : st.percentile <= 20 ? 'up' : ''),
       stat('VS 10Y MEDIAN', present(st.vs_median) ? `${st.vs_median > 0 ? '+' : ''}${num(st.vs_median, 0)}%` : DASH, `median ${num(st.median, 1)}x · IQR ${num(st.p25, 1)}–${num(st.p75, 1)}x`),
-      stat('COVERAGE', present(s.coverage) ? `${num(s.coverage * 100, 0)}%` : DASH, 'of its market cap with filed EPS'),
+      stat('COVERAGE', present(s.coverage) ? `${num(s.coverage * 100, 0)}%` : DASH,
+        book ? 'of its market cap with a positive tangible book' : 'of its market cap with filed EPS'),
       stat('FORWARD P/E (NTM)', present(s.forward_now?.pe) ? `${num(s.forward_now.pe, 1)}x` : DASH,
         s.forward_now ? `consensus EPS, ${num(s.forward_now.coverage * 100, 0)}% of cap · ${(s.forward_history?.dates || []).length} recorded days` : 'no consensus'),
       stat('P / TANGIBLE BOOK', present(s.book?.ptbv) ? `${num(s.book.ptbv, 2)}x` : DASH,
@@ -361,11 +373,13 @@ function aggregateSection(data) {
   };
   const basisSwitch = bases.length > 1 ? periodSwitch(bases, basis, (b) => { basis = b; draw(); }) : null;
   const scopeSwitch = parents.length ? periodSwitch([SECTORS_SCOPE, ...parents], scope, (v) => { scope = v; draw(); }) : null;
+  const measureSwitch = hasBook ? periodSwitch(MEASURES, measure, (m) => { measure = m; draw(); }) : null;
   const section = el('div', { class: 'grid two val-agg' }, [
     card('P/E VS OWN 10 YEARS · INDICES & SECTORS', el('span', { class: 'tag-row' }, [
-      el('span', { class: 'dim', text: 'percentile · red ≥ 80th · green ≤ 20th · click to chart' }), scopeSwitch, basisSwitch]), [barsNode]),
+      el('span', { class: 'dim', text: 'percentile · red ≥ 80th · green ≤ 20th · click to chart' }), measureSwitch, scopeSwitch, basisSwitch]), [barsNode]),
     card('P/E · 10 YEARS', lineTitle, [stats, lineNode]),
   ]);
+  const [barsTitle, lineCardTitle] = section.querySelectorAll('.card-title');
   requestAnimationFrame(draw);
   const forward = el('div', { class: 'grid two val-agg' }, [
     card('VALUATION PATH · ANALYST CONSENSUS', pathNote, [pathNode]),

@@ -362,7 +362,11 @@ ROTCE is TTM net income to common holders over the average of tangible book
 now and a year ago. A company that tags neither goodwill nor intangibles has no
 tangible book; an untagged preferred is taken as none and the row says so. Not
 adjusted for deferred tax or servicing rights, so a bank's own tangible book per
-share can differ, and there is no ten-year history of either yet.
+share can differ. P / TBV has ten years too: the P/E chart's P/E / P/TBV switch
+and a percentile column draw it, each quarter's tangible book per share built
+only from the balance sheet filed by that day, on today's share basis over the
+quarter's diluted count (a little above the period-end count for a company
+that buys back stock). ROTCE has no history yet.
 
 **Valuation path and a forward P/E's missing past.** MARKET → SECTORS adds,
 for each index and sector, its multiple at four points on the same analyst

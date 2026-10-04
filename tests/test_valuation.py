@@ -580,3 +580,93 @@ def test_group_book_totals_need_coverage_and_skip_members_without_positive_book(
     # A group whose positive-book members hold under 80% of its cap draws nothing.
     assert V.aggregate_book(members[:1] + [dict(members[2], market_cap=400.0)]) is None
     assert V.aggregate_book([]) is None
+
+
+# --- P / tangible book against its own history ---------------------------------------------
+def _annual_bank_facts():
+    """Three 10-Ks of a bank with 100m diluted shares: tangible common book
+    is 830, 930 and 1,030 at the three year ends (equity less 50 preferred,
+    100 goodwill and 20 intangibles), each filed on the date below."""
+    def annual(tag, values, unit="USD", instant=False):
+        rows = []
+        for year, (val, filed) in zip((2023, 2024, 2025), values):
+            row = {"end": f"{year}-12-31", "val": val, "filed": filed, "form": "10-K", "fp": "FY"}
+            if not instant:
+                row["start"] = f"{year}-01-01"
+            rows.append(row)
+        return {tag: {"units": {unit: rows}}}
+
+    filed = ["2024-02-20", "2025-02-20", "2026-02-20"]
+    pair = lambda *vals: list(zip(vals, filed))  # noqa: E731
+    gaap = {}
+    gaap |= annual("EarningsPerShareDiluted", pair(2.0, 2.5, 3.0), unit="USD/shares")
+    gaap |= annual("WeightedAverageNumberOfDilutedSharesOutstanding", pair(1e8, 1e8, 1e8), unit="shares")
+    gaap |= annual("NetIncomeLoss", pair(2e8, 2.5e8, 3e8))
+    gaap |= annual("Revenues", pair(9e8, 9e8, 9e8))
+    gaap |= annual("StockholdersEquity", pair(1000e6, 1100e6, 1200e6), instant=True)
+    gaap |= annual("Goodwill", pair(100e6, 100e6, 100e6), instant=True)
+    gaap |= annual("IntangibleAssetsNetExcludingGoodwill", pair(20e6, 20e6, 20e6), instant=True)
+    gaap |= annual("PreferredStockValue", pair(50e6, 50e6, 50e6), instant=True)
+    return {"facts": {"us-gaap": gaap}}
+
+
+def _sessions(start, end, price):
+    return pd.Series(price, index=pd.bdate_range(start, end))
+
+
+def test_eps_history_carries_the_balance_sheet_as_filed_that_day():
+    history = sec.eps_history(_annual_bank_facts())
+    assert [q["filed"] for q in history] == ["2024-02-20", "2025-02-20", "2026-02-20"]
+    assert history[0]["book"] == {"equity": 1000e6, "goodwill": 100e6, "intangibles": 20e6, "preferred": 50e6}
+
+
+def test_tbv_steps_are_book_per_share_on_todays_basis():
+    history = sec.eps_history(_annual_bank_facts())
+    assert [round(v, 2) for _, _, v in V.tbv_steps(history, None)] == [8.30, 9.30, 10.30]
+    split = pd.Series([2.0], index=[pd.Timestamp("2025-06-01")])      # 2:1 after the second filing
+    halved = [round(v, 3) for _, _, v in V.tbv_steps(history, split)]
+    assert halved == [4.15, 4.65, 10.30]                              # earlier years restated, the latest not
+
+
+def test_ptbv_series_divides_by_the_book_public_that_day_not_the_next_one():
+    steps = V.tbv_steps(sec.eps_history(_annual_bank_facts()), None)
+    prices = _sessions("2024-01-02", "2026-06-30", 20.0)
+    ptbv = V.ptbv_series(prices, steps)
+    assert pd.isna(ptbv[pd.Timestamp("2024-02-20")])                  # filed that evening: not yet in force
+    assert ptbv[pd.Timestamp("2024-02-21")] == pytest.approx(20.0 / 8.30)
+    assert ptbv[pd.Timestamp("2025-03-03")] == pytest.approx(20.0 / 9.30)
+    assert ptbv.iloc[-1] == pytest.approx(20.0 / 10.30)
+
+
+def test_a_tangible_book_far_above_the_price_is_a_filing_error():
+    steps = [("2024-02-20", "2023-12-31", 500.0)]
+    prices = _sessions("2024-03-01", "2024-03-29", 10.0)
+    assert V.ptbv_series(prices, steps).isna().all()                  # 50x book per share on a 10 share price
+
+
+def test_a_quarter_with_no_tangible_book_leaves_the_earlier_figure_standing():
+    history = sec.eps_history(_annual_bank_facts())
+    history[1]["book"] = {"equity": 1100e6, "goodwill": None, "intangibles": None, "preferred": None}
+    assert [round(v, 2) for _, _, v in V.tbv_steps(history, None)] == [8.30, 10.30]
+
+
+def test_aggregates_carry_a_ptbv_history_beside_the_pe_history():
+    import types
+    from market_recap.config import load_config
+    days = pd.bdate_range("2024-01-01", periods=V.MIN_HISTORY_SESSIONS + 60)
+    tickers = ["B1", "B2", "B3"]
+    rows = [{"ticker": t, "sector": "Financials", "sub_sector": "Diversified Banks", "indices": ["SPX"], "market_cap": 100.0,
+             "price": 10.0, "eps_ntm": None} for t in tickers]
+    caps = {t: pd.Series(150.0, index=days) for t in tickers}
+    earn = {b: {t: pd.Series(15.0, index=days) for t in tickers} for b in (V.OPERATING, V.REPORTED)}
+    book = {t: pd.Series(100.0, index=days) for t in tickers}
+    book["B3"] = pd.Series(float("nan"), index=days)                     # no tangible book for one of three
+    ctx = types.SimpleNamespace(indices=[types.SimpleNamespace(key="SPX", label="S&P 500")],
+                                primary=types.SimpleNamespace(key="SPX"), config=load_config())
+    thin = {s["key"]: s for s in panel._aggregates(ctx, rows, caps, earn, {}, book)["series"]}
+    assert "ptbv" not in thin["Financials"]                              # 2 of 3 equal caps: 67%, under the 80% floor
+    book["B3"] = pd.Series(100.0, index=days)
+    full = {s["key"]: s for s in panel._aggregates(ctx, rows, caps, earn, {}, book)["series"]}
+    assert full["Financials"]["stats_ptbv"]["current"] == pytest.approx(1.5)      # 450 cap over 300 book
+    assert full["fin-diversified-banks"]["stats_ptbv"]["current"] == pytest.approx(1.5)
+    assert len(full["Financials"]["ptbv"]) == len(full["Financials"]["pe"]) and full["Financials"]["coverage_ptbv"] == 1.0

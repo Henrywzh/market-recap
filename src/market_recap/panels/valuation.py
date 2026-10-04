@@ -45,6 +45,7 @@ HISTORY_METRICS = (
     V.Metric("pe_operating", "P/E operating (TTM)", "x", "valuation", "low"),
     V.Metric("pe_percentile", "P/E percentile, own 10Y", "pct", "valuation", "low"),
     V.Metric("pe_vs_median", "P/E vs own 10Y median", "pct", "valuation", "low"),
+    V.Metric("ptbv_percentile", "P/TBV percentile, own 10Y", "pct", "valuation", "low"),
 )
 
 
@@ -100,6 +101,9 @@ def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits: pd.
     lead = basis if stats[basis] is not None else V.REPORTED
     first = stats[lead]["first"]
     dates = _weekly(series[lead].iloc[-V.HISTORY_SESSIONS:]).index
+    # P / tangible book on the same footing: the balance sheet as filed that day.
+    ptbv = V.ptbv_series(prices, V.tbv_steps(data.eps_history, splits))
+    ptbv_stats = V.pe_stats(ptbv) if not ptbv.empty else None
     by_filed = {s["filed"]: s for s in operating}
 
     def payload(key: str) -> dict | None:
@@ -119,6 +123,8 @@ def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits: pd.
         **payload(lead),
         "alternate": payload(V.REPORTED if lead != V.REPORTED else basis),
         "forward": forward,
+        "ptbv": [clean_float(v, 2) for v in ptbv.reindex(dates).to_numpy()] if ptbv_stats else None,
+        "ptbv_stats": _stats_json(ptbv_stats) if ptbv_stats else None,
         # Each quarter's TTM EPS both ways, and what the operating figure took out.
         "eps": [
             {"filed": filed, "period_end": end, "reported": clean_float(eps, 4),
@@ -128,7 +134,7 @@ def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits: pd.
             for filed, end, eps in reported_steps if filed >= first
         ],
     })
-    return {"basis": lead, **stats}
+    return {"basis": lead, **stats, "ptbv": ptbv_stats}
 
 
 def _split_factor(splits, symbol: str, after: str | None) -> float:
@@ -216,6 +222,9 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         "pe_basis": basis,
         "pe_percentile": clean_float(lead.get("percentile"), 1),
         "pe_vs_median": clean_float(lead.get("vs_median"), 1),
+        "ptbv_percentile": clean_float((history.get("ptbv") or {}).get("percentile"), 1),
+        # The history's latest point checks the table's P / TBV (market cap / tangible book).
+        "ptbv_history_current": clean_float((history.get("ptbv") or {}).get("current"), 2),
     }
 
 
@@ -255,7 +264,8 @@ def _path(members: list[dict]) -> dict | None:
 
 
 def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dict[str, dict[str, pd.Series]],
-                forward_earnings: dict[str, dict[str, float]] | None = None) -> dict | None:
+                forward_earnings: dict[str, dict[str, float]] | None = None,
+                book: dict[str, pd.Series] | None = None) -> dict | None:
     """Each index's and each sector's P/E against its own ten years, on
     operating earnings (each company on its own basis) and as reported.
 
@@ -297,9 +307,9 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
             entry["forward_now"] = {"pe": clean_float(forward["pe"], 2), "coverage": clean_float(forward["coverage"], 3)}
             entry["scenario"] = [[clean_float(v, 1) for v in line] for line in
                                  V.scenario_grid(forward["pe"], scenario["multiple_turns"], scenario["eps_change_pct"])]
-        book = V.aggregate_book(members)
-        if book:
-            entry["book"] = {k: clean_float(v, 3 if k.endswith("coverage") else 2) for k, v in book.items()}
+        book_now = V.aggregate_book(members)
+        if book_now:
+            entry["book"] = {k: clean_float(v, 3 if k.endswith("coverage") else 2) for k, v in book_now.items()}
         path = _path(members)
         if path:
             entry["path"] = {"stages": [{k: clean_float(v, 2) if isinstance(v, float) else v for k, v in st.items()}
@@ -319,6 +329,14 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
                 f"stats{suffix}": _stats_json(stats) if stats else None,
                 f"pe{suffix}": [clean_float(v, 2) for v in weekly["pe"].to_numpy()],
             }
+        if book:
+            # Total market cap over total common tangible book; a member without
+            # a positive book is out of both, as for the snapshot's totals.
+            frame = V.aggregate_pe(cap_frame[columns], pd.DataFrame(book).reindex(columns=columns)).iloc[-V.HISTORY_SESSIONS:]
+            stats = V.pe_stats(frame["pe"])
+            if stats:
+                entry |= {"coverage_ptbv": clean_float(frame["coverage"].iloc[-1], 3), "stats_ptbv": _stats_json(stats),
+                          "ptbv": [clean_float(v, 2) for v in _weekly(frame)["pe"].to_numpy()]}
         series.append(entry)
     return {
         "dates": dates,
@@ -392,6 +410,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     caps, companies = {}, set()
     earnings: dict[str, dict[str, pd.Series]] = {V.OPERATING: {}, V.REPORTED: {}}
     forward_earnings: dict[str, dict[str, float]] = {}
+    book_frames: dict[str, pd.Series] = {}
     for symbol in symbols:
         cik = cik_for(symbol, cik_map)
         if cik is None:
@@ -428,6 +447,9 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             earnings[V.OPERATING][symbol] = V.plausible_eps(prices, operating) * shares
             if forward:
                 forward_earnings[symbol] = {d: e * shares for d, e in zip(forward["dates"], forward["eps_ntm"]) if e is not None}
+            tbv = V.tbv_steps(data.eps_history, symbol_splits)
+            if tbv:
+                book_frames[symbol] = V.plausible_tbvps(prices, tbv) * shares
 
     primary = ctx.members[ctx.primary.key].drop_duplicates("yahoo_symbol").set_index("yahoo_symbol")["weight"]
     check = _weight_check([r for r in rows if ctx.primary.key in r["indices"]], primary.to_dict())
@@ -437,6 +459,12 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         r["ticker"] for r in rows
         if r["pe"] and r["pe_history_current"]
         and abs(r["pe_history_current"] / r["pe"] - 1) > PE_AGREEMENT_TOLERANCE
+    )
+
+    ptbv_disagree = sorted(
+        r["ticker"] for r in rows
+        if r.get("ptbv") and r.get("ptbv_history_current")
+        and abs(r["ptbv_history_current"] / r["ptbv"] - 1) > PE_AGREEMENT_TOLERANCE
     )
 
     ctx.log.add(SourceRecord(
@@ -466,8 +494,10 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             "agreement_tolerance": PE_AGREEMENT_TOLERANCE,
             "disagree": disagree,
         },
+        "ptbv_history": {"companies": sum(1 for r in rows if r.get("ptbv_percentile") is not None),
+                         "agreement_tolerance": PE_AGREEMENT_TOLERANCE, "disagree": ptbv_disagree},
         "weight_check": check,
-        "aggregates": _aggregates(ctx, rows, caps, earnings, forward_earnings),
+        "aggregates": _aggregates(ctx, rows, caps, earnings, forward_earnings, book_frames),
         "financials_sector": V.FINANCIALS_SECTOR,
         "note": (
             "Market cap is the closing price times a filed share count: the latest cover-page count "

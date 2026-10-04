@@ -183,6 +183,54 @@ def ptbv(market_cap: float | None, balance: dict) -> float | None:
     return None if book is None else _ratio(market_cap, book["value"])
 
 
+# --- P / tangible book against its own history ---------------------------------------
+# A tangible book per share more than this multiple of the price (or a price
+# below it) cannot be a real figure: a units or sign error in the filing.
+TBV_PRICE_LIMIT = 20.0
+
+
+def tbv_steps(history: Sequence[dict], splits: pd.Series | None) -> list[tuple[str, str, float]]:
+    """(filed, period end, common tangible book per share on today's share
+    basis) for each quarter, from the balance sheet as filed that day.
+
+    The per-share figure divides by the quarter's diluted count (the same one
+    its operating EPS uses), scaled by the splits after its filing. That is a
+    weighted average over the quarter, so it runs a little above the period-end
+    count for a company that buys back stock. A quarter with no tangible book
+    (or a negative one) or no usable count is left out; the figure before it
+    stands until it expires, as for EPS.
+    """
+    reported = {filed: eps for filed, _, eps in eps_steps(history, splits)}
+    steps = []
+    for quarter in history:
+        book = tangible_book(quarter.get("book") or {})
+        eps = reported.get(quarter["filed"])
+        if book is None or book["value"] <= 0 or eps is None:
+            continue
+        shares = _shares(quarter.get("core") or {}, eps, splits, quarter["filed"])
+        if shares is None:
+            continue
+        steps.append((quarter["filed"], quarter["period_end"], book["value"] / shares))
+    return steps
+
+
+def plausible_tbvps(prices: pd.Series, steps: Sequence[tuple[str, str, float]]) -> pd.Series:
+    """eps_in_force on the price's sessions for tangible book per share, blank
+    where it cannot be a real figure."""
+    book = eps_in_force(prices.index, steps)
+    return book.where((book / prices) <= TBV_PRICE_LIMIT)
+
+
+def ptbv_series(prices: pd.Series, steps: Sequence[tuple[str, str, float]]) -> pd.Series:
+    """Daily P / tangible book: the split-adjusted close over the tangible book
+    per share already public."""
+    prices = prices.dropna()
+    if prices.empty or not steps:
+        return pd.Series(dtype=float)
+    book = plausible_tbvps(prices, steps)
+    return (prices / book.where(book > 0)).rename("ptbv")
+
+
 def _is_prior_year(row: dict, prior: dict) -> bool:
     low, high = ANNUAL_SPAN_DAYS
     return low <= (pd.Timestamp(row["period_end"]) - pd.Timestamp(prior["period_end"])).days <= high
