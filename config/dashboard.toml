@@ -220,13 +220,14 @@ news_budget = 250
 event_news_days = 45
 event_news_budget = 150
 # Hand-kept company and industry events, each with the page that states its
-# date. symbols and/or themes say whose timelines carry it.
+# date. symbols and/or themes say whose timelines carry it: a company's own
+# event goes on that company alone (symbols); themes are for events with no
+# host company, such as an OPEC meeting or CES.
 #   [[events.company_events]]
 #   date = "2026-12-01"
 #   title = "AWS re:Invent keynote"
 #   kind = "product event"
 #   symbols = ["AMZN"]
-#   themes = ["cloud"]
 #   url = "https://..."
 # Each date checked on the page given (2026-10-03).
 [[events.company_events]]
@@ -242,7 +243,6 @@ date = "2026-11-17"
 title = "Microsoft Ignite (Nov 17-20, San Francisco)"
 kind = "product event"
 symbols = ["MSFT"]
-themes = ["cloud"]
 url = "https://moscone.com/events/microsoft-ignite-2026"
 source = "Moscone Center"
 
@@ -259,7 +259,6 @@ date = "2026-11-30"
 title = "AWS re:Invent (Nov 30-Dec 4, Las Vegas)"
 kind = "product event"
 symbols = ["AMZN"]
-themes = ["cloud"]
 url = "https://aws.amazon.com/events/reinvent"
 source = "AWS"
 
@@ -292,7 +291,6 @@ date = "2027-03-15"
 title = "NVIDIA GTC 2027 (Mar 15-18, San Jose)"
 kind = "product event"
 symbols = ["NVDA"]
-themes = ["semis", "cloud"]
 url = "https://www.nvidia.com/gtc/"
 source = "NVIDIA"
 
@@ -301,7 +299,6 @@ date = "2027-04-13"
 title = "Google Cloud Next 2027 (Apr 13-15, Las Vegas)"
 kind = "product event"
 symbols = ["GOOGL", "GOOG"]
-themes = ["cloud"]
 url = "https://www.googlecloudevents.com/next-vegas/faq"
 source = "Google Cloud"
 
