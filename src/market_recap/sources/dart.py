@@ -64,7 +64,9 @@ def _search(company: str, start: date, end: date) -> str:
 def results(company: str, today: date, *, years: int = 4, use_cache: bool = True) -> list[dict]:
     """The company's results filings over ``years``, newest first."""
     start = today - timedelta(days=365 * years)
-    text = cache.fetch_text(NAMESPACE, f"results-{company}-{today.isoformat()}", lambda: _search(company, start, today),
+    # The span is in the key: THEMES asks four years, CHAIN ten, the same day.
+    name = f"results-{company}-{today.isoformat()}" + ("" if years == 4 else f"-{years}y")
+    text = cache.fetch_text(NAMESPACE, name, lambda: _search(company, start, today),
                             kind="daily_file", suffix=".json", use_cache=use_cache)
     rows = parse(json.loads(text)["html"])
     seen, out = set(), []

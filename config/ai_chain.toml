@@ -1,0 +1,929 @@
+# The AI supply chain: who sells to whom, and who competes with whom.
+#
+# Hand-kept, read by the CHAIN panel (panels/chain.py). This is today's graph:
+# a link that formed in 2024 is applied to 2016's reports too, so the CHAIN
+# study is labelled "current graph", never point-in-time evidence.
+#
+# [[nodes]]: key is the site's ticker (a US line where one trades, else the
+#   home listing), yahoo the price/earnings symbol when it differs, market the
+#   exchange whose session and index the moves are measured on, releases the
+#   market whose hours a report with no clock time is read in (an ADR's home:
+#   ASML publishes at 07:00 in Amsterdam, TSMC in the Taipei afternoon).
+# [[edges]]: type
+#   supplies  -- `from` sells to each of `to` (chips, tools, power, capacity).
+#   competes  -- the same customers' spend, so a beat can be share taken.
+#   partner   -- joint venture or co-design; neither side buys the other's output.
+#   `to` may name a group (@hyperscalers): the filings say "cloud customers"
+#   without naming them, and the edge says so (named = false).
+# scripts/chain_evidence.py checks each edge against the SEC filings of both
+# sides and writes config/ai_chain_evidence.json; an edge neither side's
+# filings name carries the `source` given here instead.
+
+# Each exchange: its time zone, cash close, the index moves are measured
+# against, and when a report with no clock time is taken to have come out
+# ("bmo" an hour before the open, "amc" just after the close -- the local habit).
+[markets]
+US = { tz = "America/New_York", close = "16:00", index = "^GSPC", unknown = "amc" }
+KR = { tz = "Asia/Seoul", close = "15:30", index = "^KS11", unknown = "bmo" }
+TW = { tz = "Asia/Taipei", close = "13:30", index = "^TWII", unknown = "amc" }
+JP = { tz = "Asia/Tokyo", close = "15:30", index = "^N225", unknown = "amc" }
+NL = { tz = "Europe/Amsterdam", close = "17:30", index = "^AEX", unknown = "bmo" }
+FR = { tz = "Europe/Paris", close = "17:30", index = "^FCHI", unknown = "bmo" }
+DE = { tz = "Europe/Berlin", close = "17:30", index = "^GDAXI", unknown = "bmo" }
+
+[groups]
+hyperscalers = ["MSFT", "GOOGL", "AMZN", "META", "ORCL"]
+memory = ["000660.KS", "MU", "005930.KS"]
+foundry = ["TSM", "005930.KS", "INTC"]
+odms = ["2317.TW", "2382.TW", "6669.TW", "3231.TW"]
+
+[[layers]]
+key = "ip"
+label = "IP & EDA"
+[[layers]]
+key = "equipment"
+label = "EQUIPMENT & MATERIALS"
+[[layers]]
+key = "foundry"
+label = "FOUNDRY & PACKAGING"
+[[layers]]
+key = "memory"
+label = "MEMORY & STORAGE"
+[[layers]]
+key = "chips"
+label = "ACCELERATORS & CHIPS"
+[[layers]]
+key = "network"
+label = "NETWORKING & OPTICS"
+[[layers]]
+key = "systems"
+label = "SERVERS & ODMs"
+[[layers]]
+key = "power"
+label = "POWER & COOLING"
+[[layers]]
+key = "capacity"
+label = "DATA CENTERS & NEOCLOUDS"
+[[layers]]
+key = "cloud"
+label = "HYPERSCALERS"
+
+# --- IP & EDA -----------------------------------------------------------------
+[[nodes]]
+key = "ARM"
+name = "Arm Holdings"
+layer = "ip"
+market = "US"
+[[nodes]]
+key = "SNPS"
+name = "Synopsys"
+layer = "ip"
+market = "US"
+[[nodes]]
+key = "CDNS"
+name = "Cadence Design"
+layer = "ip"
+market = "US"
+
+# --- Equipment & materials ------------------------------------------------------
+[[nodes]]
+key = "ASML"
+name = "ASML"
+layer = "equipment"
+market = "US"
+releases = "NL"
+[[nodes]]
+key = "AMAT"
+name = "Applied Materials"
+layer = "equipment"
+market = "US"
+[[nodes]]
+key = "LRCX"
+name = "Lam Research"
+layer = "equipment"
+market = "US"
+[[nodes]]
+key = "KLAC"
+name = "KLA"
+layer = "equipment"
+market = "US"
+[[nodes]]
+key = "8035.T"
+name = "Tokyo Electron"
+layer = "equipment"
+market = "JP"
+[[nodes]]
+key = "ASM.AS"
+name = "ASM International"
+layer = "equipment"
+market = "NL"
+[[nodes]]
+key = "6920.T"
+name = "Lasertec"
+layer = "equipment"
+market = "JP"
+[[nodes]]
+key = "6857.T"
+name = "Advantest"
+layer = "equipment"
+market = "JP"
+[[nodes]]
+key = "TER"
+name = "Teradyne"
+layer = "equipment"
+market = "US"
+[[nodes]]
+key = "BESI.AS"
+name = "BE Semiconductor"
+layer = "equipment"
+market = "NL"
+[[nodes]]
+key = "6146.T"
+name = "Disco"
+layer = "equipment"
+market = "JP"
+[[nodes]]
+key = "ENTG"
+name = "Entegris"
+layer = "equipment"
+market = "US"
+[[nodes]]
+key = "4063.T"
+name = "Shin-Etsu Chemical"
+layer = "equipment"
+market = "JP"
+
+# --- Foundry & packaging ----------------------------------------------------------
+[[nodes]]
+key = "TSM"
+name = "TSMC"
+layer = "foundry"
+market = "US"
+releases = "TW"
+[[nodes]]
+key = "ASX"
+name = "ASE Technology"
+layer = "foundry"
+market = "US"
+releases = "TW"
+[[nodes]]
+key = "AMKR"
+name = "Amkor"
+layer = "foundry"
+market = "US"
+
+# --- Memory & storage ---------------------------------------------------------------
+[[nodes]]
+key = "000660.KS"
+name = "SK hynix"
+layer = "memory"
+market = "KR"
+# DART's filer name: its preliminary results ("영업(잠정)실적") come first.
+dart = "SK하이닉스"
+[[nodes]]
+key = "005930.KS"
+name = "Samsung Electronics"
+layer = "memory"
+market = "KR"
+dart = "삼성전자"
+[[nodes]]
+key = "MU"
+name = "Micron"
+layer = "memory"
+market = "US"
+[[nodes]]
+key = "SNDK"
+name = "SanDisk"
+layer = "memory"
+market = "US"
+[[nodes]]
+key = "285A.T"
+name = "Kioxia"
+layer = "memory"
+market = "JP"
+[[nodes]]
+key = "WDC"
+name = "Western Digital"
+layer = "memory"
+market = "US"
+[[nodes]]
+key = "STX"
+name = "Seagate"
+layer = "memory"
+market = "US"
+
+# --- Accelerators & chips ------------------------------------------------------------
+[[nodes]]
+key = "NVDA"
+name = "NVIDIA"
+layer = "chips"
+market = "US"
+[[nodes]]
+key = "AMD"
+name = "AMD"
+layer = "chips"
+market = "US"
+[[nodes]]
+key = "AVGO"
+name = "Broadcom"
+layer = "chips"
+market = "US"
+[[nodes]]
+key = "MRVL"
+name = "Marvell"
+layer = "chips"
+market = "US"
+[[nodes]]
+key = "INTC"
+name = "Intel"
+layer = "chips"
+market = "US"
+[[nodes]]
+key = "ALAB"
+name = "Astera Labs"
+layer = "chips"
+market = "US"
+[[nodes]]
+key = "CRDO"
+name = "Credo"
+layer = "chips"
+market = "US"
+
+# --- Networking & optics --------------------------------------------------------------
+[[nodes]]
+key = "ANET"
+name = "Arista Networks"
+layer = "network"
+market = "US"
+[[nodes]]
+key = "CSCO"
+name = "Cisco"
+layer = "network"
+market = "US"
+[[nodes]]
+key = "CIEN"
+name = "Ciena"
+layer = "network"
+market = "US"
+[[nodes]]
+key = "COHR"
+name = "Coherent"
+layer = "network"
+market = "US"
+[[nodes]]
+key = "LITE"
+name = "Lumentum"
+layer = "network"
+market = "US"
+[[nodes]]
+key = "FN"
+name = "Fabrinet"
+layer = "network"
+market = "US"
+[[nodes]]
+key = "APH"
+name = "Amphenol"
+layer = "network"
+market = "US"
+[[nodes]]
+key = "GLW"
+name = "Corning"
+layer = "network"
+market = "US"
+
+# --- Servers & ODMs ----------------------------------------------------------------------
+[[nodes]]
+key = "SMCI"
+name = "Super Micro"
+layer = "systems"
+market = "US"
+[[nodes]]
+key = "DELL"
+name = "Dell"
+layer = "systems"
+market = "US"
+[[nodes]]
+key = "HPE"
+name = "HPE"
+layer = "systems"
+market = "US"
+[[nodes]]
+key = "CLS"
+name = "Celestica"
+layer = "systems"
+market = "US"
+[[nodes]]
+key = "2317.TW"
+name = "Hon Hai (Foxconn)"
+layer = "systems"
+market = "TW"
+[[nodes]]
+key = "2382.TW"
+name = "Quanta Computer"
+layer = "systems"
+market = "TW"
+[[nodes]]
+key = "6669.TW"
+name = "Wiwynn"
+layer = "systems"
+market = "TW"
+[[nodes]]
+key = "3231.TW"
+name = "Wistron"
+layer = "systems"
+market = "TW"
+
+# --- Power & cooling ------------------------------------------------------------------------
+[[nodes]]
+key = "VRT"
+name = "Vertiv"
+layer = "power"
+market = "US"
+[[nodes]]
+key = "ETN"
+name = "Eaton"
+layer = "power"
+market = "US"
+[[nodes]]
+key = "SU.PA"
+name = "Schneider Electric"
+layer = "power"
+market = "FR"
+[[nodes]]
+key = "2308.TW"
+name = "Delta Electronics"
+layer = "power"
+market = "TW"
+[[nodes]]
+key = "GEV"
+name = "GE Vernova"
+layer = "power"
+market = "US"
+[[nodes]]
+key = "ENR.DE"
+name = "Siemens Energy"
+layer = "power"
+market = "DE"
+[[nodes]]
+key = "PWR"
+name = "Quanta Services"
+layer = "power"
+market = "US"
+[[nodes]]
+key = "CEG"
+name = "Constellation Energy"
+layer = "power"
+market = "US"
+[[nodes]]
+key = "VST"
+name = "Vistra"
+layer = "power"
+market = "US"
+
+# --- Data centers & neoclouds ----------------------------------------------------------------
+[[nodes]]
+key = "EQIX"
+name = "Equinix"
+layer = "capacity"
+market = "US"
+[[nodes]]
+key = "DLR"
+name = "Digital Realty"
+layer = "capacity"
+market = "US"
+[[nodes]]
+key = "CRWV"
+name = "CoreWeave"
+layer = "capacity"
+market = "US"
+[[nodes]]
+key = "NBIS"
+name = "Nebius"
+layer = "capacity"
+market = "US"
+
+# --- Hyperscalers --------------------------------------------------------------------------------
+[[nodes]]
+key = "MSFT"
+name = "Microsoft"
+layer = "cloud"
+market = "US"
+[[nodes]]
+key = "GOOGL"
+name = "Alphabet"
+layer = "cloud"
+market = "US"
+[[nodes]]
+key = "AMZN"
+name = "Amazon"
+layer = "cloud"
+market = "US"
+[[nodes]]
+key = "META"
+name = "Meta Platforms"
+layer = "cloud"
+market = "US"
+[[nodes]]
+key = "ORCL"
+name = "Oracle"
+layer = "cloud"
+market = "US"
+
+# ===================================================================================================
+# Edges
+# ===================================================================================================
+
+# --- IP & EDA into chip design ---------------------------------------------------------------------
+[[edges]]
+from = "ARM"
+to = ["NVDA", "AMZN", "MSFT", "GOOGL"]
+type = "supplies"
+reason = "Arm Neoverse cores in Grace, Graviton, Cobalt and Axion server CPUs"
+[[edges]]
+from = "SNPS"
+to = ["NVDA", "AMD", "AVGO", "INTC", "MRVL"]
+type = "supplies"
+reason = "EDA tools and interface IP for chip design"
+[[edges]]
+from = "CDNS"
+to = ["NVDA", "AMD", "AVGO", "INTC", "MRVL"]
+type = "supplies"
+reason = "EDA tools and verification hardware for chip design"
+[[edges]]
+from = "SNPS"
+to = ["CDNS"]
+type = "competes"
+reason = "the two EDA majors"
+
+# --- Equipment into fabs ----------------------------------------------------------------------------
+[[edges]]
+from = "ASML"
+to = ["TSM", "005930.KS", "INTC", "000660.KS", "MU"]
+type = "supplies"
+reason = "lithography (EUV only from ASML)"
+[[edges]]
+from = "AMAT"
+to = ["TSM", "005930.KS", "INTC", "000660.KS", "MU"]
+type = "supplies"
+reason = "deposition, etch and process-control tools"
+[[edges]]
+from = "LRCX"
+to = ["005930.KS", "000660.KS", "MU", "TSM"]
+type = "supplies"
+reason = "etch and deposition, weighted to memory"
+[[edges]]
+from = "KLAC"
+to = ["TSM", "005930.KS", "INTC"]
+type = "supplies"
+reason = "process control and inspection"
+[[edges]]
+from = "8035.T"
+to = ["TSM", "005930.KS", "000660.KS", "MU", "INTC"]
+type = "supplies"
+reason = "coater/developers, etch and deposition"
+[[edges]]
+from = "ASM.AS"
+to = ["TSM", "005930.KS", "INTC"]
+type = "supplies"
+reason = "atomic-layer deposition and epitaxy for gate-all-around"
+[[edges]]
+from = "6920.T"
+to = ["TSM", "005930.KS", "INTC"]
+type = "supplies"
+reason = "EUV mask-blank and mask inspection"
+[[edges]]
+from = "6857.T"
+to = ["TSM", "NVDA", "000660.KS", "005930.KS"]
+type = "supplies"
+reason = "SoC testers for AI accelerators and HBM memory testers"
+[[edges]]
+from = "TER"
+to = ["TSM", "MU"]
+type = "supplies"
+reason = "SoC and memory test"
+[[edges]]
+from = "BESI.AS"
+to = ["TSM"]
+type = "supplies"
+reason = "hybrid and die-attach bonders for advanced packaging"
+[[edges]]
+from = "6146.T"
+to = ["TSM", "000660.KS"]
+type = "supplies"
+reason = "dicing and grinding for CoWoS and thinned HBM stacks"
+[[edges]]
+from = "ENTG"
+to = ["TSM", "005930.KS", "INTC", "MU"]
+type = "supplies"
+reason = "filtration, specialty chemicals and wafer handling"
+[[edges]]
+from = "4063.T"
+to = ["TSM", "005930.KS", "INTC"]
+type = "supplies"
+reason = "silicon wafers and photoresist"
+[[edges]]
+from = "AMAT"
+to = ["LRCX", "8035.T"]
+type = "competes"
+reason = "deposition and etch"
+[[edges]]
+from = "LRCX"
+to = ["8035.T"]
+type = "competes"
+reason = "etch"
+[[edges]]
+from = "KLAC"
+to = ["6920.T"]
+type = "competes"
+reason = "inspection"
+[[edges]]
+from = "6857.T"
+to = ["TER"]
+type = "competes"
+reason = "the two semiconductor-test majors"
+[[edges]]
+from = "BESI.AS"
+to = ["ASM.AS"]
+type = "partner"
+reason = "ASM International holds a stake in BESI; both tied to hybrid bonding"
+
+# --- Foundry & packaging into chips ---------------------------------------------------------------
+[[edges]]
+from = "TSM"
+to = ["NVDA", "AMD", "AVGO", "MRVL", "ALAB", "CRDO"]
+type = "supplies"
+reason = "leading-edge wafers and CoWoS packaging"
+[[edges]]
+from = "ASX"
+to = ["NVDA", "AMD", "AVGO"]
+type = "supplies"
+reason = "outsourced assembly and test"
+[[edges]]
+from = "AMKR"
+to = ["NVDA", "AMD"]
+type = "supplies"
+reason = "outsourced advanced packaging and test"
+[[edges]]
+from = "TSM"
+to = ["005930.KS", "INTC"]
+type = "competes"
+reason = "leading-edge foundry"
+[[edges]]
+from = "ASX"
+to = ["AMKR"]
+type = "competes"
+reason = "outsourced assembly and test"
+
+# --- Memory into accelerators and clouds ------------------------------------------------------------
+[[edges]]
+from = "000660.KS"
+to = ["NVDA", "AMD", "AVGO"]
+type = "supplies"
+reason = "HBM stacked on the accelerator package"
+[[edges]]
+from = "MU"
+to = ["NVDA", "AMD"]
+type = "supplies"
+reason = "HBM3E for accelerators"
+[[edges]]
+from = "005930.KS"
+to = ["NVDA", "AMD", "AVGO"]
+type = "supplies"
+reason = "HBM for accelerators"
+[[edges]]
+from = "MU"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "server DRAM and data-center SSDs; cloud is its largest end market"
+[[edges]]
+from = "SNDK"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "NAND and enterprise SSDs for AI storage"
+[[edges]]
+from = "WDC"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "high-capacity hard drives; cloud is most of revenue"
+[[edges]]
+from = "STX"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "high-capacity hard drives; cloud is most of revenue"
+[[edges]]
+from = "000660.KS"
+to = ["MU", "005930.KS"]
+type = "competes"
+reason = "DRAM and HBM"
+[[edges]]
+from = "MU"
+to = ["005930.KS"]
+type = "competes"
+reason = "DRAM and HBM"
+[[edges]]
+from = "SNDK"
+to = ["285A.T"]
+type = "partner"
+reason = "joint-venture NAND fabs in Japan"
+[[edges]]
+from = "SNDK"
+to = ["005930.KS", "000660.KS"]
+type = "competes"
+reason = "NAND"
+[[edges]]
+from = "WDC"
+to = ["STX"]
+type = "competes"
+reason = "the two hard-drive makers"
+
+# --- Chips into systems and clouds -----------------------------------------------------------------
+[[edges]]
+from = "NVDA"
+to = ["MSFT", "GOOGL", "AMZN", "META", "ORCL", "CRWV", "NBIS"]
+type = "supplies"
+reason = "GPUs and rack systems bought for AI clusters"
+[[edges]]
+from = "NVDA"
+to = ["SMCI", "DELL", "HPE", "2317.TW", "2382.TW", "6669.TW", "3231.TW"]
+type = "supplies"
+reason = "GPUs, boards and NVLink racks the server makers build"
+[[edges]]
+from = "AMD"
+to = ["MSFT", "META", "ORCL"]
+type = "supplies"
+reason = "Instinct accelerators and EPYC CPUs"
+[[edges]]
+from = "AMD"
+to = ["DELL", "HPE", "SMCI"]
+type = "supplies"
+reason = "EPYC CPUs and Instinct GPUs in OEM servers"
+[[edges]]
+from = "AVGO"
+to = ["GOOGL", "META"]
+type = "supplies"
+reason = "custom AI accelerators (TPU, MTIA)"
+[[edges]]
+from = "AVGO"
+to = ["ANET"]
+type = "supplies"
+reason = "Tomahawk and Jericho switch silicon"
+[[edges]]
+from = "MRVL"
+to = ["AMZN"]
+type = "supplies"
+reason = "custom accelerators and electro-optics under a multi-year AWS agreement"
+[[edges]]
+from = "ALAB"
+to = ["NVDA", "AMZN"]
+type = "supplies"
+reason = "PCIe/CXL retimers and fabric switches in AI servers"
+[[edges]]
+from = "CRDO"
+to = ["AMZN", "MSFT"]
+type = "supplies"
+reason = "active electrical cables and SerDes"
+[[edges]]
+from = "INTC"
+to = ["DELL", "HPE"]
+type = "supplies"
+reason = "Xeon host CPUs"
+[[edges]]
+from = "NVDA"
+to = ["AMD"]
+type = "competes"
+reason = "merchant AI accelerators"
+[[edges]]
+from = "AVGO"
+to = ["MRVL"]
+type = "competes"
+reason = "custom accelerators and networking silicon"
+[[edges]]
+from = "AMD"
+to = ["INTC"]
+type = "competes"
+reason = "x86 server CPUs"
+[[edges]]
+from = "ALAB"
+to = ["CRDO"]
+type = "competes"
+reason = "AI-server connectivity"
+
+# --- Networking & optics -----------------------------------------------------------------------------
+[[edges]]
+from = "ANET"
+to = ["MSFT", "META"]
+type = "supplies"
+reason = "data-center switches; each over 10% of revenue"
+[[edges]]
+from = "CSCO"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "AI infrastructure orders from webscale customers"
+[[edges]]
+from = "CIEN"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "optical transport between data centers"
+[[edges]]
+from = "COHR"
+to = ["NVDA", "@hyperscalers"]
+type = "supplies"
+reason = "800G/1.6T optical transceivers and lasers"
+[[edges]]
+from = "LITE"
+to = ["NVDA", "CIEN", "@hyperscalers"]
+type = "supplies"
+reason = "lasers, transceivers and optical circuit switches"
+[[edges]]
+from = "FN"
+to = ["NVDA", "CIEN", "AMZN"]
+type = "supplies"
+reason = "contract manufacturing of optical modules"
+[[edges]]
+from = "APH"
+to = ["NVDA", "@hyperscalers"]
+type = "supplies"
+reason = "high-speed connectors and cable cartridges in AI racks"
+[[edges]]
+from = "GLW"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "optical fiber and cable for data centers"
+[[edges]]
+from = "ANET"
+to = ["CSCO"]
+type = "competes"
+reason = "data-center switching"
+[[edges]]
+from = "COHR"
+to = ["LITE"]
+type = "competes"
+reason = "optical components and transceivers"
+
+# --- Servers & ODMs into clouds -----------------------------------------------------------------------
+[[edges]]
+from = "SMCI"
+to = ["@hyperscalers", "CRWV"]
+type = "supplies"
+reason = "GPU servers and racks"
+[[edges]]
+from = "DELL"
+to = ["CRWV", "@hyperscalers"]
+type = "supplies"
+reason = "AI servers"
+[[edges]]
+from = "HPE"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "AI servers"
+[[edges]]
+from = "CLS"
+to = ["GOOGL", "META"]
+type = "supplies"
+reason = "custom racks and switches for hyperscalers"
+[[edges]]
+from = "2317.TW"
+to = ["MSFT", "AMZN", "GOOGL", "ORCL"]
+type = "supplies"
+reason = "GB200/GB300 rack assembly"
+[[edges]]
+from = "2382.TW"
+to = ["MSFT", "GOOGL", "AMZN", "META"]
+type = "supplies"
+reason = "ODM servers built direct for the clouds"
+[[edges]]
+from = "6669.TW"
+to = ["MSFT", "META"]
+type = "supplies"
+reason = "ODM servers; its two largest customers"
+[[edges]]
+from = "3231.TW"
+to = ["DELL"]
+type = "supplies"
+reason = "contract-built servers"
+[[edges]]
+from = "SMCI"
+to = ["DELL", "HPE"]
+type = "competes"
+reason = "AI servers"
+[[edges]]
+from = "2317.TW"
+to = ["2382.TW", "6669.TW", "3231.TW"]
+type = "competes"
+reason = "AI server ODMs"
+
+# --- Power & cooling into data centers ---------------------------------------------------------------
+[[edges]]
+from = "VRT"
+to = ["@hyperscalers", "EQIX", "DLR", "CRWV"]
+type = "supplies"
+reason = "power distribution and liquid cooling"
+[[edges]]
+from = "VRT"
+to = ["NVDA"]
+type = "partner"
+reason = "reference designs for NVIDIA's rack power and cooling"
+[[edges]]
+from = "ETN"
+to = ["@hyperscalers", "EQIX", "DLR"]
+type = "supplies"
+reason = "switchgear, UPS and power distribution"
+[[edges]]
+from = "SU.PA"
+to = ["@hyperscalers", "EQIX", "DLR"]
+type = "supplies"
+reason = "electrical distribution and cooling"
+[[edges]]
+from = "2308.TW"
+to = ["NVDA", "@hyperscalers"]
+type = "supplies"
+reason = "server power supplies and power shelves"
+[[edges]]
+from = "GEV"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "gas turbines and grid equipment for data-center load"
+[[edges]]
+from = "ENR.DE"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "gas turbines and grid equipment for data-center load"
+[[edges]]
+from = "PWR"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "transmission and substation build-out for data centers"
+[[edges]]
+from = "CEG"
+to = ["MSFT", "META"]
+type = "supplies"
+reason = "nuclear power purchase agreements (Crane, Clinton)"
+[[edges]]
+from = "VST"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "power for data-center load in Texas and PJM"
+[[edges]]
+from = "VRT"
+to = ["SU.PA", "ETN", "2308.TW"]
+type = "competes"
+reason = "data-center power and cooling"
+[[edges]]
+from = "GEV"
+to = ["ENR.DE"]
+type = "competes"
+reason = "gas turbines and grid equipment"
+[[edges]]
+from = "CEG"
+to = ["VST"]
+type = "competes"
+reason = "independent power for data centers"
+
+# --- Data centers & neoclouds into clouds -----------------------------------------------------------
+[[edges]]
+from = "EQIX"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "colocation and interconnection"
+[[edges]]
+from = "DLR"
+to = ["@hyperscalers"]
+type = "supplies"
+reason = "wholesale data-center leases"
+[[edges]]
+from = "CRWV"
+to = ["MSFT"]
+type = "supplies"
+reason = "GPU cloud capacity; its largest customer"
+[[edges]]
+from = "NBIS"
+to = ["MSFT"]
+type = "supplies"
+reason = "multi-year GPU capacity agreement"
+[[edges]]
+from = "EQIX"
+to = ["DLR"]
+type = "competes"
+reason = "data-center REITs"
+[[edges]]
+from = "CRWV"
+to = ["NBIS"]
+type = "competes"
+reason = "GPU clouds"
+
+# --- Hyperscalers ------------------------------------------------------------------------------------
+[[edges]]
+from = "MSFT"
+to = ["GOOGL", "AMZN", "ORCL"]
+type = "competes"
+reason = "public cloud"
+[[edges]]
+from = "GOOGL"
+to = ["AMZN", "ORCL"]
+type = "competes"
+reason = "public cloud"
+[[edges]]
+from = "AMZN"
+to = ["ORCL"]
+type = "competes"
+reason = "public cloud"

@@ -20,7 +20,7 @@ The views are grouped by the question they answer
 | **MARKET** | **Overview** (the default view) · Indices · Heat maps · Sectors (rotation and index/sector P/E) |
 | **RISK** | **Risk** · Rates & macro · **Priced path** |
 | **NAMES** | Monitor · Screen (VALUATION & QUALITY) · **Ticker** · Cross-listing |
-| **CATALYSTS** | Calendar · Earnings |
+| **CATALYSTS** | Calendar · Earnings · Themes · **AI chain** |
 | **TOOLS** | Technicals · Trade Desk · ETF X-Ray · DCF |
 
 **Overview** is the one-glance read: the live strip; stocks (S&P 500,
@@ -116,7 +116,7 @@ Every one of these is free and requires no account.
 | **Korea Customs Service** trade statistics (`tradedata.go.kr`) | THEMES: Korean IC (HS 8542) exports | Confirmed monthly figures, mid-month; certificate verification on |
 | **ADATA Industrial** Memory & Flash Market Watch | THEMES: monthly DRAM / NAND note | A module maker's read, quoted; its charts are images and are not read |
 | **PCPartPicker** UK price trends (`uk.pcpartpicker.com/trends/price/{memory,cpu}/`) | THEMES: retail memory-kit and CPU prices | Read from the chart images' pixels (the page has no numbers); only ratios are reported, with the source linked. Its Cloudflare refuses cloud servers (HTTP 403) and is not worked around: the nightly build does not ask and logs the source as skipped; a local build reads it |
-| **DART** (FSS electronic disclosure, public search `dsab007/detailSearch.ax`) | THEMES: Samsung Electronics and SK hynix results dates | Their "영업(잠정)실적" fair disclosures, corrections dropped; no key needed |
+| **DART** (FSS electronic disclosure, public search `dsab007/detailSearch.ax`) | THEMES and AI CHAIN: Samsung Electronics and SK hynix results dates (the preliminary results first) | Their "영업(잠정)실적" fair disclosures, corrections dropped; no key needed |
 | **Korea MOTIE** monthly trade release (`motir.go.kr`, PDF attachment) | THEMES: 1st-of-month semiconductor and total exports | Read with `pdftotext` (poppler, installed by the workflow); the site is slow, so only the last 13 releases are read, each cached once |
 | **SEC EDGAR** earnings releases (8-K Item 2.02, Exhibit 99.1) | THEMES: NVIDIA Data Center revenue and outlook; capex guidance quoted from the releases | Segment revenue is not in XBRL company facts; matched text is quoted as written. Older submissions pages are read when a heavy filer's recent block (one year for the big banks) holds fewer than eight earnings releases; TSMC and ASML results come from their 6-K filings |
 | **EIA** weekly history pages (`eia.gov/dnav/pet/hist`, `/dnav/ng/hist`) | THEMES: weekly crude, gasoline, distillate and gas inventories, refinery utilization, crude production | Keyless HTML tables, petroleum back to 1982, gas storage to 2010; current vintage. The 5-year average is the same week of the five years before |
@@ -127,6 +127,8 @@ Every one of these is free and requires no account.
 | **EDGAR filing index pages** | Earnings releases' acceptance time (Eastern), for the eight reports measured | The submissions JSON stamp ran twice the Eastern offset late in October 2026; fetched once per filing and kept |
 | **ALFRED** (FRED's vintage archive, `FRED_API_KEY`) | THEMES: the day each FRED observation was first published and its first print (with the year-earlier figure as then known), for the release-day studies and the stock cards' since-the-last-report table, which marks a figure revised since | Free key; GitHub secret in CI, alternative-data's `.config` locally; without it, release lags are approximated |
 | **FRED** bank and consumer series (TOTLL, DPSACBW027SBOG, T10Y2Y, T10Y3M, BAMLH0A0HYM2, DRALACBS, DRCCLACBS, DRCRELEXFACBS, DRTSCILM; RSAFS, RSFSXMV, PCEC96, PSAVERT, TOTALSL, UMCSENT, ICSA, CCSA) | THEMES: banks and consumer data, curve/credit sensitivity, stock-card drivers | Current vintage, keyless CSV; release dates approximated from each publisher's schedule (ICE BofA OAS: last three years only; Michigan sentiment a month behind) |
+| **Yahoo** earnings archive (the visualization API `get_earnings_dates` reads) and quoteSummary `earnings` / `calendarEvents` | AI CHAIN: every report of 67 companies in seven markets, with its time of day and EPS surprise, and the next date | The archive stopped taking rows in mid-2025 (kept a year at a time); the last four quarters come from quoteSummary. The reports of July–September 2025 are missing for a company outside SEC filing and stay missing |
+| **EDGAR full-text search** (`efts.sec.gov/LATEST/search-index`) | AI CHAIN: the sentence of each company's 10-K / 20-F / 40-F that names the other end of a link | Run by hand (`scripts/chain_evidence.py`) when the graph changes; the result is committed as `config/ai_chain_evidence.json` |
 | **alternative-data** (github.com/Henrywzh/alternative-data) normalized files | THEMES: OpenRouter daily tokens and estimated revenue; Ramp AI Index | Read from the public repo, with the commit that last touched each file |
 
 ### Two things worth knowing about the feeds
