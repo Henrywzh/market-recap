@@ -498,3 +498,85 @@ def test_aggregates_draw_each_financials_group_beside_the_sector():
     report = out["subgroups"]
     assert any("Regional Banks" in name for name in report["unmatched"])   # configured, carried by no company
     assert report["unassigned"] == [{"sector": "Financials", "sub_industry": "Multi-Sector Holdings", "tickers": ["BRK"]}]
+
+
+# --- Tangible book, P / TBV and ROTCE ---------------------------------------------------
+def _bank_facts(*, preferred=True, goodwill=True):
+    """A calendar-year bank at 2026-09-30: a 10-K for 2025 and a 10-Q with nine
+    months of 2026 and 2025, each line in the US-GAAP tag it is filed under."""
+    def flow(tag, fy, ytd, ytd_prior):
+        rows = [{"start": "2025-01-01", "end": "2025-12-31", "val": fy, "filed": "2026-02-20", "form": "10-K", "fp": "FY"},
+                {"start": "2026-01-01", "end": "2026-09-30", "val": ytd, "filed": "2026-11-05", "form": "10-Q", "fp": "Q3"},
+                {"start": "2025-01-01", "end": "2025-09-30", "val": ytd_prior, "filed": "2026-11-05", "form": "10-Q", "fp": "Q3"}]
+        return {tag: {"units": {"USD": rows}}}
+
+    def inst(tag, now, year_ago):
+        return {tag: {"units": {"USD": [
+            {"end": "2026-09-30", "val": now, "filed": "2026-11-05", "form": "10-Q", "fp": "Q3"},
+            {"end": "2025-09-30", "val": year_ago, "filed": "2025-11-05", "form": "10-Q", "fp": "Q3"}]}}}
+
+    gaap = {}
+    gaap |= flow("Revenues", 120.0, 100.0, 85.0)
+    gaap |= flow("NetIncomeLoss", 40.0, 36.0, 28.0)                         # TTM 48
+    gaap |= flow("NetIncomeLossAvailableToCommonStockholdersBasic", 37.0, 33.0, 25.0)   # TTM 45
+    gaap |= inst("StockholdersEquity", 400.0, 360.0)
+    if goodwill:
+        gaap |= inst("Goodwill", 60.0, 60.0)
+        gaap |= inst("IntangibleAssetsNetExcludingGoodwill", 20.0, 24.0)
+    if preferred:
+        gaap |= inst("PreferredStockValue", 30.0, 30.0)
+    return {"facts": {"us-gaap": gaap}}
+
+
+def test_trailing_snapshot_reads_the_book_lines_and_income_to_common():
+    snapshot = sec.trailing_snapshot(_bank_facts())
+    assert snapshot["balance"]["goodwill"] == 60.0 and snapshot["balance"]["intangibles"] == 20.0
+    assert snapshot["balance"]["preferred"] == 30.0 and snapshot["balance_prior"]["intangibles"] == 24.0
+    assert snapshot["ttm"]["income_to_common"] == pytest.approx(45.0)
+
+
+def test_tangible_book_takes_out_preferred_goodwill_and_intangibles():
+    book = V.tangible_book(sec.trailing_snapshot(_bank_facts())["balance"])
+    assert book == {"value": 400.0 - 30.0 - 60.0 - 20.0, "assumed_none": []}
+    assert V.ptbv(580.0, sec.trailing_snapshot(_bank_facts())["balance"]) == pytest.approx(580.0 / 290.0)
+
+
+def test_rotce_is_income_to_common_over_average_tangible_common_equity():
+    snapshot = sec.trailing_snapshot(_bank_facts())
+    prior_tbv = 360.0 - 30.0 - 60.0 - 24.0                                  # 246
+    assert V.rotce(snapshot) == pytest.approx(45.0 / ((290.0 + prior_tbv) / 2) * 100)
+
+
+def test_an_untagged_preferred_is_taken_as_none_and_said_so():
+    book = V.tangible_book(sec.trailing_snapshot(_bank_facts(preferred=False))["balance"])
+    assert book["value"] == 400.0 - 60.0 - 20.0 and book["assumed_none"] == ["preferred"]
+
+
+def test_no_goodwill_and_no_intangibles_tagged_is_not_a_tangible_book():
+    balance = sec.trailing_snapshot(_bank_facts(goodwill=False))["balance"]
+    assert V.tangible_book(balance) is None and V.ptbv(500.0, balance) is None
+    assert V.tangible_book({"equity": 100.0, "goodwill": -5.0}) is None     # a negative asset is a filing error
+
+
+def test_a_negative_tangible_book_has_no_multiple_and_no_return():
+    balance = {"equity": 50.0, "goodwill": 80.0, "intangibles": 0.0}
+    assert V.tangible_book(balance)["value"] == -30.0
+    assert V.ptbv(100.0, balance) is None
+    assert V.rotce({"balance": balance, "balance_prior": {}, "ttm": {"income_to_common": 10.0}}) is None
+
+
+def test_rotce_needs_income_to_common_not_net_income():
+    snapshot = {"balance": {"equity": 100.0, "goodwill": 10.0}, "balance_prior": {}, "ttm": {"net_income": 20.0}}
+    assert V.rotce(snapshot) is None
+
+
+def test_group_book_totals_need_coverage_and_skip_members_without_positive_book():
+    members = [{"market_cap": 100.0, "tbv": 50.0, "tbv_avg": 48.0, "income_common": 6.0},
+               {"market_cap": 100.0, "tbv": 100.0, "tbv_avg": 100.0, "income_common": 10.0},
+               {"market_cap": 40.0, "tbv": -5.0, "tbv_avg": None, "income_common": 1.0}]
+    out = V.aggregate_book(members)
+    assert out["ptbv"] == pytest.approx(200.0 / 150.0) and out["ptbv_coverage"] == pytest.approx(200 / 240)
+    assert out["rotce"] == pytest.approx(16.0 / 148.0 * 100)
+    # A group whose positive-book members hold under 80% of its cap draws nothing.
+    assert V.aggregate_book(members[:1] + [dict(members[2], market_cap=400.0)]) is None
+    assert V.aggregate_book([]) is None

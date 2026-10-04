@@ -142,6 +142,47 @@ def return_on_equity(snapshot: dict) -> float | None:
     return _pct(snapshot["ttm"].get("net_income"), average)
 
 
+# --- Tangible book ------------------------------------------------------------------
+def tangible_book(balance: dict) -> dict | None:
+    """Common tangible book value: shareholders' equity less preferred stock,
+    goodwill and other intangibles, as filed.
+
+    A filer that tags neither goodwill nor intangibles cannot be told from one
+    that has none, so it has no tangible book here rather than a book passed
+    off as tangible. An untagged preferred stock is taken as none, as an untagged
+    debt is (see ``debt``); ``assumed_none`` names what was taken as none so the
+    row can say so. A negative component is a sign error in the filing, not an
+    asset, and leaves the figure blank. Deferred tax on intangibles and
+    mortgage-servicing rights are not adjusted, so a bank's own reported TBV
+    per share can differ.
+    """
+    equity = balance.get("equity")
+    parts = {"preferred": balance.get("preferred"), "goodwill": balance.get("goodwill"), "intangibles": balance.get("intangibles")}
+    if equity is None or (parts["goodwill"] is None and parts["intangibles"] is None):
+        return None
+    if any(v is not None and v < 0 for v in parts.values()):
+        return None
+    return {"value": equity - sum(v or 0.0 for v in parts.values()),
+            "assumed_none": sorted(k for k, v in parts.items() if v is None)}
+
+
+def rotce(snapshot: dict) -> float | None:
+    """TTM net income to common holders over average tangible common equity
+    (the ending figure when a year ago has none). Blank unless the filing tags
+    the income to common: net income would overstate a bank with preferred
+    dividends."""
+    now, prior = tangible_book(snapshot["balance"]), tangible_book(snapshot["balance_prior"])
+    if now is None or now["value"] <= 0:
+        return None
+    average = now["value"] if prior is None or prior["value"] <= 0 else (now["value"] + prior["value"]) / 2
+    return _pct(snapshot["ttm"].get("income_to_common"), average)
+
+
+def ptbv(market_cap: float | None, balance: dict) -> float | None:
+    book = tangible_book(balance)
+    return None if book is None else _ratio(market_cap, book["value"])
+
+
 def _is_prior_year(row: dict, prior: dict) -> bool:
     low, high = ANNUAL_SPAN_DAYS
     return low <= (pd.Timestamp(row["period_end"]) - pd.Timestamp(prior["period_end"])).days <= high
@@ -229,6 +270,8 @@ METRICS: tuple[tuple[Metric, Callable[[Inputs], float | None]], ...] = (
      lambda i: _ratio(i.ev, i.snapshot["ttm"].get("revenue"))),
     (Metric("pb", "P / Book", "x", "valuation", "low"),
      lambda i: _ratio(i.market_cap, i.snapshot["balance"].get("equity"))),
+    (Metric("ptbv", "P / Tangible book", "x", "valuation", "low"),
+     lambda i: ptbv(i.market_cap, i.snapshot["balance"])),
     (Metric("fcf_yield", "FCF yield", "pct", "valuation", "high", banks=False),
      lambda i: None if i.snapshot["ttm"].get("operating_cash_flow") is None or i.snapshot["ttm"].get("capex") is None
      else _yield(i.snapshot["ttm"]["operating_cash_flow"] - i.snapshot["ttm"]["capex"], i.market_cap)),
@@ -238,6 +281,7 @@ METRICS: tuple[tuple[Metric, Callable[[Inputs], float | None]], ...] = (
      lambda i: None if i.snapshot["ttm"].get("dividends_paid") is None and i.snapshot["ttm"].get("buybacks") is None
      else _yield((i.snapshot["ttm"].get("dividends_paid") or 0) + (i.snapshot["ttm"].get("buybacks") or 0), i.market_cap)),
     (Metric("roe", "ROE (TTM, avg equity)", "pct", "quality", "high"), lambda i: return_on_equity(i.snapshot)),
+    (Metric("rotce", "ROTCE (TTM, avg tangible common equity)", "pct", "quality", "high"), lambda i: rotce(i.snapshot)),
     (Metric("roic", "ROIC (TTM)", "pct", "quality", "high", banks=False), lambda i: roic(i.snapshot)),
     (Metric("gross_profitability", "Gross profit / assets", "pct", "quality", "high", banks=False),
      lambda i: _pct(gross_profit(i.snapshot["ttm"]), i.snapshot["balance"].get("total_assets"))),
@@ -580,6 +624,32 @@ def assign_subgroups(rows: list[dict], specs: list[dict], min_members: int) -> d
                   for (sector, name), tickers in sorted(present.items(), key=lambda kv: (kv[0][0], str(kv[0][1])))
                   if sector in divided and (sector, name) not in claimed]
     return {"groups": groups, "unmatched": unmatched, "too_small": too_small, "unassigned": unassigned}
+
+
+def aggregate_book(members: list[dict]) -> dict | None:
+    """A group's P / tangible book and ROTCE as totals: market cap over total
+    tangible book, and total income to common over total average tangible
+    book. Each counts only the members that have both of its inputs, and is
+    drawn when they hold ``AGGREGATE_MIN_COVERAGE`` of the group's market cap.
+    A member with no positive tangible book (most software companies) is out,
+    so a non-financial group usually has no figure at all."""
+    total = sum(r["market_cap"] for r in members if r.get("market_cap"))
+    if not total:
+        return None
+
+    def share(rows):
+        return sum(r["market_cap"] for r in rows) / total
+
+    with_book = [r for r in members if r.get("market_cap") and (r.get("tbv") or 0) > 0]
+    with_return = [r for r in with_book if r.get("tbv_avg") and r.get("income_common") is not None]
+    out = {}
+    if with_book and share(with_book) >= AGGREGATE_MIN_COVERAGE:
+        out["ptbv"] = sum(r["market_cap"] for r in with_book) / sum(r["tbv"] for r in with_book)
+        out["ptbv_coverage"] = share(with_book)
+    if with_return and share(with_return) >= AGGREGATE_MIN_COVERAGE:
+        out["rotce"] = sum(r["income_common"] for r in with_return) / sum(r["tbv_avg"] for r in with_return) * 100
+        out["rotce_coverage"] = share(with_return)
+    return out or None
 
 
 # --- Valuation path ---------------------------------------------------------------

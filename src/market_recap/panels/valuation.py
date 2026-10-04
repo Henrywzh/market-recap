@@ -150,6 +150,16 @@ def _split_factor(splits, symbol: str, after: str | None) -> float:
 YAHOO_CAP_BASIS = "Yahoo market cap: the filings count shares class by class, never in total"
 
 
+def _book_fields(snapshot: dict) -> dict:
+    now, prior = V.tangible_book(snapshot["balance"]), V.tangible_book(snapshot["balance_prior"])
+    average = None
+    if now and now["value"] > 0:
+        average = now["value"] if prior is None or prior["value"] <= 0 else (now["value"] + prior["value"]) / 2
+    return {"tbv": clean_float(now["value"], 0) if now else None, "tbv_avg": clean_float(average, 0),
+            "income_common": clean_float(snapshot["ttm"].get("income_to_common"), 0),
+            "tbv_assumed_none": now["assumed_none"] if now else None}
+
+
 def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices: list[str], splits,
          history: dict | None, ntm: dict | None = None, fallback_cap: float | None = None,
          path: dict | None = None) -> dict:
@@ -190,6 +200,8 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         # total earnings over its total price, losses included, as for an index.
         "earnings_yield": clean_float(V._pct(snapshot["ttm"].get("net_income"), market_cap), 4),
         "book_yield": clean_float(V._pct(snapshot["balance"].get("equity"), market_cap), 4),
+        # The raw inputs of P / tangible book and ROTCE, for the group totals.
+        **_book_fields(snapshot),
         "pe_forward": clean_float(V.forward_pe(price, ntm), 2),
         "eps_ntm": clean_float(ntm["eps"], 4) if ntm else None,
         # Per-share consensus at the other stages of the valuation path (VALUATION -> aggregates).
@@ -285,6 +297,9 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
             entry["forward_now"] = {"pe": clean_float(forward["pe"], 2), "coverage": clean_float(forward["coverage"], 3)}
             entry["scenario"] = [[clean_float(v, 1) for v in line] for line in
                                  V.scenario_grid(forward["pe"], scenario["multiple_turns"], scenario["eps_change_pct"])]
+        book = V.aggregate_book(members)
+        if book:
+            entry["book"] = {k: clean_float(v, 3 if k.endswith("coverage") else 2) for k, v in book.items()}
         path = _path(members)
         if path:
             entry["path"] = {"stages": [{k: clean_float(v, 2) if isinstance(v, float) else v for k, v in st.items()}

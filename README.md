@@ -354,6 +354,16 @@ config cannot place is printed under the chart, not guessed: a configured
 sub-industry no company carries (a renamed label), a group under
 `subgroup_min_members`, and sub-industries in no group.
 
+**P / tangible book and ROTCE.** VALUATION adds both as columns (so the
+scatter can set one against the other), and each index, sector and Financials
+group shows them as totals. Tangible book is shareholders' equity less
+preferred stock, goodwill and other intangibles, as filed in the latest 10-Q;
+ROTCE is TTM net income to common holders over the average of tangible book
+now and a year ago. A company that tags neither goodwill nor intangibles has no
+tangible book; an untagged preferred is taken as none and the row says so. Not
+adjusted for deferred tax or servicing rights, so a bank's own tangible book per
+share can differ, and there is no ten-year history of either yet.
+
 **Valuation path and a forward P/E's missing past.** MARKET → SECTORS adds,
 for each index and sector, its multiple at four points on the same analyst
 basis -- last fiscal year's actual, this fiscal year, the next twelve months

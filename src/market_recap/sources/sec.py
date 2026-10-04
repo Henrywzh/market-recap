@@ -791,6 +791,19 @@ CORE_EXTRA = (
     LineItem("profit_loss", "Net income including non-controlling interests", ("ProfitLoss",), "income"),
     LineItem("parent_income", "Net income to the parent", ("NetIncomeLoss",), "income"),
 )
+# What tangible book and ROTCE are built from. Kept apart from LINE_ITEMS for
+# the same reason as CORE_EXTRA: the statements tab and the DCF do not show them
+# as lines. Read into the trailing snapshot's ``balance`` and ``ttm``.
+BOOK_ITEMS: tuple[LineItem, ...] = (
+    LineItem("goodwill", "Goodwill", ("Goodwill",), "balance"),
+    LineItem("intangibles", "Intangible assets excluding goodwill",
+             ("IntangibleAssetsNetExcludingGoodwill", "FiniteLivedIntangibleAssetsNet"), "balance"),
+    # Carrying value of preferred stock, which sits inside StockholdersEquity but
+    # belongs to no common holder.
+    LineItem("preferred", "Preferred stock", (
+        "PreferredStockValue", "PreferredStockIncludingAdditionalPaidInCapital"), "balance"),
+    LineItem("income_to_common", "Net income to common holders", ("NetIncomeLossAvailableToCommonStockholdersBasic",), "income"),
+)
 # A share count is an average over a period; anything shorter is a stub.
 MIN_SHARE_PERIOD_DAYS = 80
 
@@ -819,7 +832,8 @@ def trailing_snapshot(facts: dict) -> dict | None:
     """The latest reported quarter: TTM flows and balances at its end, the same a
     year earlier (for growth and averages), and a share count for market cap."""
     splits = share_splits(facts)
-    periods = {item.key: _period_values(facts, item, splits) for item in LINE_ITEMS}
+    read = LINE_ITEMS + BOOK_ITEMS
+    periods = {item.key: _period_values(facts, item, splits) for item in read}
     anchors = sorted({e for key in ("revenue", "net_income") for (start, e) in periods[key] if start is not None})
     if not anchors:
         return None
@@ -841,10 +855,10 @@ def trailing_snapshot(facts: dict) -> dict | None:
         return value
 
     def flows(at, record=False):
-        return {item.key: flow(item.key, at, record) for item in LINE_ITEMS if not item.instant} if at else {}
+        return {item.key: flow(item.key, at, record) for item in read if not item.instant} if at else {}
 
     def balances(at):
-        return {item.key: _instant_near(periods[item.key], at) for item in LINE_ITEMS if item.instant} if at else {}
+        return {item.key: _instant_near(periods[item.key], at) for item in read if item.instant} if at else {}
 
     filed = max((trailing_value(periods[k], end)[1] or "") for k in ("revenue", "net_income")) or None
     debt_tag = next(

@@ -86,6 +86,8 @@ function rowNote(row, data) {
   ];
   if (row.lagged.length) parts.push(`from the prior quarter (not tagged in the latest 10-Q): ${row.lagged.join(', ')}`);
   if (row.sector === data.financials_sector) parts.push('Financials: EV, gross-profit, FCF and accrual metrics not computed');
+  if (row.tbv_assumed_none?.length) parts.push(`tangible book: no ${row.tbv_assumed_none.join(', ')} tagged in the filing, taken as none`);
+  else if (row.tbv === null || row.tbv === undefined) parts.push('tangible book: needs goodwill or intangibles tagged in the filing');
   if (row.piotroski === null && row.piotroski_tested) parts.push(`Piotroski: ${row.piotroski_tested} of 9 signals testable`);
   return parts.join('\n');
 }
@@ -268,6 +270,7 @@ export function renderAggregates(root, data) {
     'VALUATION PATH: total market cap over total consensus EPS at last fiscal year (the actual, as Yahoo carries it), this fiscal year, the next twelve months and next fiscal year -- all on the analysts\' basis, so a step is earnings growth, not a change of accounting, and the same companies count at every stage. A group is drawn only when they hold at least '
       + `${num(agg.min_coverage * 100, 0)}% of its market cap. Each company's fiscal year is its own, so a sector mixes year-ends. These multiples are not comparable with the trailing P/E above (filed EPS, a different basis), and a sector's forward P/E has no history of its own until consensus has been recorded for a year.`,
     'SUB-SECTOR GROUPS: a sector the config divides (Financials) can be opened beside its parts -- diversified banks, regional banks, investment banks and brokers, asset managers, insurers, payments and consumer finance, exchanges -- each a total of its own members\' market cap over their earnings, on the same bases and with the same member and weight caveats as a sector. A company sits in one group by its current GICS sub-industry (the S&P 500 labels on Wikipedia); the groups need not add up to the sector.',
+    'P / TANGIBLE BOOK and ROTCE: market cap over total common tangible book (shareholders\' equity less preferred stock, goodwill and other intangibles, from the latest 10-Q), and total TTM income to common over total average tangible book. Latest filings only -- there is no ten-year history of either yet. A company that tags neither goodwill nor intangibles has no tangible book, one that tags no preferred stock is taken as having none (said on its row), and deferred tax on intangibles and mortgage-servicing rights are not adjusted, so a bank\'s own reported tangible book per share can differ. A company counts only with a positive tangible book; the figure is drawn when those companies hold the minimum share of the group\'s cap, which most non-financial groups do not. Beside P / TBV on the table, the scatter can set it against ROTCE: what a bank earns on tangible equity is what its multiple should follow.',
     'WHAT YOU WOULD NEED TO BELIEVE: price = multiple x EPS, so a forward P/E moved by some turns with next-twelve-months EPS revised by some percent implies the price change shown. The axes are set in config/dashboard.toml. It is arithmetic on today\'s multiple; neither the multiple nor the revision is forecast.',
   ]));
   root.append(aggregateSection(data));
@@ -348,6 +351,10 @@ function aggregateSection(data) {
       stat('COVERAGE', present(s.coverage) ? `${num(s.coverage * 100, 0)}%` : DASH, 'of its market cap with filed EPS'),
       stat('FORWARD P/E (NTM)', present(s.forward_now?.pe) ? `${num(s.forward_now.pe, 1)}x` : DASH,
         s.forward_now ? `consensus EPS, ${num(s.forward_now.coverage * 100, 0)}% of cap · ${(s.forward_history?.dates || []).length} recorded days` : 'no consensus'),
+      stat('P / TANGIBLE BOOK', present(s.book?.ptbv) ? `${num(s.book.ptbv, 2)}x` : DASH,
+        s.book?.ptbv_coverage ? `latest filings, ${num(s.book.ptbv_coverage * 100, 0)}% of cap` : 'needs tangible book on most of its cap'),
+      stat('ROTCE (TTM)', present(s.book?.rotce) ? `${num(s.book.rotce, 1)}%` : DASH,
+        s.book?.rotce_coverage ? `income to common / avg tangible equity, ${num(s.book.rotce_coverage * 100, 0)}% of cap` : 'needs income to common'),
     );
     drawPath(s, pathNode, pathNote);
     drawScenario(s, agg.scenario, scenarioNode);
