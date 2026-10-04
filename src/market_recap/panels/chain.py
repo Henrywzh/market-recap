@@ -224,6 +224,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
                 rows.append(r)
 
     study = _study(rows)
+    study["layers"] = _layers(rows, nodes)
     edges = _edges(graph["edge_list"], rows, evidence.get("edges") or {})
     season = _season(nodes, reports, series, rows, cats, as_of, fetched, inputs.get("catalysts"))
 
@@ -284,6 +285,35 @@ def _study(rows: list[dict]) -> dict:
             if cat in ("from_customer", "from_supplier") and named and len(named) < len(chosen):
                 block[cat]["named_only"] = C.summarise(named)["immediate"]
         out["categories"][period] = block
+    return out
+
+
+# A cell names its firmest pairs: the ordered pairs whose same-session
+# read-through has the largest t over at least this many reports.
+TOP_PAIRS = 3
+PAIR_MIN_REPORTS = 8
+
+
+def _layers(rows: list[dict], nodes: dict) -> dict:
+    """The layer-by-layer matrix, over all years and since RECENT_SINCE, each
+    cell with its firmest pairs."""
+    layer_of = {k: n["layer"] for k, n in nodes.items()}
+    out = {}
+    for period, part in (("all", rows), ("recent", [r for r in rows if r["lead_day"] >= RECENT_SINCE])):
+        matrix = C.layer_matrix(part, layer_of)
+        by_pair: dict[tuple[str, str], list[dict]] = {}
+        for r in part:
+            by_pair.setdefault((r["lead"], r["follow"]), []).append(r)
+        best: dict[tuple[str, str], list[dict]] = {}
+        for (lead, follow), pair in by_pair.items():
+            stats = E.co_move([r["lead_move"] for r in pair], [r["follow_move"] for r in pair], min_reports=PAIR_MIN_REPORTS)
+            if stats and stats["t"] is not None and stats["t"] > 0:
+                best.setdefault((layer_of[lead], layer_of[follow]), []).append(
+                    {"lead": lead, "follow": follow, "beta": stats["beta"], "t": stats["t"], "n": stats["n"]})
+        for (a, b), pairs in best.items():
+            if a in matrix and b in matrix[a]:
+                matrix[a][b]["top"] = sorted(pairs, key=lambda p: -p["t"])[:TOP_PAIRS]
+        out[period] = matrix
     return out
 
 

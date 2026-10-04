@@ -6,6 +6,7 @@
 import { el, card, num, pct, tag, table, dirClass, sectionTitle, gap, metaRow, periodSwitch, DASH } from '../fmt.js';
 import { chainCard, linksOf, nodeHref, surpriseText, ROLE_LABEL } from '../chain-card.js';
 import { drawGraph, attachClicks, graphHeight } from '../chain-graph.js';
+import { layersCard } from '../chain-layers.js';
 
 const PERIODS = { ALL: 'all', 'SINCE 2023': 'recent' };
 const CATEGORY_ORDER = ['from_customer', 'from_supplier', 'competitor', 'partner', 'unlinked'];
@@ -281,6 +282,8 @@ export default async function renderChain(root, data, _manifest, ctx = {}) {
   };
   root.append(host);
   draw();
+  const layers = layersCard(data);
+  if (layers) root.append(layers);
   root.append(studyCard(data.study || {}));
   root.append(edgesCard(data));
 }

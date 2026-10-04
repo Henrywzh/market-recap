@@ -315,3 +315,22 @@ def season_window(as_of: date) -> tuple[date, date, str]:
             label = f"CQ{(quarter_end.month - 1) // 3 + 1} {quarter_end.year}"
             return start, end, label
     raise ValueError(as_of)
+
+
+def layer_matrix(rows: list[dict], layer_of: dict[str, str]) -> dict[str, dict[str, dict]]:
+    """Question 1 by layer: {lead layer: {follower layer: summary}} over every
+    pair, linked or not -- how a report in one part of the chain has landed on
+    another part the same session."""
+    cells: dict[tuple[str, str], list[dict]] = {}
+    for r in rows:
+        a, b = layer_of.get(r["lead"]), layer_of.get(r["follow"])
+        if a and b:
+            cells.setdefault((a, b), []).append(r)
+    out: dict[str, dict[str, dict]] = {}
+    for (a, b), part in cells.items():
+        cell = _clustered(part, lambda r: r["follow_move"] * s if (s := _sign(r["lead_move"])) else None)
+        cell["rank_corr"] = _spearman([r["lead_move"] for r in part], [r["follow_move"] for r in part])
+        same = [r for r in part if _sign(r["lead_move"]) and _sign(r["follow_move"])]
+        cell["same_way_pct"] = round(100 * sum(_sign(r["lead_move"]) == _sign(r["follow_move"]) for r in same) / len(same)) if same else None
+        out.setdefault(a, {})[b] = cell
+    return out

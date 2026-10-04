@@ -570,7 +570,11 @@ The phased build put too much in front of the reader. After looking at it:
   the other way. Below, the study: every report since 2016 paired with every
   other company, by kind of link against the no-link baseline, on four
   questions -- the same session, the follower's own next report, the drift
-  until then, and how much was priced in before it. The graph is today's,
+  until then, and how much was priced in before it; and LAYER TO LAYER, the
+  same-session question as a heat map of reporting layer by moving layer
+  (rank ρ or signed mean, all years or since 2023, each cell's firmest pairs
+  on hover). THE CHAIN switches between the board and a GRAPH of the links.
+  The graph is today's,
   applied to every year, and labelled so. The graph is
   `config/ai_chain.toml`; its evidence `config/ai_chain_evidence.json`
   (`scripts/chain_evidence.py`). TICKER carries the same card for a name in

@@ -219,3 +219,12 @@ def test_merge_prefers_the_recent_row_for_the_same_report():
     recent = [{"ts": "2025-10-31T07:01:00+00:00", "source": "yahoo_recent"}]
     merged = H.merge(archive, recent)
     assert [r["source"] for r in merged] == ["yahoo_archive", "yahoo_recent"]
+
+
+def test_the_layer_matrix_groups_pairs_by_where_lead_and_follower_sit():
+    rows = [{"lead": "A", "follow": "B", "lead_day": f"2026-0{m}-01", "lead_move": 2.0, "follow_move": 1.0} for m in range(1, 4)]
+    rows += [{"lead": "B", "follow": "A", "lead_day": "2026-01-02", "lead_move": -1.0, "follow_move": 0.5}]
+    out = C.layer_matrix(rows, {"A": "chips", "B": "cloud"})
+    assert out["chips"]["cloud"]["reports"] == 3 and out["chips"]["cloud"]["mean"] == 1.0
+    assert out["cloud"]["chips"]["mean"] == -0.5          # signed by the lead's move: against it
+    assert out["chips"]["cloud"]["same_way_pct"] == 100

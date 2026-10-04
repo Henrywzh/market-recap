@@ -937,3 +937,4 @@ table.data td.chain-quote { min-width: 280px; }
 /* The graph keeps its columns legible: below this width it scrolls in its card. */
 .chain-graph-scroll { overflow-x: auto; }
 .chain-graph { min-width: 1180px; width: 100%; }
+.chain-layers { height: 440px; min-width: 640px; width: 100%; }
