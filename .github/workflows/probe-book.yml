@@ -3,6 +3,8 @@
 # equity tags tag by tag, beside what the build's snapshot took from them.
 # Touches no build, cache or deploy. Runs on a push to this branch until the file
 # is on the default branch (GitHub dispatches only workflows already there).
+# Second run: after the carry-forward / preferred-tag / combined-line fixes, the same
+# companies, to check them against real filings.
 name: probe-book
 
 on:

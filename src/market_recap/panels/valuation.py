@@ -163,7 +163,9 @@ def _book_fields(snapshot: dict) -> dict:
         average = now["value"] if prior is None or prior["value"] <= 0 else (now["value"] + prior["value"]) / 2
     return {"tbv": clean_float(now["value"], 0) if now else None, "tbv_avg": clean_float(average, 0),
             "income_common": clean_float(snapshot["ttm"].get("income_to_common"), 0),
-            "tbv_assumed_none": now["assumed_none"] if now else None}
+            "tbv_assumed_none": now["assumed_none"] if now else None,
+            # Lines this quarter's balance sheet left out, carried from an earlier period end.
+            "tbv_carried": snapshot.get("balance_carried") or None}
 
 
 def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices: list[str], splits,

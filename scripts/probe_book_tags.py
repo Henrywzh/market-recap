@@ -50,7 +50,8 @@ def probe(ticker: str, cik_map: dict) -> dict:
     return {
         "ticker": ticker, "ciks": ciks, "period_end": (snapshot or {}).get("period_end"),
         "tags": tags,
-        "snapshot_balance": {k: balance.get(k) for k in ("equity", "goodwill", "intangibles", "preferred")},
+        "snapshot_balance": {k: balance.get(k) for k in ("equity", "goodwill", "intangibles", "goodwill_and_intangibles", "preferred")},
+        "carried": (snapshot or {}).get("balance_carried"),
         "tangible_book": V.tangible_book(balance),
     }
 

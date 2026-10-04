@@ -617,7 +617,8 @@ def _sessions(start, end, price):
 def test_eps_history_carries_the_balance_sheet_as_filed_that_day():
     history = sec.eps_history(_annual_bank_facts())
     assert [q["filed"] for q in history] == ["2024-02-20", "2025-02-20", "2026-02-20"]
-    assert history[0]["book"] == {"equity": 1000e6, "goodwill": 100e6, "intangibles": 20e6, "preferred": 50e6}
+    assert history[0]["book"] == {"equity": 1000e6, "goodwill": 100e6, "intangibles": 20e6,
+                                  "goodwill_and_intangibles": None, "preferred": 50e6}
 
 
 def test_tbv_steps_are_book_per_share_on_todays_basis():
@@ -707,3 +708,86 @@ def test_a_schedule_passed_to_the_step_builders_changes_nothing():
     split = pd.Series([2.0], index=[pd.Timestamp("2025-06-01")])
     assert V.eps_steps(history, V.SplitSchedule(split)) == V.eps_steps(history, split)
     assert V.tbv_steps(history, V.SplitSchedule(split)) == V.tbv_steps(history, split)
+
+
+# --- The ways real filers report tangible book (found with scripts/probe_book_tags.py) ---------
+def _facts_with(instants):
+    """Equity and the income lines of _bank_facts (period end 2026-09-30), plus the given
+    balance-sheet tags: {tag: [(form, period end, value, filed)]}."""
+    facts = _bank_facts(preferred=False, goodwill=False)
+    for tag, rows in instants.items():
+        facts["facts"]["us-gaap"][tag] = {"units": {"USD": [
+            {"end": end, "val": val, "filed": filed, "form": form, "fp": "Q"} for form, end, val, filed in rows]}}
+    return facts
+
+
+def test_a_line_only_the_10k_tags_is_carried_into_the_next_quarters_and_said_so():
+    """American Express, Aflac, Prudential: goodwill in the 10-K, nothing in the 10-Qs.
+    Bank of America: preferred stock in the 10-K only."""
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-K", "2025-12-31", 60.0, "2026-02-20")],
+        "PreferredStockIncludingAdditionalPaidInCapital": [("10-K", "2025-12-31", 30.0, "2026-02-20")]}))
+    assert snapshot["balance"]["goodwill"] == 60.0 and snapshot["balance"]["preferred"] == 30.0
+    assert snapshot["balance_carried"] == {"goodwill": "2025-12-31", "preferred": "2025-12-31"}
+    assert V.tangible_book(snapshot["balance"])["value"] == 400.0 - 30.0 - 60.0
+
+
+def test_a_line_older_than_the_carry_limit_is_unknown_not_carried():
+    snapshot = sec.trailing_snapshot(_facts_with({"Goodwill": [("10-K", "2024-12-31", 60.0, "2025-02-20")]}))   # 639 days back
+    assert snapshot["balance"]["goodwill"] is None and snapshot["balance_carried"] == {}
+    assert V.tangible_book(snapshot["balance"]) is None
+
+
+def test_a_line_in_the_quarter_is_not_called_carried():
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-K", "2025-12-31", 55.0, "2026-02-20"), ("10-Q", "2026-09-30", 60.0, "2026-11-05")]}))
+    assert snapshot["balance"]["goodwill"] == 60.0 and snapshot["balance_carried"] == {}
+
+
+def test_jpmorgans_preferred_stock_tag_is_read():
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-Q", "2026-09-30", 60.0, "2026-11-05")],
+        "PreferredStockIncludingAdditionalPaidInCapitalNetOfDiscount": [("10-Q", "2026-09-30", 21.0, "2026-11-05")]}))
+    assert snapshot["balance"]["preferred"] == 21.0
+    assert V.tangible_book(snapshot["balance"]) == {"value": 400.0 - 21.0 - 60.0, "assumed_none": ["intangibles"]}
+
+
+def test_a_current_combined_line_replaces_goodwill_and_intangibles_that_would_only_be_carried():
+    """Raymond James and Arch tag one goodwill-and-intangibles line in the 10-Q."""
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-K", "2025-12-31", 40.0, "2026-02-20")],
+        "IntangibleAssetsNetExcludingGoodwill": [("10-K", "2025-12-31", 10.0, "2026-02-20")],
+        "IntangibleAssetsNetIncludingGoodwill": [("10-Q", "2026-09-30", 80.0, "2026-11-05")]}))
+    assert snapshot["balance"]["goodwill"] is None and snapshot["balance"]["intangibles"] is None
+    assert snapshot["balance"]["goodwill_and_intangibles"] == 80.0
+    assert V.tangible_book(snapshot["balance"]) == {"value": 400.0 - 80.0, "assumed_none": ["preferred"]}
+
+
+def test_a_combined_line_does_not_replace_goodwill_the_quarter_reports_itself():
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-Q", "2026-09-30", 60.0, "2026-11-05")],
+        "IntangibleAssetsNetIncludingGoodwill": [("10-Q", "2026-09-30", 999.0, "2026-11-05")]}))
+    assert snapshot["balance"]["goodwill"] == 60.0 and snapshot["balance"]["goodwill_and_intangibles"] is None
+
+
+def test_finite_and_indefinite_lived_intangibles_are_added_unless_a_total_is_filed():
+    """Ameriprise files the two lines; BlackRock and Moody's file the total."""
+    split = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-Q", "2026-09-30", 60.0, "2026-11-05")],
+        "FiniteLivedIntangibleAssetsNet": [("10-Q", "2026-09-30", 5.0, "2026-11-05")],
+        "IndefiniteLivedIntangibleAssetsExcludingGoodwill": [("10-Q", "2026-09-30", 8.0, "2026-11-05")]}))
+    assert split["balance"]["intangibles"] == 13.0
+    total = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-Q", "2026-09-30", 60.0, "2026-11-05")],
+        "IntangibleAssetsNetExcludingGoodwill": [("10-Q", "2026-09-30", 20.0, "2026-11-05")],
+        "FiniteLivedIntangibleAssetsNet": [("10-Q", "2026-09-30", 5.0, "2026-11-05")]}))
+    assert total["balance"]["intangibles"] == 20.0                   # the total already holds the finite-lived part
+
+
+def test_the_history_carries_a_10k_only_line_too():
+    facts = _annual_bank_facts()
+    rows = facts["facts"]["us-gaap"]["Goodwill"]["units"]["USD"]
+    facts["facts"]["us-gaap"]["Goodwill"]["units"]["USD"] = [r for r in rows if not r["end"].startswith("2024")]
+    book = [q["book"] for q in sec.eps_history(facts)]
+    assert [b["goodwill"] for b in book] == [100e6, 100e6, 100e6]     # 2024's, missing, is the year before's
+    assert [round(v, 2) for _, _, v in V.tbv_steps(sec.eps_history(facts), None)] == [8.30, 9.30, 10.30]

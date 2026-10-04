@@ -148,18 +148,24 @@ def tangible_book(balance: dict) -> dict | None:
     """Common tangible book value: shareholders' equity less preferred stock,
     goodwill and other intangibles, as filed.
 
-    A filer that tags neither goodwill nor intangibles cannot be told from one
-    that has none, so it has no tangible book here rather than a book passed
-    off as tangible. An untagged preferred stock is taken as none, as an untagged
-    debt is (see ``debt``); ``assumed_none`` names what was taken as none so the
-    row can say so. A negative component is a sign error in the filing, not an
-    asset, and leaves the figure blank. Deferred tax on intangibles and
-    mortgage-servicing rights are not adjusted, so a bank's own reported TBV
-    per share can differ.
+    A filer that tags neither goodwill, intangibles nor a combined line cannot be
+    told from one that has none, so it has no tangible book here rather than a
+    book passed off as tangible. A combined goodwill-and-intangibles line stands
+    in when neither is tagged on its own. An untagged preferred stock is taken as
+    none, as an untagged debt is (see ``debt``); ``assumed_none`` names what was
+    taken as none so the row can say so. A negative component is a sign error in
+    the filing, not an asset, and leaves the figure blank. Deferred tax on
+    intangibles and mortgage-servicing rights are not adjusted, so a bank's own
+    reported tangible book per share can differ.
     """
     equity = balance.get("equity")
     parts = {"preferred": balance.get("preferred"), "goodwill": balance.get("goodwill"), "intangibles": balance.get("intangibles")}
-    if equity is None or (parts["goodwill"] is None and parts["intangibles"] is None):
+    combined = balance.get("goodwill_and_intangibles")
+    if parts["goodwill"] is None and parts["intangibles"] is None and combined is not None:
+        parts = {"preferred": parts["preferred"], "goodwill and intangibles": combined}
+    elif parts["goodwill"] is None and parts["intangibles"] is None:
+        return None
+    if equity is None:
         return None
     if any(v is not None and v < 0 for v in parts.values()):
         return None

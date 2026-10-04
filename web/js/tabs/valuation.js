@@ -86,6 +86,7 @@ function rowNote(row, data) {
   ];
   if (row.lagged.length) parts.push(`from the prior quarter (not tagged in the latest 10-Q): ${row.lagged.join(', ')}`);
   if (row.sector === data.financials_sector) parts.push('Financials: EV, gross-profit, FCF and accrual metrics not computed');
+  if (row.tbv_carried) parts.push(`tangible book: ${Object.entries(row.tbv_carried).map(([k, d]) => `${k} from ${d}`).join(', ')} (not in the latest 10-Q)`);
   if (row.tbv_assumed_none?.length) parts.push(`tangible book: no ${row.tbv_assumed_none.join(', ')} tagged in the filing, taken as none`);
   else if (row.tbv === null || row.tbv === undefined) parts.push('tangible book: needs goodwill or intangibles tagged in the filing');
   if (row.piotroski === null && row.piotroski_tested) parts.push(`Piotroski: ${row.piotroski_tested} of 9 signals testable`);
