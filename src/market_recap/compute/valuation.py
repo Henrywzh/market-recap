@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 import math
 from statistics import pstdev
 
@@ -200,6 +201,7 @@ def tbv_steps(history: Sequence[dict], splits: pd.Series | None) -> list[tuple[s
     (or a negative one) or no usable count is left out; the figure before it
     stands until it expires, as for EPS.
     """
+    splits = split_schedule(splits)
     reported = {filed: eps for filed, _, eps in eps_steps(history, splits)}
     steps = []
     for quarter in history:
@@ -374,13 +376,45 @@ EPS_STALE_AFTER_DAYS = 190
 EPS_PRICE_LIMIT = 2.0
 
 
-def split_factor_after(splits: pd.Series | None, date: str) -> float:
+class SplitSchedule:
+    """A symbol's splits, kept as the few events they are.
+
+    ``split_factor_after`` was asked about every filed part of every quarter of
+    every company -- 520,000 times a build -- and each time dropped the NaNs from
+    the whole price-length series and masked it, which was most of VALUATION's
+    time. The splits are a handful of dated ratios: build this once per symbol,
+    and each question scans only those.
+    """
+
+    def __init__(self, splits: pd.Series | None):
+        ratios = splits.dropna() if splits is not None else pd.Series(dtype=float)
+        self._days = list(ratios.index)
+        self._ratios = [float(r) for r in ratios]
+
+    def factor_after(self, date: str) -> float:
+        cutoff = _timestamp(date)
+        # np.prod of the same ratios in the same order: what Series.prod() did.
+        return float(np.prod([r for d, r in zip(self._days, self._ratios) if d > cutoff]))
+
+
+@lru_cache(maxsize=None)
+def _timestamp(date: str) -> pd.Timestamp:
+    return pd.Timestamp(date)
+
+
+def split_schedule(splits: "pd.Series | SplitSchedule | None") -> "SplitSchedule | None":
+    """The schedule for a splits series (itself if it already is one)."""
+    if splits is None or isinstance(splits, SplitSchedule):
+        return splits
+    return SplitSchedule(splits)
+
+
+def split_factor_after(splits: "pd.Series | SplitSchedule | None", date: str) -> float:
     """Product of the splits after ``date``: what a figure filed that day must be
-    scaled by to be on today's share basis."""
-    if splits is None:
-        return 1.0
-    ratios = splits.dropna()
-    return float(ratios[ratios.index > pd.Timestamp(date)].prod()) if not ratios.empty else 1.0
+    scaled by to be on today's share basis. Pass a ``SplitSchedule`` when asking
+    more than once about the same symbol."""
+    schedule = split_schedule(splits)
+    return 1.0 if schedule is None else schedule.factor_after(date)
 
 
 def eps_steps(history: Sequence[dict], splits: pd.Series | None) -> list[tuple[str, str, float]]:
@@ -392,6 +426,7 @@ def eps_steps(history: Sequence[dict], splits: pd.Series | None) -> list[tuple[s
     until each is scaled separately.
     """
     steps = []
+    splits = split_schedule(splits)
     for quarter in history:
         eps = sum(sign * value / split_factor_after(splits, filed) for value, filed, sign in quarter["parts"])
         steps.append((quarter["filed"], quarter["period_end"], eps))
@@ -492,6 +527,7 @@ def operating_steps(history: Sequence[dict], splits: pd.Series | None, basis: st
     A quarter whose inputs were not filed is left out; the figure before it
     stands, as for a reported EPS, until it expires.
     """
+    splits = split_schedule(splits)
     reported = {filed: eps for filed, _, eps in eps_steps(history, splits)}
     out = []
     for quarter, rate in zip(history, tax_rates(history)):

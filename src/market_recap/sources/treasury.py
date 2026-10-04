@@ -14,6 +14,7 @@ from datetime import date
 import pandas as pd
 from lxml import etree
 
+from .. import cache
 from .http import get_bytes
 
 XML_URL = (
@@ -46,7 +47,13 @@ def fetch_par_yield_curve(years: list[int] | None = None) -> tuple[pd.DataFrame,
     rows: list[dict] = []
     for year in years:
         url = XML_URL.format(year=year)
-        tree = etree.fromstring(get_bytes(url, timeout=90.0))
+        # Four panels read the curve and Treasury's server answers in ~20 s a
+        # year: uncached, a build waited out eight downloads (and could hand the
+        # panels curves from different minutes when the day's was posted
+        # mid-build). Per session, like the other daily files.
+        raw = cache.fetch_bytes("treasury", f"par-{year}", lambda url=url: get_bytes(url, timeout=90.0),
+                                kind="daily_file", suffix=".xml", compress=True)
+        tree = etree.fromstring(raw)
         for entry in tree.iter("{http://www.w3.org/2005/Atom}entry"):
             props = entry.find(".//{http://schemas.microsoft.com/ado/2007/08/dataservices/metadata}properties")
             if props is None:

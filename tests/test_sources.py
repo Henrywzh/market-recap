@@ -340,3 +340,70 @@ def test_the_facts_backstop_is_staggered_by_filer():
     due = {cik for cik in range(7) if sec.backstop_due(cik, fetched, now)}
     assert due == {0, 1, 2}                      # 30 + cik % 7 days: not all on one night
     assert not sec.backstop_due(0, None, now)
+
+
+# --- Treasury's curve is downloaded once a session, not once a panel --------------------
+_TREASURY_XML = (
+    '<feed xmlns="http://www.w3.org/2005/Atom" '
+    'xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata" '
+    'xmlns:d="http://schemas.microsoft.com/ado/2007/08/dataservices">'
+    '<entry><content><m:properties><d:NEW_DATE>2026-10-02T00:00:00</d:NEW_DATE>'
+    '<d:BC_2YEAR>3.90</d:BC_2YEAR><d:BC_10YEAR>4.12</d:BC_10YEAR></m:properties></content></entry></feed>'
+).encode()
+
+
+def test_the_par_curve_is_fetched_once_per_year_however_many_panels_ask(monkeypatch, tmp_path):
+    from market_recap import cache
+    from market_recap.sources import treasury
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    asked = []
+    monkeypatch.setattr(treasury, "get_bytes", lambda url, **kw: asked.append(url) or _TREASURY_XML)
+    first, _ = treasury.fetch_par_yield_curve([2025, 2026])
+    for _ in range(3):                                   # fixed income, DCF, catalysts, overview
+        again, _ = treasury.fetch_par_yield_curve([2025, 2026])
+    assert len(asked) == 2                               # one download per year, not eight
+    assert again.equals(first) and set(first["tenor"]) == {"2Y", "10Y"}
+    assert first.loc[first["tenor"] == "10Y", "yield_pct"].iloc[0] == 4.12
+
+
+def test_filer_is_one_cache_entry_however_it_is_called(monkeypatch):
+    from market_recap.sources import sec
+    calls = []
+    monkeypatch.setattr(sec, "fetch_filer_facts", lambda cik, use_cache=True: calls.append((cik, use_cache)) or
+                        ({"entityName": "X", "facts": {}}, [cik]))
+    sec._filer.cache_clear()
+    one, two, three = sec.filer(123), sec.filer(123, True), sec.filer(123, use_cache=True)
+    assert one is two is three and len(calls) == 1
+    assert sec.filer(123, False) is not one and len(calls) == 2      # a different request is a different entry
+    sec._filer.cache_clear()
+
+
+# --- An earnings release is parsed once, not once a build ---------------------------------
+_INDEX = ('<table class="tableFile"><tr><td>1</td><td>press release</td><td><a href="/Archives/e/x.htm">x.htm</a></td>'
+          '<td>EX-99.1</td></tr><tr><td>2</td><td>cover</td><td><a href="/Archives/e/c.htm">c.htm</a></td><td>8-K</td></tr></table>')
+_RELEASE = "<html><body><p>Data   Center revenue was $1.0 billion.</p><p>We expect capital expenditures of $2 billion.</p></body></html>"
+
+
+def test_a_release_is_parsed_once_and_read_back_identically(monkeypatch, tmp_path):
+    from market_recap import cache
+    from market_recap.sources import releases, sec
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    fetched, parsed = [], []
+    monkeypatch.setattr(sec, "_get", lambda url, timeout=30.0: fetched.append(url) or (_INDEX if url.endswith("index.html") else _RELEASE))
+    real_text = releases._text
+    monkeypatch.setattr(releases, "_text", lambda html: parsed.append(1) or real_text(html))
+    first = releases._exhibit(1045810, "0001045810-26-000001")
+    again = releases._exhibit(1045810, "0001045810-26-000001")
+    assert first == again == ("https://www.sec.gov/Archives/e/x.htm", "Data Center revenue was $1.0 billion. We expect capital expenditures of $2 billion.")
+    assert len(parsed) == 1 and len(fetched) == 2          # the index and the exhibit, once
+
+
+def test_a_filing_with_no_exhibit_is_remembered_as_having_none(monkeypatch, tmp_path):
+    from market_recap import cache
+    from market_recap.sources import releases, sec
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    fetched = []
+    monkeypatch.setattr(sec, "_get", lambda url, timeout=30.0: fetched.append(url) or '<table class="tableFile"><tr><td>1</td></tr></table>')
+    assert releases._exhibit(1, "0000000001-26-000001") is None
+    assert releases._exhibit(1, "0000000001-26-000001") is None
+    assert len(fetched) == 1

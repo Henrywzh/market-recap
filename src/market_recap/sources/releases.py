@@ -11,6 +11,7 @@ A filed release never changes and is cached as an archive.
 from __future__ import annotations
 
 from datetime import date
+import json
 import re
 
 from bs4 import BeautifulSoup
@@ -33,8 +34,9 @@ def _text(html: str) -> str:
     return re.sub(r"\s+", " ", BeautifulSoup(html, "html.parser").get_text(" ")).strip()
 
 
-def _exhibit(cik: int, accession: str) -> tuple[str, str] | None:
-    """(url, text) of the filing's EX-99.1."""
+def _read_exhibit(cik: int, accession: str) -> tuple[str, str] | None:
+    """(url, text) of the filing's EX-99.1, read from the filing's index page
+    and the exhibit itself (each kept as fetched). Parses both documents."""
     acc = accession.replace("-", "")
     base = ARCHIVE.format(cik=cik, acc=acc)
     index = cache.fetch_text(NAMESPACE, f"{acc}-index", lambda: sec._get(f"{base}{accession}-index.html", 30.0),
@@ -52,6 +54,22 @@ def _exhibit(cik: int, accession: str) -> tuple[str, str] | None:
         html = cache.fetch_text(NAMESPACE, f"{acc}-ex991", lambda: sec._get(url, 30.0), kind="archive", suffix=".html")
         return url, _text(html)
     return None
+
+
+def _exhibit(cik: int, accession: str) -> tuple[str, str] | None:
+    """(url, text) of the filing's EX-99.1.
+
+    A filed release never changes, yet every build parsed the same index page
+    and press release again: 2,351 BeautifulSoup runs over 8 million tags, most
+    of an EVENTS build's CPU. What is kept is the answer -- the url and the
+    extracted text, or that there is no exhibit -- so each filing is parsed once
+    and read back thereafter."""
+    acc = accession.replace("-", "")
+    answer = cache.fetch_text(NAMESPACE, f"{acc}-exhibit",
+                              lambda: json.dumps(_read_exhibit(cik, accession)),
+                              kind="archive", suffix=".json", compress=True)
+    found = json.loads(answer)
+    return (found[0], found[1]) if found else None
 
 
 def recent(cik: int, count: int) -> list[dict]:

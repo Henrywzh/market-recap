@@ -20,6 +20,7 @@ Two outputs:
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 import pandas as pd
@@ -473,6 +474,59 @@ def _macro(catalysts: dict, as_of: str, days: int) -> list[dict]:
     return keep
 
 
+def _finnhub_phase(*, as_of: date, settings: dict, excess: pd.DataFrame, reactions: dict, everyone: list[str],
+                   meta: dict, deep: list[str], priority) -> tuple[dict, dict, dict, dict, dict]:
+    """Large moves and their headlines, then the announced company events:
+    (moves_by_symbol, news, news_state, announced, event_state). Everything it
+    reads is passed in, so it can run beside the release guides."""
+    # Large moves: found for every name; headlines asked for within a budget,
+    # the names whose cards matter first and the newest moves first. A day's
+    # news is kept a year once settled, so the backlog clears over a few builds.
+    move_since = (as_of - timedelta(days=int(settings.get("moves_days", 730)))).isoformat()
+    news_since = (as_of - timedelta(days=int(settings.get("news_days", 365)))).isoformat()
+    moves_by_symbol = {s: E.big_moves(excess[s], since=move_since, skip=set(_sessions_of(reactions.get(s))))
+                       for s in everyone if s in excess.columns}
+    news: dict[tuple[str, str], list[dict]] = {}
+    news_state = {"asked": 0, "failed": 0, "budget": int(settings.get("news_budget", 250)), "keyed": finnhub.available()}
+    if news_state["keyed"]:
+        wanted = sorted(((priority(s), m["date"], s) for s, ms in moves_by_symbol.items() for m in ms if m["date"] >= news_since),
+                        key=lambda x: (x[0][1], x[0][2], -int(x[1].replace("-", "")), x[0][3]))
+        for _, day, symbol in wanted:
+            start, end, start_ts, end_ts = _news_window(excess.index, day)
+            asked = symbol.replace("-", ".")
+            if not finnhub.is_cached(asked, start, end, as_of):
+                if news_state["asked"] >= news_state["budget"]:
+                    continue
+                news_state["asked"] += 1
+            try:
+                rows = finnhub.company_news(asked, start, end, as_of)
+            except Exception:
+                news_state["failed"] += 1
+                continue
+            news[(symbol, day)] = E.rank_headlines(rows, symbol, meta.get(symbol, {}).get("name"), start_ts, end_ts)
+
+    # Company events announced ahead: the deep names' last weeks of headlines,
+    # read for a dated investor day, product event, FDA date, meeting or
+    # ruling; plus the hand-kept list in the config.
+    announced: dict[str, list[dict]] = {}
+    event_state = {"asked": 0, "failed": 0, "budget": int(settings.get("event_news_budget", 150))}
+    if news_state["keyed"]:
+        lookback = as_of - timedelta(days=int(settings.get("event_news_days", 45)))
+        for symbol in sorted(deep, key=priority):
+            asked = symbol.replace("-", ".")
+            if not finnhub.is_cached(asked, lookback, as_of, as_of):
+                if event_state["asked"] >= event_state["budget"]:
+                    continue
+                event_state["asked"] += 1
+            try:
+                rows = finnhub.company_news(asked, lookback, as_of, as_of)
+            except Exception:
+                event_state["failed"] += 1
+                continue
+            announced[symbol] = E.announced_events(rows, symbol, meta.get(symbol, {}).get("name"), as_of)
+    return moves_by_symbol, news, news_state, announced, event_state
+
+
 def build(ctx, *, inputs: dict | None = None) -> dict:
     inputs = inputs or {}
     catalysts, evidence = inputs.get("catalysts"), inputs.get("evidence")
@@ -555,57 +609,25 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
 
     deep = [s for s in everyone if s in carded or s in focus or s in recent_symbols
             or _heavy({"weights": meta[s].get("weights") or {}}, settings) or meta[s].get("watchlist")]
+    # Finnhub's free tier allows one request a second and a build spends up to
+    # 400 of them, so this phase is mostly waiting (a quarter of an hour of
+    # sleeping, profiled). It needs nothing the guides read, and the guides need
+    # nothing it finds: run side by side, the build waits for the longer of the
+    # two instead of both. One thread, so the rate limit holds.
+    finnhub_pool = ThreadPoolExecutor(1)
+    finnhub_future = finnhub_pool.submit(_finnhub_phase, as_of=as_of, settings=settings, excess=excess, reactions=reactions,
+                                         everyone=everyone, meta=meta, deep=deep, priority=priority)
+
     guides_by_symbol = {}
     for symbol in sorted(deep, key=priority):
         rows = {d: {symbol: r} for d, rs in calendars.items() if (r := rs.get(symbol) or rs.get(symbol.replace("-", ".")))}
         guides_by_symbol[symbol] = _guides(symbol, cik_for(symbol, cik_map) if cik_map else None, reactions.get(symbol) or [],
                                            rows, int(settings.get("guide_reports", 4)), guide_budget)
 
-    # Large moves: found for every name; headlines asked for within a budget,
-    # the names whose cards matter first and the newest moves first. A day's
-    # news is kept a year once settled, so the backlog clears over a few builds.
-    move_since = (as_of - timedelta(days=int(settings.get("moves_days", 730)))).isoformat()
-    news_since = (as_of - timedelta(days=int(settings.get("news_days", 365)))).isoformat()
-    moves_by_symbol = {s: E.big_moves(excess[s], since=move_since, skip=set(_sessions_of(reactions.get(s))))
-                       for s in everyone if s in excess.columns}
-    news: dict[tuple[str, str], list[dict]] = {}
-    news_state = {"asked": 0, "failed": 0, "budget": int(settings.get("news_budget", 250)), "keyed": finnhub.available()}
-    if news_state["keyed"]:
-        wanted = sorted(((priority(s), m["date"], s) for s, ms in moves_by_symbol.items() for m in ms if m["date"] >= news_since),
-                        key=lambda x: (x[0][1], x[0][2], -int(x[1].replace("-", "")), x[0][3]))
-        for _, day, symbol in wanted:
-            start, end, start_ts, end_ts = _news_window(excess.index, day)
-            asked = symbol.replace("-", ".")
-            if not finnhub.is_cached(asked, start, end, as_of):
-                if news_state["asked"] >= news_state["budget"]:
-                    continue
-                news_state["asked"] += 1
-            try:
-                rows = finnhub.company_news(asked, start, end, as_of)
-            except Exception:
-                news_state["failed"] += 1
-                continue
-            news[(symbol, day)] = E.rank_headlines(rows, symbol, meta.get(symbol, {}).get("name"), start_ts, end_ts)
+    # The guides are done: take the headlines, waiting for whatever is left of the rate limit.
+    moves_by_symbol, news, news_state, announced, event_state = finnhub_future.result()
+    finnhub_pool.shutdown()
 
-    # Company events announced ahead: the deep names' last weeks of headlines,
-    # read for a dated investor day, product event, FDA date, meeting or
-    # ruling; plus the hand-kept list in the config.
-    announced: dict[str, list[dict]] = {}
-    event_state = {"asked": 0, "failed": 0, "budget": int(settings.get("event_news_budget", 150))}
-    if news_state["keyed"]:
-        lookback = as_of - timedelta(days=int(settings.get("event_news_days", 45)))
-        for symbol in sorted(deep, key=priority):
-            asked = symbol.replace("-", ".")
-            if not finnhub.is_cached(asked, lookback, as_of, as_of):
-                if event_state["asked"] >= event_state["budget"]:
-                    continue
-                event_state["asked"] += 1
-            try:
-                rows = finnhub.company_news(asked, lookback, as_of, as_of)
-            except Exception:
-                event_state["failed"] += 1
-                continue
-            announced[symbol] = E.announced_events(rows, symbol, meta.get(symbol, {}).get("name"), as_of)
     kept_events = _kept_events(settings.get("company_events") or [], ctx.as_of)
 
     snapshot = snapshot_store.latest_options_summary(as_of)

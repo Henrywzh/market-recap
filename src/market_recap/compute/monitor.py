@@ -111,12 +111,13 @@ def _window(series: Any, as_of: Any, count: int, *, label: str) -> tuple[pd.Seri
     return values.astype(float), None
 
 
-def series_value(frame: Any, ticker: str, as_of: Any) -> float | None:
-    """Read a value on exactly ``as_of`` from a frame or mapping.
+def numeric_column(frame: Any, ticker: str) -> pd.Series | None:
+    """``ticker``'s column of a frame or mapping as a unique, sorted, numeric,
+    date-indexed series (``_numeric_series``), or None when there is none.
 
-    This helper intentionally does not use ``last_valid_index``: a stale last
-    value is not today's quote.
-    """
+    Normalising a column costs a date parse, a group-by and a sort over its
+    whole history. ``series_value`` did it on every question; a caller asking
+    many questions of one column does it once and uses ``value_on``."""
 
     series: Any = None
     if isinstance(frame, pd.DataFrame):
@@ -128,7 +129,12 @@ def series_value(frame: Any, ticker: str, as_of: Any) -> float | None:
         series = frame.get(ticker)
     if series is None:
         return None
-    clean = _numeric_series(series)
+    return _numeric_series(series)
+
+
+def value_on(clean: pd.Series | None, as_of: Any) -> float | None:
+    """The finite value of a normalised series on exactly ``as_of``."""
+
     day = _as_date(as_of)
     if clean is None or day is None:
         return None
@@ -140,6 +146,16 @@ def series_value(frame: Any, ticker: str, as_of: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def series_value(frame: Any, ticker: str, as_of: Any) -> float | None:
+    """Read a value on exactly ``as_of`` from a frame or mapping.
+
+    This helper intentionally does not use ``last_valid_index``: a stale last
+    value is not today's quote.
+    """
+
+    return value_on(numeric_column(frame, ticker), as_of)
 
 
 def _endpoint_return(values: pd.Series, sessions: int) -> float | None:

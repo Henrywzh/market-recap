@@ -277,3 +277,44 @@ def test_first_observation_rerun_rollback_and_removed_rows_preserve_only_ledger_
 
     with pytest.raises(ValueError, match="rollback rejected"):
         monitor.build(first_ctx, previous=advanced)
+
+
+# --- A column is normalised once, and the answer is the one series_value always gave ----------
+def _messy_frame():
+    index = pd.to_datetime(["2026-09-30", "2026-09-28", "2026-09-29", "2026-09-29", "2026-10-01", "2026-10-02"])
+    return pd.DataFrame({
+        "AAA": [10.0, 9.0, 9.5, 9.6, float("nan"), 11.0],            # unsorted, a repeated date, a NaN
+        "BBB": ["5", "4", "oops", "4.5", "6", "7"],                   # numbers as text, one unreadable
+        "CCC": [1.0, 1.0, 1.0, 1.0, 1.0, float("inf")],
+    }, index=index)
+
+
+def test_value_on_a_normalised_column_is_what_series_value_returned():
+    frame = _messy_frame()
+    for ticker in ("AAA", "BBB", "CCC", "ZZZ"):
+        for day in ("2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-03", "not a date"):
+            assert M.value_on(M.numeric_column(frame, ticker), day) == M.series_value(frame, ticker, day)
+    assert M.series_value(frame, "AAA", "2026-09-29") == 9.6          # the last print of a repeated date wins
+    assert M.series_value(frame, "AAA", "2026-10-01") is None          # a NaN is not a quote
+    assert M.series_value(frame, "CCC", "2026-10-02") is None          # nor is infinity
+
+
+def test_numeric_column_accepts_a_series_and_a_mapping_like_series_value():
+    series = pd.Series([1.0, 2.0], index=pd.to_datetime(["2026-10-01", "2026-10-02"]))
+    assert M.value_on(M.numeric_column(series, "X"), "2026-10-02") == 2.0
+    assert M.value_on(M.numeric_column({"X": series}, "X"), "2026-10-01") == 1.0
+    assert M.numeric_column({"X": series}, "Y") is None and M.numeric_column(None, "X") is None
+
+
+def test_since_first_seen_is_the_same_with_and_without_the_shared_columns():
+    index = pd.bdate_range("2026-09-01", "2026-10-02")
+    closes = pd.DataFrame({"AAA": np.linspace(10, 12, len(index)), "PPP": np.linspace(20, 19, len(index)),
+                           "QQQ": np.linspace(5, 6, len(index))}, index=index)
+    ctx = SimpleNamespace(closes=closes)
+    plain = monitor._since_first_seen(ctx, "AAA", ["AAA", "PPP", "QQQ"], "2026-09-10", "2026-10-02")
+    memo: dict = {}
+    shared = monitor._since_first_seen(ctx, "AAA", ["AAA", "PPP", "QQQ"], "2026-09-10", "2026-10-02", memo)
+    again = monitor._since_first_seen(ctx, "PPP", ["AAA", "PPP", "QQQ"], "2026-09-10", "2026-10-02", memo)
+    assert plain == shared and plain[0] is not None and plain[1] is not None
+    assert set(memo) == {"AAA", "PPP", "QQQ"}                          # each column normalised once
+    assert again == monitor._since_first_seen(ctx, "PPP", ["AAA", "PPP", "QQQ"], "2026-09-10", "2026-10-02")

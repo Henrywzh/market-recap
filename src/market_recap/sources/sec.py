@@ -925,11 +925,19 @@ class Filer:
     quarterly_revenue: tuple = ()
 
 
-@lru_cache(maxsize=None)
 def filer(cik: int, use_cache: bool = True) -> Filer:
-    """Parsed once per build: FINANCIALS, VALUATION and the DCF read the same
-    filer, and a company-facts document is tens of MB once parsed -- what the
-    panels need is kept, the document is not."""
+    """Parsed once per build: FINANCIALS, VALUATION, the DCF, EVIDENCE and
+    EVENTS read the same filer, and a company-facts document is tens of MB once
+    parsed -- what the panels need is kept, the document is not.
+
+    ``filer(cik)`` and ``filer(cik, True)`` are one call: functools keys a
+    default argument apart from the same value passed, and EVENTS' 293 filers
+    were parsed a second time because they were asked for the first way."""
+    return _filer(int(cik), bool(use_cache))
+
+
+@lru_cache(maxsize=None)
+def _filer(cik: int, use_cache: bool) -> Filer:
     facts, ciks = fetch_filer_facts(cik, use_cache=use_cache)
     # A period with neither revenue nor net income is not a set of statements:
     # an IFRS filer's few stray US-GAAP tags would otherwise pass as ten

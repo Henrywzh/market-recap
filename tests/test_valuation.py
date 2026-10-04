@@ -670,3 +670,40 @@ def test_aggregates_carry_a_ptbv_history_beside_the_pe_history():
     assert full["Financials"]["stats_ptbv"]["current"] == pytest.approx(1.5)      # 450 cap over 300 book
     assert full["fin-diversified-banks"]["stats_ptbv"]["current"] == pytest.approx(1.5)
     assert len(full["Financials"]["ptbv"]) == len(full["Financials"]["pe"]) and full["Financials"]["coverage_ptbv"] == 1.0
+
+
+# --- The split schedule must answer exactly as the series did ----------------------------
+def _old_split_factor_after(splits, date):
+    """The implementation SplitSchedule replaced, kept as the reference."""
+    if splits is None:
+        return 1.0
+    ratios = splits.dropna()
+    return float(ratios[ratios.index > pd.Timestamp(date)].prod()) if not ratios.empty else 1.0
+
+
+def test_split_schedule_agrees_bit_for_bit_with_the_series_it_replaced():
+    import random
+    rng = random.Random(7)
+    days = pd.bdate_range("2014-01-01", "2026-09-30")
+    for _ in range(300):
+        series = pd.Series(float("nan"), index=days)
+        for stamp in rng.sample(list(days), rng.randint(0, 5)):
+            series[stamp] = rng.choice([2.0, 3.0, 4.0, 10.0, 20.0, 1.5, 0.1, 0.5, 1 / 3, 0.2])
+        schedule = V.SplitSchedule(series)
+        for _ in range(25):
+            date = (pd.Timestamp("2013-06-01") + pd.Timedelta(days=rng.randint(0, 4900))).strftime("%Y-%m-%d")
+            assert V.split_factor_after(schedule, date) == _old_split_factor_after(series, date)
+            assert V.split_factor_after(series, date) == _old_split_factor_after(series, date)
+
+
+def test_no_splits_is_a_factor_of_one():
+    assert V.split_factor_after(None, "2020-01-01") == 1.0
+    assert V.split_factor_after(pd.Series(dtype=float), "2020-01-01") == 1.0
+    assert V.split_factor_after(pd.Series([float("nan")], index=[pd.Timestamp("2021-01-04")]), "2020-01-01") == 1.0
+
+
+def test_a_schedule_passed_to_the_step_builders_changes_nothing():
+    history = sec.eps_history(_annual_bank_facts())
+    split = pd.Series([2.0], index=[pd.Timestamp("2025-06-01")])
+    assert V.eps_steps(history, V.SplitSchedule(split)) == V.eps_steps(history, split)
+    assert V.tbv_steps(history, V.SplitSchedule(split)) == V.tbv_steps(history, split)
