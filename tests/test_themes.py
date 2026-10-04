@@ -378,11 +378,29 @@ def test_as_published_reads_the_year_earlier_value_as_known_on_release_day():
     assert row["released"] == t("2026-09-16") and row["value"] == 106.0 and row["year_ago"] == 100.0
 
 
-def test_pcpartpicker_is_skipped_not_failed_on_the_cloud_build(monkeypatch):
+def test_pcpartpicker_is_skipped_not_failed_on_the_cloud_build(monkeypatch, tmp_path):
     from market_recap.panels import themes as P
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(P.pcpartpicker, "FEED_PATH", tmp_path / "missing.json")
     monkeypatch.setattr(P.pcpartpicker, "fetch", lambda kind: pytest.fail("the cloud build must not ask PCPartPicker"))
-    assert P._pcpp() == {"skipped": P.PCPP_SKIP_REASON}
+    assert P._pcpp(date(2026, 10, 4)) == {"skipped": P.PCPP_SKIP_REASON}
+
+
+def test_pcpartpicker_cloud_build_reads_the_committed_snapshot(monkeypatch, tmp_path):
+    from market_recap.panels import themes as P
+    feed = tmp_path / "pcpartpicker.json"
+    feed.write_text('{"schema": 1, "fetched_at": "2026-10-04T00:00:00Z", "failed": [], '
+                    '"memory": {"rows": [{"title": "DDR5-6000", "family": "DDR5", "image_date": "2026-10-03", '
+                    '"index": {"dates": ["2026-10-03"], "values": [100]}}], "families": {}, "page": "https://example.test"}, '
+                    '"cpu": {"rows": [{"title": "AMD Ryzen", "family": "AMD", "image_date": "2026-10-03", '
+                    '"index": {"dates": ["2026-10-03"], "values": [100]}}], "families": {}, "page": "https://example.test"}}',
+                    encoding="utf-8")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(P.pcpartpicker, "FEED_PATH", feed)
+    monkeypatch.setattr(P.pcpartpicker, "fetch", lambda kind: pytest.fail("the cloud build must not ask PCPartPicker"))
+    out = P._pcpp(date(2026, 10, 4))
+    assert out["from_feed"] is True and "stale" not in out
+    assert out["memory"]["rows"][0]["image_date"] == "2026-10-03"
 
 
 def test_tv_surprises_take_actual_less_forecast_on_the_new_york_day():

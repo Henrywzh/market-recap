@@ -307,7 +307,8 @@ def _needs_refetch(cik: int) -> bool:
         return False
     fetched = cache.modified(path)
     refetch = predates(fetched, latest) or backstop_due(cik, fetched, datetime.now(timezone.utc))
-    _checked[cik] = {"latest": latest, "refetched": refetch}
+    index_path = cache.path_for(f"{NAMESPACE}/submissions", f"CIK{cik:010d}", ".json" + cache.GZIP_SUFFIX)
+    _checked[cik] = {"latest": latest, "refetched": refetch, "index_fetched": cache.modified(index_path)}
     return refetch
 
 
@@ -328,11 +329,15 @@ def check_filings(ciks) -> None:
 def filing_check() -> dict:
     """Summary of this build's submissions checks."""
     latest = [c["latest"] for c in _checked.values() if c.get("latest")]
+    fetched = [c["index_fetched"] for c in _checked.values() if c.get("index_fetched")]
     return {
         "checked": len(_checked),
         "failed": sum(1 for c in _checked.values() if "error" in c),
         "refetched": sum(1 for c in _checked.values() if c.get("refetched")),
         "latest_filed": max((f.filed for f in latest), default=None),
+        # A quiet filer can have an old 10-Q and a freshly fetched index. Use
+        # the oldest actual index fetch, so stale-cache fallback stays visible.
+        "index_observed_date": min(fetched).date().isoformat() if fetched else None,
     }
 
 

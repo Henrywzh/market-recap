@@ -73,15 +73,39 @@ def basket_index(closes: pd.DataFrame, members: list[str]) -> pd.Series:
     return 100 * (1 + returns).cumprod()
 
 
-def yoy_monthly(rows: list[dict], value: str) -> list[dict]:
-    """Adds y/y growth to monthly rows keyed by 'YYYY-MM'."""
+def yoy_monthly(rows: list[dict], value: str, key: str = "yoy_pct") -> list[dict]:
+    """Adds year-on-year growth to monthly rows keyed by YYYY-MM.
+
+    key names the field written, so a second pass can keep a different growth
+    beside one the source already stated.
+    """
     by_month = {r["month"]: r for r in rows}
     out = []
     for r in rows:
         y, m = (int(p) for p in r["month"].split("-"))
         prior = by_month.get(f"{y - 1:04d}-{m:02d}")
-        yoy = round(100 * (r[value] / prior[value] - 1), 1) if prior and prior.get(value) and r.get(value) is not None else None
-        out.append({**r, "yoy_pct": r.get("yoy_pct") if r.get("yoy_pct") is not None else yoy})
+        current = r.get(value)
+        base = prior.get(value) if prior else None
+        yoy = round(100 * (current / base - 1), 1) if base and current is not None else None
+        out.append({**r, key: r[key] if key in r and r[key] is not None else yoy})
+    return out
+
+
+def fill_months(values: dict[str, float | None]) -> list[dict]:
+    """Every month from the first key to the last. A missing month is None,
+    so a twelve-row YoY lag is twelve months and not twelve observations."""
+    if not values:
+        return []
+    keys = sorted(values)
+    year, month = (int(p) for p in keys[0].split("-"))
+    end_year, end_month = (int(p) for p in keys[-1].split("-"))
+    out = []
+    while (year, month) <= (end_year, end_month):
+        key = f"{year:04d}-{month:02d}"
+        out.append({"month": key, "value": values.get(key)})
+        month += 1
+        if month == 13:
+            year, month = year + 1, 1
     return out
 
 

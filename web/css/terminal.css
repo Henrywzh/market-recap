@@ -197,6 +197,8 @@ main { padding: 14px 12px 60px; }
 
 /* ---------- Period switch ---------- */
 .period-switch { display: flex; gap: 2px; }
+.period-switch.series-picker { flex-wrap: wrap; max-width: 100%; }
+.period-switch.series-picker button { max-width: 100%; }
 .period-switch button {
   appearance: none;
   background: var(--panel-alt);

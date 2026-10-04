@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from contextlib import contextmanager
 
 import httpx
 
@@ -46,6 +47,36 @@ class FetchError(RuntimeError):
     def __init__(self, message: str, *, not_found: bool = False) -> None:
         super().__init__(message)
         self.not_found = not_found
+
+
+class _Session:
+    """Cookie-preserving requests for feeds whose query needs a session."""
+
+    def __init__(self, client: httpx.Client) -> None:
+        self.client = client
+
+    def request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        try:
+            response = self.client.request(method, url, **kwargs)
+            response.raise_for_status()
+            return response
+        except httpx.HTTPError as exc:
+            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+            raise FetchError(f"{url}: {exc}", not_found=status in NOT_FOUND_STATUSES) from exc
+
+    def get(self, url: str, **kwargs) -> httpx.Response:
+        return self.request("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs) -> httpx.Response:
+        return self.request("POST", url, **kwargs)
+
+
+@contextmanager
+def session(*, headers: dict[str, str] | None = None, timeout: float = 45.0):
+    """Use the project identifier and verified TLS for session-only feeds."""
+    merged = {**(headers or {}), "User-Agent": USER_AGENT}
+    with httpx.Client(headers=merged, timeout=timeout, follow_redirects=True) as client:
+        yield _Session(client)
 
 
 def get_bytes(

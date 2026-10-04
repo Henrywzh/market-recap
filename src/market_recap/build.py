@@ -167,9 +167,9 @@ def run(
         ctx.log.add(SourceRecord(
             "sec_submissions", "SEC submissions index (new 10-K / 10-Q since the last fetch)",
             "https://data.sec.gov/submissions/",
-            observed_date=check["latest_filed"],
+            observed_date=check["index_observed_date"],
             rows=check["checked"],
-            policy="filings",
+            policy="daily_close",
             status="ok" if not check["failed"] else "partial",
             error=f"{check['failed']} of {check['checked']} indexes unreadable" if check["failed"] else None,
         ))

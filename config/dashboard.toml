@@ -330,6 +330,56 @@ member_corr = 0.55
 # Korean bellwethers: results dates from DART, own move on the Korean session.
 korea_index = "^KS11"
 
+# Public stand-ins for a memory-price tape. Government statistics only.
+# Korea Customs codes use the same USD-thousands unit as HS 8542.
+# FRED ids are BLS producer and import price indexes, public domain.
+# None of these is a DRAM or NAND spot or contract quote.
+
+[[themes.memory_exports]]
+code = "854232"
+label = "Memories"
+detail = "HS 854232, electronic integrated circuits: memories"
+
+[[themes.memory_exports]]
+code = "8542321010"
+label = "DRAM"
+detail = "HS 8542321010, DRAM"
+
+[[themes.memory_exports]]
+code = "8542321030"
+label = "Flash"
+detail = "HS 8542321030, flash memory"
+
+[[themes.memory_exports]]
+code = "8542323000"
+label = "Multi-chip"
+detail = "HS 8542323000, multi-chip integrated circuits."
+
+[[themes.memory_exports]]
+code = "8542324000"
+label = "MCOs"
+detail = "HS 8542324000, multi-component integrated circuits."
+
+[[themes.chip_prices]]
+id = "IZ3344"
+label = "Import prices, electronic components"
+detail = "BLS import price index, NAICS 3344 (semiconductors and other electronic components), Dec 2005=100."
+
+[[themes.chip_prices]]
+id = "IR21320"
+label = "Import prices, end-use semiconductors"
+detail = "BLS import price index, end use: semiconductors, 2000=100."
+
+[[themes.chip_prices]]
+id = "PCU334413334413"
+label = "PPI, semiconductor devices"
+detail = "BLS PPI, NAICS 334413, Dec 1998=100."
+
+[[themes.chip_prices]]
+id = "PCU3344133344131"
+label = "PPI, integrated-circuit packages"
+detail = "BLS PPI, NAICS 334413 integrated circuit packages, Dec 1998=100. Some months are unpublished."
+
 [[themes.korean]]
 label = "Samsung Electronics"
 yahoo = "005930.KS"

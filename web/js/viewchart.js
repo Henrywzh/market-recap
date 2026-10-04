@@ -76,7 +76,7 @@ export function viewChart(spec) {
         return {
           name: s.name, data: s.values.map((v) => (log && !(v > 0) ? null : v)),
           type: asBars ? 'bar' : 'line', stack: raw && spec.type === 'stack' ? 'total' : undefined,
-          barMaxWidth: 22, showSymbol: false, connectNulls: !asBars,
+          barMaxWidth: 22, showSymbol: false, connectNulls: spec.connectNulls ?? !asBars,
           lineStyle: { width: s.width || 1.4, color }, itemStyle: { color },
           markLine: !raw && i === 0 ? { silent: true, symbol: 'none', data: [{ yAxis: 0 }], lineStyle: { color: p.faint }, label: { show: false } } : undefined,
         };
