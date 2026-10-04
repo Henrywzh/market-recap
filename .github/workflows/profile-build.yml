@@ -1,0 +1,110 @@
+# Research: where does the nightly build's time go, and does it pass on this
+# branch's code? Runs the same refresh as the nightly job -- warm cache restored
+# from the default branch, recorded snapshots, the same secrets -- with each
+# panel timed and profiled (MARKET_RECAP_PROFILE_DIR), and publishes NOTHING:
+# no deploy, no cache save.
+#
+# Read panel_seconds in manifest.json, profile/<panel>.txt for the hottest
+# functions, refresh.log for what validation said, and valuation.json for the
+# P / tangible book and sub-sector groups on real filings.
+name: profile-build
+
+on:
+  # TEMPORARY, as probe-factset: GitHub dispatches only workflows already on the
+  # default branch, so until this file is merged a push to this branch runs it.
+  push:
+    branches: [claude/dazzling-bardeen-ntnted]
+    paths: [.github/workflows/profile-build.yml]
+  workflow_dispatch:
+
+concurrency:
+  group: profile-build
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.lock
+
+      - name: Install
+        run: |
+          python -m pip install -r requirements.lock
+          python -m pip install --no-deps -e .
+          python -m pip install pyflakes==4.0.0
+          command -v pdftotext || { sudo apt-get update -q && sudo apt-get install -y -q poppler-utils; }
+
+      - name: Test
+        run: |
+          python -m pyflakes src tests scripts
+          python -m pytest tests -q
+
+      # Read-only: the newest cache the default branch saved (same locked library versions).
+      - name: Restore cache
+        uses: actions/cache/restore@v6
+        with:
+          path: data/cache
+          key: profile-${{ github.run_id }}
+          restore-keys: data-cache-${{ hashFiles('requirements.lock') }}-
+
+      - name: Check out recorded snapshots
+        continue-on-error: true
+        env:
+          REMOTE: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+        run: |
+          if git ls-remote --exit-code --heads "$REMOTE" snapshots >/dev/null; then
+            git clone -q --depth 1 --branch snapshots --single-branch "$REMOTE" data/snapshots
+          fi
+
+      - name: Refresh (timed and profiled)
+        id: refresh
+        continue-on-error: true
+        env:
+          MARKET_RECAP_PROFILE_DIR: profile
+          MONITOR_PUBLISHED_STATE: "1"
+          GITHUB_TOKEN: ${{ github.token }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: python -m market_recap.cli refresh --history 10y --strict 2>&1 | tee refresh.log
+
+      - name: Write the numbers
+        if: always()
+        run: |
+          {
+            echo "### Refresh: ${{ steps.refresh.outcome }}"
+            python - <<'PY'
+          import json
+          try:
+              m = json.load(open("artifacts/manifest.json"))
+          except OSError:
+              raise SystemExit("no manifest")
+          print(f"build_seconds: {m.get('build_seconds')}")
+          print("| panel | seconds |\n|---|---:|")
+          for name, sec in sorted((m.get("panel_seconds") or {}).items(), key=lambda kv: -kv[1]):
+              print(f"| {name} | {sec} |")
+          PY
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: profile-${{ github.run_id }}
+          path: |
+            profile/
+            refresh.log
+            artifacts/manifest.json
+            artifacts/valuation.json
+          if-no-files-found: ignore
+          retention-days: 30

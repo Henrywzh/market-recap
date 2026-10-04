@@ -6,8 +6,11 @@ A step a human has to remember is a step that does not happen on a schedule.
 
 from __future__ import annotations
 
+import cProfile
 import json
 import os
+from pathlib import Path
+import pstats
 import time
 
 from . import cache, site
@@ -120,7 +123,19 @@ def run(
                           if os.environ.get("MONITOR_PUBLISHED_STATE") == "1" else None)
     monitor_carried: dict | None = None
 
+    # Where the time goes: seconds per panel in the manifest and on the build
+    # log, and, with MARKET_RECAP_PROFILE_DIR set, each panel's cProfile top
+    # functions in that folder (an investigation, off in the nightly build).
+    panel_seconds: dict[str, float] = {}
+    profile_dir = Path(os.environ["MARKET_RECAP_PROFILE_DIR"]) if os.environ.get("MARKET_RECAP_PROFILE_DIR") else None
+    if profile_dir:
+        profile_dir.mkdir(parents=True, exist_ok=True)
+
     for name in selected:
+        panel_started = time.monotonic()
+        profiler = cProfile.Profile() if profile_dir else None
+        if profiler:
+            profiler.enable()
         try:
             if name == "monitor":
                 previous = load_previous(
@@ -157,6 +172,13 @@ def run(
             # instead of an empty tab that looks like a quiet market.
             ctx.log.fail(name, exc)
             continue
+        finally:
+            if profiler:
+                profiler.disable()
+                with (profile_dir / f"{name}.txt").open("w") as handle:
+                    pstats.Stats(profiler, stream=handle).sort_stats("cumulative").print_stats(45)
+            panel_seconds[name] = round(time.monotonic() - panel_started, 1)
+            print(f"[build] {name}: {panel_seconds[name]}s", flush=True)
         if name != "monitor":
             write_json(ARTIFACT_DIR / f"{name}.json", payload)
         built[name] = payload
@@ -181,6 +203,7 @@ def run(
         "generated_at": generated_at,
         "monitor_schema_version": 1,
         "build_seconds": round(time.monotonic() - started, 1),
+        "panel_seconds": panel_seconds,
         "build_age_hours": BUILD_AGE_HOURS,
         # Per index, not as a union: ``closes`` spans every basket, so one
         # "priced" number would overstate each index's own coverage.
