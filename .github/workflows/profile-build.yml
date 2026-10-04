@@ -4,6 +4,8 @@
 # panel timed and profiled (MARKET_RECAP_PROFILE_DIR), and publishes NOTHING:
 # no deploy, no cache save.
 #
+# Second run, 2026-10-04: after the profiled hotspots were fixed (compare panel_seconds with the first).
+#
 # Read panel_seconds in manifest.json, profile/<panel>.txt for the hottest
 # functions, refresh.log for what validation said, and valuation.json for the
 # P / tangible book and sub-sector groups on real filings.
