@@ -384,6 +384,14 @@ etf = "ITB"
 bellwethers = ["DHI", "LEN", "PHM", "NVR", "HD", "LOW", "TOL"]
 macro = ["Housing starts", "New home sales", "Construction spending", "FOMC"]
 
+[valuation.scenario]
+# MARKET -> SECTORS, "WHAT YOU WOULD NEED TO BELIEVE": the price change implied
+# by moving a group's forward multiple by these many turns and revising its
+# next-twelve-months consensus EPS by these percentages. The axes are choices;
+# the arithmetic (price = multiple x EPS) lives in compute/valuation.py.
+multiple_turns = [-3, -2, -1, 0, 1, 2, 3]
+eps_change_pct = [-10, -5, 0, 5, 10]
+
 [positioning]
 # POSITIONING (RISK -> POSITIONING). Short interest covers the index members,
 # the watchlist and these ETFs; ``rounds`` is how many FINRA rounds (two a

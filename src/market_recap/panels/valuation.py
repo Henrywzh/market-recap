@@ -151,7 +151,8 @@ YAHOO_CAP_BASIS = "Yahoo market cap: the filings count shares class by class, ne
 
 
 def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices: list[str], splits,
-         history: dict | None, ntm: dict | None = None, fallback_cap: float | None = None) -> dict:
+         history: dict | None, ntm: dict | None = None, fallback_cap: float | None = None,
+         path: dict | None = None) -> dict:
     snapshot = data.trailing
     factor = _split_factor(splits, symbol, snapshot["shares_as_of"])
     shares = snapshot["shares"] * factor if snapshot["shares"] else None
@@ -190,6 +191,10 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         "book_yield": clean_float(V._pct(snapshot["balance"].get("equity"), market_cap), 4),
         "pe_forward": clean_float(V.forward_pe(price, ntm), 2),
         "eps_ntm": clean_float(ntm["eps"], 4) if ntm else None,
+        # Per-share consensus at the other stages of the valuation path (VALUATION -> aggregates).
+        "eps_fy_prev": clean_float((path or {}).get("fy_prev"), 4),
+        "eps_fy0": clean_float((path or {}).get("fy0"), 4),
+        "eps_fy1": clean_float((path or {}).get("fy1"), 4),
         "pe_history": has_history,
         # The reported history's latest point checks the table's P/E (both are
         # reported); the percentile is on the history's leading basis.
@@ -222,6 +227,20 @@ def _forward_aggregate(cap_frame: pd.DataFrame, columns: list[str], forward_earn
     return {"dates": out_days, "pe": out_pe} if out_days else None
 
 
+# Row field holding each valuation-path stage's per-share EPS.
+PATH_FIELDS = {"fy_prev": "eps_fy_prev", "fy0": "eps_fy0", "ntm": "eps_ntm", "fy1": "eps_fy1"}
+
+
+def _path(members: list[dict]) -> dict | None:
+    """The group's multiple at each stage of the valuation path (see
+    V.aggregate_path); per-share EPS become total earnings through the share
+    count the row's market cap implies."""
+    usable = [r for r in members if r.get("price")]
+    stages = {key: {r["ticker"]: r[field] * r["market_cap"] / r["price"] for r in usable if r.get(field) is not None}
+              for key, field in PATH_FIELDS.items()}
+    return V.aggregate_path({r["ticker"]: r["market_cap"] for r in usable}, stages)
+
+
 def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dict[str, dict[str, pd.Series]],
                 forward_earnings: dict[str, dict[str, float]] | None = None) -> dict | None:
     """Each index's and each sector's P/E against its own ten years, on
@@ -233,6 +252,7 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
     """
     if not caps:
         return None
+    scenario = ctx.config["valuation"]["scenario"]
     cap_frame = pd.DataFrame(caps)
     frames = {key: pd.DataFrame(values) for key, values in earnings.items()}
     groups = [(spec.key, spec.label, "index", [r["ticker"] for r in rows if spec.key in r["indices"]])
@@ -252,6 +272,13 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
                                        for r in members if r.get("eps_ntm") is not None and r.get("price")})
         if forward:
             entry["forward_now"] = {"pe": clean_float(forward["pe"], 2), "coverage": clean_float(forward["coverage"], 3)}
+            entry["scenario"] = [[clean_float(v, 1) for v in line] for line in
+                                 V.scenario_grid(forward["pe"], scenario["multiple_turns"], scenario["eps_change_pct"])]
+        path = _path(members)
+        if path:
+            entry["path"] = {"stages": [{k: clean_float(v, 2) if isinstance(v, float) else v for k, v in st.items()}
+                                        for st in path["stages"]],
+                             "companies": path["companies"], "coverage": clean_float(path["coverage"], 3)}
         recorded = _forward_aggregate(cap_frame, columns, forward_earnings or {})
         if recorded:
             entry["forward_history"] = recorded
@@ -274,6 +301,7 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
         "alternate": V.REPORTED,
         "window_sessions": V.HISTORY_SESSIONS,
         "min_coverage": V.AGGREGATE_MIN_COVERAGE,
+        "scenario": {"multiple_turns": scenario["multiple_turns"], "eps_change_pct": scenario["eps_change_pct"]},
     }
 
 
@@ -356,7 +384,8 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         forward = _forward_series(symbol, ctx.prices.get(symbol), recorded, today, ntm)
         history = _history(symbol, data, ctx.prices.get(symbol), symbol_splits, sector, forward)
         fallback_cap = estimates.market_cap(symbol) if not data.trailing["shares"] and price is not None else None
-        row = _row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history, ntm, fallback_cap)
+        row = _row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history, ntm, fallback_cap,
+                   V.fiscal_path(trends.get(symbol), ntm))
         rows.append(row)
         prices = ctx.prices.get(symbol)
         if (prices is not None and data.eps_history and row["market_cap"] and price and row["cik"] not in companies

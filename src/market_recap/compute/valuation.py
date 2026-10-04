@@ -540,6 +540,67 @@ def forward_pe(price: float | None, ntm: dict | None) -> float | None:
     return price / ntm["eps"]
 
 
+# --- Valuation path ---------------------------------------------------------------
+# One group's multiple at four points on the same analyst-consensus basis: the
+# fiscal year just reported (Yahoo's ``yearAgoEps``, the actual), this fiscal
+# year, the next twelve months, and next fiscal year. Every stage is Yahoo's,
+# so the steps between them are growth, not a change of accounting (a trailing
+# filed-EPS multiple would differ by definition). A "fiscal year" is each
+# company's own, so a sector mixes year-ends.
+PATH_STAGES = ("fy_prev", "fy0", "ntm", "fy1")
+
+
+def fiscal_path(trend: dict | None, ntm: dict | None) -> dict | None:
+    """Per-share EPS at each stage, or None without this year's and next year's
+    consensus. The last fiscal year's actual may be missing; the rest stand."""
+    if not trend or not ntm:
+        return None
+    this, nxt = trend.get("0y") or {}, trend.get("+1y") or {}
+    if this.get("eps") is None or nxt.get("eps") is None:
+        return None
+    return {"fy_prev": this.get("year_ago_eps"), "fy0": this["eps"], "ntm": ntm["eps"], "fy1": nxt["eps"]}
+
+
+def aggregate_path(caps: dict[str, float], stages: dict[str, dict[str, float]]) -> dict | None:
+    """Total cap over total earnings at each stage, for the same companies at
+    every stage, so a step between stages is the earnings path and not a change
+    of who is counted.
+
+    Needs ``AGGREGATE_MIN_COVERAGE`` of the group's cap. If too few companies
+    carry last year's actual, that stage is dropped and the rest are kept,
+    rather than leaving the whole path blank. ``growth`` is the step's change
+    in total earnings from the stage before it; a loss makes the multiple and
+    the growth blank, never zero.
+    """
+    total = sum(caps.values())
+    if not total:
+        return None
+    for wanted in (PATH_STAGES, PATH_STAGES[1:]):
+        common = [s for s in caps if caps[s] and all(s in stages.get(k, {}) for k in wanted)]
+        covered = sum(caps[s] for s in common)
+        if not common or covered < AGGREGATE_MIN_COVERAGE * total:
+            continue
+        out, previous = [], None
+        for key in wanted:
+            profit = sum(stages[key][s] for s in common)
+            out.append({"key": key, "pe": covered / profit if profit > 0 else None,
+                        "growth": (profit / previous - 1) * 100 if profit > 0 and previous and previous > 0 else None})
+            previous = profit
+        return {"stages": out, "companies": len(common), "coverage": covered / total}
+    return None
+
+
+def scenario_grid(pe: float | None, turns: list[float], eps_changes: list[float]) -> list[list[float | None]]:
+    """Price change implied by a forward multiple moved by ``turns`` and NTM
+    consensus EPS revised by ``eps_changes`` percent: price = multiple x EPS,
+    so (pe + turn) / pe x (1 + eps change) - 1, in percent. Arithmetic on
+    today's multiple, not a forecast of either input."""
+    if pe is None or pe <= 0:
+        return [[None] * len(eps_changes) for _ in turns]
+    return [[((pe + turn) / pe * (1 + change / 100) - 1) * 100 if pe + turn > 0 else None
+             for change in eps_changes] for turn in turns]
+
+
 def aggregate_forward(caps: dict[str, float], earnings: dict[str, float]) -> dict | None:
     """Total cap over total NTM earnings for the companies with both, and the
     share of the group's cap they hold."""

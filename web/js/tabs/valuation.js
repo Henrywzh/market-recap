@@ -18,6 +18,8 @@ const AXIS_PERCENTILES = [0.05, 0.95];
 const ALL = '';
 // The P/E history's earnings bases, as the switch names them.
 const BASIS_NAMES = { operating: 'OPERATING', ex_gains: 'EX GAINS', reported: 'REPORTED' };
+// The valuation path's stages, in order (compute/valuation.py PATH_STAGES).
+const PATH_LABELS = { fy_prev: 'LAST FISCAL YEAR (actual)', fy0: 'THIS FISCAL YEAR', ntm: 'NEXT 12 MONTHS', fy1: 'NEXT FISCAL YEAR' };
 
 function format(value, unit) {
   if (value === null || value === undefined) return DASH;
@@ -261,6 +263,9 @@ export function renderAggregates(root, data) {
       + 'An EPS more than twice the share price either way is taken as a units error in the filing and left out. '
       + 'OPERATING (the default) divides by each company\'s operating earnings: pre-tax income, capped at operating income less interest paid, taxed at the company\'s own rate -- so gains on stakes (Alphabet and Amazon on Anthropic), divestitures and one-off tax items do not make a group look cheap. Financials and utilities, whose ordinary earnings are partly below the operating line, and companies that report no operating line, are on reported EPS less gains on equity securities. REPORTED is plain diluted EPS. '
       + 'Both are trailing, not FactSet\'s forward operating P/E (on EARNINGS), so they run higher and move more around recessions. Percentile and band are over the last ten years of sessions, each on its own basis.',
+    'VALUATION PATH: total market cap over total consensus EPS at last fiscal year (the actual, as Yahoo carries it), this fiscal year, the next twelve months and next fiscal year -- all on the analysts\' basis, so a step is earnings growth, not a change of accounting, and the same companies count at every stage. A group is drawn only when they hold at least '
+      + `${num(agg.min_coverage * 100, 0)}% of its market cap. Each company's fiscal year is its own, so a sector mixes year-ends. These multiples are not comparable with the trailing P/E above (filed EPS, a different basis), and a sector's forward P/E has no history of its own until consensus has been recorded for a year.`,
+    'WHAT YOU WOULD NEED TO BELIEVE: price = multiple x EPS, so a forward P/E moved by some turns with next-twelve-months EPS revised by some percent implies the price change shown. The axes are set in config/dashboard.toml. It is arithmetic on today\'s multiple; neither the multiple nor the revision is forecast.',
   ]));
   root.append(aggregateSection(data));
   return true;
@@ -275,6 +280,9 @@ function aggregateSection(data) {
   const lineNode = el('div', { class: 'chart tall' });
   const lineTitle = el('span', { class: 'dim' });
   const stats = el('div', { class: 'stat-strip val-agg-stats' });
+  const pathNode = el('div');
+  const pathNote = el('span', { class: 'dim' });
+  const scenarioNode = el('div');
   const stat = (label, value, note, cls = '') => el('div', { class: 'stat' }, [
     el('div', { class: 'stat-label', text: label }),
     el('div', { class: `stat-value ${cls}`, text: value }),
@@ -312,6 +320,8 @@ function aggregateSection(data) {
       stat('FORWARD P/E (NTM)', present(s.forward_now?.pe) ? `${num(s.forward_now.pe, 1)}x` : DASH,
         s.forward_now ? `consensus EPS, ${num(s.forward_now.coverage * 100, 0)}% of cap · ${(s.forward_history?.dates || []).length} recorded days` : 'no consensus'),
     );
+    drawPath(s, pathNode, pathNote);
+    drawScenario(s, agg.scenario, scenarioNode);
   };
   const basisSwitch = bases.length > 1 ? periodSwitch(bases, basis, (b) => { basis = b; draw(); }) : null;
   const section = el('div', { class: 'grid two val-agg' }, [
@@ -320,7 +330,46 @@ function aggregateSection(data) {
     card('P/E · 10 YEARS', lineTitle, [stats, lineNode]),
   ]);
   requestAnimationFrame(draw);
-  return section;
+  const forward = el('div', { class: 'grid two val-agg' }, [
+    card('VALUATION PATH · ANALYST CONSENSUS', pathNote, [pathNode]),
+    card('WHAT YOU WOULD NEED TO BELIEVE', el('span', { class: 'dim', text: 'price change implied · arithmetic on today\'s forward P/E, not a forecast' }), [scenarioNode]),
+  ]);
+  return el('div', {}, [section, forward]);
+}
+
+// The group's multiple at last fiscal year, this one, the next twelve months
+// and next year, all on Yahoo's consensus basis, with the earnings growth each
+// step carries. The same companies count at every stage.
+function drawPath(s, node, note) {
+  const path = s.path;
+  if (!path) {
+    note.textContent = '';
+    node.replaceChildren(el('div', { class: 'gap', text: `${s.label}: no valuation path (consensus covers too little of its market cap).` }));
+    return;
+  }
+  note.textContent = `${path.companies} companies · ${num(path.coverage * 100, 0)}% of cap · each company's own fiscal year`;
+  const rows = path.stages.map((st) => el('tr', {}, [
+    el('td', { text: PATH_LABELS[st.key] || st.key }),
+    el('td', { text: present(st.pe) ? `${num(st.pe, 1)}x` : DASH }),
+    el('td', { class: present(st.growth) ? (st.growth >= 0 ? 'up' : 'down') : 'dim',
+      text: present(st.growth) ? `${st.growth > 0 ? '+' : ''}${num(st.growth, 1)}%` : DASH }),
+  ]));
+  node.replaceChildren(table(['STAGE', 'P/E', 'EARNINGS VS STAGE BEFORE'], rows));
+}
+
+// Price change if the forward multiple moves by some turns and NTM consensus
+// EPS is revised by some percent (price = multiple x EPS).
+function drawScenario(s, axes, node) {
+  if (!s.scenario || !axes || !present(s.forward_now?.pe)) {
+    node.replaceChildren(el('div', { class: 'gap', text: `${s.label}: no forward P/E to move.` }));
+    return;
+  }
+  const rows = axes.multiple_turns.map((turn, i) => el('tr', {}, [
+    el('td', { text: `${num(s.forward_now.pe + turn, 1)}x (${turn > 0 ? '+' : ''}${turn})` }),
+    ...s.scenario[i].map((v) => el('td', { class: !present(v) ? 'dim' : v > 0 ? 'up' : v < 0 ? 'down' : '',
+      text: present(v) ? `${v > 0 ? '+' : ''}${num(v, 1)}%` : DASH })),
+  ]));
+  node.replaceChildren(table(['FWD P/E', ...axes.eps_change_pct.map((c) => `EPS ${c > 0 ? '+' : ''}${c}%`)], rows));
 }
 
 function epsChart(node, history) {

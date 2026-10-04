@@ -385,3 +385,53 @@ def test_row_takes_yahoo_cap_only_without_a_share_count_and_flags_history_truthf
     filed = dict(trailing, shares=2e9, shares_as_of="2026-07-31", shares_basis="cover page shares outstanding")
     row = panel._row("X", {}, sec.Filer("X", (1,), ("us-gaap",), (), filed), 10.0, [], pd.DataFrame(), {}, fallback_cap=9e12)
     assert row["market_cap"] == 2e10 and row["pe_history"] is True    # the filings' count wins
+
+
+def test_fiscal_path_needs_both_years_and_tolerates_a_missing_actual():
+    ntm = {"eps": 11.0}
+    trend = {"0y": {"eps": 10.0, "year_ago_eps": 8.0}, "+1y": {"eps": 12.0}}
+    assert V.fiscal_path(trend, ntm) == {"fy_prev": 8.0, "fy0": 10.0, "ntm": 11.0, "fy1": 12.0}
+    assert V.fiscal_path({"0y": {"eps": 10.0}, "+1y": {"eps": 12.0}}, ntm)["fy_prev"] is None
+    assert V.fiscal_path({"0y": {"eps": 10.0}}, ntm) is None
+    assert V.fiscal_path(trend, None) is None
+
+
+def test_aggregate_path_counts_the_same_companies_at_every_stage():
+    caps = {"A": 100.0, "B": 100.0, "C": 100.0}
+    stages = {"fy_prev": {"A": 4.0, "B": 4.0, "C": 4.0}, "fy0": {"A": 5.0, "B": 5.0, "C": 5.0},
+              "ntm": {"A": 5.5, "B": 5.5, "C": 5.5}, "fy1": {"A": 6.0, "B": 6.0}}
+    # C has no FY+1, so no stage counts it: a step is earnings growth, not a new member.
+    out = V.aggregate_path(caps, stages)
+    assert out is None                                    # A and B hold 67% of the cap, under the 80% floor
+    stages["fy1"]["C"] = 6.0
+    out = V.aggregate_path(caps, stages)
+    assert [s["key"] for s in out["stages"]] == ["fy_prev", "fy0", "ntm", "fy1"]
+    assert out["stages"][0]["pe"] == pytest.approx(300 / 12) and out["stages"][3]["pe"] == pytest.approx(300 / 18)
+    assert out["stages"][0]["growth"] is None             # nothing before the first stage
+    assert out["stages"][1]["growth"] == pytest.approx(25.0)
+    assert out["companies"] == 3 and out["coverage"] == pytest.approx(1.0)
+
+
+def test_aggregate_path_drops_only_the_stage_nobody_reports():
+    caps = {"A": 100.0, "B": 100.0}
+    stages = {"fy0": {"A": 5.0, "B": 5.0}, "ntm": {"A": 5.5, "B": 5.5}, "fy1": {"A": 6.0, "B": 6.0}}
+    out = V.aggregate_path(caps, stages)                  # no last-year actuals at all
+    assert [s["key"] for s in out["stages"]] == ["fy0", "ntm", "fy1"]
+
+
+def test_aggregate_path_leaves_a_loss_blank_not_zero():
+    caps = {"A": 100.0}
+    out = V.aggregate_path(caps, {"fy_prev": {"A": -1.0}, "fy0": {"A": 2.0}, "ntm": {"A": 3.0}, "fy1": {"A": 4.0}})
+    assert out["stages"][0]["pe"] is None
+    assert out["stages"][1]["growth"] is None             # growth off a loss is not a percentage
+    assert out["stages"][2]["growth"] == pytest.approx(50.0)
+
+
+def test_scenario_grid_is_price_equals_multiple_times_eps():
+    grid = V.scenario_grid(20.0, [-2.0, 0.0, 2.0], [-10.0, 0.0, 10.0])
+    assert grid[1][1] == pytest.approx(0.0)               # nothing moves: no change
+    assert grid[1][2] == pytest.approx(10.0)              # EPS +10% at an unchanged multiple
+    assert grid[0][1] == pytest.approx(-10.0)             # 2 turns lower on 20x
+    assert grid[2][2] == pytest.approx((22 / 20 * 1.1 - 1) * 100)
+    assert V.scenario_grid(None, [0.0], [0.0]) == [[None]]
+    assert V.scenario_grid(1.0, [-2.0], [0.0]) == [[None]]   # a negative multiple is not a price

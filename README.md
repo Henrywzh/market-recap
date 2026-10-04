@@ -343,6 +343,19 @@ with its 5- and 10-year averages, comes from FactSet: the blog's articles in
 season and the weekly Earnings Insight PDF every Friday (its text, via
 pdftotext; the sector page is an image and is not read).
 
+**Valuation path and a forward P/E's missing past.** MARKET → SECTORS adds,
+for each index and sector, its multiple at four points on the same analyst
+basis -- last fiscal year's actual, this fiscal year, the next twelve months
+and next fiscal year -- with the earnings growth each step carries, counted
+over the same companies at every stage; and a grid of the price change implied
+by moving the forward P/E and revising NTM EPS (`[valuation.scenario]` sets the
+axes). The grid is price = multiple x EPS on today's multiple, not a forecast.
+A sector's forward P/E has no past before 2026-10-01 and Yahoo publishes only
+today's consensus, so it cannot be back-filled; FactSet's sector page might
+supply averages and history, and `probe-factset.yml` (manual) measures whether
+its numbers can be read and how far back the PDFs go, before any reader is
+written.
+
 `make snapshot-options` and `make snapshot-expectations` write the same files
 under `data/snapshots/` locally. The plan they serve is
 `docs/information_architecture.md`.
