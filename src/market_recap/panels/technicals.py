@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from .. import corporate_actions
 from ..config import PERIOD_TRADING_DAYS, TICKER_ARTIFACT_DIR
 from ..sources import yahoo
 from ..util import clean_float, prune_stale, write_json
@@ -74,8 +75,14 @@ def build(ctx) -> dict:
 
     all_closes = pd.concat([ctx.closes, ctx.etf_closes, ctx.index_closes], axis=1)
     all_closes = all_closes.loc[:, ~all_closes.columns.duplicated()]
+    # The bars are read from the cache, not from the context, so the same
+    # corporate-action adjustment the context applied has to be applied here:
+    # a spun-off parent's traded history would otherwise keep the distribution
+    # as a gap. Volume is a count of shares that traded and stays as it was.
     companions = yahoo.fetch_ohlcv_cache(ctx.history_period)
-    raw_prices = yahoo.fetch_prices(ctx.history_period)
+    companions = {kind: corporate_actions.adjust(frame, ctx.adjustments) if kind != "volume" else frame
+                  for kind, frame in companions.items()}
+    raw_prices = corporate_actions.adjust(yahoo.fetch_prices(ctx.history_period), ctx.adjustments)
 
     baked = []
     for symbol in all_closes.columns:

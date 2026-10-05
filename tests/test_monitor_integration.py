@@ -15,7 +15,7 @@ def pipeline(tmp_path, monkeypatch):
     cfg = config.load_config()
     ctx = SimpleNamespace(config=cfg, as_of="2026-09-23", holdings_as_of="2026-09-23",
                           log=BuildLog(), indices=[], closes=pd.DataFrame(),
-                          filled_sessions={}, session_check=None)
+                          filled_sessions={}, session_check=None, adjustments=[], price_jumps=[])
     monkeypatch.setattr(build, "ARTIFACT_DIR", tmp_path)
     monkeypatch.setattr(build, "ensure_dirs", lambda: None)
     monkeypatch.setattr(build, "load_config", lambda: cfg)

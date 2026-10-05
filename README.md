@@ -450,6 +450,20 @@ the nightly build's close.
   comes out the morning after, so the night's own session is checked against
   Nasdaq's closes for the 30 largest members instead; when too few answer,
   the page says the session was not cross-checked.
+- **Spin-offs are adjusted from `[[corporate_actions]]`, not by Yahoo.** Yahoo
+  adjusts closes for splits and dividends but not distributions: Corteva's
+  separation of Vylor (one share per share, ex-date 2026-10-01) showed CTVA as
+  77.65 to 12.57, an 84% loss on a holder who had lost nothing, and dragged
+  Materials 4 points under on the rotation tab. Each entry in
+  `config/dashboard.toml` names the ticker, ex-date, the distributed ticker and
+  the ratio from the filing; the factor is computed from both lines' prices on
+  the ex-date (`corporate_actions.py`), applied to every close and traded price
+  before it, and said at the top of MARKETS and in the manifest. If the
+  distributed line has no price that day, history before the date is dropped
+  rather than left wrong. `[price_checks]` lists any recent one-session fall of
+  60% or rise of 150% with no split on record as a notice, because it may be
+  the next one; news produces these too, so it never blocks a build. VALUATION
+  for a spun-off parent stays on pre-spin EPS until its first post-spin 10-Q.
 - **SEC's company-facts feed can skip a filing, so the build reads it itself.**
   Citigroup's 10-Qs of 2026-05-07 and 2026-08-06 never reached company facts,
   and the VALUATION row sat on FY2025 (P/E 15.7, ROE 6.8%) while every other

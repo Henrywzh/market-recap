@@ -211,6 +211,11 @@ def run(
         # Sessions Yahoo skipped, filled from iShares holdings and Nasdaq closes.
         "filled_sessions": ctx.filled_sessions,
         "session_check": ctx.session_check,
+        # Spin-offs the price feed does not adjust for, as applied to every
+        # close and price this build read; and recent moves too big to take on
+        # trust, which may be one that is not yet configured.
+        "corporate_actions": [item.as_dict() for item in ctx.adjustments],
+        "price_jumps": ctx.price_jumps,
         "panels": written,
         "skipped_panels": sorted(set(selected) - set(written)),
         # Set when MONITOR could not be rebuilt and the published ledger was

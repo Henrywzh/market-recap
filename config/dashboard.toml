@@ -66,6 +66,32 @@ commodity_history = "10y"
 above_ma_windows = [5, 20, 50, 100, 200]
 slope_lookbacks = [5, 20, 50, 100, 200]
 
+# Corporate actions the price feed does not adjust for (see
+# src/market_recap/corporate_actions.py). Yahoo adjusts for splits and
+# dividends but not spin-offs, so a spun-off parent shows the distribution as a
+# loss. ``ratio`` is shares of ``distributed`` received per share held, read
+# from the company's filing; the adjustment factor is computed from both lines'
+# prices on ``ex_date`` and is not typed in. ``distributed`` must be priced by
+# the build (an index member or watchlist name), or history before ``ex_date``
+# is dropped instead.
+[[corporate_actions]]
+ticker = "CTVA"
+kind = "spin-off"
+ex_date = "2026-10-01"
+distributed = "VYLR"
+ratio = 1.0
+source = "https://www.sec.gov/Archives/edgar/data/0001755672/000119312526414490/ck0001755672-20260929.htm"
+note = "Corteva distributed its seed business, Vylor Inc., one share per Corteva share (record date 2026-09-24); Vylor began regular-way trading on 2026-10-01."
+
+# A recent one-session move this large with no split on record is listed as a
+# notice, because it may be a distribution that needs an entry above. News
+# produces these too (a bid, an earnings gap), so it is a prompt to look and
+# never blocks a build.
+[price_checks]
+drop_pct = 60
+rise_pct = 150
+sessions = 10
+
 # Intraday strip on MARKETS, fetched in the reader's browser through
 # functions/api/quotes.js. It sits beside the recap, never inside it: every
 # other figure on the page is the nightly build's close. The symbols are the
