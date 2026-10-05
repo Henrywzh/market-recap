@@ -439,6 +439,11 @@ def _backfill(cik: int, facts: dict) -> dict:
         try:
             extra = instance_facts(cik, filing)
             if not extra.get("us-gaap"):
+                # An amendment often carries a cover or an exhibit and no
+                # statements (Nebius's 20-F/A of 2026-05-22): nothing to add.
+                # An original filing with no statements was not read right.
+                if filing.form.endswith("/A"):
+                    continue
                 raise LookupError("instance carried no US-GAAP facts")
         except Exception as exc:
             _unprocessed[cik] = f"{filing.form} {filing.accession} filed {filing.filed}: {exc}"

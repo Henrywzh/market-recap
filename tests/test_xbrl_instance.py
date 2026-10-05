@@ -160,3 +160,20 @@ def test_validate_warns_on_an_unreadable_filing_and_notes_a_backfilled_one():
     many = {"sec_filings": {"backfilled": {f"{n:010d}": "acc" for n in range(61)}}}
     (line,) = validate._check_sec_filings(many)
     assert "61 filers" in line.detail
+
+
+def test_backfill_ignores_an_amendment_with_no_statements_but_not_an_original(monkeypatch):
+    def run(form):
+        filing = sec.LatestFiling(form, "a-x", "2026-05-22", datetime.now(timezone.utc) - timedelta(hours=3000))
+        monkeypatch.setattr(sec, "_checked", {1: {"latest": filing}})
+        monkeypatch.setattr(sec, "_unprocessed", {})
+        monkeypatch.setattr(sec, "_backfilled", {})
+        monkeypatch.setattr(sec, "_statement_filings", lambda block: [filing])
+        monkeypatch.setattr(sec, "_recent_block", lambda cik, **kw: {})
+        monkeypatch.setattr(sec, "instance_facts", lambda *a: {"dei": {}})
+        facts = _stale_facts()
+        assert sec._backfill(1, facts) is facts
+        return dict(sec._unprocessed)
+
+    assert run("20-F/A") == {}
+    assert "no US-GAAP facts" in run("10-Q")[1]
