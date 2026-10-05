@@ -51,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("validate", help="Re-check the artifacts already on disk.")
     sub.add_parser("site", help="Assemble dist/ from the artifacts already on disk.")
 
+    auctions = sub.add_parser("auction-results", help="Collect completed coupon auctions into the existing Treasury source's private evidence store.")
+    auctions.add_argument("--days", type=int, default=90, help="Bounded recent window (1..365 calendar days).")
+    auctions.add_argument("--query", action="store_true", help="Read the local latest snapshot without network access.")
+
     snapshot = sub.add_parser("snapshot", help="Record option chains, market expectations, risk inputs or consensus as published (see snapshots/).")
     snapshot.add_argument("kind", choices=("options", "expectations", "risk", "consensus"))
     snapshot.add_argument("--root", help="Directory to write under (default: [snapshots] root).")
@@ -67,6 +71,23 @@ def main(argv: list[str] | None = None) -> int:
     prune.add_argument("--all", action="store_true", help="Delete every cache entry, not just expired ones.")
 
     args = parser.parse_args(argv)
+
+    if args.command == "auction-results":
+        from .config import REPO_ROOT
+        from .sources import treasury
+        if args.query:
+            path = REPO_ROOT / "data" / "private" / "treasury_auctions" / "latest.json"
+            _print({"network": False, "snapshot": json.loads(path.read_text()) if path.exists() else None,
+                    "last_attempt": json.loads(path.with_name("last_attempt.json").read_text()) if path.with_name("last_attempt.json").exists() else None})
+            return 0
+        try:
+            result = treasury.collect_auction_results(days=args.days)
+        except Exception as exc:
+            _print({"status": "failed", "error": f"{type(exc).__name__}: {str(exc)[:400]}"})
+            return 1
+        _print({"status": result["status"], "rows": len(result["rows"]), "run_id": result["run_id"],
+                "latest": str(REPO_ROOT / "data" / "private" / "treasury_auctions" / "latest.json")})
+        return 0
 
     if args.command == "refresh":
         manifest = build_module.run(

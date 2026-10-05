@@ -97,4 +97,30 @@ export default function renderFixedIncome(root, data) {
 
   root.append(card('TREASURY YIELDS — LEVEL & CHANGE (BPS)', el('span', { class: 'dim', text: 'red = yield up' }),
     table(['MATURITY', 'YIELD', ...cols.map((c) => `${c} (BPS)`)], rows)));
+
+  const auctions = data.auctions;
+  if (auctions?.groups?.length) {
+    const auctionRows = auctions.groups.map((row) => el('tr', {}, [
+      el('td', { text: `${row.original_term} ${row.type}` }),
+      el('td', { text: row.reopening === 'Yes' ? 'Reopening' : 'New' }),
+      el('td', { text: row.latest_date }),
+      el('td', { text: row.high_yield == null ? DASH : `${num(row.high_yield, 3)}%` }),
+      el('td', { class: yieldClass(row.high_yield_change_bps), text: bps(row.high_yield_change_bps) }),
+      el('td', { text: row.bid_to_cover == null ? DASH : num(row.bid_to_cover, 2) }),
+      el('td', { class: 'dim', text: row.bid_to_cover_change == null ? DASH : num(row.bid_to_cover_change, 2) }),
+      el('td', { text: row.indirect_share_pct == null ? DASH : `${num(row.indirect_share_pct, 1)}%` }),
+      el('td', { text: row.direct_share_pct == null ? DASH : `${num(row.direct_share_pct, 1)}%` }),
+      el('td', { text: row.dealer_share_pct == null ? DASH : `${num(row.dealer_share_pct, 1)}%` }),
+    ]));
+    root.append(card(
+      'RECENT COUPON AUCTIONS',
+      el('span', { class: 'dim', text: `${auctions.coverage?.start || DASH} to ${auctions.coverage?.end || DASH}` }),
+      [
+        table(['ISSUE', 'KIND', 'AUCTION', 'HIGH YIELD', 'VS PRIOR', 'BID/COVER', 'CHANGE', 'INDIRECT', 'DIRECT', 'DEALER'], auctionRows),
+        el('div', { class: 'note-text', text: 'Each row is the latest completed auction within its original maturity, type and reopening group. Change is against the previous auction in that same group, not against a different tenor. Indirect bidders are not the same as foreign buyers. Tail is unavailable without a pre-auction when-issued yield.' }),
+      ],
+    ));
+  } else if (auctions?.status === 'missing') {
+    root.append(el('div', { class: 'gap', text: 'Treasury auction results are not in the local snapshot yet.' }));
+  }
 }

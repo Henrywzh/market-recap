@@ -27,6 +27,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 import os
 import re
+from pathlib import Path
+import json
 
 import pandas as pd
 
@@ -521,7 +523,53 @@ def _energy(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
     out["sensitivity"] = {"drivers": {"wti": "WTI, per 1% move", "gas": "Henry Hub, per 1% move", "crack": "3-2-1 crack, per $1 move"},
                           "rows": _sensitivities(excess, [spec.get("etf") or ""] + list(spec.get("bellwethers") or []), drivers)}
     out["next"] = {"petroleum": eia.next_release(as_of, 2).isoformat(), "gas_storage": eia.next_release(as_of, 3).isoformat()}
+    out["chokepoints"] = _chokepoints()
     return out
+
+
+ENERGY_CHOKEPOINTS = (
+    "Strait of Hormuz", "Bab el-Mandeb Strait", "Suez Canal", "Cape of Good Hope", "Malacca Strait",
+)
+
+
+def _chokepoints() -> dict:
+    """Read the existing PortWatch snapshot. No fetch and no invented route."""
+    path = Path(os.environ.get("MARKET_RECAP_PORTWATCH") or (Path(__file__).resolve().parents[4] / "quantamental-lab" / "data" / "research-intelligence" / "institutional" / "latest" / "imf_portwatch.json"))
+    if not path.exists():
+        return {"status": "missing", "series": []}
+    payload = json.loads(path.read_text())
+    rows = [r for r in payload.get("rows") or [] if r.get("portname") in ENERGY_CHOKEPOINTS]
+    by_name = {}
+    for row in rows:
+        by_name.setdefault(row["portname"], []).append(row)
+    series = []
+    for name in ENERGY_CHOKEPOINTS:
+        events = sorted(by_name.get(name, []), key=lambda r: r["date"])
+        if not events:
+            continue
+        latest, prior = events[-1], events[-8] if len(events) >= 8 else None
+        def avg(window, field):
+            return None if not window else sum(r[field] or 0 for r in window) / len(window)
+        recent, previous = events[-7:], events[-14:-7]
+        series.append({
+            "name": name,
+            "dates": [r["date"] for r in events],
+            "tankers": [r.get("n_tanker") for r in events],
+            "vessels": [r.get("n_total") for r in events],
+            "latest_date": latest["date"],
+            "tankers_latest": latest.get("n_tanker"),
+            "vessels_latest": latest.get("n_total"),
+            "tankers_7d": None if not recent else round(avg(recent, "n_tanker"), 1),
+            "tankers_prior_7d": None if len(previous) < 7 else round(avg(previous, "n_tanker"), 1),
+            "observed_at": latest.get("observed_at"),
+        })
+        if prior and series[-1]["tankers_7d"] is not None and series[-1]["tankers_prior_7d"] not in (None, 0):
+            series[-1]["tankers_7d_change_pct"] = round(100 * (series[-1]["tankers_7d"] / series[-1]["tankers_prior_7d"] - 1), 1)
+        else:
+            series[-1]["tankers_7d_change_pct"] = None
+    return {"status": "ok" if series else "empty", "coverage": payload.get("stored_coverage"),
+            "source_url": "https://portwatch.imf.org/", "series": series,
+            "note": "IMF PortWatch modeled vessel transits. Daily observations, normally published weekly; recent missing days are not filled. Capacity is modeled vessel capacity, not USD trade value."}
 
 
 # --- HOUSING ------------------------------------------------------------------------

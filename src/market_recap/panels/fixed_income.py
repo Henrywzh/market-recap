@@ -183,6 +183,7 @@ def build(ctx) -> dict:
         "rows": rows,
         "spreads": spread_rows,
         "history": _history(ctx, settings),
+        "auctions": treasury.public_auction_summary(),
         "note": (
             '"Latest Published" is the most recent date the U.S. Treasury has posted par yield '
             "curve rates for. Treasury usually publishes same-day but sometimes not until early "

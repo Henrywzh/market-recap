@@ -558,6 +558,23 @@ function pricesCard(e) {
     'Front-month futures (Yahoo: CL, BZ, NG, RB, HO). 3-2-1 crack = (2 bbl gasoline + 1 bbl heating oil − 3 bbl crude) / 3, $/bbl -- the refiners\' margin. Pump price: EIA weekly US regular, via FRED.');
 }
 
+function chokepointCard(e) {
+  const c = e?.chokepoints;
+  if (!c || c.status === 'missing' || !c.series?.length) return null;
+  const rows = c.series.map((row) => el('tr', {}, [
+    el('td', { text: row.name }),
+    el('td', { text: row.latest_date }),
+    el('td', { text: row.tankers_latest == null ? DASH : String(row.tankers_latest) }),
+    el('td', { text: row.tankers_7d == null ? DASH : num(row.tankers_7d, 1) }),
+    el('td', { class: row.tankers_7d_change_pct == null ? 'dim' : row.tankers_7d_change_pct < 0 ? 'down' : 'up', text: row.tankers_7d_change_pct == null ? DASH : `${row.tankers_7d_change_pct > 0 ? '+' : ''}${num(row.tankers_7d_change_pct, 1)}%` }),
+    el('td', { class: 'dim', text: row.vessels_latest == null ? DASH : String(row.vessels_latest) }),
+  ]));
+  return card('SHIPPING CHOKEPOINTS · TANKER TRANSITS', el('span', { class: 'dim', text: c.coverage ? `${c.coverage.start} to ${c.coverage.end}` : '' }), [
+    table(['ROUTE', 'LATEST DAY', 'TANKERS', '7-DAY AVG', 'VS PRIOR 7D', 'ALL VESSELS'], rows),
+    el('div', { class: 'field-note', text: c.note }),
+  ]);
+}
+
 // How each name's excess return over the S&P 500 has moved with each driver
 // over the last year: it says which data the basket actually trades on.
 function sensitivityCard(title, s, note) {
@@ -798,7 +815,7 @@ function industry(key, data) {
   if (key === 'energy' && data.energy) {
     const e = data.energy;
     return [eiaCard(e), pricesCard(e), sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', e.sensitivity,
-      'Correlation and beta of each name\'s daily return beyond the S&P 500 with the driver\'s daily change. Producers trade on crude; refiners also on the crack; services on neither as much. History, not a forecast.')].filter(Boolean);
+      'Correlation and beta of each name\'s daily return beyond the S&P 500 with the driver\'s daily change. Producers trade on crude; refiners also on the crack; services on neither as much. History, not a forecast.'), chokepointCard(e)].filter(Boolean);
   }
   if (key === 'housing' && data.housing) {
     const h = data.housing;
