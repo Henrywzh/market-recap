@@ -307,6 +307,25 @@ def _check_flow_attribution(heatmaps: dict | None) -> list[Finding]:
     return out
 
 
+def _check_sec_filings(manifest: dict) -> list[Finding]:
+    """Filers whose latest 10-K / 10-Q company facts did not carry.
+
+    One read from the filing itself is a notice: the statements are right, and
+    SEC's feed is what lagged. One that could not be read leaves that company's
+    VALUATION row a quarter or more behind its peers, so it is a warning.
+    """
+    sec = manifest.get("sec_filings") or {}
+    out = [Finding("warning", "sec_filings", f"CIK {cik}: {why}") for cik, why in (sec.get("unprocessed") or {}).items()]
+    read = sec.get("backfilled") or {}
+    if read:
+        # Most nights some filers' newest filing has not reached company facts
+        # yet; one line says how many, not one line each.
+        out.append(Finding("notice", "sec_filings",
+                           f"{len(read)} filers' latest statements were read from the filings themselves because company "
+                           f"facts lacked them (CIK {', '.join(sorted(read)[:5])}{', ...' if len(read) > 5 else ''})"))
+    return out
+
+
 def _check_sources(manifest: dict) -> list[Finding]:
     out = []
     for record in manifest.get("sources", []):
@@ -347,6 +366,7 @@ def run() -> dict:
         + _check_monitor_carried(manifest)
         + _check_cross_listing(config, panels.get("cross_listing"))
         + _check_flow_attribution(panels.get("heatmaps"))
+        + _check_sec_filings(manifest)
         + _check_sources(manifest)
     )
     for name, reason in (manifest.get("errors") or {}).items():

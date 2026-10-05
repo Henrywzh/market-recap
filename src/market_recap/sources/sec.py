@@ -25,6 +25,7 @@ import pandas as pd
 
 from .. import cache
 from ..config import SEC_USER_AGENT
+from . import xbrl_instance
 from .http import FetchError
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -241,9 +242,9 @@ class LatestFiling:
 _checked: dict[int, dict] = {}
 
 
-def _latest_statement(recent: dict) -> LatestFiling | None:
-    """The newest statement filing with XBRL in a submissions index's recent block."""
-    filings = [
+def _statement_filings(recent: dict) -> list[LatestFiling]:
+    """Every statement filing with XBRL in a submissions index's recent block."""
+    return [
         LatestFiling(form, accession, filed, datetime.fromisoformat(accepted.replace("Z", "+00:00")))
         for form, accession, filed, accepted, xbrl in zip(
             recent.get("form", []), recent.get("accessionNumber", []), recent.get("filingDate", []),
@@ -251,7 +252,24 @@ def _latest_statement(recent: dict) -> LatestFiling | None:
         )
         if form in STATEMENT_FORMS and xbrl
     ]
-    return max(filings, key=lambda f: f.accepted, default=None)
+
+
+def _latest_statement(recent: dict) -> LatestFiling | None:
+    """The newest statement filing with XBRL in a submissions index's recent block."""
+    return max(_statement_filings(recent), key=lambda f: f.accepted, default=None)
+
+
+def _recent_block(cik: int, *, use_cache: bool = True) -> dict:
+    text = cache.fetch_text(
+        f"{NAMESPACE}/submissions",
+        f"CIK{cik:010d}",
+        lambda: _get(SUBMISSIONS_URL.format(cik=cik), 45.0),
+        kind="daily_file",
+        suffix=".json",
+        use_cache=use_cache,
+        compress=True,
+    )
+    return json.loads(text).get("filings", {}).get("recent", {})
 
 
 def latest_statement_filing(cik: int, *, use_cache: bool = True) -> LatestFiling | None:
@@ -262,16 +280,7 @@ def latest_statement_filing(cik: int, *, use_cache: bool = True) -> LatestFiling
     index instead: tens of KB, updated as each filing is accepted. Read once
     per session, like the closes.
     """
-    text = cache.fetch_text(
-        f"{NAMESPACE}/submissions",
-        f"CIK{cik:010d}",
-        lambda: _get(SUBMISSIONS_URL.format(cik=cik), 45.0),
-        kind="daily_file",
-        suffix=".json",
-        use_cache=use_cache,
-        compress=True,
-    )
-    return _latest_statement(json.loads(text).get("filings", {}).get("recent", {}))
+    return _latest_statement(_recent_block(cik, use_cache=use_cache))
 
 
 def predates(fetched: datetime | None, latest: LatestFiling | None) -> bool:
@@ -335,10 +344,108 @@ def filing_check() -> dict:
         "failed": sum(1 for c in _checked.values() if "error" in c),
         "refetched": sum(1 for c in _checked.values() if c.get("refetched")),
         "latest_filed": max((f.filed for f in latest), default=None),
+        # Company facts lacked these filers' latest filing: read from the
+        # filing itself ("backfilled"), or not readable at all ("unprocessed").
+        "backfilled": {f"{cik:010d}": accessions for cik, accessions in sorted(_backfilled.items())},
+        "unprocessed": {f"{cik:010d}": why for cik, why in sorted(_unprocessed.items())},
         # A quiet filer can have an old 10-Q and a freshly fetched index. Use
         # the oldest actual index fetch, so stale-cache fallback stays visible.
         "index_observed_date": min(fetched).date().isoformat() if fetched else None,
     }
+
+
+ARCHIVE_FOLDER_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{folder}/"
+INSTANCE_NAMESPACE = f"{NAMESPACE}/instance"
+_NOT_AN_INSTANCE = re.compile(r"_(cal|def|lab|pre)\.xml$|FilingSummary|MetaLinks", re.I)
+
+# Filers whose latest statement filing company facts did not carry, and what
+# became of each: read from the filing's own instance, or why that failed.
+_backfilled: dict[int, str] = {}
+_unprocessed: dict[int, str] = {}
+
+
+def _carries(facts: dict, accession: str) -> bool:
+    """Whether any company-facts row came from ``accession``."""
+    for taxonomy in facts.get("facts", {}).values():
+        for concept in taxonomy.values():
+            for rows in concept.get("units", {}).values():
+                if any(row.get("accn") == accession for row in rows):
+                    return True
+    return False
+
+
+def instance_facts(cik: int, filing: LatestFiling) -> dict:
+    """Company-facts rows read from a filing's XBRL instance, kept per filing.
+
+    A filing never changes, so the derived rows are cached on their own and the
+    17 MB instance is downloaded once, not once a night.
+    """
+    folder = filing.accession.replace("-", "")
+
+    def fetch() -> str:
+        base = ARCHIVE_FOLDER_URL.format(cik=cik, folder=folder)
+        listing = json.loads(_get(base + "index.json", 45.0))
+        names = [item["name"] for item in listing.get("directory", {}).get("item", [])]
+        # EDGAR extracts the inline XBRL into "<name>_htm.xml"; older filings
+        # carry a plain "<name>.xml" instance.
+        instance = next((n for n in names if n.endswith("_htm.xml")), None) or next(
+            (n for n in names if n.endswith(".xml") and not _NOT_AN_INSTANCE.search(n)), None)
+        if instance is None:
+            raise LookupError(f"{filing.accession} lists no XBRL instance")
+        rows = xbrl_instance.facts_from_instance(
+            _get(base + instance, 180.0), accession=filing.accession, filed=filing.filed)
+        return json.dumps(rows)
+
+    return json.loads(cache.fetch_text(
+        INSTANCE_NAMESPACE, folder, fetch, kind="filings", suffix=".json", compress=True))
+
+
+def _newest_filed(facts: dict) -> str:
+    """The latest date a statement filing (10-K, 10-Q or an amendment) is
+    carried by company facts. An 8-K's cover facts do not count: Citigroup's
+    September 8-K is there while both its 2026 10-Qs are not."""
+    newest = ""
+    for taxonomy in facts.get("facts", {}).values():
+        for concept in taxonomy.values():
+            for rows in concept.get("units", {}).values():
+                newest = max([newest, *(row.get("filed") or "" for row in rows if row.get("form") in STATEMENT_FORMS)])
+    return newest
+
+
+def _backfill(cik: int, facts: dict) -> dict:
+    """Add the filer's statement filings that company facts lack.
+
+    SEC builds company facts in a second pipeline and can skip filings for
+    months (Citigroup's two 2026 10-Qs). Left alone, that is a row quietly
+    valued on statements two quarters old while its peers are current. Every
+    statement filing newer than the newest one company facts carries is read
+    from the filing itself; one accepted inside the processing margin may
+    still be on its way and is left. A filing that cannot be read is reported,
+    never guessed.
+    """
+    latest = _checked.get(cik, {}).get("latest")
+    # An IFRS filer's statements are not US-GAAP and are not extracted here at
+    # all (FINANCIALS lists them as such); reading its amendment would only
+    # report a failure about something nobody asked for.
+    if latest is None or "us-gaap" not in facts.get("facts", {}) or _carries(facts, latest.accession):
+        return facts
+    newest = _newest_filed(facts)
+    now = datetime.now(timezone.utc)
+    missing = sorted(
+        (f for f in _statement_filings(_recent_block(cik))
+         if f.filed > newest and now - f.accepted >= PROCESSING_MARGIN and not _carries(facts, f.accession)),
+        key=lambda f: f.accepted)
+    for filing in missing:
+        try:
+            extra = instance_facts(cik, filing)
+            if not extra.get("us-gaap"):
+                raise LookupError("instance carried no US-GAAP facts")
+        except Exception as exc:
+            _unprocessed[cik] = f"{filing.form} {filing.accession} filed {filing.filed}: {exc}"
+            continue
+        _backfilled[cik] = ", ".join(filter(None, [_backfilled.get(cik), filing.accession]))
+        facts = xbrl_instance.merge_into(facts, extra)
+    return facts
 
 
 def fetch_company_facts(cik: int, *, use_cache: bool = True) -> dict:
@@ -356,7 +463,7 @@ def fetch_company_facts(cik: int, *, use_cache: bool = True) -> dict:
         # 3-4 MB of JSON per filer, of which this reads a handful of tags.
         compress=True,
     )
-    return json.loads(text)
+    return _backfill(cik, json.loads(text))
 
 
 def _has_annual_facts(facts: dict) -> bool:
@@ -975,16 +1082,7 @@ ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{docume
 def submissions_recent(cik: int, *, use_cache: bool = True) -> dict:
     """The filer's recent-filings block (form, dates, items, documents), from
     the same cached submissions index the statement check reads."""
-    text = cache.fetch_text(
-        f"{NAMESPACE}/submissions",
-        f"CIK{cik:010d}",
-        lambda: _get(SUBMISSIONS_URL.format(cik=cik), 45.0),
-        kind="daily_file",
-        suffix=".json",
-        use_cache=use_cache,
-        compress=True,
-    )
-    return json.loads(text).get("filings", {}).get("recent", {})
+    return _recent_block(cik, use_cache=use_cache)
 
 
 INDEX_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{folder}/{accession}-index.html"

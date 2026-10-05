@@ -450,6 +450,19 @@ the nightly build's close.
   comes out the morning after, so the night's own session is checked against
   Nasdaq's closes for the 30 largest members instead; when too few answer,
   the page says the session was not cross-checked.
+- **SEC's company-facts feed can skip a filing, so the build reads it itself.**
+  Citigroup's 10-Qs of 2026-05-07 and 2026-08-06 never reached company facts,
+  and the VALUATION row sat on FY2025 (P/E 15.7, ROE 6.8%) while every other
+  bank was on 2026-06-30. Each night the build compares a filer's statement
+  filings in the submissions index with what company facts carry, and reads any
+  it lacks from the filing's own XBRL instance (`sources/xbrl_instance.py`:
+  facts with no dimension, in company-facts' shape, cached per filing). A
+  filing accepted in the last six hours is left for SEC to process. The
+  manifest's `sec_filings.backfilled` lists the filers; one that cannot be read
+  is `unprocessed` and fails `--strict`. IFRS filers are not read. Checked
+  against SEC's own rows for 13 filers (5,292 rows): the only differences are
+  four figures Veeva's instance states rounded to the million, and six rows the
+  parser left out.
 - **Optional feeds cannot hold back the page.** Validation has three levels:
   an error is not publishable, a warning makes `--strict` refuse the deploy,
   and a notice is shown on its tab and nothing more. The catalyst calendars
