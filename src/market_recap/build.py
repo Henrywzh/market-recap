@@ -92,6 +92,9 @@ def run(
     config = load_config()
     ctx = build_context(history_period=history_period)
     generated_at = utc_now_iso()
+    # Seconds spent on each part of the build, so a slow night says where:
+    # the shared context (constituents, prices), each panel, and the tail.
+    timings: dict = {"context": round(time.monotonic() - started, 1), "panels": {}}
 
     selected = [name for name in (panels or list(PANELS)) if name in PANELS]
     if skip_sec:
@@ -121,48 +124,54 @@ def run(
     monitor_carried: dict | None = None
 
     for name in selected:
+        panel_started = time.monotonic()
         try:
-            if name == "monitor":
-                previous = load_previous(
-                    local_path=ARTIFACT_DIR / "monitor.json",
-                    published_base_url=published_base_url,
-                )
-                payload = PANELS[name](ctx, valuation=optional_panel("valuation"),
-                                      catalysts=optional_panel("catalysts"), previous=previous)
-                payload["generated_at"] = generated_at
-                validate_previous(payload)
-                # Replace atomically: interruption must not truncate the ledger.
-                pending = ARTIFACT_DIR / "monitor.pending"
-                write_json(pending, payload)
-                pending.replace(ARTIFACT_DIR / "monitor.json")
-            elif name == "overview":
-                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in overview.INPUTS})
-            elif name == "positioning":
-                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in positioning.INPUTS})
-            elif name == "events":
-                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in events.INPUTS})
-            elif name == "themes":
-                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in themes.INPUTS})
-            elif name == "chain":
-                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in chain.INPUTS})
-            else:
-                payload = PANELS[name](ctx)
-        except Exception as exc:
-            if name == "monitor" and published_base_url:
-                monitor_carried = _carry_monitor(published_base_url, ctx, exc)
-                if monitor_carried is not None:
-                    written.append(name)
-                    continue
-            # A panel that fails leaves a named gap. The page renders the gap
-            # instead of an empty tab that looks like a quiet market.
-            ctx.log.fail(name, exc)
-            continue
-        if name != "monitor":
-            write_json(ARTIFACT_DIR / f"{name}.json", payload)
-        built[name] = payload
-        written.append(name)
+            try:
+                if name == "monitor":
+                    previous = load_previous(
+                        local_path=ARTIFACT_DIR / "monitor.json",
+                        published_base_url=published_base_url,
+                    )
+                    payload = PANELS[name](ctx, valuation=optional_panel("valuation"),
+                                          catalysts=optional_panel("catalysts"), previous=previous)
+                    payload["generated_at"] = generated_at
+                    validate_previous(payload)
+                    # Replace atomically: interruption must not truncate the ledger.
+                    pending = ARTIFACT_DIR / "monitor.pending"
+                    write_json(pending, payload)
+                    pending.replace(ARTIFACT_DIR / "monitor.json")
+                elif name == "overview":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in overview.INPUTS})
+                elif name == "positioning":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in positioning.INPUTS})
+                elif name == "events":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in events.INPUTS})
+                elif name == "themes":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in themes.INPUTS})
+                elif name == "chain":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in chain.INPUTS})
+                else:
+                    payload = PANELS[name](ctx)
+            except Exception as exc:
+                if name == "monitor" and published_base_url:
+                    monitor_carried = _carry_monitor(published_base_url, ctx, exc)
+                    if monitor_carried is not None:
+                        written.append(name)
+                        continue
+                # A panel that fails leaves a named gap. The page renders the gap
+                # instead of an empty tab that looks like a quiet market.
+                ctx.log.fail(name, exc)
+                continue
+            if name != "monitor":
+                write_json(ARTIFACT_DIR / f"{name}.json", payload)
+            built[name] = payload
+            written.append(name)
+        finally:
+            timings["panels"][name] = round(time.monotonic() - panel_started, 1)
 
+    tail_started = time.monotonic()
     check = sec.filing_check()
+    timings["sec_check"] = round(time.monotonic() - tail_started, 1)
     if check["checked"]:
         ctx.log.add(SourceRecord(
             "sec_submissions", "SEC submissions index (new 10-K / 10-Q since the last fetch)",
@@ -181,6 +190,7 @@ def run(
         "generated_at": generated_at,
         "monitor_schema_version": 1,
         "build_seconds": round(time.monotonic() - started, 1),
+        "timings": timings,
         "build_age_hours": BUILD_AGE_HOURS,
         # Per index, not as a union: ``closes`` spans every basket, so one
         # "priced" number would overstate each index's own coverage.
@@ -211,7 +221,9 @@ def run(
         **ctx.log.to_dict(),
     }
     if prune_cache:
+        prune_started = time.monotonic()
         manifest["cache_pruned"] = cache.prune()
+        timings["cache_prune"] = round(time.monotonic() - prune_started, 1)
     write_json(ARTIFACT_DIR / "manifest.json", manifest)
     # Assemble the deployable tree last, so it contains the manifest that was
     # just written rather than the previous build's.

@@ -167,3 +167,22 @@ def test_local_monitor_failure_is_not_carried(pipeline, monkeypatch):
     monkeypatch.setattr(build, "PANELS", {"monitor": lambda ctx, **kw: (_ for _ in ()).throw(RuntimeError("x"))})
     manifest = build.run(prune_cache=False)
     assert "monitor" in manifest["errors"]
+
+
+def test_the_manifest_says_how_long_each_part_of_the_build_took(pipeline, monkeypatch):
+    _, ctx, _ = pipeline
+
+    def slow(ctx):
+        import time
+        time.sleep(0.12)
+        return {"as_of": ctx.as_of}
+
+    def broken(ctx):
+        raise RuntimeError("upstream failure")
+
+    monkeypatch.setattr(build, "PANELS", {"valuation": slow, "markets": broken})
+    manifest = build.run(prune_cache=False)
+    timings = manifest["timings"]
+    assert set(timings["panels"]) == {"valuation", "markets"}      # a failed panel is timed too
+    assert timings["panels"]["valuation"] >= 0.1
+    assert timings["context"] >= 0 and "sec_check" in timings

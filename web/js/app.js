@@ -1,6 +1,7 @@
 // Shell: artifact loading, tab routing, theme, clock and the provenance footer.
 
 import { el } from './fmt.js';
+import { slowestParts } from './timings.js';
 import { resizeAll, disposeAll } from './charts.js';
 import { GROUPS, parseHash, hashFor, viewById, viewsIn } from './routes.js';
 
@@ -182,7 +183,8 @@ function renderFooter(manifest) {
     `${brand.title || 'MARKET RECAP'} — ${brand.disclaimer || 'Not investment advice.'}`,
   ]));
   footer.append(el('div', {}, [
-    `Generated ${manifest.generated_at} in ${manifest.build_seconds}s · `,
+    el('span', { title: slowestParts(manifest.timings) }, `Generated ${manifest.generated_at} in ${manifest.build_seconds}s`),
+    ' · ',
     // One line per index the build actually covered, named by the build.
     ...(manifest.indices || []).map((index) => (
       `${index.label}: ${index.members} members (${index.priced} priced) · `
