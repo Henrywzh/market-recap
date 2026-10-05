@@ -431,3 +431,30 @@ def test_release_study_scores_on_forecasts_when_they_cover_most_releases():
     assert out["recent"][0]["vs_forecast"] == beats[-1]
     sparse = forecasts.iloc[:5]
     assert T.release_study(releases, excess, headline="pct", forecasts=sparse)["basis"] == "trend"
+
+
+def test_theme_sources_record_how_many_observations_they_carry():
+    from types import SimpleNamespace
+    from market_recap.panels import themes as panel
+
+    records = []
+    ctx = SimpleNamespace(log=SimpleNamespace(add=records.append))
+    months = lambda n: [{"month": f"2026-0{i + 1}"} for i in range(n)]  # noqa: E731
+    cloud = {
+        "capex": {"companies": [{"quarters": [{"end": "2026-06-30"}] * 3}, {"quarters": [{"end": "2026-06-30"}] * 2}]},
+        "nvda": {"quarters": [{"filed": "2026-08-26"}] * 4},
+        "odm": [{"months": months(3)}, {"months": months(2)}],
+        "openrouter": {"dates": ["2026-10-01", "2026-10-02"]},
+        "ramp": {"months": ["2026-07", "2026-08"]},
+    }
+    semis = {
+        "korea": {"months": months(5)}, "korea_flash": {"months": months(2)}, "adata": {"notes": [{"month": "2026-09"}]},
+        "memory_exports": {"series": [{"months": months(4)}, {"months": months(4)}], "failed": []},
+        "chip_prices": {"series": [{"months": months(6), "page": "https://fred.stlouisfed.org/series/IZ3344"}, {"months": months(3)}], "failed": []},
+        "pcpp": {"memory": {"rows": [{"image_date": "2026-10-04"}] * 13}, "cpu": {"rows": [{"image_date": "2026-10-04"}] * 20}},
+    }
+    panel._log(ctx, cloud, semis)
+    rows = {r.source_id: r.rows for r in records}
+    assert rows == {"sec_capex": 5, "sec_releases": 4, "mops_revenue": 5, "altdata_openrouter": 2, "altdata_ramp": 2,
+                    "korea_customs": 5, "motie_trade": 2, "adata_market_watch": 1, "korea_customs_memory": 8,
+                    "fred_chip_prices": 9, "pcpartpicker": 33}

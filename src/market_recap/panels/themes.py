@@ -1145,44 +1145,54 @@ def _log_studies(ctx, studies: dict) -> None:
         error=studies.get("unavailable") or (None if keyed else "no FRED_API_KEY: release days approximated") or (", ".join(bad) or None)))
 
 
+def _count(items, key: str) -> int:
+    """Observations across a section's series: each series' ``key`` list summed."""
+    return sum(len(item.get(key) or []) for item in items or [] if isinstance(item, dict))
+
+
 def _log(ctx, cloud: dict, semis: dict) -> None:
-    def record(source_id, label, url, section, observed, policy):
+    def record(source_id, label, url, section, observed, policy, rows=0):
         failed = isinstance(section, dict) and "unavailable" in section
         ctx.log.add(SourceRecord(source_id, label, url, None if failed else observed, status="error" if failed else "ok",
-                                 error=section["unavailable"][:ERROR_DETAIL_CHARS] if failed else None, policy=policy))
+                                 error=section["unavailable"][:ERROR_DETAIL_CHARS] if failed else None, policy=policy,
+                                 rows=0 if failed else rows))
 
     capex = cloud["capex"]
     record("sec_capex", "Cloud capex (SEC XBRL 10-Q/10-K)", "https://www.sec.gov/edgar/search/", capex,
            None if "unavailable" in capex else max((c["quarters"][-1]["end"] for c in capex["companies"] if c["quarters"]), default=None),
-           "quarterly_filing")
+           "quarterly_filing", _count(capex.get("companies"), "quarters"))
     nv = cloud["nvda"]
     record("sec_releases", "Earnings releases (8-K Ex. 99.1): NVIDIA Data Center, capex guidance", "https://www.sec.gov/edgar/search/", nv,
-           None if "unavailable" in nv else nv["quarters"][-1]["filed"], "quarterly_filing")
+           None if "unavailable" in nv else nv["quarters"][-1]["filed"], "quarterly_filing", len(nv.get("quarters") or []))
     odm = cloud["odm"]
     record("mops_revenue", "Taiwan monthly revenue (MOPS)", mops.PAGE_URL, odm if isinstance(odm, dict) else {},
            None if isinstance(odm, dict) else max((s["months"][-1]["month"] + "-01" for s in odm if s["months"]), default=None),
-           "monthly_release")
+           "monthly_release", 0 if isinstance(odm, dict) else _count(odm, "months"))
     orr = cloud["openrouter"]
     record("altdata_openrouter", "OpenRouter tokens & estimated revenue (alternative-data)", altdata.OPENROUTER_URL, orr,
-           None if "unavailable" in orr else (orr["dates"][-1] if orr["dates"] else None), "daily_close")
+           None if "unavailable" in orr else (orr["dates"][-1] if orr["dates"] else None), "daily_close", len(orr.get("dates") or []))
     ramp = cloud["ramp"]
     record("altdata_ramp", "Ramp AI Index (alternative-data)", altdata.RAMP_URL, ramp,
-           None if "unavailable" in ramp else (ramp["months"][-1] + "-01" if ramp["months"] else None), "monthly_release")
+           None if "unavailable" in ramp else (ramp["months"][-1] + "-01" if ramp["months"] else None), "monthly_release",
+           len(ramp.get("months") or []))
     korea = semis["korea"]
     record("korea_customs", "Korea Customs IC exports (HS 8542)", korea_customs.HOME_URL, korea,
-           None if "unavailable" in korea else (korea["months"][-1]["month"] + "-01" if korea["months"] else None), "monthly_release")
+           None if "unavailable" in korea else (korea["months"][-1]["month"] + "-01" if korea["months"] else None), "monthly_release",
+           len(korea.get("months") or []))
     flash = semis["korea_flash"]
     record("motie_trade", "Korea monthly trade release (MOTIE, 1st of month)", motie.LIST_URL, flash,
-           None if "unavailable" in flash else flash["months"][-1]["month"] + "-01", "monthly_release")
+           None if "unavailable" in flash else flash["months"][-1]["month"] + "-01", "monthly_release", len(flash.get("months") or []))
     notes = semis["adata"]
     record("adata_market_watch", "ADATA Memory & Flash Market Watch", "https://industrial.adata.com/en/edm", notes,
-           None if "unavailable" in notes or not notes["notes"] else notes["notes"][0]["month"] + "-01", "monthly_release")
+           None if "unavailable" in notes or not notes["notes"] else notes["notes"][0]["month"] + "-01", "monthly_release",
+           len(notes.get("notes") or []))
     mem = semis["memory_exports"]
     mem_failed = isinstance(mem, dict) and "unavailable" in mem
     mem_months = [s["months"][-1]["month"] for s in (mem.get("series") or []) if s.get("months")] if not mem_failed else []
     ctx.log.add(SourceRecord(
         "korea_customs_memory", "Korea Customs memory exports (HS 854232, DRAM, flash)", korea_customs.HOME_URL,
         None if mem_failed or not mem_months else min(mem_months) + "-01",
+        rows=0 if mem_failed else _count(mem.get("series"), "months"),
         status="error" if mem_failed else ("partial" if mem.get("failed") else "ok"),
         error=(mem.get("unavailable") if mem_failed else None) or ("; ".join(mem.get("failed") or []) or None),
         policy="monthly_release"))
@@ -1193,6 +1203,7 @@ def _log(ctx, cloud: dict, semis: dict) -> None:
         "fred_chip_prices", "BLS semiconductor producer and import prices (FRED)",
         next((series["page"] for series in chips.get("series") or []), "https://fred.stlouisfed.org/"),
         None if chip_failed or not chip_months else min(chip_months) + "-01",
+        rows=0 if chip_failed else _count(chips.get("series"), "months"),
         status="error" if chip_failed else ("partial" if chips.get("failed") else "ok"),
         error=(chips.get("unavailable") if chip_failed else None) or ("; ".join(chips.get("failed") or []) or None),
         policy="monthly_release"))
@@ -1203,4 +1214,4 @@ def _log(ctx, cloud: dict, semis: dict) -> None:
     else:
         record("pcpartpicker", "PCPartPicker UK price trends (memory, CPU)", "https://uk.pcpartpicker.com/trends/", pc,
                None if "unavailable" in pc else min((r["image_date"] for k in ("memory", "cpu") for r in pc.get(k, {}).get("rows", [])), default=None),
-               "daily_close")
+               "daily_close", sum(len((pc.get(k) or {}).get("rows") or []) for k in ("memory", "cpu")))
