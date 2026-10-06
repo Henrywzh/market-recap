@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 import hashlib
+import time
 
 import numpy as np
 import pandas as pd
@@ -493,6 +494,14 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         raise RuntimeError("EVENTS needs this session's CATALYSTS and EVIDENCE")
     settings = dict(ctx.config.get("events", {}))
     as_of = date.fromisoformat(ctx.as_of)
+    # Seconds by step, for the manifest: EVENTS is most of a build's time.
+    steps: dict[str, float] = {}
+    clock = {"t": time.monotonic()}
+
+    def lap(step: str) -> None:
+        now = time.monotonic()
+        steps[step] = round(steps.get(step, 0.0) + now - clock["t"], 1)
+        clock["t"] = now
     names = evidence.get("names") or {}
     meta = _universe(ctx)
     meta = {info["symbol"]: info for info in meta.values()}
@@ -526,7 +535,9 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     # Every name's trend: the revisions table is on every ticker page, and
     # EARNINGS has already read the whole universe's this session (cached).
     everyone = sorted(set(ctx.closes.columns) & set(meta))
+    lap("setup")
     trends, missing = estimates.fetch_trends(everyone) if everyone else ({}, {})
+    lap("yahoo_estimates")
     ctx.log.add(SourceRecord("yahoo_estimates_quarter", "EPS and revenue estimates and revisions (Yahoo earningsTrend)",
                              estimates.URL.format(symbol="{symbol}"), ctx.as_of, rows=len(trends),
                              status="ok" if len(missing) <= 0.2 * max(len(everyone), 1) else "partial",
@@ -535,6 +546,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     # Past reports: each date's Nasdaq calendar (consensus, actual, surprise).
     report_dates = {r["date"] for rs in reactions.values() for r in rs if r.get("date")}
     calendars, dates_left = _calendars(report_dates, as_of, int(settings.get("history_new_dates", 120)))
+    lap("nasdaq_history")
     ctx.log.add(SourceRecord("nasdaq_earnings_history", "Nasdaq earnings calendar on past report dates (EPS vs consensus)",
                              nasdaq.EARNINGS_URL.format(date="{date}"), ctx.as_of, rows=len(calendars),
                              status="ok" if not dates_left else "partial",
@@ -574,6 +586,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         guides_by_symbol[symbol] = _guides(symbol, cik_for(symbol, cik_map) if cik_map else None, reactions.get(symbol) or [],
                                            rows, int(settings.get("guide_reports", 4)), guide_budget)
 
+    lap("sec_guidance")
     # Large moves: found for every name; headlines asked for within a budget,
     # the names whose cards matter first and the newest moves first. A day's
     # news is kept a year once settled, so the backlog clears over a few builds.
@@ -600,6 +613,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
                 continue
             news[(symbol, day)] = E.rank_headlines(rows, symbol, meta.get(symbol, {}).get("name"), start_ts, end_ts)
 
+    lap("finnhub_moves")
     # Company events announced ahead: the deep names' last weeks of headlines,
     # read for a dated investor day, product event, FDA date, meeting or
     # ruling; plus the hand-kept list in the config.
@@ -631,6 +645,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
             announced[symbol] = E.announced_events(rows, symbol, meta.get(symbol, {}).get("name"), as_of)
     kept_events = _kept_events(settings.get("company_events") or [], ctx.as_of)
 
+    lap("finnhub_events")
     snapshot = snapshot_store.latest_options_summary(as_of)
     history = snapshot_store.options_summaries(as_of - timedelta(days=400), as_of) if snapshot else pd.DataFrame()
 
@@ -701,6 +716,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
             cards.append(_summary(payload))
         if "outcome" in payload and (_heavy(payload, settings) or payload["watchlist"]):
             outcomes.append(_summary(payload))
+    lap("per_name")
     prune_stale(EVENTS_ARTIFACT_DIR, written)
 
     cards.sort(key=lambda c: (c["card"]["date"], {"bmo": 0, "intraday": 1, "amc": 2}.get(c["card"]["timing"], 3),
@@ -718,6 +734,18 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
                              rows=sum(1 for s in written if (s in carded or s in focus)),
                              status="ok" if guide_budget["left"] > 0 else "partial",
                              error=None if guide_budget["left"] > 0 else "release budget spent; the rest are read next build"))
+    lap("tail")
+    if hasattr(ctx, "diagnostics"):
+        # How the Finnhub budget went: asked tonight, read from the cache (a
+        # settled day, or a name off its turn in the rotation), and failed.
+        ctx.diagnostics["events"] = {
+            "seconds": steps,
+            "finnhub_moves": {"asked": news_state["asked"], "budget": news_state["budget"], "failed": news_state["failed"],
+                              "from_cache": max(0, len(news) - news_state["asked"])},
+            "finnhub_events": {"names": len(deep), "asked": event_state["asked"], "budget": event_state["budget"],
+                               "reused_off_turn": event_state["reused"], "failed": event_state["failed"],
+                               "from_cache": max(0, len(announced) - event_state["asked"] - event_state["reused"])},
+        }
     return {
         "as_of": ctx.as_of,
         "options_snapshot": snapshot[0].isoformat() if snapshot else None,

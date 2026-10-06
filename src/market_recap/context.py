@@ -131,6 +131,9 @@ class MarketContext:
     price_jumps: list = field(default_factory=list)
     # Yahoo's closes against IVV's on the holdings date (gapfill.verify).
     session_check: dict | None = None
+    # What a panel wants on record about its own run: seconds by step, requests
+    # asked and served from cache. The manifest carries it as `diagnostics`.
+    diagnostics: dict = field(default_factory=dict)
 
     @property
     def as_of(self) -> str | None:

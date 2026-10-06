@@ -191,6 +191,7 @@ def run(
         "monitor_schema_version": 1,
         "build_seconds": round(time.monotonic() - started, 1),
         "timings": timings,
+        "diagnostics": getattr(ctx, "diagnostics", {}),
         "build_age_hours": BUILD_AGE_HOURS,
         # Per index, not as a union: ``closes`` spans every basket, so one
         # "priced" number would overstate each index's own coverage.

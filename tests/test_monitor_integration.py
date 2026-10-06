@@ -15,7 +15,7 @@ def pipeline(tmp_path, monkeypatch):
     cfg = config.load_config()
     ctx = SimpleNamespace(config=cfg, as_of="2026-09-23", holdings_as_of="2026-09-23",
                           log=BuildLog(), indices=[], closes=pd.DataFrame(),
-                          filled_sessions={}, session_check=None, adjustments=[], price_jumps=[])
+                          filled_sessions={}, session_check=None, adjustments=[], price_jumps=[], diagnostics={})
     monkeypatch.setattr(build, "ARTIFACT_DIR", tmp_path)
     monkeypatch.setattr(build, "ensure_dirs", lambda: None)
     monkeypatch.setattr(build, "load_config", lambda: cfg)
@@ -175,6 +175,7 @@ def test_the_manifest_says_how_long_each_part_of_the_build_took(pipeline, monkey
     def slow(ctx):
         import time
         time.sleep(0.12)
+        ctx.diagnostics["valuation"] = {"seconds": {"fetch": 0.1}, "requests": {"asked": 3}}
         return {"as_of": ctx.as_of}
 
     def broken(ctx):
@@ -186,3 +187,5 @@ def test_the_manifest_says_how_long_each_part_of_the_build_took(pipeline, monkey
     assert set(timings["panels"]) == {"valuation", "markets"}      # a failed panel is timed too
     assert timings["panels"]["valuation"] >= 0.1
     assert timings["context"] >= 0 and "sec_check" in timings
+    # A panel's own account of its run reaches the manifest as written.
+    assert manifest["diagnostics"]["valuation"]["requests"] == {"asked": 3}
