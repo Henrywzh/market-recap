@@ -2,7 +2,7 @@
 // each index, with the closes that flip it tomorrow; and FINRA short interest
 // for the members, the watchlist and the broad ETFs.
 
-import { el, card, num, metaRow, tag, DASH } from '../fmt.js';
+import { el, card, num, metaRow, table, tag, DASH } from '../fmt.js';
 import { render, timeLines } from '../charts.js';
 import { rangeSwitch, sliceRange, initialRange } from '../range.js';
 import { spark } from '../spark.js';
