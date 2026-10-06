@@ -1,16 +1,7 @@
 import { el, card, table, num, pct, dirClass, periodSwitch, sectionTitle, notice, DASH } from '../fmt.js';
 import { areaLine, zeroLine, multiLine } from '../charts.js';
 import { mountLive } from '../live.js';
-
-function quoteStat(quote) {
-  return el('div', { class: 'stat' }, [
-    el('div', { class: 'stat-label', text: quote.ticker }),
-    el('div', { class: 'stat-value', text: `$${num(quote.price)}` }),
-    el('div', { class: `stat-note ${dirClass(quote.change_pct)}` }, [
-      `${quote.change >= 0 ? '+' : ''}${num(quote.change)} (${pct(quote.change_pct)})`,
-    ]),
-  ]);
-}
+import { mountIndexCharts } from '../live-indices.js';
 
 function drawdownStat(entry) {
   return el('div', { class: 'stat' }, [
@@ -146,9 +137,11 @@ export default function renderMarkets(root, data, manifest) {
   // Intraday prices first, the recap's closes beneath: the live strip is
   // labelled as such and nothing below it changes during the session.
   root.append(mountLive());
+  root.append(mountIndexCharts());
 
   root.append(el('div', { class: 'stat-strip' }, [
-    ...data.quotes.map(quoteStat),
+    // The ETFs' closes are not repeated here: the live strip above carries
+    // the cash indices they track.
     ...blocks.map((block) => drawdownStat({ label: block.key, ...block.drawdown })),
     ...blocks.map((block) => adStat(block.key, block.advance_decline)),
   ]));

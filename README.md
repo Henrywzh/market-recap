@@ -79,7 +79,7 @@ The panels, as each is built:
 | Tab | Contents |
 |---|---|
 | **MONITOR** | Research queue over the S&P 500 and the watchlist. A name enters at a 20% drawdown from its 1Y high or when it trails its sector peers (company excluded) by 10 pp over 1M. **TODAY** lists what changed since the previous build (entered, stabilising, evidence turned, reported, left), with weak-as-a-whole sectors grouped as one event; **QUEUE** has a price-state × evidence-state 2×2; evidence for and against (FY1 EPS revisions from Yahoo, revenue, FCF, last quarter vs consensus) is listed, never scored; candidate history persists between builds, and watch/exclude reasons live in `config/monitor_notes.toml`. See [the monitor contract](docs/monitor.md). |
-| **MARKETS** | A **live intraday strip** (see below), then the recap: SPY/QQQ/IWM quote strip, SPX/NDX drawdown with sessions since the high, advance/decline, a price + net-breadth + movers block for **each index**, a **watchlist** of names no index holds, sector performance / weight / **contribution**, sectors rebased to 100, % of each sector above its moving averages, SMA200 slope by sector |
+| **MARKETS** | A **live strip** and **intraday index charts** (see below), then the recap: SPX/NDX drawdown with sessions since the high, advance/decline, a price + net-breadth + movers block for **each index**, a **watchlist** of names no index holds, sector performance / weight / **contribution**, sectors rebased to 100, % of each sector above its moving averages, SMA200 slope by sector |
 | **CATALYSTS → CALENDAR** | Things to watch, in two lanes. **Macro & broad index**: BLS, BEA and Census releases at the time each agency publishes, FOMC decisions / press conferences / minutes and Board speeches from the Fed's calendar, announced Treasury coupon auctions, rule-based events (options expiry and quad witching, S&P rebalance, VIX expiry, jobless claims, ISM, EIA crude inventories) and hand-kept events (elections, deadlines) from the config — each with the previous print from FRED and the period it covers. **Single name**: earnings of every S&P 500 / Nasdaq-100 member and watchlist name with before-open / after-close timing, consensus EPS, estimates and index weight. A **last session** block shows what was released and who reported, with EPS vs. consensus and the day's move. Times in New York and the reader's own zone; every event says how its date is known | High-importance releases (FOMC, CPI, payrolls, GDP) are listed 45 days out. After a release the last-session block shows the actual against the survey point (TradingView).
 | **CATALYSTS → EARNINGS** | S&P 500 earnings in three blocks. **FactSet Earnings Insight** figures read from its articles (growth, beat rates, forward P/E vs its 10-year average, the quarter's and year's EPS revision against FactSet's typical one; history from 2014). A **daily bottom-up revision tracker** built from every member's consensus trend (current quarter, this year and next, 7–90 days, by sector, with the names that moved it). The **reporting season** from Nasdaq's calendar: reported, beat rate, surprise, growth against year-ago EPS captured before each report |
 | **CATALYSTS → THEMES** | Six groups of names that trade together (cloud & AI capex, semiconductors & memory, energy, banks, consumer, housing), each with a proxy (an ETF, or an equal-weight basket) and its run-in against the S&P 500, its bellwethers' next reports (scheduled, or projected from their own rhythm) with how far the proxy moved on their past reports, and a six-week calendar of those reports, the macro releases that bear on it and its own data's due dates. CLOUD adds hyperscaler capex from 10-Q/10-K XBRL, three Taiwanese AI-server makers' monthly revenue, OpenRouter tokens and estimated revenue by model author, and the Ramp AI Index; SEMIS adds TSMC and Nanya monthly revenue, Korean IC exports and the memory, DRAM and flash lines inside them, BLS semiconductor producer and import price indexes, ADATA's monthly memory note and UK retail memory/CPU prices read from PCPartPicker's trend charts; ENERGY adds EIA's weekly crude, gasoline, distillate and gas inventories against the same week of the last five years, refinery utilization and production, WTI/Brent/Henry Hub, the 3-2-1 crack and the pump price; HOUSING adds the 30-year mortgage rate, starts, permits, new home sales, months' supply and Case-Shiller; BANKS adds H.8 loans and deposits, the 2s10s and 3m10y curve, the high-yield spread, call-report delinquency rates and the loan officer survey; CONSUMER adds retail sales, real spending and the saving rate, consumer credit, Michigan sentiment and jobless claims (all from FRED, each dated by when its publisher releases it). A RELEASE DAYS card for each of the four shows how its ETF moved beyond the S&P 500 on the session of each past release of the series that bear on it (payrolls, core CPI, retail sales, claims, starts, new home sales, EIA crude stocks): the size of the move against any other day, and how often it rose after a print above or below the published forecast (TradingView's economic calendar, back to 2016), or its own trend where no forecast covers most releases. Each of the four also shows what moves the names: each bellwether's correlation and beta with oil, gas and the crack, the 10-year yield, the curve, the high-yield spread or gasoline futures, over the last year, and its series feed the stock cards' since-the-last-report table |
@@ -357,37 +357,48 @@ pdftotext; the sector page is an image and is not read).
 under `data/snapshots/` locally. The plan they serve is
 `docs/information_architecture.md`.
 
-## Live intraday strip
+## Live intraday prices
 
-The top of MARKETS carries intraday prices for the quote strip, the indices
-and the watchlist (Yahoo's v8 chart) and the 2Y/10Y/30Y Treasury yields
-(CNBC's quote service). It is the only thing on the page that changes during
-the session, and it is labelled that way: each price shows its source and its
-age, the strip says whether the session is open, a price older than
-`stale_after_seconds` during the session is marked STALE, and one that did not
-arrive is a dash. The recap beneath it is untouched: every other figure is
-the nightly build's close.
+Three things on the page change during the session, each labelled live with
+its age: the **strip** at the top of MARKETS and OVERVIEW (SPX, NDX, RUT, Dow,
+VIX, the 2Y/10Y/30Y yields, the dollar index, WTI and gold, then a row of
+names to watch: `[live] strip` and `strip_names`), the **intraday index
+charts** on INDICES (five-minute closes against the previous close), and the
+**S&P 500 heat map's LIVE window** (each tile coloured by today's move so far).
+Prices are Yahoo's spark (indices, VIX, the dollar, futures, stocks) and
+CNBC's quote service (yields). Each price shows its source and age; one older
+than `stale_after_seconds` during the session is marked STALE, and one that
+did not arrive is a dash, never a number from elsewhere. Everything else on
+the page is the nightly build's close; LIVE is the heat map's default only
+while the session is open.
 
-- **Refresh.** Every `refresh_seconds` (60) while the regular session is open
-  and the tab is visible; every `closed_refresh_seconds` (300) otherwise, to
-  notice the open. A hidden tab or another dashboard tab does not poll. The
-  REFRESH button fetches on demand.
+- **Refresh.** The strip every `refresh_seconds` (60) during the session; the
+  heat map and the index charts every `board_refresh_seconds` (300). Closed,
+  each checks every `closed_refresh_seconds` / `board_closed_refresh_seconds`
+  for the open. A hidden tab does not poll and catches up when shown. REFRESH
+  asks again at once, though never sooner than `manual_min_seconds` (30)
+  after the last fetch.
 - **Server side.** `functions/api/quotes.js` is a Cloudflare Pages Function,
   deployed with the site because `wrangler pages deploy` picks up
   `functions/` from the repository root. It fetches only what `dist/live.json`
-  lists; `site.build` writes that file from `config/dashboard.toml`
-  (`[universe]`, `[[watchlist]]`, `[live]`), so the endpoint cannot proxy
-  arbitrary symbols. Readers share one fetch per `server_cache_seconds` (15)
-  per Cloudflare isolate, so clicks do not multiply requests to Yahoo.
-- **Session.** Open means now falls inside the regular period Yahoo reports
-  for the symbols, which handles weekends and exchange holidays without a
-  calendar here. Change is against Yahoo's previous close.
+  lists; `site.build` writes that file from `[live]` and the heat-map
+  artifact's members, so the endpoint cannot proxy arbitrary symbols. Spark
+  takes 20 symbols a call: the 504-name heat map is 26 calls, inside the 50
+  sub-requests a Function may make. Readers share one fetch per
+  `server_cache_seconds` (15, the strip) or `board_cache_seconds` (60) per
+  Cloudflare isolate.
+- **Session.** Open means now falls inside the regular session Yahoo reports
+  for the indices (or the board's stocks), which handles weekends and
+  holidays without a calendar here. Change is against Yahoo's previous close.
+  Yahoo's Russell 2000 quote runs about 15 minutes behind and its futures and
+  dollar index about 10; their ages say so.
 - **Sources were chosen by measurement** from Cloudflare's edge (2026-09-24
-  after the close, 2026-09-25 mid-session): Yahoo chart ~45 ms with prices a
-  few seconds old, CNBC ~120 ms and ~15 s behind. Nasdaq (2-3 s per call) and
+  after the close, 2026-09-25 mid-session): Yahoo ~45 ms with prices a few
+  seconds old, CNBC ~120 ms and ~15 s behind. Nasdaq (2-3 s per call) and
   Cboe (15-minute delay, up to 0.3% off) were not used.
-- **Locally**, `make serve` has no function, so the strip reports HTTP 404;
-  `make serve-live` runs the same tree under `wrangler pages dev` with it.
+- **Locally**, `make serve` has no function, so the live blocks report HTTP
+  404 and the heat map stays on the close; `make serve-live` runs the same
+  tree under `wrangler pages dev` with it.
 
 ## Design rules this repo follows
 

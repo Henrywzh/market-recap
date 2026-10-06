@@ -944,3 +944,7 @@ table.data td.chain-quote { min-width: 280px; }
 .replay-slider { flex: 1 1 220px; min-width: 160px; accent-color: var(--accent); }
 .replay-day { font-size: 13px; white-space: nowrap; }
 .replay-log { display: grid; gap: 4px; margin-top: 6px; font-size: 12px; line-height: 1.45; min-height: 3em; }
+/* LIVE: the names row under the strip, and the index charts on INDICES. */
+.live-strip-names { margin-top: 6px; }
+.live-index-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.live-index-head .stat-value { font-size: 15px; }

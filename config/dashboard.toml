@@ -92,16 +92,41 @@ drop_pct = 60
 rise_pct = 150
 sessions = 10
 
-# Intraday strip on MARKETS, fetched in the reader's browser through
-# functions/api/quotes.js. It sits beside the recap, never inside it: every
-# other figure on the page is the nightly build's close. The symbols are the
-# quote strip, the indices and the watchlist above; only the rates are named
-# here, because they come from a different publisher (CNBC).
+# Intraday prices, fetched in the reader's browser through
+# functions/api/quotes.js (Yahoo's spark, 20 symbols a call; CNBC for the
+# yields). Beside the recap, never inside it: every other figure on the page
+# is the nightly build's close. The strip leads MARKETS and OVERVIEW; the
+# boards are the heat map's members (from the heat-map artifact) and the index
+# charts on INDICES.
 [live]
-refresh_seconds = 60        # automatic refresh while the session is open and the tab visible
+refresh_seconds = 60        # the strip, while the session is open and the tab visible
 closed_refresh_seconds = 300  # how often a closed session checks whether it has opened
 server_cache_seconds = 15   # repeated clicks and readers share one fetch per window
 stale_after_seconds = 1200  # during the session, an older price is marked STALE
+board_refresh_seconds = 300   # heat map and index charts, while the session is open
+board_closed_refresh_seconds = 900
+board_cache_seconds = 60
+manual_min_seconds = 30     # REFRESH asks again, but not sooner than this after the last fetch
+# The strip: cash indices, volatility, the dollar and two commodities (Yahoo
+# chart symbols), then a second row of names to watch.
+strip = [
+  { symbol = "^GSPC", label = "SPX", kind = "index" },
+  { symbol = "^NDX", label = "NDX", kind = "index" },
+  { symbol = "^RUT", label = "RUT", kind = "index" },
+  { symbol = "^DJI", label = "DOW", kind = "index" },
+  { symbol = "^VIX", label = "VIX", kind = "macro" },
+  { symbol = "DX-Y.NYB", label = "DXY", kind = "macro" },
+  { symbol = "CL=F", label = "WTI", kind = "macro" },
+  { symbol = "GC=F", label = "GOLD", kind = "macro" },
+]
+strip_names = ["SKHY", "GOOG", "NVDA", "AMD"]
+# The INDICES intraday charts.
+index_board = [
+  { symbol = "^GSPC", label = "S&P 500" },
+  { symbol = "^NDX", label = "Nasdaq 100" },
+  { symbol = "^RUT", label = "Russell 2000" },
+  { symbol = "^DJI", label = "Dow Jones" },
+]
 # Overnight board; these are Yahoo chart symbols, never proxies for cash SPX/NDX.
 overnight = [
   { symbol = "ES=F", label = "S&P 500 futures", region = "US" },
