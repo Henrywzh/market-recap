@@ -954,3 +954,9 @@ table.data td.chain-quote { min-width: 280px; }
 .live-strip-names { margin-top: 6px; }
 .live-index-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .live-index-head .stat-value { font-size: 15px; }
+
+/* INDUSTRIES: a group's row opens to its names; a name table nested in the row is read, not sorted. */
+table.industries tr.clickable { cursor: pointer; }
+table.industries tr.clickable:hover td { background: var(--panel-alt); }
+table.industries td .dim { font-size: 10.5px; }
+table.industries-members { font-size: 11px; }

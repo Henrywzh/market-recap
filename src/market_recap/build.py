@@ -13,7 +13,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, evidence, financials, fixed_income, heatmaps, macro, markets, monitor, overview, positioning, priced, risk, rotation, themes, valuation, xray
+from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, evidence, financials, fixed_income, heatmaps, industries, macro, markets, monitor, overview, positioning, priced, risk, rotation, themes, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -49,6 +49,8 @@ PANELS = {
     "chain": chain.build,
     "anchor": anchor.build,
     "monitor": monitor.build,
+    # Reads this session's MONITOR (drawdowns, EPS revisions) and VALUATION.
+    "industries": industries.build,
     # OVERVIEW reads this session's other panels and so runs last.
     "overview": overview.build,
 }
@@ -99,11 +101,11 @@ def run(
     selected = [name for name in (panels or list(PANELS)) if name in PANELS]
     if skip_sec:
         selected = [name for name in selected if name not in SEC_PANELS]
-    # Also honor dependency order when the user passes --panels monitor valuation.
-    if "monitor" in selected:
-        selected = [name for name in selected if name != "monitor"] + ["monitor"]
-    if "overview" in selected:
-        selected = [name for name in selected if name != "overview"] + ["overview"]
+    # Also honor dependency order when the user passes --panels monitor valuation:
+    # monitor after what it reads, industries after monitor, overview last.
+    for late in ("monitor", "industries", "overview"):
+        if late in selected:
+            selected = [name for name in selected if name != late] + [late]
 
     written: list[str] = []
     built: dict[str, dict] = {}
@@ -142,6 +144,8 @@ def run(
                     pending.replace(ARTIFACT_DIR / "monitor.json")
                 elif name == "overview":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in overview.INPUTS})
+                elif name == "industries":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in industries.INPUTS})
                 elif name == "positioning":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in positioning.INPUTS})
                 elif name == "events":

@@ -92,6 +92,33 @@ drop_pct = 60
 rise_pct = 150
 sessions = 10
 
+# INDUSTRIES view (src/market_recap/compute/industries.py): each sub-industry
+# and sector as the median of its members, beside the evidence that tells a
+# fall the estimates explain from one they do not. Evidence is listed, never
+# scored (docs/information_architecture.md); a reading is flagged only where it
+# crosses a threshold written here beforehand.
+[industries]
+min_members = 3             # a group of fewer names is not a reading and is not shown
+thin_below = 5              # fewer names than this: shown, marked thin (a median of three is noise)
+ma_sessions = 200           # trend: the share of names above their average of this many sessions
+# A group is SOLD OFF when its median 1M return is at or below this and at
+# least this share of its names fell over the month (one name's crash is not
+# an industry's).
+sold_off_return_pct = -6.0
+sold_off_down_share = 0.8
+# Estimates are CUT when the median FY1 EPS revision is below either figure
+# (percent over 30 and 90 days). A revision under half a percent is noise: with
+# the 90-day line at zero, Insurance Brokers' median of -0.04% read as a cut.
+# Only names whose EPS is positive are read: a percentage off a loss is not a
+# revision.
+estimates_cut_30d_pct = -0.5
+estimates_cut_90d_pct = -0.5
+# P/E is CHEAP against its own ten years at or below this percentile.
+cheap_percentile = 50.0
+# Sectors where P/E is not the multiple (a REIT is valued on funds from
+# operations): neither the forward P/E nor its percentile is shown.
+no_pe_sectors = ["Real Estate"]
+
 # Intraday prices, fetched in the reader's browser through
 # functions/api/quotes.js (Yahoo's spark, 20 symbols a call; CNBC for the
 # yields). Beside the recap, never inside it: every other figure on the page

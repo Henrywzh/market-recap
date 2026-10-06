@@ -307,6 +307,19 @@ def _check_flow_attribution(heatmaps: dict | None) -> list[Finding]:
     return out
 
 
+def _check_industries(payload: dict | None) -> list[Finding]:
+    """The industry scorecard: empty means nothing was read; missing inputs are named."""
+    if not payload:
+        return []
+    out = []
+    if not payload.get("sub_industries") and not payload.get("sectors"):
+        out.append(Finding("warning", "industries", "no group was read: the scorecard is empty"))
+    if payload.get("missing"):
+        out.append(Finding("notice", "industries",
+                           f"{', '.join(payload['missing'])} did not build this session; its columns are empty"))
+    return out
+
+
 def _check_sec_filings(manifest: dict) -> list[Finding]:
     """Filers whose latest 10-K / 10-Q company facts did not carry.
 
@@ -378,6 +391,7 @@ def run() -> dict:
         + _check_monitor_carried(manifest)
         + _check_cross_listing(config, panels.get("cross_listing"))
         + _check_flow_attribution(panels.get("heatmaps"))
+        + _check_industries(panels.get("industries"))
         + _check_sec_filings(manifest)
         + _check_price_actions(manifest)
         + _check_sources(manifest)

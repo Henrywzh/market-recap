@@ -5,6 +5,7 @@
 import { el, card, num, metaRow, periodSwitch, sectionTitle, tag, DASH } from '../fmt.js';
 import { render, SERIES_COLORS } from '../charts.js';
 import { renderAggregates } from './valuation.js';
+import renderIndustries from './industries.js';
 import { tickerHref } from '../routes.js';
 import { createManualFeed } from '../live-feed.js';
 import { TODAY, todayFrom, applyToday } from '../rotation-live.js';
@@ -380,6 +381,14 @@ function methodNotes(data) {
 export default async function renderRotation(root, data, _manifest, ctx = {}) {
   root.append(sectionTitle('ROTATION', 'RELATIVE STRENGTH VS THE S&P 500'));
   renderRotationSection(root, data);
+  // The typical member of each group with the evidence beside it. A view has
+  // at most four tabs (docs/information_architecture.md), so this is a section
+  // of SECTORS rather than a view of its own.
+  const industries = await ctx.loadArtifact?.('industries').catch(() => null);
+  const industriesHost = el('div', { class: 'sectors-industries' });
+  root.append(industriesHost);
+  if (industries && industries.as_of) renderIndustries(industriesHost, industries);
+  else industriesHost.append(sectionTitle('INDUSTRIES', 'MEDIAN MEMBER'), el('div', { class: 'gap', text: 'The industry scorecard was not built for this session.' }));
   const valuation = await ctx.loadArtifact?.('valuation').catch(() => null);
   const host = el('div', { class: 'sectors-valuation' });
   root.append(sectionTitle('VALUATION', 'P/E AGAINST OWN 10 YEARS'), host);
