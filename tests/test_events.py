@@ -295,3 +295,38 @@ def test_a_name_quoted_as_the_commentator_is_not_the_story():
     assert "a" not in [h["url"] for h in E.rank_headlines(rows, "JPM", "JPMorgan Chase & Co", start, end)]
     analyst = [{"datetime": 1, "headline": "JPMorgan analysts upgrade Nvidia to overweight", "source": "Reuters", "url": "d"}]
     assert E.rank_headlines(analyst, "JPM", "JPMorgan Chase & Co", start, end) == []
+
+
+def test_each_name_is_asked_once_in_any_run_of_rotation_weekdays():
+    from datetime import date, timedelta
+    import numpy as np
+    from market_recap.panels.events import rotation_due
+
+    days = [d for d in (date(2026, 9, 1) + timedelta(n) for n in range(60)) if d.weekday() < 5]
+    for symbol in ("AAPL", "MSFT", "NVDA", "BRK-B", "000660.KS"):
+        due = [rotation_due(symbol, d, 3) for d in days]
+        for i in range(len(days) - 2):
+            assert sum(due[i:i + 3]) == 1, (symbol, days[i])     # a weekend does not skip a turn
+    assert all(rotation_due("AAPL", d, 1) for d in days)
+    shares = np.mean([[rotation_due(f"S{i}", d, 3) for i in range(300)] for d in days[:3]], axis=1)
+    assert all(0.25 < s < 0.42 for s in shares)                   # about a third of names each night
+
+
+def test_a_names_last_event_window_is_read_again_between_its_turns(tmp_path, monkeypatch):
+    import gzip
+    import json
+    from datetime import date
+    from market_recap import cache
+    from market_recap.sources import finnhub
+
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    folder = tmp_path / finnhub.NAMESPACE
+    folder.mkdir()
+    write = lambda name, rows: (folder / name).write_bytes(gzip.compress(json.dumps(rows).encode()))  # noqa: E731
+    write("AAPL-2026-08-20-2026-10-04.json.gz", [{"headline": "older"}])
+    write("AAPL-2026-08-21-2026-10-05.json.gz", [{"headline": "newest"}])
+    write("AAPL-2026-10-04-2026-10-07.json.gz", [{"headline": "a move window"}])
+    write("AAPLX-2026-08-21-2026-10-05.json.gz", [{"headline": "another name"}])
+    assert finnhub.recent_window("AAPL", date(2026, 10, 7), 45, max_age=10) == [{"headline": "newest"}]
+    assert finnhub.recent_window("AAPL", date(2026, 10, 30), 45, max_age=10) is None
+    assert finnhub.recent_window("MSFT", date(2026, 10, 7), 45, max_age=10) is None

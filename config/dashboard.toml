@@ -242,9 +242,12 @@ moves_days = 730
 news_days = 365
 news_budget = 250
 # Company events announced ahead, read from the deep names' last
-# event_news_days of headlines (event_news_budget requests a build).
+# event_news_days of headlines (event_news_budget requests a build). Each
+# name is asked once every event_news_rotation_days sessions -- Finnhub's free
+# tier is one request a second -- and its last window is read in between.
 event_news_days = 45
 event_news_budget = 150
+event_news_rotation_days = 3
 # Hand-kept company and industry events, each with the page that states its
 # date. symbols and/or themes say whose timelines carry it: a company's own
 # event goes on that company alone (symbols); themes are for events with no

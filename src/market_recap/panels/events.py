@@ -21,7 +21,9 @@ Two outputs:
 from __future__ import annotations
 
 from datetime import date, timedelta
+import hashlib
 
+import numpy as np
 import pandas as pd
 
 from ..compute import events as E
@@ -380,6 +382,17 @@ def _news_window(excess_index: pd.DatetimeIndex, day: str) -> tuple[date, date, 
     return prev.date(), date.fromisoformat(day), close(prev), close(pd.Timestamp(day))
 
 
+def rotation_due(symbol: str, day: date, every: int) -> bool:
+    """Whether ``symbol`` is asked on session ``day`` when each name is asked
+    once every ``every`` weekdays: a stable hash of the name picks its slot,
+    and weekdays are counted so a weekend does not skip a slot."""
+    if every <= 1:
+        return True
+    weekdays = int(np.busday_count(date(2000, 1, 3), day))
+    slot = int(hashlib.md5(symbol.encode("utf-8")).hexdigest(), 16) % every   # md5 spreads short names evenly; crc32 did not
+    return slot == weekdays % every
+
+
 def _kept_events(entries: list[dict], as_of: str) -> list[dict]:
     """The config's hand-kept company and industry events still ahead, each
     with its source: {date, kind, text, url, symbols, themes, origin}."""
@@ -591,11 +604,21 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     # read for a dated investor day, product event, FDA date, meeting or
     # ruling; plus the hand-kept list in the config.
     announced: dict[str, list[dict]] = {}
-    event_state = {"asked": 0, "failed": 0, "budget": int(settings.get("event_news_budget", 150))}
+    event_state = {"asked": 0, "failed": 0, "reused": 0, "budget": int(settings.get("event_news_budget", 150))}
     if news_state["keyed"]:
-        lookback = as_of - timedelta(days=int(settings.get("event_news_days", 45)))
+        event_days = int(settings.get("event_news_days", 45))
+        lookback = as_of - timedelta(days=event_days)
+        rotation = max(1, int(settings.get("event_news_rotation_days", 3)))
         for symbol in sorted(deep, key=priority):
             asked = symbol.replace("-", ".")
+            # Each name is asked every `rotation` sessions; between, its last
+            # window is read again (an announcement is weeks ahead of its date).
+            if not rotation_due(symbol, as_of, rotation):
+                rows = finnhub.recent_window(asked, as_of, event_days, max_age=2 * rotation + 4)
+                if rows is not None:
+                    event_state["reused"] += 1
+                    announced[symbol] = E.announced_events(rows, symbol, meta.get(symbol, {}).get("name"), as_of)
+                    continue
             if not finnhub.is_cached(asked, lookback, as_of, as_of):
                 if event_state["asked"] >= event_state["budget"]:
                     continue
