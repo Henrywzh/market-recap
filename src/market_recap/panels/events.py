@@ -432,7 +432,7 @@ def _guides(symbol: str, cik: int | None, reactions: list[dict], calendar: dict[
         found = None
         for filer_cik, block in blocks:
             try:
-                found = releases.release_on(filer_cik, day, block, fetch=budget["left"] > 0)
+                found = releases.release_on(filer_cik, day, block, fetch=budget["left"] > 0, counts=budget)
             except Exception:
                 found = None
             if found:
@@ -440,6 +440,7 @@ def _guides(symbol: str, cik: int | None, reactions: list[dict], calendar: dict[
         if found is None:
             continue
         url, text, fresh = found
+        budget["found"] = budget.get("found", 0) + 1
         if fresh:
             budget["left"] -= 1
         eps_ref = ((calendar.get(day) or {}).get(symbol) or {}).get("eps")
@@ -556,7 +557,8 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     except Exception:
         cik_map = {}
     focus = set(evidence.get("focus") or [])
-    guide_budget = {"left": int(settings.get("guide_new_releases", 200))}
+    guide_cap = int(settings.get("guide_new_releases", 200))
+    guide_budget = {"left": guide_cap, "found": 0, "waiting": 0}
     themes = inputs.get("themes") or {}
     drivers = themes.get("drivers") if isinstance(themes.get("drivers"), list) else []
     membership = themes.get("membership") or {}
@@ -732,8 +734,9 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     ctx.log.add(SourceRecord("sec_releases_guidance", "Guidance stated in earnings releases (8-K Item 2.02, EX-99)",
                              "https://www.sec.gov/cgi-bin/browse-edgar", ctx.as_of,
                              rows=sum(1 for s in written if (s in carded or s in focus)),
-                             status="ok" if guide_budget["left"] > 0 else "partial",
-                             error=None if guide_budget["left"] > 0 else "release budget spent; the rest are read next build"))
+                             status="ok" if not guide_budget["waiting"] else "partial",
+                             error=None if not guide_budget["waiting"]
+                             else f"release budget spent; {guide_budget['waiting']} releases are read next build"))
     lap("tail")
     if hasattr(ctx, "diagnostics"):
         # How the Finnhub budget went: asked tonight, read from the cache (a
@@ -745,6 +748,11 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
             "finnhub_events": {"names": len(deep), "asked": event_state["asked"], "budget": event_state["budget"],
                                "reused_off_turn": event_state["reused"], "failed": event_state["failed"],
                                "from_cache": max(0, len(announced) - event_state["asked"] - event_state["reused"])},
+            # Releases behind the guides: read tonight for the first time,
+            # read from the cache, and left for a later build by the budget.
+            "sec_guidance": {"budget": guide_cap, "read_new": guide_cap - guide_budget["left"],
+                             "from_cache": guide_budget["found"] - (guide_cap - guide_budget["left"]),
+                             "waiting": guide_budget["waiting"]},
         }
     return {
         "as_of": ctx.as_of,

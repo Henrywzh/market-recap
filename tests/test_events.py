@@ -330,3 +330,30 @@ def test_a_names_last_event_window_is_read_again_between_its_turns(tmp_path, mon
     assert finnhub.recent_window("AAPL", date(2026, 10, 7), 45, max_age=10) == [{"headline": "newest"}]
     assert finnhub.recent_window("AAPL", date(2026, 10, 30), 45, max_age=10) is None
     assert finnhub.recent_window("MSFT", date(2026, 10, 7), 45, max_age=10) is None
+
+
+INDEX_PAGE = """<table class="tableFile"><tr><td>1</td><td>Press release</td><td>a.htm</td>
+<td>EX-99.1</td><td><a href="/Archives/a.htm">a.htm</a></td></tr></table>"""
+
+
+def test_a_release_is_turned_into_text_once(monkeypatch, tmp_path):
+    from market_recap import cache
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    asked = []
+    monkeypatch.setattr(R.sec, "_get", lambda url, timeout: asked.append(url) or (INDEX_PAGE if "index" in url else "<p>Revenue is expected to be $5.0 billion.</p>"))
+    parsed = []
+    real = R._text
+    monkeypatch.setattr(R, "_text", lambda html: parsed.append(html) or real(html))
+    first = R._exhibit(320193, "0000320193-26-000001")
+    again = R._exhibit(320193, "0000320193-26-000001")
+    assert first == again == ("https://www.sec.gov/Archives/a.htm", "Revenue is expected to be $5.0 billion.")
+    assert len(asked) == 2 and len(parsed) == 1
+
+
+def test_a_release_past_the_budget_is_counted_as_waiting(monkeypatch, tmp_path):
+    from market_recap import cache
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    block = {"form": ["8-K"], "items": ["2.02,9.01"], "filingDate": ["2026-10-01"], "accessionNumber": ["0000320193-26-000001"]}
+    counts = {"waiting": 0}
+    assert R.release_on(320193, "2026-10-01", block, fetch=False, counts=counts) is None
+    assert counts["waiting"] == 1
