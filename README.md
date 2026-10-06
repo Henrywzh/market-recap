@@ -359,7 +359,7 @@ under `data/snapshots/` locally. The plan they serve is
 
 ## Live intraday prices
 
-Three things on the page change during the session, each labelled live with
+Three things on the page change on their own during the session, each labelled live with
 its age: the **strip** at the top of MARKETS and OVERVIEW (SPX, NDX, RUT, Dow,
 VIX, the 2Y/10Y/30Y yields, the dollar index, WTI and gold, then a row of
 names to watch: `[live] strip` and `strip_names`), the **intraday index
@@ -371,6 +371,25 @@ than `stale_after_seconds` during the session is marked STALE, and one that
 did not arrive is a dash, never a number from elsewhere. Everything else on
 the page is the nightly build's close; LIVE is the heat map's default only
 while the session is open.
+
+Three more blocks take live prices **only when the reader presses REFRESH**,
+and never fetch on their own:
+
+- **SECTORS: a TODAY window.** The page's own GICS baskets priced at each
+  member's live change from the heat-map board, weighted by today's official
+  SPY weight, against the whole index built the same way. Relative strength,
+  breadth, sub-industries and the members that moved a sector all get TODAY;
+  members without a live price are left out and counted. Beside each basket
+  is its SPDR fund against SPY (`[live] sector_etfs`), as the tradable
+  comparison. The rotation graph stays on weekly closes.
+- **MACRO commodities.** PRICE and 1D from Yahoo (`[macro.commodities]`);
+  1W and longer stay on the build's closes.
+- **Treasury yields.** CNBC's on-the-run yields for all 13 tenors in one call
+  (`[live] yield_board`), as LIVE and TODAY columns, live 10Y-2Y and 10Y-3M,
+  and a dashed live curve on the chart. These are market yields, not
+  Treasury's fitted par curve: the two differ by a few bp on coupons and
+  about ten on bills on the same day, so TODAY is the comparison, not the
+  level.
 
 - **Refresh.** The strip every `refresh_seconds` (60) during the session; the
   heat map and the index charts every `board_refresh_seconds` (300). Closed,

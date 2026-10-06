@@ -59,6 +59,19 @@ def test_the_heat_map_board_is_its_members_heaviest_first():
     assert contract["boards"]["heatmap"]["series"] is False
 
 
+def test_the_refresh_only_boards_come_from_their_own_config():
+    config = {"universe": {}, "macro": {"commodities": {"Gold": "GC=F", "Copper": "HG=F"}},
+              "live": {"sector_etfs": [{"symbol": "XLK", "sector": "Information Technology"}], "sector_benchmark": "SPY",
+                       "yield_board": [{"symbol": "US10Y", "label": "10Y"}]}}
+    boards = site.live_contract(config)["boards"]
+    assert boards["sector_etfs"]["symbols"] == ["XLK", "SPY"]
+    assert boards["sector_etfs"]["labels"] == {"XLK": "Information Technology", "SPY": "benchmark"}
+    assert boards["macro"]["symbols"] == ["GC=F", "HG=F"] and boards["macro"]["labels"]["HG=F"] == "Copper"
+    assert boards["yields"]["source"] == "cnbc" and boards["yields"]["labels"] == {"US10Y": "10Y"}
+    bare = site.live_contract({"universe": {}, "live": {}})["boards"]
+    assert set(bare) == {"indices"}
+
+
 def test_trade_premarket_scan_uses_weighted_members_plus_watchlist_once():
     config = {
         "universe": {"quote_tickers": [], "indices": []},

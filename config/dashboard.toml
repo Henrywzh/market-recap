@@ -146,6 +146,32 @@ rates = [
   { symbol = "US10Y", label = "UST 10Y" },
   { symbol = "US30Y", label = "UST 30Y" },
 ]
+# Pages that take live prices only when the reader presses REFRESH: SECTORS
+# (the heat-map board for its baskets, plus the SPDR sector funds beside them),
+# the commodity table on MACRO (its own symbols, [macro.commodities]) and the
+# Treasury table (CNBC's on-the-run yields, one call for the whole curve).
+sector_benchmark = "SPY"
+sector_etfs = [
+  { symbol = "XLK", sector = "Information Technology" },
+  { symbol = "XLF", sector = "Financials" },
+  { symbol = "XLV", sector = "Health Care" },
+  { symbol = "XLY", sector = "Consumer Discretionary" },
+  { symbol = "XLC", sector = "Communication Services" },
+  { symbol = "XLI", sector = "Industrials" },
+  { symbol = "XLP", sector = "Consumer Staples" },
+  { symbol = "XLE", sector = "Energy" },
+  { symbol = "XLU", sector = "Utilities" },
+  { symbol = "XLRE", sector = "Real Estate" },
+  { symbol = "XLB", sector = "Materials" },
+]
+# CNBC symbol per tenor; the labels are the Treasury table's own tenors.
+yield_board = [
+  { symbol = "US1M", label = "1M" }, { symbol = "US2M", label = "2M" }, { symbol = "US3M", label = "3M" },
+  { symbol = "US4M", label = "4M" }, { symbol = "US6M", label = "6M" }, { symbol = "US1Y", label = "1Y" },
+  { symbol = "US2Y", label = "2Y" }, { symbol = "US3Y", label = "3Y" }, { symbol = "US5Y", label = "5Y" },
+  { symbol = "US7Y", label = "7Y" }, { symbol = "US10Y", label = "10Y" }, { symbol = "US20Y", label = "20Y" },
+  { symbol = "US30Y", label = "30Y" },
+]
 
 # Names to follow that no tracked index carries. A watchlist entry gets the
 # same price treatment as an index member and is never mixed into an index's

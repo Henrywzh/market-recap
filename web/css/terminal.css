@@ -689,6 +689,12 @@ table.data.monitor-change-table td.monitor-why { min-width: 260px; }
 .rot-grid tbody tr.selected td:first-child { box-shadow: inset 2px 0 0 var(--accent), inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent); }
 .rot-cell { min-width: 48px; font-variant-numeric: tabular-nums; }
 .rot-cell.active { font-weight: 600; color: var(--text); }
+.rot-cell.rot-etf { white-space: nowrap; font-size: 10px; }
+.rot-cell.rot-etf.up { color: var(--up); }
+.rot-cell.rot-etf.down { color: var(--down); }
+.rot-controls .live-controls { margin-left: 0; }
+.live-cell { font-weight: 600; }
+.live-cell .sub { display: block; font-weight: 400; }
 .rot-name { color: var(--text); }
 .rot-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; background: var(--text-faint); }
 .q-leading { color: var(--up); } .rot-dot.q-leading { background: var(--up); }

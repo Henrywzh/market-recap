@@ -1,6 +1,7 @@
 import { el, card, table, num, pct, dirClass, sectionTitle, DASH } from '../fmt.js';
 import { timeLines } from '../charts.js';
 import { rangeSwitch, sliceRange, initialRange } from '../range.js';
+import { createManualFeed } from '../live-feed.js';
 
 const HEAT_WARM = [185, 28, 28];
 const HEAT_COOL = [30, 64, 175];
@@ -67,7 +68,14 @@ export default function renderMacro(root, data) {
     tr.addEventListener('click', () => commodityChart.pick(row, tr));
     return tr;
   };
-  const rows = data.commodities.rows.map((row) => {
+  // PRICE and 1D take live values once the reader presses REFRESH; the longer
+  // windows stay on the build's closes.
+  let live = null;
+  const liveOf = (row) => {
+    const q = live?.get(row.symbol);
+    return q && typeof q.price === 'number' ? q : null;
+  };
+  const buildRows = () => data.commodities.rows.map((row) => {
     if (row.status !== 'ok') {
       return el('tr', {}, [
         el('td', {}, [el('span', { text: row.label }), el('span', { class: 'sub', text: row.symbol })]),
@@ -75,14 +83,34 @@ export default function renderMacro(root, data) {
         ...cols.map(() => el('td', { class: 'dim', text: DASH })),
       ]);
     }
+    const q = liveOf(row);
+    const failed = live && !q ? live.get(row.symbol)?.error || 'no live price' : null;
     return pickable(row, [
       el('td', {}, [el('span', { text: row.label }), el('span', { class: 'sub', text: row.symbol })]),
-      el('td', { text: num(row.price) }),
-      ...cols.map((c) => el('td', { class: dirClass(row[c]), text: pct(row[c]) })),
+      q ? el('td', { class: 'live-cell', title: `close ${num(row.price)}`, text: num(q.price) })
+        : el('td', { title: failed || '', text: num(row.price) }),
+      ...cols.map((c) => (c === '1D' && q
+        ? el('td', { class: `live-cell ${dirClass(q.change_pct)}`, title: `close-to-close ${pct(row[c])}`, text: pct(q.change_pct) })
+        : el('td', { class: dirClass(row[c]), text: pct(row[c]) }))),
     ]);
   });
+  const tableHost = el('div');
+  const liveNote = el('div', { class: 'note-text' });
+  const drawTable = () => {
+    tableHost.replaceChildren(table(['ASSET', live ? 'PRICE · LIVE' : 'PRICE', ...cols.map((c) => (live && c === '1D' ? '1D · LIVE' : c))], buildRows()));
+  };
+  const feed = createManualFeed(['api/quotes?board=macro'], {
+    onData: ([body]) => {
+      live = new Map(body.quotes.map((q) => [q.symbol, q]));
+      liveNote.textContent = 'PRICE and 1D: Yahoo, unofficial, a few minutes old, against the previous close or settlement; '
+        + '1W and longer are the build\'s closes. Futures trade nearly around the clock, so 1D moves outside US hours too.';
+      drawTable();
+    },
+  });
+  drawTable();
   root.append(el('div', { class: 'grid two' }, [
-    card('COMMODITIES', el('span', { class: 'dim', text: 'click a row to plot it' }), table(['ASSET', 'PRICE', ...cols], rows)),
+    card('COMMODITIES', el('div', { class: 'live-controls' }, [el('span', { class: 'dim', text: 'click a row to plot it' }), feed.controls]),
+      [tableHost, liveNote]),
     commodityChart.card,
   ]));
 

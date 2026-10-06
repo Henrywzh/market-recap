@@ -6,11 +6,13 @@ import { el, card, num, metaRow, periodSwitch, sectionTitle, tag, DASH } from '.
 import { render, SERIES_COLORS } from '../charts.js';
 import { renderAggregates } from './valuation.js';
 import { tickerHref } from '../routes.js';
+import { createManualFeed } from '../live-feed.js';
+import { TODAY, todayFrom, applyToday } from '../rotation-live.js';
 
 const WINDOWS = ['1M', '3M', '6M', '12M'];
 // Weekly points drawn on the rotation graph for each window. Past a quarter
 // the weekly path is noise, so the longer windows keep thirteen weeks.
-const TAIL_WEEKS = { '1M': 5, '3M': 13, '6M': 13, '12M': 13 };
+const TAIL_WEEKS = { [TODAY]: 5, '1M': 5, '3M': 13, '6M': 13, '12M': 13 };
 // Every other sector keeps a short tail: eleven half-year paths are a tangle.
 const OTHER_TAIL = 5;
 const SCHEMES = { cap: 'CAP-WTD', equal: 'EQUAL-WTD' };
@@ -29,6 +31,8 @@ const SECTOR_SHORT = {
 const short = (label) => SECTOR_SHORT[label] || label;
 const present = (v) => v !== null && v !== undefined && Number.isFinite(v);
 const signed = (v, digits = 1, unit = '') => (present(v) ? `${v > 0 ? '+' : ''}${num(v, digits)}${unit}` : DASH);
+
+const over = (w) => (w === TODAY ? 'today so far' : `over ${w}`);
 
 function quadrantOf(ratio, momentum) {
   if (!present(ratio) || !present(momentum)) return null;
@@ -181,9 +185,62 @@ function rsLines(node, data, ranked, view, colorOf) {
   }));
 }
 
-function heatGrid(ranked, view, benchmark, onPick) {
+function etfCell(etf) {
+  if (!etf || !present(etf.excess)) return el('td', { class: 'rot-cell dim', title: etf?.error || '', text: etf ? `${etf.symbol} ${DASH}` : DASH });
+  return el('td', { class: `rot-cell rot-etf ${etf.excess >= 0 ? 'up' : 'down'}`, title: `${etf.symbol} ${signed(etf.return, 2, '%')} today`,
+    text: `${etf.symbol} ${signed(etf.excess, 2)}` });
+}
+
+// TODAY has no path to draw: each sector's basket against the S&P 500 so far,
+// beside its SPDR fund against SPY.
+function todayBars(node, ranked, view, today, onPick) {
+  const labels = ranked.map((g) => short(g.label));
+  node.style.height = `${Math.max(260, ranked.length * 26 + 50)}px`;
+  const chart = render(node, (option, p) => ({
+    ...option,
+    grid: { left: 120, right: 46, top: 28, bottom: 20 },
+    legend: { top: 0, left: 0, itemWidth: 10, itemHeight: 8, textStyle: { color: p.dim, fontSize: 10 } },
+    tooltip: {
+      ...option.tooltip, trigger: 'axis',
+      formatter: (items) => {
+        const g = ranked[items[0].dataIndex];
+        const etf = today.etfs[g.key];
+        return `<b>${g.label}</b><br>basket ${signed(g[view.scheme].windows[TODAY].return, 2, '%')} · ${signed(g[view.scheme].windows[TODAY].excess, 2)} pp vs S&P`
+          + (etf ? `<br>${etf.symbol} ${signed(etf.return, 2, '%')} · ${signed(etf.excess, 2)} pp vs ${today.etfBenchmark?.symbol || 'SPY'}` : '');
+      },
+    },
+    xAxis: { type: 'value', axisLabel: { color: p.dim, fontSize: 10 }, splitLine: { lineStyle: { color: p.border, opacity: 0.4 } } },
+    yAxis: {
+      type: 'category', inverse: true, data: labels, triggerEvent: true,
+      axisLabel: { color: p.dim, fontSize: 10 }, axisLine: { show: false }, axisTick: { show: false },
+    },
+    series: [
+      {
+        name: `BASKET vs S&P (${view.scheme === 'cap' ? 'cap' : 'equal'}-wtd)`, type: 'bar', barMaxWidth: 9,
+        itemStyle: { color: p.accent },
+        data: ranked.map((g) => ({ value: g[view.scheme].windows[TODAY].excess,
+          itemStyle: { color: (g[view.scheme].windows[TODAY].excess ?? 0) >= 0 ? p.up : p.down, opacity: 0.85 } })),
+        label: { show: true, position: 'right', color: p.dim, fontSize: 9, formatter: (q) => signed(q.value, 2) },
+        markLine: { silent: true, symbol: 'none', data: [{ xAxis: 0 }], lineStyle: { color: p.faint }, label: { show: false } },
+      },
+      {
+        name: `SPDR ETF vs ${today.etfBenchmark?.symbol || 'SPY'}`, type: 'bar', barMaxWidth: 9,
+        itemStyle: { color: p.faint },
+        data: ranked.map((g) => ({ value: today.etfs[g.key]?.excess ?? null, itemStyle: { color: p.faint, opacity: 0.9 } })),
+        label: { show: true, position: 'right', color: p.faint, fontSize: 9, formatter: (q) => (present(q.value) ? signed(q.value, 2) : '') },
+      },
+    ],
+  }));
+  chart?.on('click', (q) => {
+    const index = q.componentType === 'yAxis' ? labels.indexOf(q.value) : q.dataIndex;
+    if (ranked[index]) onPick(ranked[index].key);
+  });
+}
+
+function heatGrid(ranked, view, benchmark, onPick, today = null) {
+  const windows = today ? [TODAY, ...WINDOWS] : WINDOWS;
   const scale = {};
-  WINDOWS.forEach((w) => {
+  windows.forEach((w) => {
     scale[w] = Math.max(1, ...ranked.map((g) => Math.abs(g[view.scheme].windows[w].excess ?? 0)));
   });
   const cell = (value, w) => {
@@ -209,7 +266,8 @@ function heatGrid(ranked, view, benchmark, onPick) {
         el('span', { class: `rot-dot q-${s.quadrant || 'none'}` }),
         short(g.label),
       ]),
-      ...WINDOWS.map((w) => cell(s.windows[w].excess, w)),
+      ...windows.map((w) => cell(s.windows[w].excess, w)),
+      ...(today ? [etfCell(today.etfs[g.key])] : []),
       el('td', { class: 'rot-breadth' }, [
         el('span', { class: 'rot-breadth-bar' }, [
           el('span', { class: 'rot-breadth-fill', style: `width:${present(breadth) ? breadth : 0}%` }),
@@ -221,13 +279,15 @@ function heatGrid(ranked, view, benchmark, onPick) {
   });
   const head = el('tr', {}, [
     el('th', { text: 'SECTOR' }),
-    ...WINDOWS.map((w) => el('th', { class: w === view.window ? 'active' : '', text: w })),
+    ...windows.map((w) => el('th', { class: w === view.window ? 'active' : '', text: w })),
+    ...(today ? [el('th', { title: `SPDR sector fund vs ${today.etfBenchmark?.symbol || 'SPY'}, today so far`, text: 'ETF TODAY' })] : []),
     el('th', { text: `BEAT S&P · ${view.window}` }),
     el('th', { text: 'NOW' }),
   ]);
   return el('div', { class: 'table-scroll' }, [
     el('table', { class: 'data rot-grid' }, [el('thead', {}, [head]), el('tbody', {}, rows)]),
-    el('div', { class: 'rot-foot dim', text: `pp vs the S&P 500 (${view.scheme === 'cap' ? 'cap' : 'equal'}-weighted: ${WINDOWS.map((w) => `${w} ${signed(benchmark[w], 1, '%')}`).join(' · ')})` }),
+    el('div', { class: 'rot-foot dim', text: `pp vs the S&P 500 (${view.scheme === 'cap' ? 'cap' : 'equal'}-weighted: ${windows.map((w) => `${w} ${signed(benchmark[w], 1, '%')}`).join(' · ')})`
+      + (today ? ` · ETF TODAY: the SPDR sector fund vs ${today.etfBenchmark?.symbol || 'SPY'} (${signed(today.etfBenchmark?.return, 2, '%')}), for comparison; the baskets are the page's sectors` : '') }),
   ]);
 }
 
@@ -290,7 +350,7 @@ function drillDown(data, view) {
   const excess = s.windows[view.window].excess;
   const top = members[0];
   const summary = [
-    `${group.label}: ${signed(excess, 1)} pp vs the S&P 500 over ${view.window}`,
+    `${group.label}: ${signed(excess, 1)} pp vs the S&P 500 ${over(view.window)}`,
     `${present(s.breadth[view.window]) ? num(s.breadth[view.window], 0) : DASH}% of ${group.members} names beat it`,
     top ? `biggest lift ${top.ticker} ${signed(top.contribution[view.scheme][view.window], 1)} pp` : null,
   ].filter(Boolean).join(' · ');
@@ -307,6 +367,7 @@ function methodNotes(data) {
   const etf = data.index?.holdings_etf || 'SPY';
   return [
     `Each sector is a basket of the S&P 500's current members with that GICS sector, built from the same daily closes as the rest of the site. No extra data is fetched.`,
+    `TODAY appears when you press REFRESH (or pick TODAY); the page never asks on its own. It is the same baskets and benchmark priced at each member's live change since the previous close (Yahoo, unofficial, a few minutes old), weighted by today's official ${etf} weight. Members without a live price are left out of every average and counted. ETF TODAY is the SPDR sector fund against ${etf} over the same session: a tradable comparison, not the basket. The rotation graph stays on weekly closes.`,
     `Cap-weighted: each member is held at today's official ${etf} weight turned into a share count and kept there, so weights drift with prices as an index's do between rebalances. Equal-weighted: the average daily return of the members. The benchmark is the whole index built the same way from the same dividend-adjusted closes, so dividends and the weighting scheme cancel.`,
     `Relative strength (pp) = sector return − index return over the window (21/63/126/252 sessions). A member's contribution is its weight in the sector at the window's start × (its return − the index's); a sector's contributions add up to its pp.`,
     `Rotation graph, weekly: RS = sector ÷ index at each week's last close. RS-Ratio = 100 × RS ÷ its ${data.rrg_weeks?.ratio ?? 10}-week average (above 100: outperforming its recent trend). RS-Momentum = 100 × RS-Ratio ÷ its ${data.rrg_weeks?.momentum ?? 4}-week average (above 100: that lead is growing). Sectors usually travel clockwise: improving → leading → weakening → lagging. The selected sector's tail shows the last ${Object.entries(TAIL_WEEKS).map(([w, n]) => `${n} weeks for ${w}`).join(', ')}; the others keep ${OTHER_TAIL}. The current week ends at the latest close. This is an open approximation of the idea, not the proprietary JdK RS-Ratio.`,
@@ -335,6 +396,10 @@ function renderRotationSection(root, data) {
   }
   const colors = new Map(groups.map((g, i) => [g.key, SERIES_COLORS[i % SERIES_COLORS.length]]));
   const view = { scheme: 'cap', window: '1M', selected: null, picked: false };
+  // TODAY exists once the reader has pressed REFRESH (or picked TODAY):
+  // the page never asks for live prices on its own.
+  let today = null;
+  let wantToday = false;
 
   const statsHost = el('div', { class: 'stat-strip rot-stats' });
   const rrgNode = el('div', { class: 'chart tall' });
@@ -368,15 +433,45 @@ function renderRotationSection(root, data) {
     );
 
     const tail = TAIL_WEEKS[view.window];
-    rrgNote.textContent = `${SCHEMES[view.scheme].toLowerCase()} · ${tail > OTHER_TAIL ? `${tail}-week tail on ${short(groups.find((g) => g.key === view.selected).label)}, ${OTHER_TAIL} on the rest` : `${tail}-week tails`} · click to inspect`;
-    linesNote.textContent = `top 3 / bottom 3 · ${view.window} · rebased to 100`;
+    rrgNote.textContent = `${view.window === TODAY ? 'weekly closes, not live · ' : ''}${SCHEMES[view.scheme].toLowerCase()} · ${tail > OTHER_TAIL ? `${tail}-week tail on ${short(groups.find((g) => g.key === view.selected).label)}, ${OTHER_TAIL} on the rest` : `${tail}-week tails`} · click to inspect`;
     rrgChart(rrgNode, groups, view, pick);
-    rsLines(linesNode, data, ranked, view, (key) => colors.get(key));
+    if (view.window === TODAY) {
+      linesTitle.textContent = 'TODAY SO FAR · BASKET VS SPDR ETF';
+      linesNote.textContent = `pp · ${today.priced} of ${today.total} members priced · click a sector`;
+      todayBars(linesNode, ranked, view, today, pick);
+    } else {
+      linesTitle.textContent = 'RELATIVE STRENGTH VS S&P 500';
+      linesNote.textContent = `top 3 / bottom 3 · ${view.window} · rebased to 100`;
+      linesNode.style.height = '';
+      rsLines(linesNode, data, ranked, view, (key) => colors.get(key));
+    }
     gridHost.replaceChildren(card('RELATIVE STRENGTH BY WINDOW', el('span', { class: 'dim', text: 'pp vs S&P 500 · click a row to inspect' }),
-      [heatGrid(ranked, view, bench, pick)]));
+      [heatGrid(ranked, view, bench, pick, today)]));
     drillHost.replaceChildren(...[drillDown(data, view)].filter(Boolean));
   }
 
+  const pressed = () => [...windowSwitch.children].forEach((b) => b.setAttribute('aria-pressed', String(b.textContent === view.window)));
+  const feed = createManualFeed(['api/quotes?board=heatmap', 'api/quotes?board=sector_etfs'], {
+    onData: ([members, etfs]) => {
+      today = todayFrom(data, members.quotes, etfs.quotes);
+      applyToday(data, today);
+      if (wantToday) view.window = TODAY;
+      wantToday = false;
+      pressed();
+      draw();
+    },
+  });
+  // Picking TODAY before any live prices is the reader asking for them.
+  const windowSwitch = periodSwitch([TODAY, ...WINDOWS], view.window, async (w) => {
+    if (w === TODAY && !today) {
+      wantToday = true;
+      await feed.refresh();
+      if (!today) { wantToday = false; pressed(); }
+      return;
+    }
+    view.window = w;
+    draw();
+  });
   const controls = el('div', { class: 'rot-controls' }, [
     el('span', { class: 'dim', text: 'WEIGHT' }),
     periodSwitch(Object.values(SCHEMES), SCHEMES[view.scheme], (label) => {
@@ -384,8 +479,13 @@ function renderRotationSection(root, data) {
       draw();
     }),
     el('span', { class: 'dim', text: 'WINDOW' }),
-    periodSwitch(WINDOWS, view.window, (w) => { view.window = w; draw(); }),
+    windowSwitch,
+    el('span', { class: 'dim rot-live-label', text: 'LIVE' }),
+    feed.controls,
   ]);
+  const linesTitle = el('span', { class: 'card-title', text: 'RELATIVE STRENGTH VS S&P 500' });
+  const linesCard = card('', linesNote, [linesNode]);
+  linesCard.querySelector('.card-title').replaceWith(linesTitle);
 
   root.append(
     metaRow(`SECTOR ROTATION · GICS sectors vs the ${data.index?.label || 'S&P 500'} · ${data.members.length} members · as of ${data.as_of}`, methodNotes(data)),
@@ -393,7 +493,7 @@ function renderRotationSection(root, data) {
     statsHost,
     el('div', { class: 'grid two rot-top' }, [
       card('RELATIVE ROTATION GRAPH', rrgNote, [rrgNode]),
-      card('RELATIVE STRENGTH VS S&P 500', linesNote, [linesNode]),
+      linesCard,
     ]),
     el('div', { class: 'grid two rot-bottom' }, [gridHost, drillHost]),
   );

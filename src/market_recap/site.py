@@ -73,6 +73,19 @@ def live_contract(config: dict | None = None, *, weighted_names: list[str] | Non
                           "labels": {e["symbol"]: e["label"] for e in live.get("index_board", [])}}}
     if weighted_names:
         boards["heatmap"] = {**board, "series": False, "symbols": list(dict.fromkeys(weighted_names))}
+    # Asked for only on REFRESH (SECTORS, MACRO, the Treasury table).
+    etfs = live.get("sector_etfs", [])
+    if etfs:
+        bench = live.get("sector_benchmark", "SPY")
+        boards["sector_etfs"] = {**board, "series": False, "symbols": [e["symbol"] for e in etfs] + [bench],
+                                 "labels": {**{e["symbol"]: e["sector"] for e in etfs}, bench: "benchmark"}}
+    commodities = config.get("macro", {}).get("commodities", {})
+    if commodities:
+        boards["macro"] = {**board, "series": False, "symbols": list(dict.fromkeys(commodities.values())),
+                           "labels": {symbol: label for label, symbol in commodities.items()}}
+    if live.get("yield_board"):
+        boards["yields"] = {**board, "source": "cnbc", "symbols": [e["symbol"] for e in live["yield_board"]],
+                            "labels": {e["symbol"]: e["label"] for e in live["yield_board"]}}
     return {
         "refresh_seconds": live.get("refresh_seconds", 60),
         "closed_refresh_seconds": live.get("closed_refresh_seconds", 300),

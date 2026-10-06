@@ -1,4 +1,4 @@
-// Intraday quotes for the MARKETS live strip: GET /api/quotes.
+// Intraday quotes for the live strip and the boards: GET /api/quotes.
 //
 // The only server-side code on the site, and deliberately small. It fetches
 // exactly the symbols in /live.json (written from config/dashboard.toml and
@@ -205,7 +205,8 @@ export async function buildBody(contract, nowMs = Date.now(), scope = 'default')
     const board = (contract.boards || {})[scope.slice(6)];
     if (!board) return { error: `no board ${scope.slice(6)}` };
     const entries = board.symbols.map((symbol) => ({ symbol, label: board.labels?.[symbol] ?? symbol, kind: 'board' }));
-    const quotes = await yahooSpark(entries, { series: Boolean(board.series) });
+    // The yield board is CNBC's: one call carries the whole curve.
+    const quotes = board.source === 'cnbc' ? await cnbcRates(entries) : await yahooSpark(entries, { series: Boolean(board.series) });
     // A board's session is the US cash session: its index or its stocks.
     return { fetched_at: new Date(nowMs).toISOString(), session: sessionOf(quotes, nowMs),
       refresh_seconds: board.refresh_seconds, closed_refresh_seconds: board.closed_refresh_seconds,

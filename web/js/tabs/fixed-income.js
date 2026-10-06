@@ -1,6 +1,29 @@
 import { el, card, table, num, bps, sectionTitle, DASH } from '../fmt.js';
 import { render, timeLines, SERIES_COLORS } from '../charts.js';
 import { rangeSwitch, sliceRange, initialRange } from '../range.js';
+import { createManualFeed } from '../live-feed.js';
+
+const ok = (v) => typeof v === 'number' && Number.isFinite(v);
+
+// A spread row ("10Y - 2Y") from live yields by tenor: its level and today's
+// change, both in bp. Null where either leg has no live quote.
+export function liveSpread(label, byTenor) {
+  const [long, shortLeg] = String(label).split('-').map((x) => x.trim());
+  const a = byTenor.get(long);
+  const b = byTenor.get(shortLeg);
+  if (!a || !b || !ok(a.price) || !ok(b.price)) return null;
+  return {
+    bps: Math.round((a.price - b.price) * 1000) / 10,
+    change_bp: ok(a.change_bp) && ok(b.change_bp) ? Math.round((a.change_bp - b.change_bp) * 10) / 10 : null,
+  };
+}
+
+// ET clock of the newest live quote, for the curve's legend.
+function clockOf(quotes) {
+  const newest = Math.max(...quotes.map((q) => q.time).filter(ok));
+  if (!Number.isFinite(newest)) return '';
+  return new Date(newest * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' });
+}
 
 // A rising yield is a falling bond price and tighter money: red, as on
 // OVERVIEW. Spreads are shape, not direction, so they stay grey.
@@ -57,14 +80,16 @@ export default function renderFixedIncome(root, data) {
   const history = historyCard(data.history);
   root.append(history ? el('div', { class: 'grid two' }, [curveCard, history]) : curveCard);
 
-  requestAnimationFrame(() => render(chartNode, (option, p) => ({
+  // CNBC's live curve joins the chart and the table only after REFRESH.
+  let live = null;
+  const drawCurve = () => render(chartNode, (option, p) => ({
     ...option,
     grid: { ...option.grid, bottom: 52, left: 56 },
     legend: { bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9 },
     tooltip: { ...option.tooltip, valueFormatter: (v) => (v === null ? DASH : `${v.toFixed(2)}%`) },
     xAxis: { ...option.xAxis, data: data.tenors, boundaryGap: false },
     yAxis: { ...option.yAxis, axisLabel: { ...option.yAxis.axisLabel, formatter: (v) => `${v.toFixed(2)}%` } },
-    series: data.curves.map((curve, index) => ({
+    series: [...data.curves.map((curve, index) => ({
       name: `${curve.label} (${curve.date})`,
       type: 'line',
       data: curve.values,
@@ -74,29 +99,68 @@ export default function renderFixedIncome(root, data) {
       // context, so they are thinner and cooler.
       lineStyle: { width: index === 0 ? 1.8 : 1.1, color: SERIES_COLORS[index % SERIES_COLORS.length] },
       itemStyle: { color: SERIES_COLORS[index % SERIES_COLORS.length] },
-    })),
-  })));
+    })), ...(live ? [{
+      name: `Live, CNBC (${live.clock} ET)`,
+      type: 'line',
+      data: data.tenors.map((t) => live.byTenor.get(t)?.price ?? null),
+      showSymbol: true,
+      symbolSize: 4,
+      lineStyle: { width: 1.4, type: 'dashed', color: p.text },
+      itemStyle: { color: p.text },
+    }] : [])],
+  }));
+  requestAnimationFrame(drawCurve);
 
   // Change columns come from the artifact, which took them from the contract:
   // "1W" on this tab is seven calendar days because the curve is published on
   // a calendar schedule, and it says so in the note rather than silently
   // meaning something different from "1W" on the equity tabs.
   const cols = data.change_columns;
-  const rows = data.rows.map((row) => el('tr', {}, [
-    el('td', { text: row.tenor }),
-    el('td', { text: row.yield_pct === null ? DASH : `${num(row.yield_pct)}%` }),
-    ...cols.map((c) => el('td', { class: yieldClass(row[c]), text: bps(row[c]) })),
-  ]));
-  data.spreads.forEach((spread) => {
-    rows.push(el('tr', { class: 'emphasis' }, [
-      el('td', { text: spread.label }),
-      el('td', { text: spread.bps === null ? DASH : `${bps(spread.bps)} bps` }),
-      ...cols.map((c) => el('td', { class: 'dim', text: bps(spread[c]) })),
-    ]));
+  const liveCells = (yieldText, change, cls) => (live ? [
+    el('td', { class: 'live-cell', text: yieldText }),
+    el('td', { class: `live-cell ${cls}`, text: ok(change) ? bps(change) : DASH }),
+  ] : []);
+  const buildRows = () => {
+    const rows = data.rows.map((row) => {
+      const q = live?.byTenor.get(row.tenor);
+      return el('tr', {}, [
+        el('td', { text: row.tenor }),
+        el('td', { text: row.yield_pct === null ? DASH : `${num(row.yield_pct)}%` }),
+        ...liveCells(q && ok(q.price) ? `${num(q.price, 3)}%` : DASH, q?.change_bp, yieldClass(q?.change_bp)),
+        ...cols.map((c) => el('td', { class: yieldClass(row[c]), text: bps(row[c]) })),
+      ]);
+    });
+    data.spreads.forEach((spread) => {
+      const s = live ? liveSpread(spread.label, live.byTenor) : null;
+      rows.push(el('tr', { class: 'emphasis' }, [
+        el('td', { text: spread.label }),
+        el('td', { text: spread.bps === null ? DASH : `${bps(spread.bps)} bps` }),
+        ...liveCells(s ? `${bps(s.bps)} bps` : DASH, s?.change_bp, 'dim'),
+        ...cols.map((c) => el('td', { class: 'dim', text: bps(spread[c]) })),
+      ]));
+    });
+    return rows;
+  };
+  const tableHost = el('div');
+  const liveNote = el('div', { class: 'note-text' });
+  const drawTable = () => tableHost.replaceChildren(table(
+    ['MATURITY', 'YIELD', ...(live ? ['LIVE', 'TODAY (BPS)'] : []), ...cols.map((c) => `${c} (BPS)`)], buildRows()));
+  const feed = createManualFeed(['api/quotes?board=yields'], {
+    onData: ([body]) => {
+      live = { byTenor: new Map(body.quotes.map((q) => [q.label, q])), clock: clockOf(body.quotes) };
+      liveNote.textContent = 'LIVE: CNBC\'s on-the-run market yields, about 15 seconds behind, as of '
+        + `${live.clock || DASH} ET; TODAY is CNBC's change since its previous close. YIELD and the change columns are Treasury's `
+        + 'published par curve, a fitted curve on a bond-equivalent basis: the two differ by a few bp on coupons and by ten or so on bills '
+        + 'on the same day without anything moving, so compare TODAY with TODAY, not LIVE with YIELD.';
+      drawTable();
+      drawCurve();
+    },
   });
+  drawTable();
 
-  root.append(card('TREASURY YIELDS — LEVEL & CHANGE (BPS)', el('span', { class: 'dim', text: 'red = yield up' }),
-    table(['MATURITY', 'YIELD', ...cols.map((c) => `${c} (BPS)`)], rows)));
+  root.append(card('TREASURY YIELDS — LEVEL & CHANGE (BPS)',
+    el('div', { class: 'live-controls' }, [el('span', { class: 'dim', text: 'red = yield up' }), feed.controls]),
+    [tableHost, liveNote]));
 
   const auctions = data.auctions;
   if (auctions?.groups?.length) {

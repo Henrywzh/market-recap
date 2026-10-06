@@ -107,3 +107,80 @@ export function createFeed(url, { node, onData, onTick }) {
   setTimeout(() => fetchNow(false), 0);
   return { state, stop, controls: el('div', { class: 'live-controls' }, [status, button]) };
 }
+
+// The status line of a block that asks only when the reader presses REFRESH:
+// before then it says the page shows the build's close; after, how old the
+// prices are. Nothing is scheduled, so there is no "next in".
+export function manualStatusText(state, now = Date.now()) {
+  if (state.inflight && !state.body) return 'FETCHING…';
+  const parts = [];
+  if (state.error) parts.push(`LAST FETCH FAILED: ${state.error}`);
+  if (state.body) {
+    const open = state.body.session?.open;
+    if (open !== null && open !== undefined) parts.push(sessionText(state.body));
+    parts.push(`LIVE AS OF ${ageText(Math.round((now - state.lastFetch) / 1000))} AGO · PRESS REFRESH TO UPDATE`);
+  } else if (!state.error) {
+    parts.push('BUILD CLOSE · PRESS REFRESH FOR LIVE PRICES');
+  }
+  return parts.join(' · ');
+}
+
+// One or more URLs on the quote function, asked together and only on a
+// click: SECTORS, MACRO and the Treasury table. `onData(bodies)` gets the
+// answers in the order of `urls`; the page keeps the build's close until then.
+export function createManualFeed(urls, { onData }) {
+  const state = { body: null, bodies: null, lastFetch: 0, inflight: false, error: null };
+  const button = el('button', { type: 'button', class: 'live-refresh', text: 'REFRESH' });
+  const status = el('span', { class: 'live-status', text: manualStatusText(state) });
+  const controls = el('div', { class: 'live-controls' }, [status, button]);
+
+  function tick() {
+    status.textContent = manualStatusText(state);
+    status.className = `live-status${state.error ? ' down' : ''}`;
+  }
+
+  // A click while a fetch is out waits for that fetch instead of starting another.
+  let pending = null;
+  function fetchNow() {
+    if (!pending) pending = run().finally(() => { pending = null; });
+    return pending;
+  }
+
+  async function run() {
+    state.inflight = true;
+    button.disabled = true;
+    button.textContent = 'REFRESHING…';
+    tick();
+    try {
+      const bodies = await Promise.all(urls.map(async (url) => {
+        const response = await fetch(withFresh(url), { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const body = await response.json();
+        if (!Array.isArray(body.quotes)) throw new Error(body.error || 'malformed response');
+        return body;
+      }));
+      state.bodies = bodies;
+      state.body = bodies[0];
+      state.error = null;
+      state.lastFetch = Date.now();
+    } catch (error) {
+      state.error = error.message;
+    } finally {
+      state.inflight = false;
+      button.disabled = false;
+      button.textContent = 'REFRESH';
+    }
+    if (state.bodies && !state.error) onData(state.bodies);
+    tick();
+  }
+
+  button.addEventListener('click', fetchNow);
+  // Only the age moves; once the block leaves the page the clock stops.
+  let shown = false;
+  const ticker = setInterval(() => {
+    if (controls.isConnected) shown = true;
+    else if (shown) { clearInterval(ticker); return; }
+    if (state.body) tick();
+  }, 5000);
+  return { state, controls, refresh: fetchNow };
+}
