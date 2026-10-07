@@ -71,9 +71,9 @@ slope_lookbacks = [5, 20, 50, 100, 200]
 # dividends but not spin-offs, so a spun-off parent shows the distribution as a
 # loss. ``ratio`` is shares of ``distributed`` received per share held, read
 # from the company's filing; the adjustment factor is computed from both lines'
-# prices on ``ex_date`` and is not typed in. ``distributed`` must be priced by
-# the build (an index member or watchlist name), or history before ``ex_date``
-# is dropped instead.
+# prices on ``ex_date`` and is not typed in. The build downloads both lines
+# for that even after the index drops one; if either still has no price on
+# ``ex_date``, history before the date is dropped instead.
 [[corporate_actions]]
 ticker = "CTVA"
 kind = "spin-off"

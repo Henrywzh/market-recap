@@ -80,3 +80,21 @@ def test_validate_warns_on_an_uncomputable_action_and_only_notes_a_jump():
     assert [(f.severity, f.check) for f in findings] == [("warning", "corporate_actions"), ("notice", "price_jump")]
     ok = {"corporate_actions": [{"ticker": "CTVA", "factor": 0.155}], "price_jumps": []}
     assert validate._check_price_actions(ok) == []
+
+
+def test_both_lines_are_priced_for_the_factor_and_then_dropped():
+    # By 2026-10-06 SPY held Vylor and not Corteva: both are still priced, for this only.
+    assert ca.priced_lines(CONFIG) == {"CTVA", "VYLR"}
+    assert ca.priced_lines({}) == set()
+    frame = pd.DataFrame({"CTVA": [1.0], "VYLR": [2.0]})
+    assert list(ca.drop_extra(frame, {"VYLR"}).columns) == ["CTVA"]
+    assert list(ca.drop_extra(frame, set()).columns) == ["CTVA", "VYLR"]
+    assert ca.drop_extra(pd.DataFrame(), {"VYLR"}).empty
+
+
+def test_an_unknown_factor_names_the_line_without_a_price():
+    prices = pd.DataFrame({"VYLR": [68.26]}, index=pd.to_datetime(["2026-10-01"]))
+    [item] = ca.resolve(CONFIG, prices)
+    assert item.factor is None and item.unpriced == ("CTVA",)
+    findings = validate._check_price_actions({"corporate_actions": [item.as_dict()]})
+    assert "no price for CTVA on 2026-10-01" in findings[0].detail

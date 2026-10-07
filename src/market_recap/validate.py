@@ -342,7 +342,8 @@ def _check_sec_filings(manifest: dict) -> list[Finding]:
 def _check_price_actions(manifest: dict) -> list[Finding]:
     """Spin-off adjustments that could not be computed, and moves to look at."""
     out = [Finding("warning", "corporate_actions",
-                   f"{a['ticker']}: no price for {a['distributed']} on {a['ex_date']}, so history before it was dropped")
+                   f"{a['ticker']}: no price for {' or '.join(a.get('unpriced') or [a['distributed']])} on {a['ex_date']}, "
+                   "so history before it was dropped")
            for a in manifest.get("corporate_actions") or [] if a.get("factor") is None]
     out += [Finding("notice", "price_jump",
                     f"{m['ticker']} moved {m['move_pct']:+.1f}% on {m['date']} with no split on record; "

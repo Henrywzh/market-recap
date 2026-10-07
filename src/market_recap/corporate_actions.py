@@ -17,6 +17,12 @@ then what a holder of the stub and of the distributed shares together earned
 that day. If the distributed line has no price on the ex-date the factor is
 unknown, and history before the date is dropped rather than left wrong: a
 panel must not invent a value, and a false -84% is one.
+
+Both lines are downloaded with the members whether or not the index still
+holds them (``priced_lines``), then dropped again (``drop_extra``). Index
+membership moves around a spin-off: by 2026-10-06 SPY held Vylor and no longer
+Corteva, the build stopped pricing CTVA, the factor went with it, and the
+strict build refused to publish.
 """
 
 from __future__ import annotations
@@ -37,13 +43,26 @@ class Adjustment:
     ratio: float
     source: str
     factor: float | None  # None: not computable, so history before ex_date is dropped
+    unpriced: tuple[str, ...] = ()  # the lines with no price on ex_date
 
     def as_dict(self) -> dict:
         return {
             "ticker": self.ticker, "kind": self.kind, "ex_date": self.ex_date.strftime("%Y-%m-%d"),
             "distributed": self.distributed, "ratio": self.ratio, "source": self.source,
             "factor": None if self.factor is None else round(self.factor, 6),
+            "unpriced": list(self.unpriced),
         }
+
+
+def priced_lines(config: dict) -> set[str]:
+    """Both lines of every configured action: its factor needs their prices."""
+    return {str(e[key]).upper() for e in config.get("corporate_actions") or []
+            for key in ("ticker", "distributed") if e.get(key)}
+
+
+def drop_extra(frame: pd.DataFrame, extra: set[str]) -> pd.DataFrame:
+    """``frame`` without the columns fetched only to compute a factor."""
+    return frame.drop(columns=[c for c in extra if c in frame.columns]) if extra and not frame.empty else frame
 
 
 def _price(prices: pd.DataFrame, symbol: str, day: pd.Timestamp) -> float | None:
@@ -74,7 +93,8 @@ def resolve(config: dict, prices: pd.DataFrame) -> list[Adjustment]:
         ticker, distributed = str(entry["ticker"]).upper(), str(entry["distributed"]).upper()
         held, spun = _price(prices, ticker, ex_date), _price(prices, distributed, ex_date)
         factor = held / (held + ratio * spun) if held is not None and spun is not None else None
-        out.append(Adjustment(ticker, str(entry["kind"]), ex_date, distributed, ratio, str(entry["source"]), factor))
+        unpriced = tuple(s for s, p in ((ticker, held), (distributed, spun)) if p is None)
+        out.append(Adjustment(ticker, str(entry["kind"]), ex_date, distributed, ratio, str(entry["source"]), factor, unpriced))
     return out
 
 

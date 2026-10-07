@@ -257,8 +257,11 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
             *(set(frame["yahoo_symbol"]) for frame in ctx.members.values())
         )
     )
+    # Both lines of a spin-off are priced for its factor even when the index
+    # no longer holds one of them, and dropped again once the factor is known.
+    extra = corporate_actions.priced_lines(config) - set(symbols)
     ctx.closes = mark_missing_sessions(completed_sessions(
-        yahoo.fetch_closes(symbols, period=history_period, need_ohlcv=True)))
+        yahoo.fetch_closes(sorted(set(symbols) | extra), period=history_period, need_ohlcv=True)))
     if ctx.closes.empty:
         raise RuntimeError("no constituent prices were fetched; the page has no session to describe")
     ctx.splits = _through(yahoo.fetch_splits(history_period), ctx.closes.index[-1])
@@ -286,8 +289,9 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
     # Yahoo adjusts for splits and dividends, not spin-offs: a spun-off parent
     # would read as a loss in every window that spans the distribution.
     ctx.adjustments = corporate_actions.resolve(config, ctx.prices)
-    ctx.closes = corporate_actions.adjust(ctx.closes, ctx.adjustments)
-    ctx.prices = corporate_actions.adjust(ctx.prices, ctx.adjustments)
+    ctx.closes = corporate_actions.drop_extra(corporate_actions.adjust(ctx.closes, ctx.adjustments), extra)
+    ctx.prices = corporate_actions.drop_extra(corporate_actions.adjust(ctx.prices, ctx.adjustments), extra)
+    ctx.splits = corporate_actions.drop_extra(ctx.splits, extra)
     ctx.price_jumps = corporate_actions.unexplained_moves(
         ctx.prices, ctx.splits, **{key: config["price_checks"][key] for key in ("drop_pct", "rise_pct", "sessions")})
     missing = sorted(set(symbols) - set(ctx.closes.columns))
