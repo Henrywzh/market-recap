@@ -83,7 +83,7 @@ def _forward_series(symbol: str, prices: pd.Series | None, recorded: dict[str, d
             "eps_ntm": [clean_float(points[d][1], 4) for d in days], "recorded_days": len(recorded)}
 
 
-def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits: pd.Series | None,
+def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits,
              sector: str | None, forward: dict | None = None) -> dict | None:
     """P/E against its own ten years, on the operating basis and as reported;
     writes the ticker's chart artifact. Returns {basis, <basis>: stats, ...}."""
@@ -350,7 +350,8 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             continue
         closes = ctx.closes[symbol].dropna() if symbol in ctx.closes.columns else None
         price = float(closes.iloc[-1]) if closes is not None and not closes.empty else None
-        symbol_splits = ctx.splits[symbol] if symbol in ctx.splits.columns else None
+        # Read once per name: every quarter's EPS and share count is scaled by it.
+        symbol_splits = V.split_lookup(ctx.splits[symbol] if symbol in ctx.splits.columns else None)
         sector = meta.get(symbol, {}).get("sector")
         ntm = V.ntm_eps(trends.get(symbol), today)
         forward = _forward_series(symbol, ctx.prices.get(symbol), recorded, today, ntm)

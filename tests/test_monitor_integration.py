@@ -189,3 +189,37 @@ def test_the_manifest_says_how_long_each_part_of_the_build_took(pipeline, monkey
     assert timings["context"] >= 0 and "sec_check" in timings
     # A panel's own account of its run reaches the manifest as written.
     assert manifest["diagnostics"]["valuation"]["requests"] == {"asked": 3}
+
+
+def test_frame_values_reads_a_date_exactly_as_series_value_does():
+    import numpy as np
+    import pandas as pd
+    from market_recap.compute import monitor as M
+
+    index = pd.to_datetime(["2026-10-05", "2026-10-06", "2026-10-06", "2026-10-07"])
+    frame = pd.DataFrame({
+        "A": [1.0, 2.0, 3.0, 4.0],          # a duplicated date: the last print
+        "B": [1.0, 5.0, np.nan, 4.0],       # ... the last numeric one
+        "C": [1.0, np.inf, np.inf, 4.0],    # not finite: no value
+        "D": ["x", "7", "y", 4.0],          # text coerced, as series_value does
+    }, index=index)
+    for day in ("2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"):
+        fast = M.frame_values(frame, day)
+        slow = {c: M.series_value(frame, c, day) for c in frame.columns}
+        assert fast == {c: v for c, v in slow.items() if v is not None}, day
+    twice = pd.DataFrame([[1.0, 2.0]], columns=["A", "A"], index=index[:1])
+    assert M.frame_values(twice, "2026-10-05") == {}           # a column named twice is no column
+
+
+def test_a_clean_close_column_is_taken_as_it_is():
+    import numpy as np
+    import pandas as pd
+    from market_recap.compute import monitor as M
+
+    index = pd.date_range("2026-01-02", periods=6, freq="B")
+    clean = pd.Series([1.0, np.nan, 3.0, 4.0, np.nan, 6.0], index=index, name="AAPL")
+    fast = M._numeric_series(clean)
+    slow = M._numeric_series(clean.astype(object))           # the general path
+    pd.testing.assert_series_equal(fast, slow, check_dtype=False)
+    shuffled = clean.iloc[[3, 0, 5, 1, 4, 2]]                 # unsorted: the general path still sorts
+    pd.testing.assert_series_equal(M._numeric_series(shuffled), slow, check_dtype=False, check_freq=False)

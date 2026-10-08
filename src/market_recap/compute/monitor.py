@@ -60,6 +60,13 @@ def _numeric_series(series: Any) -> pd.Series | None:
 
     if series is None:
         return None
+    # The build's own close columns are already what this returns: a unique,
+    # sorted, tz-naive date index over floats. Normalising each again cost
+    # MONITOR some 15 s a build, every name read several times.
+    if (isinstance(series, pd.Series) and isinstance(series.index, pd.DatetimeIndex)
+            and series.index.tz is None and series.dtype.kind == "f" and not series.index.hasnans
+            and series.index.is_unique and series.index.is_monotonic_increasing):
+        return pd.Series(series.to_numpy(dtype=float), index=series.index)
     if isinstance(series, pd.DataFrame):
         if series.shape[1] != 1:
             return None
@@ -140,6 +147,35 @@ def series_value(frame: Any, ticker: str, as_of: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def frame_values(frame: Any, as_of: Any) -> dict[str, float]:
+    """``series_value`` for every column of ``frame`` on ``as_of`` at once.
+
+    Same rules -- the date exactly, the last numeric print of a duplicated
+    date, finite values only, no column that appears twice -- but only that
+    date's rows are read. Normalising the whole column per call cost MONITOR
+    about a minute: a return since first seen reads two dates for every name
+    and every one of its sector peers.
+    """
+
+    day = _as_date(as_of)
+    if not isinstance(frame, pd.DataFrame) or day is None:
+        return {}
+    try:
+        index = pd.to_datetime(frame.index, errors="coerce")
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(index, pd.DatetimeIndex):
+        return {}
+    if index.tz is not None:
+        index = index.tz_localize(None)
+    hit = np.asarray(index == pd.Timestamp(day))
+    if not hit.any():
+        return {}
+    rows = frame.loc[hit, ~frame.columns.duplicated(keep=False)]
+    last = rows.apply(pd.to_numeric, errors="coerce").ffill().iloc[-1]
+    return {str(c): float(v) for c, v in last.items() if pd.notna(v) and math.isfinite(float(v))}
 
 
 def _endpoint_return(values: pd.Series, sessions: int) -> float | None:

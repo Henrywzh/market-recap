@@ -282,13 +282,44 @@ EPS_STALE_AFTER_DAYS = 190
 EPS_PRICE_LIMIT = 2.0
 
 
+def split_lookup(splits: pd.Series | None):
+    """``split_factor_after`` for one series, with the splits read once.
+
+    A split column is ten years of sessions with a handful of ratios. Filtering
+    it again for every part of every quarter of every filer cost VALUATION
+    about 45 s a build; here each date is a binary search into the few split
+    dates. The product is taken over the same ratios in the same order, so the
+    factor is the same to the last bit.
+    """
+    ratios = splits.dropna() if splits is not None else None
+    if ratios is None or ratios.empty:
+        return lambda date: 1.0
+    stamps = ratios.index.to_numpy(dtype="datetime64[ns]")
+    values = ratios.to_numpy()
+    after = [float(np.prod(values[i:])) for i in range(len(values))]
+    ordered = bool(np.all(stamps[1:] >= stamps[:-1]))
+    seen: dict[str, float] = {}
+
+    def factor(date: str) -> float:
+        if date not in seen:
+            day = pd.Timestamp(date)
+            if ordered:
+                i = int(np.searchsorted(stamps, day.to_datetime64(), side="right"))
+                seen[date] = after[i] if i < len(after) else 1.0
+            else:
+                seen[date] = float(ratios[ratios.index > day].prod())
+        return seen[date]
+    return factor
+
+
+def _factor(splits):
+    return splits if callable(splits) else split_lookup(splits)
+
+
 def split_factor_after(splits: pd.Series | None, date: str) -> float:
     """Product of the splits after ``date``: what a figure filed that day must be
     scaled by to be on today's share basis."""
-    if splits is None:
-        return 1.0
-    ratios = splits.dropna()
-    return float(ratios[ratios.index > pd.Timestamp(date)].prod()) if not ratios.empty else 1.0
+    return _factor(splits)(date)
 
 
 def eps_steps(history: Sequence[dict], splits: pd.Series | None) -> list[tuple[str, str, float]]:
@@ -299,9 +330,10 @@ def eps_steps(history: Sequence[dict], splits: pd.Series | None) -> list[tuple[s
     part filed before a split and one filed after it are on different bases
     until each is scaled separately.
     """
+    after = _factor(splits)
     steps = []
     for quarter in history:
-        eps = sum(sign * value / split_factor_after(splits, filed) for value, filed, sign in quarter["parts"])
+        eps = sum(sign * value / after(filed) for value, filed, sign in quarter["parts"])
         steps.append((quarter["filed"], quarter["period_end"], eps))
     return steps
 
@@ -367,7 +399,7 @@ def _shares(core: dict, eps: float, splits: pd.Series | None, filed: str) -> flo
     implied = core["net_income"] / eps if core.get("net_income") and eps else None
     shares = core.get("shares")
     if shares:
-        shares *= split_factor_after(splits, core.get("shares_filed") or filed)
+        shares *= _factor(splits)(core.get("shares_filed") or filed)
         if implied and implied > 0 and not 1 / SHARE_UNITS_FACTOR <= shares / implied <= SHARE_UNITS_FACTOR:
             shares = implied
     else:
@@ -400,6 +432,7 @@ def operating_steps(history: Sequence[dict], splits: pd.Series | None, basis: st
     A quarter whose inputs were not filed is left out; the figure before it
     stands, as for a reported EPS, until it expires.
     """
+    splits = _factor(splits)
     reported = {filed: eps for filed, _, eps in eps_steps(history, splits)}
     out = []
     for quarter, rate in zip(history, tax_rates(history)):

@@ -5,11 +5,17 @@ same day but sometimes not until the evening ET, so a refresh run shortly
 after the close can legitimately show the prior business day. The artifact
 carries the published date so the page can say which one it is showing
 instead of implying the curve is stale or broken.
+
+Each year's XML is cached: this year's as a daily file (refetched after the
+18:30 rollover, when the day's curve has posted), last year's for a week,
+older years for good. Four panels read the curve; uncached, each fetch took
+about 20 s a year and a build spent some 150 s downloading the same two files.
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from functools import lru_cache
 import hashlib
 import json
 import math
@@ -20,6 +26,7 @@ import pandas as pd
 from lxml import etree
 
 from .http import get_bytes
+from .. import cache
 from ..config import REPO_ROOT
 from ..util import write_json
 
@@ -47,13 +54,28 @@ TENORS = [
 _D = "{http://schemas.microsoft.com/ado/2007/08/dataservices}"
 
 
+NAMESPACE = "treasury/par"
+
+
+def _year_xml(year: int, today: date) -> bytes:
+    kind = "daily_file" if year >= today.year else ("reference_data" if year == today.year - 1 else "archive")
+    return cache.fetch_bytes(NAMESPACE, f"par-{year}", lambda: get_bytes(XML_URL.format(year=year), timeout=90.0),
+                             kind=kind, suffix=".xml", compress=True)
+
+
 def fetch_par_yield_curve(years: list[int] | None = None) -> tuple[pd.DataFrame, str]:
     """Tidy (date, tenor, tenor_months, yield_pct) across the requested years."""
-    years = years or [date.today().year - 1, date.today().year]
+    today = date.today()
+    frame, url = _curve(tuple(years or [today.year - 1, today.year]), today)
+    return frame.copy(), url
+
+
+# Parsed once per build and day: CATALYSTS, FIXED INCOME, DCF and OVERVIEW all read it.
+@lru_cache(maxsize=8)
+def _curve(years: tuple[int, ...], today: date) -> tuple[pd.DataFrame, str]:
     rows: list[dict] = []
     for year in years:
-        url = XML_URL.format(year=year)
-        tree = etree.fromstring(get_bytes(url, timeout=90.0))
+        tree = etree.fromstring(_year_xml(year, today))
         for entry in tree.iter("{http://www.w3.org/2005/Atom}entry"):
             props = entry.find(".//{http://schemas.microsoft.com/ado/2007/08/dataservices/metadata}properties")
             if props is None:

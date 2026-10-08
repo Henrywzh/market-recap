@@ -13,9 +13,13 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+import hashlib
 import math
 from functools import lru_cache
 import json
+import os
+from pathlib import Path
+import pickle
 import re
 import threading
 import time
@@ -396,8 +400,9 @@ def instance_facts(cik: int, filing: LatestFiling) -> dict:
             _get(base + instance, 180.0), accession=filing.accession, filed=filing.filed)
         return json.dumps(rows)
 
-    return json.loads(cache.fetch_text(
-        INSTANCE_NAMESPACE, folder, fetch, kind="filings", suffix=".json", compress=True))
+    text = cache.fetch_text(INSTANCE_NAMESPACE, folder, fetch, kind="filings", suffix=".json", compress=True)
+    _record_read(cache.path_for(INSTANCE_NAMESPACE, folder, ".json" + cache.GZIP_SUFFIX))
+    return json.loads(text)
 
 
 def _newest_filed(facts: dict) -> str:
@@ -431,10 +436,11 @@ def _backfill(cik: int, facts: dict) -> dict:
         return facts
     newest = _newest_filed(facts)
     now = datetime.now(timezone.utc)
-    missing = sorted(
-        (f for f in _statement_filings(_recent_block(cik))
-         if f.filed > newest and now - f.accepted >= PROCESSING_MARGIN and not _carries(facts, f.accession)),
-        key=lambda f: f.accepted)
+    newer = [f for f in _statement_filings(_recent_block(cik)) if f.filed > newest and not _carries(facts, f.accession)]
+    missing = sorted((f for f in newer if now - f.accepted >= PROCESSING_MARGIN), key=lambda f: f.accepted)
+    for waiting in (f for f in newer if now - f.accepted < PROCESSING_MARGIN):
+        # Left for now; a parsed filer kept from this build is stale once it is due.
+        _record_recheck(waiting.accepted + PROCESSING_MARGIN)
     for filing in missing:
         try:
             extra = instance_facts(cik, filing)
@@ -468,6 +474,7 @@ def fetch_company_facts(cik: int, *, use_cache: bool = True) -> dict:
         # 3-4 MB of JSON per filer, of which this reads a handful of tags.
         compress=True,
     )
+    _record_read(cache.path_for(f"{NAMESPACE}/facts", f"CIK{cik:010d}", ".json" + cache.GZIP_SUFFIX))
     return _backfill(cik, json.loads(text))
 
 
@@ -1022,11 +1029,126 @@ class Filer:
     quarterly_revenue: tuple = ()
 
 
-@lru_cache(maxsize=None)
 def filer(cik: int, use_cache: bool = True) -> Filer:
-    """Parsed once per build: FINANCIALS, VALUATION and the DCF read the same
-    filer, and a company-facts document is tens of MB once parsed -- what the
-    panels need is kept, the document is not."""
+    """Parsed once per build: FINANCIALS, VALUATION, the DCF, EVIDENCE and EVENTS
+    read the same filer, and a company-facts document is tens of MB once parsed
+    -- what the panels need is kept, the document is not.
+
+    The arguments are normalised before the memo: ``lru_cache`` keys
+    ``filer(cik)`` and ``filer(cik, True)`` apart, so EVENTS, calling the short
+    form, parsed every filer a second time (about a minute a build)."""
+    return _filer(int(cik), bool(use_cache))
+
+
+# --- The parsed filer, kept between builds ---------------------------------------
+# Parsing ~500 company-facts documents (JSON decode, then the statements, the
+# trailing figures and the EPS history) took about a minute a build, and on most
+# nights none of them had changed. The parsed Filer is kept with what it was
+# built from, and reused only while all of it still holds:
+#   - every cached document it read (company facts, filing instances) is unchanged;
+#   - the filer's latest statement filing is the same, and not due a refetch;
+#   - no filing it left inside the processing margin has come due since;
+#   - the code that parses it is the same (a hash of the modules involved).
+# What the parse recorded about backfilled filings is kept and replayed with it.
+FILER_NAMESPACE = f"{NAMESPACE}/filer"
+# Per thread: a parse records only what it read itself.
+_local = threading.local()
+
+
+def _recorders() -> list[dict]:
+    if not hasattr(_local, "recording"):
+        _local.recording = []
+    return _local.recording
+
+
+def _record_read(path: Path) -> None:
+    for recorder in _recorders():
+        recorder["reads"].add(str(path))
+
+
+def _record_recheck(when: datetime) -> None:
+    for recorder in _recorders():
+        recorder["recheck"] = when if recorder["recheck"] is None else min(recorder["recheck"], when)
+
+
+@lru_cache(maxsize=1)
+def _code_version() -> str:
+    from ..compute import capex
+
+    digest = hashlib.sha256()
+    for path in (__file__, xbrl_instance.__file__, capex.__file__):
+        digest.update(Path(path).read_bytes())
+    return digest.hexdigest()[:16]
+
+
+def _file_stamp(path: str) -> tuple[int, int] | None:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def _filer_state(cik: int) -> dict:
+    checked = _checked.get(cik) or {}
+    latest = checked.get("latest")
+    return {"latest": latest.accession if latest else None, "error": "error" in checked}
+
+
+def _kept_filer(cik: int) -> dict | None:
+    path = cache.path_for(FILER_NAMESPACE, f"CIK{cik:010d}", ".pkl")
+    if not path.exists() or (_checked.get(cik) or {}).get("refetched"):
+        return None
+    try:
+        entry = pickle.loads(path.read_bytes())
+    except Exception:
+        return None
+    if entry.get("code") != _code_version() or entry.get("state") != _filer_state(cik):
+        return None
+    if entry.get("recheck") is not None and datetime.now(timezone.utc) >= entry["recheck"]:
+        return None
+    if any(_file_stamp(read) != stamp for read, stamp in entry.get("reads", {}).items()):
+        return None
+    return entry
+
+
+def _keep_filer(cik: int, result: Filer, recorder: dict, before: tuple[dict, dict]) -> None:
+    changed = lambda now, then: {k: v for k, v in now.items() if then.get(k) != v}  # noqa: E731
+    entry = {
+        "code": _code_version(), "state": _filer_state(cik), "recheck": recorder["recheck"],
+        "reads": {read: _file_stamp(read) for read in recorder["reads"]},
+        "backfilled": changed(_backfilled, before[0]), "unprocessed": changed(_unprocessed, before[1]),
+        "filer": result,
+    }
+    path = cache.path_for(FILER_NAMESPACE, f"CIK{cik:010d}", ".pkl")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".pkl.part")
+        temporary.write_bytes(pickle.dumps(entry, protocol=pickle.HIGHEST_PROTOCOL))
+        temporary.replace(path)
+    except OSError:
+        pass  # A filer not kept is parsed again next build, never wrong.
+
+
+@lru_cache(maxsize=None)
+def _filer(cik: int, use_cache: bool) -> Filer:
+    if use_cache and (entry := _kept_filer(cik)) is not None:
+        _backfilled.update(entry["backfilled"])
+        _unprocessed.update(entry["unprocessed"])
+        return entry["filer"]
+    recorder = {"reads": set(), "recheck": None}
+    before = (dict(_backfilled), dict(_unprocessed))
+    _recorders().append(recorder)
+    try:
+        result = _parse_filer(cik, use_cache)
+    finally:
+        _recorders().remove(recorder)
+    if use_cache:
+        _keep_filer(cik, result, recorder, before)
+    return result
+
+
+def _parse_filer(cik: int, use_cache: bool) -> Filer:
     facts, ciks = fetch_filer_facts(cik, use_cache=use_cache)
     # A period with neither revenue nor net income is not a set of statements:
     # an IFRS filer's few stray US-GAAP tags would otherwise pass as ten

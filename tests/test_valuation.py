@@ -385,3 +385,19 @@ def test_row_takes_yahoo_cap_only_without_a_share_count_and_flags_history_truthf
     filed = dict(trailing, shares=2e9, shares_as_of="2026-07-31", shares_basis="cover page shares outstanding")
     row = panel._row("X", {}, sec.Filer("X", (1,), ("us-gaap",), (), filed), 10.0, [], pd.DataFrame(), {}, fallback_cap=9e12)
     assert row["market_cap"] == 2e10 and row["pe_history"] is True    # the filings' count wins
+
+
+def test_a_split_lookup_gives_the_same_factor_as_filtering_the_series():
+    import numpy as np
+    days = pd.date_range("2016-01-04", "2026-10-07", freq="B")
+    splits = pd.Series(np.nan, index=days)
+    splits[pd.Timestamp("2020-08-31")] = 4.0
+    splits[pd.Timestamp("2024-06-10")] = 10.0
+    splits[pd.Timestamp("2025-01-02")] = 1 / 3
+    after = V.split_lookup(splits)
+    for date in ("2015-01-01", "2020-08-28", "2020-08-31", "2022-03-01", "2024-06-10", "2025-01-02", "2026-10-07"):
+        ratios = splits.dropna()
+        assert after(date) == float(ratios[ratios.index > pd.Timestamp(date)].prod()), date
+        assert V.split_factor_after(splits, date) == after(date)
+    assert V.split_lookup(None)("2020-01-01") == 1.0
+    assert V.split_lookup(pd.Series(np.nan, index=days))("2020-01-01") == 1.0

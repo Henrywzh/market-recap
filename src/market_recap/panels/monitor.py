@@ -917,15 +917,21 @@ _REASON_TEXT = {
 }
 
 
-def _since_first_seen(ctx: Any, ticker: str, peers: list[str], start: str, as_of: str) -> tuple[float | None, float | None]:
-    """Adjusted return since the first queue date, and the peers' median."""
+def _since_first_seen(ctx: Any, ticker: str, peers: list[str], start: str, as_of: str,
+                      closes_on: dict | None = None) -> tuple[float | None, float | None]:
+    """Adjusted return since the first queue date, and the peers' median.
+    ``closes_on`` keeps each date's closes for the next row."""
 
     closes = getattr(ctx, "closes", None)
     if start >= as_of or not isinstance(closes, pd.DataFrame):
         return None, None
+    closes_on = {} if closes_on is None else closes_on
+    for day in (start, as_of):
+        if day not in closes_on:
+            closes_on[day] = M.frame_values(closes, day)
 
     def ret(symbol: str) -> float | None:
-        a, b = M.series_value(closes, symbol, start), M.series_value(closes, symbol, as_of)
+        a, b = closes_on[start].get(symbol), closes_on[as_of].get(symbol)
         return (b / a - 1.0) * 100.0 if a and b is not None and a > 0 else None
 
     own = ret(ticker)
@@ -1131,6 +1137,7 @@ def build(ctx, *, valuation=None, catalysts=None, previous=None, trends=None, no
         row["return_pct"] = _number(excess + market_return, 2) if excess is not None and market_return is not None else None
 
     changes: list[dict] = []
+    closes_on: dict[str, dict[str, float]] = {}
     for row in rows:
         ticker = row["ticker"]
         old = old_rows.get(ticker)
@@ -1158,7 +1165,7 @@ def build(ctx, *, valuation=None, catalysts=None, previous=None, trends=None, no
         row["first_seen"] = first
         if first and current:
             row["since_first_seen_pct"], row["peers_since_first_seen_pct"] = _since_first_seen(
-                ctx, ticker, sector_members.get(row.get("sector") or "", []), first["date"], as_of)
+                ctx, ticker, sector_members.get(row.get("sector") or "", []), first["date"], as_of, closes_on)
         old_log = (old or {}).get("state_log") or []
         before = _last_state(old_log, as_of)
         row["state_log"] = _log_state(old_log, as_of, _loggable(row)) if current else [

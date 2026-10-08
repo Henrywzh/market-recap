@@ -693,7 +693,8 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         # bellwethers of its themes -- not every name in its industry.
         movers = {r["symbol"] for r in readthrough.get("into") or []} | {
             b for g in theme_groups if g.get("key") in theme_keys for b in bellwethers.get(g["key"], [])}
-        peer_reports = {p: _sessions_of(reactions.get(p)) for p in movers - {symbol} if reactions.get(p)}
+        # Sorted: a set's order changes from run to run, and so did the reasons'.
+        peer_reports = {p: _sessions_of(reactions.get(p)) for p in sorted(movers - {symbol}) if reactions.get(p)}
         releases_on = _releases_by_day(drivers, theme_keys)
         payload["moves"] = [{**m, "reasons": E.move_reasons(m["date"], payload["timeline"], peer_reports, releases_on),
                              "news": news.get((symbol, m["date"]), []), "news_checked": (symbol, m["date"]) in news}
