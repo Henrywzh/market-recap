@@ -14,8 +14,7 @@ Nasdaq-only names in the S&P 500's breadth.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime
 
 import pandas as pd
 
@@ -42,15 +41,14 @@ def completed_sessions(closes: pd.DataFrame, *, now: datetime | None = None) -> 
         return closes
     # Yahoo may return a fully populated *intraday* daily row at 09:33 ET.
     # Cross-sectional coverage alone cannot call that a completed session.
-    ny = (now or datetime.now(ZoneInfo("America/New_York"))).astimezone(ZoneInfo("America/New_York"))
-    last_allowed = ny.date() if ny.time() >= time(16, 15) else ny.date() - timedelta(days=1)
+    last_allowed = catalysts.latest_completed_session(now)
     closes = closes.loc[pd.to_datetime(closes.index).date <= last_allowed]
     if closes.empty:
         return closes
     coverage = closes.notna().sum(axis=1) / closes.shape[1]
     complete = coverage >= SESSION_COVERAGE_THRESHOLD
     if not complete.any():
-        return closes
+        return closes.iloc[:0]
     return closes.loc[: complete[complete].index[-1]]
 
 

@@ -200,7 +200,9 @@ the workflow's `workflow_dispatch` with an `edition` input:
 The header says when the page is the close edition. Both fire within the
 minute; GitHub's own schedule (23:47 UTC) started two to three hours late
 every night, so it stays only as the fallback and skips itself when an
-evening edition passed in the last ten hours. The Worker fires at both
+evening edition passed in the last ten hours **and the live manifest confirms
+that evening edition covers the latest completed NYSE session**. A successful
+dry run or an old published session does not suppress the fallback. The Worker fires at both
 daylight-saving candidates (20:35-23:35 UTC) and keeps the ones that are
 16:35 and 18:35 in New York.
 
@@ -220,8 +222,14 @@ anything this was tested on — and failed. `make lock` re-resolves the lock on
 purpose; upgrading is then a commit that was tested, not something a clean
 machine does on its own one night.
 
-Two checks sit around the deploy, because `--strict` validates a build
-against its own contract and cannot see the calendar:
+Three checks protect the published session:
+
+- **An edition must cover the latest completed NYSE session.** Strict
+  validation compares its `as_of` with the build timestamp in New York,
+  including holidays and early closes. Yesterday's internally consistent
+  build is not today's evening edition. Price caches are checked by their
+  observation date as well as their file timestamp, and missing latest
+  closes are retried without inventing them.
 
 - **Daily files expire at the session rollover, not after 24 hours.** Prices
   and issuer files count as fresh only if fetched after the latest weekday

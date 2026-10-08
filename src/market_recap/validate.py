@@ -13,10 +13,12 @@ comes from the build itself rather than from someone opening every tab.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import json
 import re
 
 from .config import ARTIFACT_DIR, PERIOD_TRADING_DAYS, SESSION_COVERAGE_THRESHOLD, load_config
+from .compute.catalysts import latest_completed_session
 
 # error: not publishable. warning: publishable, but --strict refuses it.
 # notice: a gap in an optional feed, shown on its own tab; never blocks.
@@ -87,6 +89,24 @@ def _check_as_of(manifest: dict, panels: dict[str, dict]) -> list[Finding]:
         if as_of != reference:
             out.append(Finding("error", "as_of", f"{name} is dated {as_of}, manifest says {reference}"))
     return out
+
+
+def _check_current_edition(manifest: dict) -> list[Finding]:
+    """A green scheduled edition must describe the latest completed session."""
+    if manifest.get("edition") not in {"close", "evening"}:
+        return []  # historical / explicitly partial builds are not editions
+    try:
+        started = datetime.fromisoformat(manifest["generated_at"].replace("Z", "+00:00"))
+        if started.tzinfo is None:
+            raise ValueError("missing timezone")
+        expected = latest_completed_session(started).isoformat()
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return [Finding("error", "edition_session", "edition has no valid timezone-aware generated_at")]
+    if manifest.get("as_of") != expected:
+        return [Finding("error", "edition_session",
+                        f"{manifest['edition']} edition is dated {manifest.get('as_of')}; "
+                        f"latest completed NYSE session is {expected}; not publishable")]
+    return []
 
 
 def _check_coverage(manifest: dict) -> list[Finding]:
@@ -379,6 +399,7 @@ def run() -> dict:
     findings = (
         _check_period_labels(config)
         + _check_as_of(manifest, panels)
+        + _check_current_edition(manifest)
         + _check_coverage(manifest)
         + _check_latest_session(panels.get("markets"))
         + _check_presets(config, panels.get("technicals"))

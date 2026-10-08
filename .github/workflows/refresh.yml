@@ -5,7 +5,7 @@
 # (workers/dispatch): "close" at 16:35 New York, half an hour after the bell,
 # and "evening" at 18:35, after the evening publishers. GitHub's own schedule
 # below starts two to three hours late, so it is only the fallback: it skips
-# itself when an evening edition has already passed.
+# itself when a current evening edition has passed and is actually published.
 name: refresh
 run-name: refresh · ${{ github.event_name == 'schedule' && 'scheduled' || inputs.edition || 'evening' }}
 
@@ -43,9 +43,22 @@ jobs:
   # dispatch did not happen or did not pass.
   guard:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: src
     outputs:
       run: ${{ steps.check.outputs.run }}
     steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.lock
+      # Calendar + honest HTTP client only; all transitive versions are
+      # constrained by the same lock as the build itself.
+      - name: Install guard dependencies
+        if: github.event_name == 'schedule'
+        run: python -m pip install -c requirements.lock pandas httpx
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
@@ -56,12 +69,7 @@ jobs:
           since=$(date -u -d '10 hours ago' +%Y-%m-%dT%H:%M:%SZ)
           done=$(gh run list -R "${{ github.repository }}" --workflow refresh.yml --status success \
             --created ">=$since" --json displayTitle -q '[.[] | select(.displayTitle == "refresh · evening")] | length')
-          if [ "${done:-0}" -gt 0 ]; then
-            echo "An evening edition passed since $since; the scheduled fallback has nothing to do."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
+          python -m market_recap.refresh_guard --successful-evenings "${done:-0}"
 
   refresh:
     needs: guard
