@@ -194,8 +194,8 @@ the workflow's `workflow_dispatch` with an `edition` input:
 
 | New York | Edition | What it has |
 |---|---|---|
-| 16:35 | `close` | The session's closes and everything built from them: returns, heat maps, sectors, technicals, risk, earnings cards. Daily files roll over at 16:20 for this run (`MARKET_RECAP_ROLLOVER`), so it fetches the session it describes. Not published if fewer than 90% of closes have printed. |
-| 18:35 | `evening` | Everything, with the 18:30 rollover: what the close edition fetched before the evening publishers posted (Treasury's par curve, fund NAVs and flows, Cboe's put/call, late earnings figures) is fetched again. |
+| 16:20 | `close` | The session's closes and everything built from them: returns, heat maps, sectors, technicals, risk, valuation, earnings cards. Up about half an hour after the bell. Yahoo's prices cached before 16:15 are stale after it, so the closes are fetched; every other daily file is still last evening's (the 18:30 rollover has not passed), so nothing else is downloaded again. Not published unless it covers the session that just closed. |
+| 18:35 | `evening` | Everything, after the 18:30 rollover: the evening publishers' files (Treasury's par curve, fund NAVs and flows, Cboe's put/call, late earnings figures) are fetched again. |
 
 The header says when the page is the close edition. Both fire within the
 minute; GitHub's own schedule (23:47 UTC) started two to three hours late
@@ -203,8 +203,8 @@ every night, so it stays only as the fallback and skips itself when an
 evening edition passed in the last ten hours **and the live manifest confirms
 that evening edition covers the latest completed NYSE session**. A successful
 dry run or an old published session does not suppress the fallback. The Worker fires at both
-daylight-saving candidates (20:35-23:35 UTC) and keeps the ones that are
-16:35 and 18:35 in New York.
+daylight-saving candidates (20:20/21:20 and 22:35/23:35 UTC) and keeps the
+ones that are 16:20 and 18:35 in New York.
 
 The Worker needs one secret: a fine-grained GitHub token for this repository
 only, with Actions read and write, set with

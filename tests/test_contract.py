@@ -451,23 +451,3 @@ def test_an_annual_filing_is_not_stale_after_three_weeks():
     assert freshness_status(five_weeks, "filings") == "stale"
     assert freshness_status(five_weeks, "annual_filings") != "stale"
 
-
-def test_the_close_edition_rolls_at_its_own_time_and_the_evening_build_refetches(tmp_path, monkeypatch):
-    """16:35: last night's files are stale under a 16:20 rollover, so the close
-    edition fetches the session it describes; 18:35: what the close edition
-    fetched at 16:40 is stale again under 18:30, so the evening publishers are read."""
-    import os
-
-    path = tmp_path / "closes.parquet"
-    path.write_bytes(b"x")
-    last_night = _ny("2026-09-21 19:45").timestamp()
-    os.utime(path, (last_night, last_night))
-    monkeypatch.setenv("MARKET_RECAP_ROLLOVER", "16:20")
-    assert cache.last_rollover(_ny("2026-09-22 16:35")) == _ny("2026-09-22 16:20")
-    assert not cache.is_fresh(path, "daily_file", now=_ny("2026-09-22 16:35"))
-    close_edition = _ny("2026-09-22 16:40").timestamp()
-    os.utime(path, (close_edition, close_edition))
-    monkeypatch.delenv("MARKET_RECAP_ROLLOVER")
-    assert not cache.is_fresh(path, "daily_file", now=_ny("2026-09-22 18:35"))
-    monkeypatch.setenv("MARKET_RECAP_ROLLOVER", "")              # unset in the workflow: the default
-    assert cache.last_rollover(_ny("2026-09-22 18:35")) == _ny("2026-09-22 18:30")

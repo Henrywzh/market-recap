@@ -2,8 +2,8 @@
 # does not depend on a laptop lid being open at the right minute.
 #
 # Two editions a weekday, dispatched on time by a Cloudflare cron Worker
-# (workers/dispatch): "close" at 16:35 New York, half an hour after the bell,
-# and "evening" at 18:35, after the evening publishers. GitHub's own schedule
+# (workers/dispatch): "close" at 16:20 New York, so the recap is up about half
+# an hour after the bell, and "evening" at 18:35, after the evening publishers. GitHub's own schedule
 # below starts two to three hours late, so it is only the fallback: it skips
 # itself when a current evening edition has passed and is actually published.
 name: refresh
@@ -24,7 +24,7 @@ on:
         type: boolean
         default: true
       edition:
-        description: "close: half an hour after the bell (rollover 16:20); evening: after the evening publishers"
+        description: "close: 16:20 New York, the session's prices; evening: 18:35, after the evening publishers"
         type: choice
         options: [evening, close]
         default: evening
@@ -150,9 +150,10 @@ jobs:
           # TICKER's headlines on large-move days and announced company
           # events; without it moves are explained from filings and data only.
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
-          # The close edition's daily files go stale at 16:20, not 18:30
-          # (cache.rollover_time); empty keeps the default.
-          MARKET_RECAP_ROLLOVER: ${{ inputs.edition == 'close' && '16:20' || '' }}
+          # The close edition needs no cache override: Yahoo's prices cached
+          # before 16:15 are stale after it (sources/yahoo._read), and every
+          # other daily file is last evening's until the 18:30 rollover, when
+          # the evening edition fetches them again.
           MARKET_RECAP_EDITION: ${{ inputs.edition || 'evening' }}
         # --strict: nobody reads an unattended run's output, so a warning is a
         # failure. A red run emails the repo owner; a stale page does not.

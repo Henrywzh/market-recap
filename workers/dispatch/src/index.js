@@ -1,7 +1,8 @@
-// Dispatches the refresh workflow's two editions a weekday: "close" at 16:35
-// New York and "evening" at 18:35. Nothing else: no routes, no fetch handler.
+// Dispatches the refresh workflow's two editions a weekday: "close" at 16:20
+// New York (Yahoo's closes have settled by 16:15; the recap is up about half an
+// hour after the bell) and "evening" at 18:35. No routes, no fetch handler.
 
-const EDITIONS = { '16:35': 'close', '18:35': 'evening' };
+const EDITIONS = { '16:20': 'close', '18:35': 'evening' };
 
 // New York wall-clock time of an instant, "HH:MM".
 export function newYorkClock(ms) {

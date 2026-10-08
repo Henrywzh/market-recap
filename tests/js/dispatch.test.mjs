@@ -5,15 +5,15 @@ import { editionAt, dispatch } from '../../workers/dispatch/src/index.js';
 
 const at = (iso) => Date.parse(iso);
 
-test('each cron firing stands for an edition only at 16:35 or 18:35 in New York', () => {
-  // Summer (EDT, UTC-4): 20:35 and 22:35 UTC.
-  assert.equal(editionAt(at('2026-10-08T20:35:00Z')), 'close');
-  assert.equal(editionAt(at('2026-10-08T21:35:00Z')), null);
+test('each cron firing stands for an edition only at 16:20 or 18:35 in New York', () => {
+  // Summer (EDT, UTC-4): 20:20 and 22:35 UTC.
+  assert.equal(editionAt(at('2026-10-08T20:20:00Z')), 'close');
+  assert.equal(editionAt(at('2026-10-08T21:20:00Z')), null);
   assert.equal(editionAt(at('2026-10-08T22:35:00Z')), 'evening');
   assert.equal(editionAt(at('2026-10-08T23:35:00Z')), null);
-  // Winter (EST, UTC-5): 21:35 and 23:35 UTC.
-  assert.equal(editionAt(at('2026-12-08T20:35:00Z')), null);
-  assert.equal(editionAt(at('2026-12-08T21:35:00Z')), 'close');
+  // Winter (EST, UTC-5): 21:20 and 23:35 UTC.
+  assert.equal(editionAt(at('2026-12-08T20:20:00Z')), null);
+  assert.equal(editionAt(at('2026-12-08T21:20:00Z')), 'close');
   assert.equal(editionAt(at('2026-12-08T23:35:00Z')), 'evening');
 });
 

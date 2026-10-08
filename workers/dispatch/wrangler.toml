@@ -7,11 +7,11 @@ compatibility_date = "2026-09-01"
 workers_dev = false
 
 # Cron is UTC and New York moves an hour twice a year, so the Worker fires on
-# both candidates and keeps the one that is 16:35 or 18:35 in New York:
-# EDT 20:35 / 22:35 UTC, EST 21:35 / 23:35 UTC. Monday to Friday in UTC is
+# both candidates and keeps the one that is 16:20 or 18:35 in New York:
+# EDT 20:20 / 22:35 UTC, EST 21:20 / 23:35 UTC. Monday to Friday in UTC is
 # Monday to Friday in New York at these hours.
 [triggers]
-crons = ["35 20-23 * * 1-5"]
+crons = ["20 20,21 * * 1-5", "35 22,23 * * 1-5"]
 
 [vars]
 REPO = "Henrywzh/market-recap"
