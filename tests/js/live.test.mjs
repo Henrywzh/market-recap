@@ -228,3 +228,26 @@ test('an index chart keeps a gap in the day as a gap', async () => {
   assert.deepEqual(points({ t: [1, 2, 3], c: [10, null, 11] }), [[1000, 10], [2000, null], [3000, 11]]);
   assert.deepEqual(points(null), []);
 });
+
+test('an index chart spans the whole session, Yahoo\'s own or 09:30-16:00 New York on the series\' day', async () => {
+  const { sessionWindow, newYorkOpen } = await import('../../web/js/live-indices.js');
+  const open = Date.parse('2026-10-08T13:30:00Z') / 1000;       // 09:30 EDT
+  const series = { t: [open, open + 300], c: [1, 2] };
+  assert.deepEqual(sessionWindow({ start: open, end: open + 23400 }, series), [open * 1000, (open + 23400) * 1000]);
+  // An early close comes from Yahoo's period, not from a calendar here.
+  assert.deepEqual(sessionWindow({ start: open, end: open + 12600 }, series)[1], (open + 12600) * 1000);
+  // After the close Yahoo may report tomorrow's period: the series' own day wins.
+  const tomorrow = { start: open + 86400, end: open + 86400 + 23400 };
+  assert.deepEqual(sessionWindow(tomorrow, series), [open * 1000, (open + 23400) * 1000]);
+  assert.equal(newYorkOpen(Date.parse('2026-12-08T18:00:00Z') / 1000), Date.parse('2026-12-08T14:30:00Z') / 1000);  // EST
+  assert.equal(sessionWindow(null, { t: [] }), null);
+});
+
+test('an index chart\'s value range always holds the previous close', async () => {
+  const { valueRange } = await import('../../web/js/live-indices.js');
+  const [low, high] = valueRange({ c: [7773, 7794, null] }, 7801.77);
+  assert.ok(high > 7801.77 && low < 7773);
+  const [l2, h2] = valueRange({ c: [100, 100] }, null);
+  assert.ok(l2 < 100 && h2 > 100);
+  assert.equal(valueRange({ c: [] }, null), null);
+});
