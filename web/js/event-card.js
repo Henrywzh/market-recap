@@ -7,6 +7,7 @@ import { el, card, num, pct, tag, table, dirClass, periodSwitch, DASH } from './
 import { render } from './charts.js';
 import { tickerHref } from './routes.js';
 import { availableRanges, sliceRange } from './range.js';
+import { rangeGeometry, rangeBarNode, splitBarNode, trailLevels, trailText, trailNode, reactionNode, figure, sectorHue, priceGeometry, priceNode } from './event-visuals.js';
 
 const TIMING = { bmo: 'BEFORE OPEN', amc: 'AFTER CLOSE', intraday: 'DURING SESSION' };
 // A timeline reads events, not a decade of price: the longer ranges stay on
@@ -59,36 +60,99 @@ function pricedTag(priced) {
   return tag('PRICED NEAR ITS AVG', 'dim');
 }
 
-function consensusStats(c) {
-  const k = c.consensus || {};
-  const eps = k.eps ?? k.eps_yahoo;
-  const range = k.eps_low !== undefined && k.eps_low !== null ? `range ${num(k.eps_low)}–${num(k.eps_high)}` : null;
-  const revisions = k.eps_change_30d_pct !== undefined && k.eps_change_30d_pct !== null
-    ? `30d ${pct(k.eps_change_30d_pct, 1)} (${k.up_30d ?? DASH}↑ ${k.down_30d ?? DASH}↓)` : null;
-  const growth = k.eps_growth_pct !== null && k.eps_growth_pct !== undefined ? `${pct(k.eps_growth_pct, 0)} y/y` : null;
-  return [
-    stat(`EPS CONSENSUS${k.fiscal_quarter ? ` · ${k.fiscal_quarter}` : ''}`, eps === null || eps === undefined ? DASH : num(eps),
-      [growth, range, revisions].filter(Boolean).join(' · ') || `${k.eps_estimates ?? DASH} estimates`),
-    stat('REVENUE CONSENSUS', billions(k.revenue),
-      k.revenue ? [k.revenue_growth_pct !== null && k.revenue_growth_pct !== undefined ? `${pct(k.revenue_growth_pct, 0)} y/y` : null,
-        k.revenue_low ? `range ${billions(k.revenue_low)}–${billions(k.revenue_high)}` : null].filter(Boolean).join(' · ')
-        : 'Yahoo row is not this quarter, or none'),
-  ];
+// A block of the strip that carries a drawing under its figure.
+function visual(label, value, note, drawing, { cls = '', tail = null } = {}) {
+  return el('div', { class: 'stat ec-vis' }, [
+    el('div', { class: 'stat-label', text: label }),
+    el('div', { class: 'ec-vis-value' }, [el('span', { class: `stat-value ${cls}`, text: value }), tail]),
+    drawing,
+    note ? el('div', { class: 'stat-note', text: note }) : null,
+  ]);
 }
 
-function pricedStats(c) {
+function yoy(value) {
+  return value === null || value === undefined ? null : el('span', { class: `ec-vis-yoy ${dirClass(value)}`, text: `${pct(value, 0)} y/y` });
+}
+
+// Consensus with its range drawn, the estimate's trail and the split of the
+// last 30 days' revisions. All of it is what Yahoo and Nasdaq gave at the
+// build; the card's freshness line says when.
+function consensusStats(c, payload, compact) {
+  const k = c.consensus || {};
+  const eps = k.eps ?? k.eps_yahoo;
+  const epsGeo = rangeGeometry(k.eps_low, k.eps_high, eps, k.eps_year_ago);
+  const epsBar = rangeBarNode(epsGeo, { low: k.eps_low, high: k.eps_high, point: eps, ref: k.eps_year_ago, fmt: (v) => figure(v) });
+  const revGeo = rangeGeometry(k.revenue_low, k.revenue_high, k.revenue, k.revenue_year_ago);
+  const revBar = rangeBarNode(revGeo, { low: k.revenue_low, high: k.revenue_high, point: k.revenue, ref: k.revenue_year_ago, fmt: billions });
+  const analysts = k.analysts ? `${k.analysts} analysts` : (k.eps_estimates ? `${k.eps_estimates} estimates` : null);
+  const thisQuarter = (payload.revisions || []).find((r) => r.period === '0q');
+  const levels = thisQuarter ? trailLevels(thisQuarter.eps, thisQuarter.changes) : [];
+  const out = [
+    visual(`EPS CONSENSUS${k.fiscal_quarter ? ` · ${k.fiscal_quarter}` : ''}`, eps === null || eps === undefined ? DASH : num(eps), analysts, epsBar, { tail: yoy(k.eps_growth_pct) }),
+    visual('REVENUE CONSENSUS', billions(k.revenue), k.revenue ? null : 'Yahoo row is not this quarter, or none', revBar, { tail: yoy(k.revenue_growth_pct) }),
+  ];
+  if (levels.length > 1 || k.up_30d !== undefined) {
+    out.push(visual('ESTIMATE TRAIL · THIS QUARTER', trailText(levels) || DASH, compact ? null : 'Yahoo reports 7/30/60/90-day windows, not the date of each change',
+      el('div', {}, [trailNode(levels), splitBarNode(k.up_30d, k.down_30d)]), { cls: 'ec-vis-small' }));
+  }
+  return out;
+}
+
+// What the report moved the stock in the past and what the options market
+// asks for this time.
+function pricedStats(c, payload, compact, prices) {
   const p = c.priced || {};
   const implied = p.implied;
+  const drawing = reactionNode(payload.history, implied);
+  const note = p.reports
+    ? `median ±${num(p.median_abs, 1)}% · up ${p.up} of ${p.reports} · outlined = beat EPS, then fell${p.beat_implied !== null && p.beat_implied !== undefined ? ` · ${p.beat_implied} beat today's implied` : ''}`
+    : 'no 8-K releases on file';
+  const impliedNote = implied
+    ? `dashed: implied ±${num(implied.straddle_pct, 1)}% (straddle to ${implied.expiry} · ${implied.snapshot_day} snapshot)`
+    : 'no straddle expiring within a week of the report in the snapshot';
+  const out = [
+    visual(`AVG |MOVE| · LAST ${p.reports || 0}`, p.mean_abs ? `±${num(p.mean_abs, 1)}%` : DASH, compact ? `up ${p.up} of ${p.reports}` : `${note} · ${impliedNote}`, drawing),
+  ];
+  const g = prices ? priceGeometry(prices.dates, prices.close, (payload.history || []).map((r) => ({ date: r.session || r.date, move: r.move_pct }))) : null;
+  if (g) {
+    out.push(visual('PRICE · 1Y', pct(g.ret, 0), [`${pct(g.fromHigh, 1)} from its high`, c.setup?.above_50d === null || c.setup?.above_50d === undefined ? null : (c.setup.above_50d ? 'above its 50-day' : 'below its 50-day'), `last ${num(g.last, 2)}`].filter(Boolean).join(' · '), priceNode(g), { cls: dirClass(g.ret) }));
+  }
+  return out;
+}
+
+// What the name is and what the report can move: its sector and industry
+// (coloured by sector) and its weight in the indices at the average move.
+function identityRow(payload, c) {
+  const hue = sectorHue(payload.sector);
+  const style = hue === null ? '' : `--sec:hsl(${hue} 62% 54%)`;
   const impact = c.impact || {};
   const indices = Object.entries(impact.indices || {}).sort((a, b) => b[1].points_pct - a[1].points_pct);
-  return [
-    stat('IMPLIED MOVE', implied ? `±${num(implied.straddle_pct, 1)}%` : DASH,
-      implied ? `straddle to ${implied.expiry} · ${implied.snapshot_day} snapshot` : 'no straddle expiring within a week of the report in the snapshot'),
-    stat(`AVG |MOVE| · LAST ${p.reports || 0}`, p.mean_abs ? `±${num(p.mean_abs, 1)}%` : DASH,
-      p.reports ? `median ±${num(p.median_abs, 1)}% · up ${p.up} of ${p.reports}${p.beat_implied !== null && p.beat_implied !== undefined ? ` · ${p.beat_implied} beat today's implied` : ''}` : 'no 8-K releases on file'),
-    stat('INDEX IMPACT', indices.length ? indices.map(([k, v]) => `${k} ±${num(v.points_pct, 2)}%`).join(' ') : DASH,
-      indices.length ? `weight × ${impact.basis} move ±${num(impact.move_pct, 1)}% · ${indices.map(([k, v]) => `${k} ${num(v.weight, 2)}%`).join(', ')}` : 'not an index member'),
-  ];
+  return el('div', { class: 'tag-row event-identity' }, [
+    payload.sector ? el('span', { class: 'tag ec-sector', style, text: payload.sector.toUpperCase(), title: 'GICS sector' }) : null,
+    payload.industry ? el('span', { class: 'tag ec-sector ec-industry', style, text: payload.industry, title: 'GICS sub-industry' }) : null,
+    indices.length
+      ? el('span', {
+        class: 'tag tag-dim',
+        text: `INDEX IMPACT ${indices.map(([k, v]) => `${k} ±${num(v.points_pct, 2)}%`).join(' · ')}`,
+        title: `weight × ${impact.basis} move ±${num(impact.move_pct, 1)}% · ${indices.map(([k, v]) => `${k} ${num(v.weight, 2)}%`).join(', ')}`,
+      })
+      : el('span', { class: 'tag tag-dim', text: 'NOT AN INDEX MEMBER' }),
+  ]);
+}
+
+// Where each part of the card came from and how old it is. The estimates are
+// the build's; an implied move older than a few sessions is marked.
+function freshness(payload, c, asOf) {
+  const k = c.consensus || {};
+  const implied = c.priced?.implied;
+  const days = implied ? Math.round((new Date(`${asOf}T00:00:00Z`) - new Date(`${implied.snapshot_day}T00:00:00Z`)) / 86400000) : null;
+  return el('div', { class: 'tag-row event-fresh' }, [
+    el('span', { class: 'dim', text: 'DATA' }),
+    tag(`ESTIMATES · ${k.source || 'Yahoo'} · build ${payload.as_of || asOf}`, 'info', 'consensus, range, revisions and revenue; refreshed with each nightly build'),
+    tag(implied ? `IMPLIED · ${implied.snapshot_day} snapshot${days > 3 ? ' · OLD' : ''}` : 'IMPLIED · none in snapshot', implied && days <= 3 ? 'info' : 'warn',
+      'the options snapshot is taken on its own schedule; a straddle must expire within a week of the report'),
+    tag(`REPORTS · 8-K history to ${((payload.history || [])[0] || {}).date || DASH}`, 'dim', 'moves and surprises come from the company\'s own releases'),
+  ]);
 }
 
 // Where the street sits against the range the company itself gave for this
@@ -108,14 +172,14 @@ function guideTag(c) {
   return above.length ? tag(`STREET ABOVE GUIDE · ${above.join(' + ')}`, 'warn', 'consensus above the top of the range the company gave last quarter') : null;
 }
 
-function setupStats(c) {
+function setupStats(c, hasPrice = false) {
   const s = c.setup || {};
   return [
     stat('GOING IN · 20D', pct(s.ret_20d, 1),
       [s.vs_sector_20d !== null && s.vs_sector_20d !== undefined ? `${s.vs_sector_20d > 0 ? '+' : ''}${num(s.vs_sector_20d, 1)} pp vs ${s.sector_etf}` : null,
         s.ret_5d !== null && s.ret_5d !== undefined ? `5d ${pct(s.ret_5d, 1)}` : null].filter(Boolean).join(' · '), dirClass(s.ret_20d)),
-    stat('FROM 1Y HIGH', pct(s.from_high_pct, 1), s.above_50d === null || s.above_50d === undefined ? null : (s.above_50d ? 'above its 50-day average' : 'below its 50-day average'),
-      dirClass(s.from_high_pct)),
+    ...(hasPrice ? [] : [stat('FROM 1Y HIGH', pct(s.from_high_pct, 1), s.above_50d === null || s.above_50d === undefined ? null : (s.above_50d ? 'above its 50-day average' : 'below its 50-day average'),
+      dirClass(s.from_high_pct))]),
   ];
 }
 
@@ -167,7 +231,7 @@ function intoTable(rt, limit, asOf) {
 }
 
 // The full card on TICKER; `compact` is the CATALYSTS lead strip's version.
-export function eventCard(payload, asOf, { compact = false } = {}) {
+export function eventCard(payload, asOf, { compact = false, prices = null } = {}) {
   const c = payload.card;
   if (!c) return null;
   const title = compact ? `${payload.symbol} · ${(payload.name || '').toUpperCase()}` : 'NEXT REPORT · EVENT CARD';
@@ -175,7 +239,9 @@ export function eventCard(payload, asOf, { compact = false } = {}) {
     el('span', { class: 'dim', text: `${c.date} · reacts ${c.reaction_session || DASH}` })]);
   const rt = payload.readthrough || {};
   const body = [
-    el('div', { class: 'stat-strip event-stats' }, [...consensusStats(c), ...pricedStats(c), ...(compact ? [] : setupStats(c))]),
+    identityRow(payload, c),
+    el('div', { class: 'stat-strip event-stats visual' }, [...consensusStats(c, payload, compact), ...pricedStats(c, payload, compact, prices), ...(compact ? [] : setupStats(c, Boolean(prices)))]),
+    freshness(payload, c, asOf),
   ];
   const bar = compact ? [] : guideStats(c);
   if (bar.length) body.push(el('div', { class: 'stat-strip event-stats' }, bar));
@@ -610,6 +676,16 @@ export function storyCard(payload) {
 
 function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// The name's price file (dates and closes); null when it has none.
+export async function loadPrices(symbol) {
+  try {
+    const response = await fetch(`artifacts/tickers/${encodeURIComponent(symbol)}.json`, { cache: 'no-cache' });
+    return response.ok ? await response.json() : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function loadEvents(symbol) {

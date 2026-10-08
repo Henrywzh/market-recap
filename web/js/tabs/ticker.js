@@ -337,7 +337,7 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   if (situation) root.append(situation);
   const outcome = eventPayload ? outcomeCard(eventPayload) : null;
   if (outcome) root.append(outcome);
-  const upcoming = eventPayload ? eventCard(eventPayload, asOf) : null;
+  const upcoming = eventPayload ? eventCard(eventPayload, asOf, { prices }) : null;
   if (upcoming) root.append(upcoming);
   const timeline = eventPayload ? timelineCard(eventPayload, prices, events?.macro, asOf) : null;
   if (timeline) root.append(timeline);

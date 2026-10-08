@@ -663,6 +663,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
             readthrough = {"unavailable": describe_error(exc)}
         payload = {
             "symbol": symbol, "as_of": ctx.as_of, "name": info.get("name"), "sector": info.get("sector"),
+            "industry": industry.get(symbol),
             "weights": {k: clean_float(v, 3) for k, v in (info.get("weights") or {}).items()},
             "watchlist": bool(info.get("watchlist")),
             "readthrough": readthrough,

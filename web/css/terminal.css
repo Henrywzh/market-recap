@@ -898,6 +898,61 @@ tr.picked td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 .chart.event-timeline { height: 280px; }
 .event-stats + .event-stats { margin-top: 6px; }
 .stat-value.warn { color: var(--accent); }
+
+/* Event card drawings: ranges, the estimate's trail, the reaction history. */
+.stat-strip.event-stats.visual { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.stat.ec-vis { display: flex; flex-direction: column; gap: 4px; }
+.ec-vis-value { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ec-vis-yoy { font-size: 12px; font-weight: 600; }
+.stat-value.ec-vis-small { font-size: 13px; font-weight: 500; line-height: 1.3; }
+.ec-rbar-wrap { margin-top: 2px; }
+.ec-rbar { position: relative; height: 12px; }
+.ec-rbar::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--border-strong); }
+.ec-rbar-box { position: absolute; top: 2px; bottom: 2px; background: color-mix(in srgb, var(--blue) 26%, transparent); border-left: 2px solid var(--blue); border-right: 2px solid var(--blue); }
+.ec-rbar-point { position: absolute; top: 1px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--accent); }
+.ec-rbar-point.outside { outline: 1px solid var(--down); outline-offset: 1px; }
+.ec-rbar-ref { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--text-dim); }
+.ec-rbar-labels { display: flex; justify-content: space-between; gap: 6px; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.ec-rbar-mid { color: var(--text-faint); }
+.ec-split-wrap { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+.ec-splitbar { display: flex; flex: 1; height: 8px; border-radius: 2px; overflow: hidden; background: var(--border); }
+.ec-splitbar-up { background: var(--up); }
+.ec-splitbar-down { background: var(--down); }
+.ec-vis-note { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.ec-trail-line { height: 30px; }
+.ec-trail-line svg { display: block; width: 100%; height: 30px; }
+.ec-trail-line.up { color: var(--up); }
+.ec-trail-line.down { color: var(--down); }
+.ec-trail-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); }
+.ec-mbars { position: relative; display: flex; gap: 4px; height: 70px; }
+.ec-mbars::before { content: ""; position: absolute; left: 0; right: 0; top: 28px; height: 1px; background: var(--border-strong); }
+.ec-mbar { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.ec-mbar-half { height: 28px; display: flex; }
+.ec-mbar-half.top { align-items: flex-end; }
+.ec-mbar-half.bottom { align-items: flex-start; }
+.ec-mbar-fill { width: 100%; min-height: 2px; }
+.ec-mbar-fill.up { background: var(--up); }
+.ec-mbar-fill.down { background: var(--down); }
+.ec-mbar-fill.fell { background: color-mix(in srgb, var(--down) 40%, transparent); outline: 1px solid var(--down); outline-offset: -1px; }
+.ec-mbar-val { height: 14px; line-height: 14px; margin-top: 0; font-size: 9px; text-align: center; }
+.ec-mbar-implied { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed var(--accent); pointer-events: none; }
+.ec-pips { display: flex; gap: 4px; margin-top: 3px; }
+.ec-pip { flex: 1; height: 4px; border-radius: 2px; }
+.ec-pip.up { background: var(--up); }
+.ec-pip.down { background: var(--down); }
+.event-identity { margin-bottom: 8px; }
+.tag.ec-sector { --sec: var(--text-dim); color: var(--sec); border-color: color-mix(in srgb, var(--sec) 60%, transparent); background: color-mix(in srgb, var(--sec) 18%, transparent); font-weight: 600; }
+.tag.ec-industry { background: transparent; font-weight: 400; }
+.ec-price { position: relative; height: 46px; color: var(--up); }
+.ec-price.down { color: var(--down); }
+.ec-price-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.ec-price-line { fill: none; stroke: currentColor; stroke-width: 1.4; }
+.ec-price-area { fill: color-mix(in srgb, currentColor 14%, transparent); stroke: none; }
+.ec-price-mark { position: absolute; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%; border: 1px solid var(--bg); }
+.ec-price-mark.up { background: var(--up); }
+.ec-price-mark.down { background: var(--down); }
+.ec-price-now { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: currentColor; }
+.event-fresh { margin-top: 6px; font-size: 11px; align-items: center; }
 .event-history-line { font-size: 12px; line-height: 1.5; margin: 2px 0 8px; }
 .section-sub { font-size: 10.5px; letter-spacing: 0.1em; color: var(--text-dim); margin: 12px 0 6px; }
 
