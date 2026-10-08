@@ -243,7 +243,10 @@ export async function boot(manifest, version) {
   document.getElementById('brand').textContent = brand.title || 'MARKET RECAP';
   document.getElementById('brand-sub').textContent = brand.subtitle || '';
   document.getElementById('asof').textContent = `AS OF ${manifest.as_of || '—'}`;
-  document.getElementById('updated').textContent = `Built ${manifest.generated_at} · session ${manifest.as_of}`;
+  // The close edition is out half an hour after the bell; the evening build
+  // adds what posts later (Treasury's curve, fund NAVs and flows, Cboe).
+  const edition = manifest.edition === 'close' ? ' · close edition, evening data to follow' : '';
+  document.getElementById('updated').textContent = `Built ${manifest.generated_at} · session ${manifest.as_of}${edition}`;
   startBuildAge(manifest.generated_at, manifest.build_age_hours);
   document.title = `${brand.title || 'Market Recap'} · ${manifest.as_of || ''}`;
   renderFooter(manifest);

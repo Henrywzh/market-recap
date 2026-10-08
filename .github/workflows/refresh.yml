@@ -1,6 +1,13 @@
 # Nightly refresh + deploy. Runs on GitHub's machines, so whether it happens
 # does not depend on a laptop lid being open at the right minute.
+#
+# Two editions a weekday, dispatched on time by a Cloudflare cron Worker
+# (workers/dispatch): "close" at 16:35 New York, half an hour after the bell,
+# and "evening" at 18:35, after the evening publishers. GitHub's own schedule
+# below starts two to three hours late, so it is only the fallback: it skips
+# itself when an evening edition has already passed.
 name: refresh
+run-name: refresh · ${{ github.event_name == 'schedule' && 'scheduled' || inputs.edition || 'evening' }}
 
 on:
   schedule:
@@ -16,6 +23,11 @@ on:
         description: "Publish to Cloudflare Pages after a passing build"
         type: boolean
         default: true
+      edition:
+        description: "close: half an hour after the bell (rollover 16:20); evening: after the evening publishers"
+        type: choice
+        options: [evening, close]
+        default: evening
 
 # Two overlapping runs would race on the deploy; a manual run queues instead.
 concurrency:
@@ -24,9 +36,36 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  # The late GitHub schedule repeats work only when the Worker's evening
+  # dispatch did not happen or did not pass.
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          since=$(date -u -d '10 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          done=$(gh run list -R "${{ github.repository }}" --workflow refresh.yml --status success \
+            --created ">=$since" --json displayTitle -q '[.[] | select(.displayTitle == "refresh · evening")] | length')
+          if [ "${done:-0}" -gt 0 ]; then
+            echo "An evening edition passed since $since; the scheduled fallback has nothing to do."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   refresh:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -103,6 +142,10 @@ jobs:
           # TICKER's headlines on large-move days and announced company
           # events; without it moves are explained from filings and data only.
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          # The close edition's daily files go stale at 16:20, not 18:30
+          # (cache.rollover_time); empty keeps the default.
+          MARKET_RECAP_ROLLOVER: ${{ inputs.edition == 'close' && '16:20' || '' }}
+          MARKET_RECAP_EDITION: ${{ inputs.edition || 'evening' }}
         # --strict: nobody reads an unattended run's output, so a warning is a
         # failure. A red run emails the repo owner; a stale page does not.
         run: make refresh REFRESH_FLAGS=--strict
@@ -142,6 +185,11 @@ jobs:
         id: gate
         run: |
           if [ "${{ steps.smoke.outcome }}" != "success" ]; then
+            echo "deployable=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.edition }}" = "close" ] && [ "$(python -c 'import json; print(json.load(open("artifacts/manifest.json"))["as_of"])')" != "$(TZ=America/New_York date +%F)" ]; then
+            # Not every close was printed yet: a close edition of yesterday's
+            # session would only relabel the page. The evening build follows.
+            echo "::notice::close edition found no complete session for today; not published"
             echo "deployable=false" >> "$GITHUB_OUTPUT"
           elif [ "${{ steps.refresh.outcome }}" = "success" ]; then
             echo "deployable=true" >> "$GITHUB_OUTPUT"

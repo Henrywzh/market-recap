@@ -192,6 +192,9 @@ def run(
         "as_of": ctx.as_of,
         "holdings_as_of": ctx.holdings_as_of,
         "generated_at": generated_at,
+        # "close" half an hour after the bell, "evening" once the evening
+        # publishers have posted; None for a build run by hand.
+        "edition": os.environ.get("MARKET_RECAP_EDITION") or None,
         "monitor_schema_version": 1,
         "build_seconds": round(time.monotonic() - started, 1),
         "timings": timings,

@@ -1,0 +1,20 @@
+# Starts the refresh workflow on time. GitHub's own schedule runs two to three
+# hours late; a Cloudflare cron trigger fires within the minute. Deployed by
+# hand (`make deploy-dispatch`), apart from the site.
+name = "market-recap-dispatch"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = false
+
+# Cron is UTC and New York moves an hour twice a year, so the Worker fires on
+# both candidates and keeps the one that is 16:35 or 18:35 in New York:
+# EDT 20:35 / 22:35 UTC, EST 21:35 / 23:35 UTC. Monday to Friday in UTC is
+# Monday to Friday in New York at these hours.
+[triggers]
+crons = ["35 20-23 * * 1-5"]
+
+[vars]
+REPO = "Henrywzh/market-recap"
+WORKFLOW = "refresh.yml"
+# GITHUB_TOKEN is a secret: a fine-grained token for this repository only,
+# with Actions read and write. `npx wrangler secret put GITHUB_TOKEN`.

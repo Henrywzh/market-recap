@@ -19,8 +19,9 @@ human is expected to remember.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 import gzip
+import os
 from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
@@ -52,8 +53,22 @@ def modified(path: Path) -> datetime | None:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
 
 
+def rollover_time() -> time:
+    """When a session's daily files go stale, New York time: SESSION_ROLLOVER,
+    or ``MARKET_RECAP_ROLLOVER`` (HH:MM) for this run. The close edition, built
+    half an hour after the bell, sets 16:20 so it fetches the session it
+    describes; the evening build keeps 18:30, so everything the close edition
+    fetched -- including whatever the evening publishers had not posted yet --
+    is fetched again."""
+    raw = os.environ.get("MARKET_RECAP_ROLLOVER", "").strip()
+    if not raw:
+        return SESSION_ROLLOVER
+    hour, minute = raw.split(":")
+    return time(int(hour), int(minute))
+
+
 def last_rollover(now: datetime | None = None) -> datetime:
-    """The most recent weekday SESSION_ROLLOVER in New York at or before ``now``.
+    """The most recent weekday rollover (``rollover_time``) in New York at or before ``now``.
 
     Holidays are not modelled: on one, the rollover still passes and the next
     build re-fetches a file that has not changed. That costs a request, never a
@@ -61,9 +76,10 @@ def last_rollover(now: datetime | None = None) -> datetime:
     """
     market = ZoneInfo(MARKET_TIMEZONE)
     now = (now or datetime.now(timezone.utc)).astimezone(market)
+    at = rollover_time()
     day = now.date()
     while True:
-        candidate = datetime.combine(day, SESSION_ROLLOVER, tzinfo=market)
+        candidate = datetime.combine(day, at, tzinfo=market)
         if candidate <= now and candidate.weekday() < 5:
             return candidate
         day -= timedelta(days=1)

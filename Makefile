@@ -5,7 +5,7 @@ SITE_URL = https://market-recap-b5p.pages.dev
 WRANGLER_DEPLOY = ./node_modules/.bin/wrangler pages deploy dist --project-name market-recap --branch main --commit-dirty=true
 export PYTHONPATH := src
 
-.PHONY: help install refresh refresh-fast validate site serve serve-live deploy deploy-only test smoke lock prune clean status run-now snapshot-options snapshot-expectations
+.PHONY: help install refresh refresh-fast validate site serve serve-live deploy deploy-only deploy-dispatch test smoke lock prune clean status run-now snapshot-options snapshot-expectations
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -43,6 +43,9 @@ serve-live: site ## Serve dist/ with the live-quote function, as Cloudflare runs
 deploy: refresh ## Refresh, then publish dist/ to Cloudflare Pages
 	$(PYTHON) scripts/guard_deploy.py $(SITE_URL)
 	$(WRANGLER_DEPLOY)
+
+deploy-dispatch: ## Publish the cron Worker that starts each edition on time (workers/dispatch)
+	cd workers/dispatch && ../../node_modules/.bin/wrangler deploy
 
 deploy-only: site ## Publish what is already built, without refetching
 	$(PYTHON) scripts/guard_deploy.py $(SITE_URL)
