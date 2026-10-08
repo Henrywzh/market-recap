@@ -173,8 +173,8 @@ python -m market_recap.cli refresh --panels markets --skip-sec
 ### Running it on a schedule
 
 The nightly job is a GitHub Actions workflow,
-[`.github/workflows/refresh.yml`](.github/workflows/refresh.yml): weekdays at
-23:47 UTC it tests, refreshes with `--strict`, and deploys only if that passed.
+[`.github/workflows/refresh.yml`](.github/workflows/refresh.yml): it tests,
+refreshes with `--strict`, and deploys only if that passed.
 It runs on GitHub's machines, so it does not depend on a laptop being awake —
 the launchd job this replaced missed its first night because the lid was shut.
 
@@ -188,20 +188,27 @@ Two feeds are not fetched from GitHub's machines. PCPartPicker refuses cloud IPs
 A failed scheduled run emails the repo owner. `workflow_dispatch` takes a
 `deploy` input, so a run can build and validate without publishing.
 
-Not the closing bell, because the publishers this reads post after it: State
-Street's holdings and NAV files land in the evening, and Treasury sometimes
-does not post the par curve until early evening ET. A job firing at 16:00 ET
-builds a page entirely from the previous session and reports itself perfectly
-healthy. GitHub cron is UTC, and 23:47 UTC is after 18:30 New York in both
-halves of the year:
+Two editions a weekday, started on time by a Cloudflare cron Worker
+([`workers/dispatch`](workers/dispatch), `make deploy-dispatch`), which calls
+the workflow's `workflow_dispatch` with an `edition` input:
 
-| UTC | New York |
-|---|---|
-| 23:47 | 19:47 EDT (Mar – Nov) |
-| 23:47 | 18:47 EST (Nov – Mar) |
+| New York | Edition | What it has |
+|---|---|---|
+| 16:35 | `close` | The session's closes and everything built from them: returns, heat maps, sectors, technicals, risk, earnings cards. Daily files roll over at 16:20 for this run (`MARKET_RECAP_ROLLOVER`), so it fetches the session it describes. Not published if fewer than 90% of closes have printed. |
+| 18:35 | `evening` | Everything, with the 18:30 rollover: what the close edition fetched before the evening publishers posted (Treasury's par curve, fund NAVs and flows, Cboe's put/call, late earnings figures) is fetched again. |
 
-GitHub can start a scheduled run late under load; minute 37 avoids the
-on-the-hour and half-hour slots that are delayed most.
+The header says when the page is the close edition. Both fire within the
+minute; GitHub's own schedule (23:47 UTC) started two to three hours late
+every night, so it stays only as the fallback and skips itself when an
+evening edition passed in the last ten hours. The Worker fires at both
+daylight-saving candidates (20:35-23:35 UTC) and keeps the ones that are
+16:35 and 18:35 in New York.
+
+The Worker needs one secret: a fine-grained GitHub token for this repository
+only, with Actions read and write, set with
+`cd workers/dispatch && ../../node_modules/.bin/wrangler secret put GITHUB_TOKEN`.
+Without it the Worker logs that nothing was dispatched and the late GitHub
+schedule is all there is.
 
 The run uses `--strict`, so a warning fails it. Nobody reads the output of an
 unattended job, and a job that exits 0 on a degraded build is how a stale page
