@@ -1,16 +1,11 @@
 # Research: why do some companies have no tangible book, or an implausible one?
 # scripts/probe_book_tags.py prints their SEC goodwill / intangible / preferred /
 # equity tags tag by tag, beside what the build's snapshot took from them.
-# Touches no build, cache or deploy. Runs on a push to this branch until the file
-# is on the default branch (GitHub dispatches only workflows already there).
-# Second run: after the carry-forward / preferred-tag / combined-line fixes, the same
-# companies, to check them against real filings.
+# Touches no build, cache or deploy. Manual only. Last run: after the carry-forward /
+# preferred-tag / combined-line fixes, the same companies, against real filings.
 name: probe-book
 
 on:
-  push:
-    branches: [claude/dazzling-bardeen-ntnted]
-    paths: [.github/workflows/probe-book.yml]
   workflow_dispatch:
     inputs:
       tickers:

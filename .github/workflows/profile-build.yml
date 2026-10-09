@@ -4,8 +4,8 @@
 # panel timed and profiled (MARKET_RECAP_PROFILE_DIR), and publishes NOTHING:
 # no deploy, no cache save.
 #
-# Second run, 2026-10-04: after the profiled hotspots were fixed (compare panel_seconds with the first).
-# Third run: with the tangible-book fixes and MOTIE read three at a time.
+# Manual only. Run it again after a change meant to make the build faster and compare
+# panel_seconds with the previous run's manifest.
 #
 # Read panel_seconds in manifest.json, profile/<panel>.txt for the hottest
 # functions, refresh.log for what validation said, and valuation.json for the
@@ -13,11 +13,6 @@
 name: profile-build
 
 on:
-  # TEMPORARY, as probe-factset: GitHub dispatches only workflows already on the
-  # default branch, so until this file is merged a push to this branch runs it.
-  push:
-    branches: [claude/dazzling-bardeen-ntnted]
-    paths: [.github/workflows/profile-build.yml]
   workflow_dispatch:
 
 concurrency:

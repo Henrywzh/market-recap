@@ -10,12 +10,6 @@
 name: probe-factset
 
 on:
-  # TEMPORARY: GitHub dispatches only workflows already on the default branch,
-  # so until this file is merged a push to this branch runs it. Remove with the
-  # first run's results.
-  push:
-    branches: [claude/dazzling-bardeen-ntnted]
-    paths: [.github/workflows/probe-factset.yml]
   workflow_dispatch:
     inputs:
       years:
