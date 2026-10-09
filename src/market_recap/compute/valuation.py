@@ -674,6 +674,124 @@ def forward_pe(price: float | None, ntm: dict | None) -> float | None:
     return price / ntm["eps"]
 
 
+# --- Yahoo's fiscal-year forward P/E history --------------------------------------
+# What Yahoo itself published at each month end: price over the consensus EPS of
+# a *fiscal year*, as of that day (sources.forward_pe_history). It is not the
+# next-twelve-months multiple above, and the two are never drawn as one line.
+# Yahoo moves the EPS on to the next fiscal year this many months before the
+# year ends -- seen as a step in the EPS the multiple implies (close / P/E) at
+# that month for Goldman and JPMorgan (December years), Microsoft (June), Oracle
+# (May), Costco (August) and Apple (September); not published by Yahoo, so a
+# rule read off the data and checked against it by the tests.
+FY_ROLL_MONTHS = 3
+# Above this a forward multiple is reported as extreme. Some are real (a company
+# priced for years of growth) and some are a near-zero EPS (Boeing's 3,333x, Warner
+# Bros. Discovery's 5,000x); the multiple alone cannot tell them apart, so none is
+# removed -- as with the P/E history, the table keeps the true range and the chart's
+# axis stops short of a spike.
+EXTREME_FORWARD_PE = 100.0
+
+
+def _month_index(date: str) -> int:
+    stamp = pd.Timestamp(date)
+    return stamp.year * 12 + stamp.month - 1
+
+
+def fiscal_year_end_month(annual: Sequence[dict]) -> int | None:
+    """The month a company's fiscal year ends: the month of its annual points.
+
+    The annual series is dated at each fiscal year end, so the most common
+    month is the answer; a 52-week year that wanders across a month boundary
+    still has one most common month. None without annual points.
+    """
+    months = [pd.Timestamp(p["date"]).month for p in annual]
+    if not months:
+        return None
+    counts = {m: months.count(m) for m in set(months)}
+    return max(counts, key=lambda m: (counts[m], m))
+
+
+def forward_horizon_months(date: str, year_end_month: int) -> int:
+    """Months from ``date`` to the end of the fiscal year Yahoo's EPS is for.
+
+    Until FY_ROLL_MONTHS before the year ends it is the current year, so the
+    horizon shrinks from 11 months to 4; from then on it is the next year, 15
+    months at the roll and 12 at the year end itself. Always 4 to 15, which is
+    why successive months are not on one footing.
+    """
+    left = (year_end_month - pd.Timestamp(date).month) % 12
+    return left + 12 if left <= FY_ROLL_MONTHS else left
+
+
+def is_roll_month(date: str, year_end_month: int) -> bool:
+    """True at the month the EPS behind the multiple moves to the next fiscal year."""
+    return (year_end_month - pd.Timestamp(date).month) % 12 == FY_ROLL_MONTHS
+
+
+def merge_points(*series: Sequence[dict]) -> list[dict]:
+    """One list of points by date, the first series winning where two overlap.
+
+    Where the monthly and quarterly series share a date they carry the same
+    value (all 2,412 shared points across the S&P 500 universe did); the
+    quarterly series adds the fiscal quarter ends the monthly one lacks."""
+    by_date: dict[str, dict] = {}
+    for name, points in zip(("monthly", "quarterly"), series):
+        for point in points:
+            by_date.setdefault(point["date"], {"date": point["date"], "pe": point["pe"], "series": name})
+    return [by_date[d] for d in sorted(by_date)]
+
+
+def missing_months(dates: Sequence[str]) -> list[str]:
+    """Calendar months between the first and last date that no point covers."""
+    if len(dates) < 2:
+        return []
+    have = {_month_index(d) for d in dates}
+    first, last = min(have), max(have)
+    return [f"{i // 12:04d}-{i % 12 + 1:02d}" for i in range(first, last + 1) if i not in have]
+
+
+def fiscal_forward(found: dict | None) -> dict | None:
+    """One company's Yahoo history, ready to draw; None when it has no points.
+
+    ``points`` are the monthly and quarterly points merged, each with the
+    ``horizon`` of its EPS in months and ``rolled`` at the month the EPS moved
+    to the next fiscal year. ``year_ago`` compares the latest point with the
+    same month a year earlier -- the one comparison that holds the horizon
+    fixed -- and ``annual`` is the fiscal year ends, each exactly twelve months
+    ahead, so comparable across companies and years. Values are as Yahoo
+    published them.
+    """
+    if not found:
+        return None
+    annual = found.get("annual") or []
+    year_end = fiscal_year_end_month(annual)
+    merged = merge_points(found.get("monthly") or [], found.get("quarterly") or [])
+    if not merged and not annual:
+        return None
+
+    points = [{"date": p["date"], "series": p["series"], "pe": p["pe"],
+               "horizon": None if year_end is None else forward_horizon_months(p["date"], year_end),
+               "rolled": year_end is not None and is_roll_month(p["date"], year_end)} for p in merged]
+    latest = points[-1] if points else None
+    year_ago = None
+    if latest:
+        earlier = next((p for p in points if _month_index(p["date"]) == _month_index(latest["date"]) - 12), None)
+        if earlier:
+            change = None
+            if latest["pe"] is not None and earlier["pe"] is not None:
+                change = (latest["pe"] / earlier["pe"] - 1) * 100
+            year_ago = {"date": earlier["date"], "pe": earlier["pe"], "change_pct": change}
+    return {
+        "year_end_month": year_end,
+        "points": points,
+        "annual": [{"date": p["date"], "pe": p["pe"]} for p in annual],
+        "latest": latest,
+        "year_ago": year_ago,
+        "missing_months": missing_months([p["date"] for p in points]),
+        "unread": found.get("unread") or [],
+    }
+
+
 # --- Sub-sector groups ------------------------------------------------------------
 def assign_subgroups(rows: list[dict], specs: list[dict], min_members: int) -> dict:
     """Split sectors into the groups the config names, by GICS sub-industry.

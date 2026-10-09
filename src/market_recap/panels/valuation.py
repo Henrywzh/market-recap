@@ -21,7 +21,7 @@ import pandas as pd
 
 from ..compute import valuation as V
 from ..config import VALUATION_ARTIFACT_DIR
-from ..sources import estimates, sec, snapshot_store
+from ..sources import estimates, forward_pe_history, sec, snapshot_store
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, prune_stale, write_json
 from .financials import cik_for, universe
 
@@ -85,7 +85,7 @@ def _forward_series(symbol: str, prices: pd.Series | None, recorded: dict[str, d
 
 
 def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits: pd.Series | None,
-             sector: str | None, forward: dict | None = None) -> dict | None:
+             sector: str | None, forward: dict | None = None, fiscal: dict | None = None) -> dict | None:
     """P/E against its own ten years, on the operating basis and as reported;
     writes the ticker's chart artifact. Returns {basis, <basis>: stats, ...}."""
     if prices is None or not data.eps_history:
@@ -123,6 +123,8 @@ def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits: pd.
         **payload(lead),
         "alternate": payload(V.REPORTED if lead != V.REPORTED else basis),
         "forward": forward,
+        # Yahoo's own fiscal-year forward P/E, point in time; a different measure from `forward` (NTM).
+        "fiscal_forward": fiscal,
         "ptbv": [clean_float(v, 2) for v in ptbv.reindex(dates).to_numpy()] if ptbv_stats else None,
         "ptbv_stats": _stats_json(ptbv_stats) if ptbv_stats else None,
         # Each quarter's TTM EPS both ways, and what the operating figure took out.
@@ -170,7 +172,7 @@ def _book_fields(snapshot: dict) -> dict:
 
 def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices: list[str], splits,
          history: dict | None, ntm: dict | None = None, fallback_cap: float | None = None,
-         path: dict | None = None) -> dict:
+         path: dict | None = None, fiscal: dict | None = None) -> dict:
     snapshot = data.trailing
     factor = _split_factor(splits, symbol, snapshot["shares_as_of"])
     shares = snapshot["shares"] * factor if snapshot["shares"] else None
@@ -212,6 +214,7 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         **_book_fields(snapshot),
         "pe_forward": clean_float(V.forward_pe(price, ntm), 2),
         "eps_ntm": clean_float(ntm["eps"], 4) if ntm else None,
+        **_fiscal_fields(fiscal),
         # Per-share consensus at the other stages of the valuation path (VALUATION -> aggregates).
         "eps_fy_prev": clean_float((path or {}).get("fy_prev"), 4),
         "eps_fy0": clean_float((path or {}).get("fy0"), 4),
@@ -227,6 +230,51 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         "ptbv_percentile": clean_float((history.get("ptbv") or {}).get("percentile"), 1),
         # The history's latest point checks the table's P / TBV (market cap / tangible book).
         "ptbv_history_current": clean_float((history.get("ptbv") or {}).get("current"), 2),
+    }
+
+
+def _fiscal_fields(fiscal: dict | None) -> dict:
+    """Yahoo's latest fiscal-year forward P/E on the row, beside (never in place of) the NTM one.
+
+    The year-over-year change is against the same month a year earlier, the one
+    comparison that keeps the forecast horizon the same."""
+    latest = (fiscal or {}).get("latest") or {}
+    year_ago = (fiscal or {}).get("year_ago") or {}
+    return {
+        "pe_forward_fy": clean_float(latest.get("pe"), 2),
+        "pe_forward_fy_date": latest.get("date"),
+        "pe_forward_fy_horizon": latest.get("horizon"),
+        "pe_forward_fy_yoy": clean_float(year_ago.get("change_pct"), 1),
+    }
+
+
+# A company has "a full year" of monthly points from this many; Yahoo's usual is
+# 14 or 15. A universe where few do means the answers were truncated.
+FULL_MONTHLY_POINTS = 12
+
+
+def _fiscal_report(universe_size: int, fiscal: dict[str, dict], failed: dict[str, str]) -> dict:
+    """What the Yahoo history covers and what it leaves out, named."""
+    monthly = {s: sum(1 for p in f["points"] if p["series"] == "monthly") for s, f in fiscal.items()}
+    gaps: dict[str, int] = {}
+    for f in fiscal.values():
+        for month in f["missing_months"]:
+            gaps[month] = gaps.get(month, 0) + 1
+    return {
+        "universe": universe_size,
+        "companies": len(fiscal),
+        "with_annual": sum(1 for f in fiscal.values() if f["annual"]),
+        "full_monthly": sum(1 for n in monthly.values() if n >= FULL_MONTHLY_POINTS),
+        "full_monthly_points": FULL_MONTHLY_POINTS,
+        # Expected: Yahoo has no history for a new listing. Anything else is a fetch problem.
+        "none": sorted(s for s, why in failed.items() if why == forward_pe_history.NO_HISTORY),
+        "failed": {s: why for s, why in sorted(failed.items()) if why != forward_pe_history.NO_HISTORY},
+        "unread": {s: f["unread"] for s, f in sorted(fiscal.items()) if f["unread"]},
+        # Kept as published, named so a 3,333x is not read as a valuation.
+        "extreme": sorted(s for s, f in fiscal.items() if any(p["pe"] > V.EXTREME_FORWARD_PE for p in f["points"] + f["annual"])),
+        "missing_months": dict(sorted(gaps.items())),
+        "roll_months": V.FY_ROLL_MONTHS,
+        "extreme_above": V.EXTREME_FORWARD_PE,
     }
 
 
@@ -404,6 +452,13 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         trends, _ = estimates.fetch_trends(sorted(symbols))
     except Exception:
         trends = {}
+    # Yahoo's own fiscal-year forward P/E history, for the ticker artifacts and the rows.
+    try:
+        fiscal_found, fiscal_failed = forward_pe_history.fetch_series(sorted(symbols), use_cache=use_cache)
+    except Exception as exc:  # noqa: BLE001 - optional: the page then has the recorded NTM history only
+        ctx.log.fail("valuation:forward_pe_history", exc)
+        fiscal_found, fiscal_failed = {}, {symbol: str(exc)[:ERROR_DETAIL_CHARS] for symbol in symbols}
+    fiscal_by_symbol: dict[str, dict] = {}
     today = pd.Timestamp(ctx.as_of)
     recorded = snapshot_store.consensus_history((today - pd.Timedelta(days=V.HISTORY_SESSIONS * 7 // 5)).date(), today.date())
     rows, skipped = [], {}
@@ -432,10 +487,13 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         sector = meta.get(symbol, {}).get("sector")
         ntm = V.ntm_eps(trends.get(symbol), today)
         forward = _forward_series(symbol, ctx.prices.get(symbol), recorded, today, ntm)
-        history = _history(symbol, data, ctx.prices.get(symbol), symbol_splits, sector, forward)
+        fiscal = V.fiscal_forward(fiscal_found.get(symbol))
+        if fiscal:
+            fiscal_by_symbol[symbol] = fiscal
+        history = _history(symbol, data, ctx.prices.get(symbol), symbol_splits, sector, forward, fiscal)
         fallback_cap = estimates.market_cap(symbol) if not data.trailing["shares"] and price is not None else None
         row = _row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history, ntm, fallback_cap,
-                   V.fiscal_path(trends.get(symbol), ntm))
+                   V.fiscal_path(trends.get(symbol), ntm), fiscal)
         rows.append(row)
         prices = ctx.prices.get(symbol)
         if (prices is not None and data.eps_history and row["market_cap"] and price and row["cik"] not in companies
@@ -478,6 +536,17 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         status="ok" if not skipped else "partial",
         error=None if not skipped else f"{len(skipped)} of {len(symbols)} not extracted",
     ))
+    fiscal_report = _fiscal_report(len(symbols), fiscal_by_symbol, fiscal_failed)
+    problems = len(fiscal_report["failed"]) + len(fiscal_report["unread"])
+    ctx.log.add(SourceRecord(
+        "yahoo_forward_pe_history", "Yahoo Finance fundamentals-timeseries (forward P/E at each month end)",
+        "https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/",
+        observed_date=max((f["latest"]["date"] for f in fiscal_by_symbol.values() if f["latest"]), default=None),
+        rows=len(fiscal_by_symbol),
+        policy="reference_data",
+        status="ok" if not problems else "partial",
+        error=None if not problems else f"{problems} companies not read in full",
+    ))
     return {
         "as_of": ctx.as_of,
         "indices": list(ctx.config["financials"]["indices"]),
@@ -499,6 +568,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         "ptbv_history": {"companies": sum(1 for r in rows if r.get("ptbv_percentile") is not None),
                          "agreement_tolerance": PE_AGREEMENT_TOLERANCE, "disagree": ptbv_disagree},
         "weight_check": check,
+        "fiscal_forward": fiscal_report,
         "aggregates": _aggregates(ctx, rows, caps, earnings, forward_earnings, book_frames),
         "financials_sector": V.FINANCIALS_SECTOR,
         "note": (

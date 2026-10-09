@@ -6,6 +6,9 @@
 
 import { el, card, table, num, sectionTitle, notice, metaRow, periodSwitch, DASH } from '../fmt.js';
 import { render, SERIES_COLORS } from '../charts.js';
+import * as FF from '../fiscal-forward.js';
+
+const { quantile } = FF;
 
 const BILLION = 1e9;
 const HISTORY_BASE = 'artifacts/valuation';
@@ -30,14 +33,6 @@ function format(value, unit) {
   if (unit === 'pp') return num(value, 1);
   if (unit === 'score') return num(value, 0);
   return num(value, 2);
-}
-
-function quantile(sorted, q) {
-  if (!sorted.length) return null;
-  const position = (sorted.length - 1) * q;
-  const low = Math.floor(position);
-  const high = Math.ceil(position);
-  return sorted[low] + (sorted[high] - sorted[low]) * (position - low);
 }
 
 const median = (values) => quantile([...values].sort((a, b) => a - b), 0.5);
@@ -444,6 +439,37 @@ function epsChart(node, history) {
   }));
 }
 
+// Yahoo's own forward P/E at each month end: the line is what the market was told that
+// day, the large markers are the fiscal year ends (each exactly twelve months ahead), and a
+// dashed vertical marks the month Yahoo's EPS moved on to the next fiscal year.
+function fiscalForwardChart(node, fiscal) {
+  const data = FF.chartData(fiscal);
+  const cap = FF.axisCap([...data.line, ...data.annual]);
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, top: 22, bottom: 28, right: 16 },
+    legend: { top: 0, textStyle: { color: p.dim, fontSize: 9 }, itemWidth: 10, itemHeight: 2 },
+    tooltip: { ...option.tooltip, trigger: 'axis', formatter: (items) => FF.tooltipText(items[0].value[0], data) },
+    xAxis: { ...option.xAxis, type: 'time', data: undefined, axisLabel: { ...option.xAxis?.axisLabel, formatter: '{yyyy}-{MM}' } },
+    yAxis: { ...option.yAxis, max: cap ?? undefined, axisLabel: { color: p.dim, fontSize: 10, formatter: (v) => `${v}x` } },
+    series: [
+      {
+        name: 'month and fiscal-quarter ends', type: 'line', data: data.linePairs, showSymbol: true, symbolSize: 4, connectNulls: false,
+        itemStyle: { color: p.text }, lineStyle: { width: 1.2, color: p.text },
+        markLine: {
+          silent: true, symbol: 'none',
+          label: { color: p.dim, fontSize: 9, position: 'insideEndTop', formatter: 'next FY' },
+          data: data.rolled.map((d) => ({ xAxis: d, lineStyle: { color: p.faint, type: 'dashed' } })),
+        },
+      },
+      {
+        name: 'fiscal year end (12 months ahead)', type: 'line', data: data.annualPairs, showSymbol: true, symbolSize: 9,
+        connectNulls: false, lineStyle: { width: 0 }, itemStyle: { color: p.accent },
+      },
+    ],
+  }));
+}
+
 function historyTable(history, view) {
   const s = view.stats;
   const latest = history.eps?.[history.eps.length - 1];
@@ -459,8 +485,10 @@ function historyTable(history, view) {
       + ` · NTM EPS $${num(fwd.eps_ntm[fwd.eps_ntm.length - 1], 2)}`
       + (fwd.dates.length > 1 ? ` · recorded since ${fwd.dates[0]}` : ' · history recorded from today'),
   ]] : [];
+  const fiscalRows = history.fiscal_forward ? FF.tableRows(history.fiscal_forward) : [];
   const rows = [
     ...forwardRows,
+    ...fiscalRows,
     ['Earnings basis', (BASIS_NAMES[view.basis] || 'REPORTED').toLowerCase()],
     ...removed,
     ['Current P/E', s.current === null ? 'n/m (loss)' : `${num(s.current, 1)}x`],
@@ -470,7 +498,7 @@ function historyTable(history, view) {
     ['10th–90th · min–max', `${num(s.p10, 1)}–${num(s.p90, 1)}x · ${num(s.min, 1)}–${num(s.max, 1)}x`],
     ['Sessions with positive earnings', `${s.sessions} since ${s.first}`],
   ];
-  return table(['', ''], rows.map(([a, b]) => el('tr', {}, [el('td', { class: 'dim', text: a }), el('td', { text: b })])));
+  return table(['', ''], rows.map(([a, b, wrap]) => el('tr', {}, [el('td', { class: 'dim', text: a }), el('td', { class: wrap ? 'wrap-cell' : '', text: b })])));
 }
 
 function sectorTable(rows, metrics) {
@@ -541,6 +569,9 @@ export async function renderPeHistory(host, symbol, data) {
   let active = views[0];
   const historyNode = el('div', { class: 'chart tall' });
   const epsNode = el('div', { class: 'chart short' });
+  // undefined: an artifact from before this series existed. null: Yahoo has none for this company.
+  const fiscal = history.fiscal_forward;
+  const fiscalNode = fiscal ? el('div', { class: 'chart short' }) : null;
   const tableHost = el('div', {});
   const draw = () => {
     const s = active.stats;
@@ -559,7 +590,14 @@ export async function renderPeHistory(host, symbol, data) {
   host.replaceChildren(
     el('div', { class: 'grid two' }, [
       el('div', {}, [basisSwitch ? el('div', { class: 'tag-row' }, [el('span', { class: 'dim', text: 'EARNINGS' }), basisSwitch]) : null, historyNode]),
-      el('div', {}, [tableHost, el('div', { class: 'card-title', text: 'TTM EPS, TODAY\'S SHARE BASIS, BY FILING DATE' }), epsNode]),
+      el('div', {}, [
+        tableHost,
+        el('div', { class: 'card-title', text: 'TTM EPS, TODAY\'S SHARE BASIS, BY FILING DATE' }), epsNode,
+        ...(fiscal === undefined ? [] : [
+          el('div', { class: 'card-title', text: 'FORWARD P/E · YAHOO\'S OWN HISTORY, FISCAL-YEAR EPS' }),
+          fiscal ? fiscalNode : el('div', { class: 'gap', text: 'Yahoo has no forward P/E history for this company.' }),
+        ]),
+      ]),
     ]),
     el('details', { class: 'method-fold' }, [el('summary', { text: 'ⓘ METHOD & DATA' }), el('div', { class: 'method-copy', text:
       `Each session's P/E is the split-adjusted close (not dividend-adjusted) over the TTM EPS `
@@ -576,10 +614,16 @@ export async function renderPeHistory(host, symbol, data) {
       + `${Math.round(data.pe_history.agreement_tolerance * 100)}% for ${data.pe_history.disagree.length} companies`
       + (data.pe_history.disagree.length ? ` (${data.pe_history.disagree.join(', ')}) — usually a merger or spin-off `
         + 'moving the share count, preferred dividends, or a large minority interest' : '')
-      + `. The axis stops at ${AGGREGATE_AXIS_CAP}x the 90th percentile when a spike (earnings near zero) would flatten the rest; the table keeps the true range.` })]),
+      + `. The axis stops at ${AGGREGATE_AXIS_CAP}x the 90th percentile when a spike (earnings near zero) would flatten the rest; the table keeps the true range. `
+      + `YAHOO'S OWN FORWARD P/E is what Yahoo published at each month end, price over the consensus EPS of a fiscal year as it stood that day `
+      + `(not recomputed with today's estimates). Yahoo moves that EPS to the next fiscal year three months before the year ends, so each point `
+      + `looks 4 to 15 months ahead and the line steps down at the dashed month; it is not the next-twelve-months multiple above and is never joined to it. `
+      + `Compare a point with the same month a year earlier, or with the fiscal year ends, which are always twelve months ahead. `
+      + `That chart's axis stops at ${FF.AXIS_CAP_FACTOR}x the 75th percentile when near-zero earnings send the multiple into the hundreds; the table keeps the true figure.` })]),
   );
   draw();
   epsChart(epsNode, history);
+  if (fiscal) fiscalForwardChart(fiscalNode, fiscal);
   const row = data.rows.find((r) => r.ticker === symbol);
   return `${row?.name || symbol} · weekly, ${history.dates[0]} → ${history.dates[history.dates.length - 1]}`;
 }
