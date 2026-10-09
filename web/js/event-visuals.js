@@ -76,6 +76,43 @@ export function splitShares(up, down) {
   return { up: (u / (u + d)) * 100, down: (d / (u + d)) * 100 };
 }
 
+// How the estimate changed, in the words a reader wants: raised, cut or held,
+// by how much, from what to what, and when. `when` is set only when one step
+// between the windows carries most of the change.
+const WHEN = { '90d>60d': '2-3 months ago', '60d>30d': '1-2 months ago', '30d>7d': 'in the last month', '7d>now': 'in the last week' };
+const SPAN = { '90d': '90 days', '60d': '60 days', '30d': '30 days', '7d': '7 days' };
+
+export function trailSummary(levels) {
+  if (levels.length < 2) return null;
+  const first = levels[0];
+  const last = levels[levels.length - 1];
+  const total = (last.value / first.value - 1) * 100;
+  const base = { span: SPAN[first.label] || first.label, from: first.value, to: last.value, total, when: null };
+  if (Math.abs(total) < 0.5) return { ...base, verb: 'held' };
+  const steps = levels.slice(1).map((p, i) => ({ key: `${levels[i].label}>${p.label}`, change: (p.value / levels[i].value - 1) * 100 }));
+  const gross = steps.reduce((a, x) => a + Math.abs(x.change), 0);
+  const big = steps.reduce((a, b) => (Math.abs(b.change) > Math.abs(a.change) ? b : a));
+  const share = gross ? Math.abs(big.change) / gross : 0;
+  return { ...base, verb: total > 0 ? 'raised' : 'cut', when: share >= 0.8 ? WHEN[big.key] || null : null };
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// "Jul" over "'26" for a reaction bar's foot; null for a date that is not one.
+export function shortDate(iso) {
+  const m = /^(\d{4})-(\d{2})-\d{2}/.exec(iso || '');
+  return m && MONTHS[Number(m[2]) - 1] ? { month: MONTHS[Number(m[2]) - 1], year: `'${m[1].slice(2)}` } : null;
+}
+
+// EPS surprise of each report against the move it brought, oldest first, and
+// the counts a headline needs. A report without both figures is left out.
+export function surpriseRows(history) {
+  const rows = (history || []).filter((r) => finite(r.surprise_pct) && finite(r.move_pct)).slice().reverse()
+    .map((r) => ({ date: r.session || r.date, surprise: r.surprise_pct, move: r.move_pct }));
+  const beats = rows.filter((r) => r.surprise > 0);
+  return { rows, n: rows.length, beats: beats.length, roseOnBeat: beats.filter((r) => r.move > 0).length };
+}
+
 // The last reports as bars, oldest first. `fell` marks a beat the stock sold.
 export function moveBars(history) {
   const rows = (history || []).filter((r) => finite(r.move_pct)).slice().reverse();
@@ -158,7 +195,7 @@ export function splitBarNode(up, down) {
       s.up ? el('div', { class: 'ec-splitbar-up', style: `width:${s.up}%` }) : null,
       s.down ? el('div', { class: 'ec-splitbar-down', style: `width:${s.down}%` }) : null,
     ]),
-    el('span', { class: 'ec-vis-note' }, [el('span', { class: 'up', text: `${up ?? 0}↑` }), ' ', el('span', { class: 'down', text: `${down ?? 0}↓` }), ' · 30d']),
+    el('span', { class: 'ec-vis-note' }, [el('span', { class: 'up', text: `${up ?? 0} raised` }), ' · ', el('span', { class: 'down', text: `${down ?? 0} cut` }), ' · last 30 days']),
   ]);
 }
 
@@ -169,35 +206,65 @@ export function trailNode(levels) {
   line.append(spark(levels.map((p) => p.value), { width: 150, height: 30, color: 'currentColor' }));
   return el('div', { class: 'ec-trail' }, [
     line,
-    el('div', { class: 'ec-trail-labels' }, levels.map((p) => el('span', { text: p.label }))),
+    el('div', { class: 'ec-trail-labels' }, levels.map((p, i) => el('span', { text: i === 0 || i === levels.length - 1 ? `${p.label} ${num(p.value, 2)}` : p.label }))),
   ]);
 }
 
-// Bars of the last report-day moves, one dot per report beneath. A dashed line
-// at the implied move when the snapshot has one.
-export function reactionNode(history, implied) {
+function dateFoot(iso) {
+  const d = shortDate(iso);
+  return el('div', { class: 'ec-mbar-date' }, d ? [el('span', { text: d.month }), el('span', { text: d.year })] : []);
+}
+
+// Bars of the last report-day moves, oldest to newest, a dashed line at their
+// average and, last, a placeholder for the coming report that holds the
+// implied move when the snapshot has one.
+export function reactionNode(history, implied, mean = null) {
   const { scale: seen, bars } = moveBars(history);
   if (!bars.length) return null;
   const impliedPct = implied && finite(implied.straddle_pct) ? implied.straddle_pct : null;
-  const scale = Math.max(seen, impliedPct || 0) || 1;
+  const avg = finite(mean) ? mean : null;
+  const scale = Math.max(seen, impliedPct || 0, avg || 0) || 1;
   const h = (v) => `${(Math.abs(v) / scale) * 100}%`;
   const cols = bars.map((b) => el('div', {
     class: 'ec-mbar',
-    title: `${b.date}: ${b.move > 0 ? '+' : ''}${num(b.move, 1)}%${b.surprise !== null ? ` · EPS surprise ${b.surprise > 0 ? '+' : ''}${num(b.surprise, 1)}%` : ''}${b.fell ? ' · beat, then fell' : ''}`,
+    title: `${b.date}: ${b.move > 0 ? '+' : ''}${num(b.move, 1)}%${b.surprise !== null ? ` · EPS surprise ${b.surprise > 0 ? '+' : ''}${num(b.surprise, 1)}%` : ''}`,
   }, [
     el('div', { class: 'ec-mbar-half top' }, b.move > 0 ? [el('div', { class: 'ec-mbar-fill up', style: `height:${h(b.move)}` })] : []),
-    el('div', { class: 'ec-mbar-half bottom' }, b.move < 0 ? [el('div', { class: b.fell ? 'ec-mbar-fill down fell' : 'ec-mbar-fill down', style: `height:${h(b.move)}` })] : []),
+    el('div', { class: 'ec-mbar-half bottom' }, b.move < 0 ? [el('div', { class: 'ec-mbar-fill down', style: `height:${h(b.move)}` })] : []),
     el('div', { class: `ec-mbar-val ${b.move > 0 ? 'up' : 'down'}`, text: `${b.move > 0 ? '+' : ''}${num(b.move, 1)}` }),
+    dateFoot(b.date),
   ]));
-  // The halves are HALF px tall each, the axis between them; a dashed line a
-  // implied-move's height above and below it.
-  const reach = impliedPct === null ? 0 : (impliedPct / scale) * HALF;
-  const lines = impliedPct === null ? [] : [
-    el('div', { class: 'ec-mbar-implied', style: `top:${HALF - reach}px`, title: `implied move ±${num(impliedPct, 1)}%` }),
-    el('div', { class: 'ec-mbar-implied', style: `top:${HALF + reach}px` }),
+  const next = el('div', { class: 'ec-mbar ec-mbar-next', title: impliedPct === null ? 'no implied move for the coming report yet' : `implied ±${num(impliedPct, 1)}% for the coming report` }, [
+    el('div', { class: 'ec-mbar-half top' }, impliedPct === null ? [] : [el('div', { class: 'ec-mbar-fill ghost', style: `height:${h(impliedPct)}` })]),
+    el('div', { class: 'ec-mbar-half bottom' }, impliedPct === null ? [] : [el('div', { class: 'ec-mbar-fill ghost', style: `height:${h(impliedPct)}` })]),
+    el('div', { class: 'ec-mbar-val dim', text: impliedPct === null ? DASH : `±${num(impliedPct, 1)}` }),
+    el('div', { class: 'ec-mbar-date' }, [el('span', { text: 'next' })]),
+  ]);
+  const reach = avg === null ? 0 : (avg / scale) * HALF;
+  const lines = avg === null ? [] : [
+    el('div', { class: 'ec-mbar-avg', style: `top:${HALF - reach}px`, title: `average ±${num(avg, 1)}%` }),
+    el('div', { class: 'ec-mbar-avg', style: `top:${HALF + reach}px` }),
   ];
-  const pipRow = el('div', { class: 'ec-pips', title: 'green: the stock rose on the report; red: it fell' }, bars.map((b) => el('span', { class: `ec-pip ${b.move > 0 ? 'up' : 'down'}` })));
-  return el('div', { class: 'ec-reaction' }, [el('div', { class: 'ec-mbars' }, [...cols, ...lines]), pipRow]);
+  return el('div', { class: 'ec-reaction' }, [el('div', { class: 'ec-mbars' }, [...cols, next, ...lines])]);
+}
+
+// Each report's EPS surprise as a dot -- higher is a bigger beat -- coloured by
+// what the stock did on the report session.
+export function surpriseNode(rows) {
+  if (!rows.length) return null;
+  const top = Math.max(0, ...rows.map((r) => r.surprise));
+  const bottom = Math.min(0, ...rows.map((r) => r.surprise));
+  const span = top - bottom || 1;
+  const at = (v) => ((top - v) / span) * 100;
+  const cols = rows.map((r) => el('div', {
+    class: 'ec-sbar',
+    title: `${r.date}: EPS ${r.surprise > 0 ? 'beat' : 'missed'} by ${num(Math.abs(r.surprise), 1)}%, stock ${r.move > 0 ? '+' : ''}${num(r.move, 1)}%`,
+  }, [
+    el('div', { class: 'ec-sdot-area' }, [el('span', { class: 'ec-szero', style: `top:${at(0)}%` }), el('span', { class: `ec-sdot ${r.move > 0 ? 'up' : 'down'}`, style: `top:${at(r.surprise)}%` })]),
+    el('div', { class: `ec-mbar-val ${r.surprise > 0 ? 'up' : 'down'}`, text: `${r.surprise > 0 ? '+' : ''}${num(r.surprise, 1)}` }),
+    dateFoot(r.date),
+  ]));
+  return el('div', { class: 'ec-sbars' }, cols);
 }
 
 export function figure(value, digits = 2) {

@@ -357,3 +357,22 @@ def test_a_release_past_the_budget_is_counted_as_waiting(monkeypatch, tmp_path):
     counts = {"waiting": 0}
     assert R.release_on(320193, "2026-10-01", block, fetch=False, counts=counts) is None
     assert counts["waiting"] == 1
+
+
+def test_own_calendar_tries_the_session_and_the_weekday_before():
+    from market_recap.panels.events import _calendar_days, _days_to_try, _own_calendar
+    reactions = {"PEP": [{"date": "2026-07-08", "session": "2026-07-09"}, {"date": "2026-04-15", "session": "2026-04-16"}],
+                 "TER": [{"date": "2026-07-29", "session": "2026-07-29"}, {"date": "2026-08-03", "session": "2026-08-03"}],
+                 "JPM": [{"date": "2026-07-14", "session": "2026-07-14"}]}
+    calendars = {"2026-07-08": {}, "2026-07-09": {"PEP": {"eps": 2.2, "surprise_pct": 0.46}},
+                 "2026-04-15": {"PEP": {"eps": 1.0, "surprise_pct": 1.0}}, "2026-07-14": {"JPM": {"eps": 5.0}},
+                 "2026-07-28": {"TER": {"eps": 2.47, "surprise_pct": 21.08}}, "2026-07-29": {},
+                 "2026-07-31": {"TER": {"eps": 2.0, "surprise_pct": 5.0}}, "2026-08-03": {}}
+    assert _calendar_days({"date": "2026-08-03", "session": "2026-08-03"}) == ["2026-08-03", "2026-07-31"]  # Monday: back to Friday
+    assert _own_calendar("PEP", reactions["PEP"], calendars) == {
+        "2026-07-08": {"eps": 2.2, "surprise_pct": 0.46}, "2026-04-15": {"eps": 1.0, "surprise_pct": 1.0}}
+    assert _own_calendar("TER", reactions["TER"], calendars) == {
+        "2026-07-29": {"eps": 2.47, "surprise_pct": 21.08}, "2026-08-03": {"eps": 2.0, "surprise_pct": 5.0}}
+    # Only a report whose own date missed the name sends us to other days.
+    assert _days_to_try(reactions, calendars) == {"2026-07-07", "2026-07-09", "2026-07-28", "2026-07-31"}
+    assert _own_calendar("PEP", [{"date": "2026-01-01", "session": "2026-01-02"}], calendars) == {}

@@ -7,7 +7,7 @@ import { el, card, num, pct, tag, table, dirClass, periodSwitch, DASH } from './
 import { render } from './charts.js';
 import { tickerHref } from './routes.js';
 import { availableRanges, sliceRange } from './range.js';
-import { rangeGeometry, rangeBarNode, splitBarNode, trailLevels, trailText, trailNode, reactionNode, figure, sectorHue, priceGeometry, priceNode } from './event-visuals.js';
+import { rangeGeometry, rangeBarNode, splitBarNode, trailLevels, trailSummary, trailNode, reactionNode, surpriseRows, surpriseNode, figure, sectorHue, priceGeometry, priceNode } from './event-visuals.js';
 
 const TIMING = { bmo: 'BEFORE OPEN', amc: 'AFTER CLOSE', intraday: 'DURING SESSION' };
 // A timeline reads events, not a decade of price: the longer ranges stay on
@@ -92,8 +92,15 @@ function consensusStats(c, payload, compact) {
     visual('REVENUE CONSENSUS', billions(k.revenue), k.revenue ? null : 'Yahoo row is not this quarter, or none', revBar, { tail: yoy(k.revenue_growth_pct) }),
   ];
   if (levels.length > 1 || k.up_30d !== undefined) {
-    out.push(visual('ESTIMATE TRAIL · THIS QUARTER', trailText(levels) || DASH, compact ? null : 'Yahoo reports 7/30/60/90-day windows, not the date of each change',
-      el('div', {}, [trailNode(levels), splitBarNode(k.up_30d, k.down_30d)]), { cls: 'ec-vis-small' }));
+    const t = trailSummary(levels);
+    const sentence = t && (t.verb === 'held'
+      ? `held at ${num(t.to, 2)} for ${t.span}`
+      : `${num(t.from, 2)} → ${num(t.to, 2)}${t.when ? ` · almost all of it ${t.when}` : ''}`);
+    out.push(visual(`EPS ESTIMATE · LAST ${t ? t.span.toUpperCase() : '90 DAYS'}`,
+      t ? (t.verb === 'held' ? 'Unchanged' : `${t.verb === 'raised' ? 'Raised' : 'Cut'} ${num(Math.abs(t.total), 1)}%`) : DASH,
+      compact ? null : 'Yahoo\'s own consensus, so it can differ slightly from the EPS above; it gives 7/30/60/90-day windows, not the date of each change',
+      el('div', {}, [t ? el('div', { class: 'ec-vis-sub', text: sentence }) : null, trailNode(levels), splitBarNode(k.up_30d, k.down_30d)]),
+      { cls: t && t.verb !== 'held' ? (t.verb === 'raised' ? 'up' : 'down') : '' }));
   }
   return out;
 }
@@ -103,19 +110,29 @@ function consensusStats(c, payload, compact) {
 function pricedStats(c, payload, compact, prices) {
   const p = c.priced || {};
   const implied = p.implied;
-  const drawing = reactionNode(payload.history, implied);
-  const note = p.reports
-    ? `median ±${num(p.median_abs, 1)}% · up ${p.up} of ${p.reports} · outlined = beat EPS, then fell${p.beat_implied !== null && p.beat_implied !== undefined ? ` · ${p.beat_implied} beat today's implied` : ''}`
-    : 'no 8-K releases on file';
+  const drawing = reactionNode(payload.history, implied, p.mean_abs);
   const impliedNote = implied
-    ? `dashed: implied ±${num(implied.straddle_pct, 1)}% (straddle to ${implied.expiry} · ${implied.snapshot_day} snapshot)`
-    : 'no straddle expiring within a week of the report in the snapshot';
+    ? `last bar: implied ±${num(implied.straddle_pct, 1)}% (straddle to ${implied.expiry} · ${implied.snapshot_day} snapshot)`
+    : 'last bar: no implied move for the coming report yet';
   const out = [
-    visual(`AVG |MOVE| · LAST ${p.reports || 0}`, p.mean_abs ? `±${num(p.mean_abs, 1)}%` : DASH, compact ? `up ${p.up} of ${p.reports}` : `${note} · ${impliedNote}`, drawing),
+    visual('STOCK MOVE AFTER PAST REPORTS', p.mean_abs ? `±${num(p.mean_abs, 1)}%` : DASH,
+      p.reports ? (compact ? null : `Move on the report session, last ${p.reports}; dashed line = the average. Median ±${num(p.median_abs, 1)}%. ${impliedNote}`) : 'no 8-K releases on file',
+      drawing, { tail: p.reports ? el('span', { class: 'ec-vis-yoy dim', text: `typical size · up ${p.up} of ${p.reports}` }) : null }),
   ];
+  const sur = surpriseRows(payload.history);
+  if (sur.n) {
+    out.push(visual('BEAT OR MISS, THEN THE STOCK', `beat ${sur.beats} of ${sur.n}`,
+      compact ? 'green: stock rose · red: fell' : 'Dot height = EPS surprise against consensus. Green: the stock rose on the report session; red: it fell.',
+      surpriseNode(sur.rows), { tail: sur.beats ? el('span', { class: 'ec-vis-yoy dim', text: `stock rose after ${sur.roseOnBeat} of those` }) : null }));
+  }
   const g = prices ? priceGeometry(prices.dates, prices.close, (payload.history || []).map((r) => ({ date: r.session || r.date, move: r.move_pct }))) : null;
   if (g) {
-    out.push(visual('PRICE · 1Y', pct(g.ret, 0), [`${pct(g.fromHigh, 1)} from its high`, c.setup?.above_50d === null || c.setup?.above_50d === undefined ? null : (c.setup.above_50d ? 'above its 50-day' : 'below its 50-day'), `last ${num(g.last, 2)}`].filter(Boolean).join(' · '), priceNode(g), { cls: dirClass(g.ret) }));
+    const s = c.setup || {};
+    const going = !compact && s.ret_20d !== null && s.ret_20d !== undefined
+      ? `20d ${pct(s.ret_20d, 1)}${s.vs_sector_20d !== null && s.vs_sector_20d !== undefined ? ` (${s.vs_sector_20d > 0 ? '+' : ''}${num(s.vs_sector_20d, 1)} pp vs ${s.sector_etf})` : ''}` : null;
+    out.push(visual('PRICE · 1Y', pct(g.ret, 0),
+      [`${pct(g.fromHigh, 1)} from its high`, s.above_50d === null || s.above_50d === undefined ? null : (s.above_50d ? 'above its 50-day' : 'below its 50-day'), `last ${num(g.last, 2)}`, going].filter(Boolean).join(' · '),
+      priceNode(g), { cls: dirClass(g.ret) }));
   }
   return out;
 }
@@ -174,12 +191,14 @@ function guideTag(c) {
 
 function setupStats(c, hasPrice = false) {
   const s = c.setup || {};
+  // With the price drawn, its note carries the 20-day move and the 1Y high.
+  if (hasPrice) return [];
   return [
     stat('GOING IN · 20D', pct(s.ret_20d, 1),
       [s.vs_sector_20d !== null && s.vs_sector_20d !== undefined ? `${s.vs_sector_20d > 0 ? '+' : ''}${num(s.vs_sector_20d, 1)} pp vs ${s.sector_etf}` : null,
         s.ret_5d !== null && s.ret_5d !== undefined ? `5d ${pct(s.ret_5d, 1)}` : null].filter(Boolean).join(' · '), dirClass(s.ret_20d)),
-    ...(hasPrice ? [] : [stat('FROM 1Y HIGH', pct(s.from_high_pct, 1), s.above_50d === null || s.above_50d === undefined ? null : (s.above_50d ? 'above its 50-day average' : 'below its 50-day average'),
-      dirClass(s.from_high_pct))]),
+    stat('FROM 1Y HIGH', pct(s.from_high_pct, 1), s.above_50d === null || s.above_50d === undefined ? null : (s.above_50d ? 'above its 50-day average' : 'below its 50-day average'),
+      dirClass(s.from_high_pct)),
   ];
 }
 

@@ -265,6 +265,57 @@ def _calendars(dates: set[str], as_of: date, budget: int) -> tuple[dict[str, dic
     return out, left
 
 
+def _prior_weekday(day: str) -> str:
+    d = date.fromisoformat(day) - timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d.isoformat()
+
+
+def _calendar_days(report: dict) -> list[str]:
+    """The days Nasdaq may list a report under, best first: the release's own
+    date, the session that traded on it, and the weekday before. The sources
+    disagree by a day in both directions: PepsiCo's release carries the evening
+    before its morning report, and an after-close report is listed on the
+    evening while the release is stamped the next day."""
+    days = [report.get("date"), report.get("session")]
+    if report.get("date"):
+        days.append(_prior_weekday(report["date"]))
+    out = []
+    for day in days:
+        if day and day not in out:
+            out.append(day)
+    return out
+
+
+def _own_calendar(symbol: str, reactions: list[dict], calendars: dict[str, dict[str, dict]]) -> dict[str, dict]:
+    """{report date: Nasdaq row} for one name, trying each of the report's
+    possible calendar days in turn."""
+    alt = symbol.replace("-", ".")
+    out = {}
+    for r in reactions:
+        for day in _calendar_days(r):
+            rows = calendars.get(day) or {}
+            row = rows.get(symbol) or rows.get(alt)
+            if row:
+                out[r["date"]] = row
+                break
+    return out
+
+
+def _days_to_try(reactions: dict[str, list[dict]], calendars: dict[str, dict[str, dict]]) -> set[str]:
+    """Calendar days worth reading beyond the release dates: those of a report
+    whose own date had no row for the name."""
+    days = set()
+    for symbol, rs in reactions.items():
+        alt = symbol.replace("-", ".")
+        for r in rs:
+            rows = calendars.get(r.get("date")) or {}
+            if r.get("date") and symbol not in rows and alt not in rows:
+                days.update(_calendar_days(r)[1:])
+    return days
+
+
 # A release names its business items; these are the ones a card lists.
 FILING_ITEMS = {
     "1.01": "material agreement", "1.02": "agreement ended", "2.01": "acquisition or disposal",
@@ -547,6 +598,9 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     # Past reports: each date's Nasdaq calendar (consensus, actual, surprise).
     report_dates = {r["date"] for rs in reactions.values() for r in rs if r.get("date")}
     calendars, dates_left = _calendars(report_dates, as_of, int(settings.get("history_new_dates", 120)))
+    more, more_left = _calendars(_days_to_try(reactions, calendars) - set(calendars), as_of, int(settings.get("history_new_dates", 120)))
+    calendars.update(more)
+    dates_left += more_left
     lap("nasdaq_history")
     ctx.log.add(SourceRecord("nasdaq_earnings_history", "Nasdaq earnings calendar on past report dates (EPS vs consensus)",
                              nasdaq.EARNINGS_URL.format(date="{date}"), ctx.as_of, rows=len(calendars),
@@ -584,7 +638,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
             or _heavy({"weights": meta[s].get("weights") or {}}, settings) or meta[s].get("watchlist")]
     guides_by_symbol = {}
     for symbol in sorted(deep, key=priority):
-        rows = {d: {symbol: r} for d, rs in calendars.items() if (r := rs.get(symbol) or rs.get(symbol.replace("-", ".")))}
+        rows = {d: {symbol: r} for d, r in _own_calendar(symbol, reactions.get(symbol) or [], calendars).items()}
         guides_by_symbol[symbol] = _guides(symbol, cik_for(symbol, cik_map) if cik_map else None, reactions.get(symbol) or [],
                                            rows, int(settings.get("guide_reports", 4)), guide_budget)
 
@@ -671,8 +725,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         }
         cik = cik_for(symbol, cik_map) if cik_map else None
         own = entry.get("reactions") or []
-        nasdaq_symbol = symbol.replace("-", ".")
-        calendar = {d: rows.get(symbol) or rows.get(nasdaq_symbol) for d, rows in calendars.items()}
+        calendar = _own_calendar(symbol, own, calendars)
         guides = guides_by_symbol.get(symbol) or {}
         close = ctx.closes[symbol] if symbol in ctx.closes.columns else pd.Series(dtype=float)
         payload["history"] = E.report_history(own, {d: r for d, r in calendar.items() if r}, guides, close, index_close)

@@ -104,3 +104,41 @@ test('sectorHue: known sectors fixed, unknown stable, none null', () => {
   assert.equal(V.sectorHue('Odd Sector'), V.sectorHue('Odd Sector'));
   assert.equal(V.sectorHue(null), null);
 });
+
+test('trailSummary says raised, cut or held, from what to what, and when', () => {
+  const up = V.trailSummary(V.trailLevels(5.94, { '90d': 8.2, '60d': 0.1, '30d': 0.1, '7d': 0 }));
+  assert.equal(up.verb, 'raised');
+  near(up.from, 5.94 / 1.082);
+  assert.equal(up.span, '90 days');
+  assert.equal(up.when, '2-3 months ago');
+  const down = V.trailSummary(V.trailLevels(2.9, { '90d': -5.6, '60d': -5.5, '30d': -0.2, '7d': 0 }));
+  assert.equal(down.verb, 'cut');
+  assert.equal(V.trailSummary(V.trailLevels(5, { '90d': 0.2, '30d': 0 })).verb, 'held');
+  assert.equal(V.trailSummary([]), null);
+});
+
+test('trailSummary leaves out when for a change spread over the windows', () => {
+  const spread = V.trailSummary(V.trailLevels(5.94, { '90d': 6, '60d': 4, '30d': 2, '7d': 1 }));
+  assert.equal(spread.verb, 'raised');
+  assert.equal(spread.when, null);
+});
+
+test('shortDate gives month and two-digit year, null for junk', () => {
+  assert.deepEqual(V.shortDate('2026-07-14'), { month: 'Jul', year: "'26" });
+  assert.equal(V.shortDate('nope'), null);
+  assert.equal(V.shortDate(null), null);
+});
+
+test('surpriseRows runs oldest to newest, counts beats and rises, skips reports without both figures', () => {
+  const r = V.surpriseRows([
+    { date: '2026-07-14', surprise_pct: 9.8, move_pct: 2.5 },
+    { date: '2026-04-14', surprise_pct: 8.2, move_pct: -0.8 },
+    { date: '2026-01-13', surprise_pct: -3, move_pct: -4 },
+    { date: '2025-10-14', surprise_pct: null, move_pct: 1 },
+  ]);
+  assert.equal(r.n, 3);
+  assert.equal(r.beats, 2);
+  assert.equal(r.roseOnBeat, 1);
+  assert.deepEqual(r.rows.map((x) => x.date), ['2026-01-13', '2026-04-14', '2026-07-14']);
+  assert.equal(V.surpriseRows(null).n, 0);
+});
