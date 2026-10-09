@@ -9,9 +9,11 @@ workers_dev = false
 # Cron is UTC and New York moves an hour twice a year, so the Worker fires on
 # both candidates and keeps the one that is 16:20 or 18:35 in New York:
 # EDT 20:20 / 22:35 UTC, EST 21:20 / 23:35 UTC. Monday to Friday in UTC is
-# Monday to Friday in New York at these hours.
+# Monday to Friday in New York at these hours. Days are named, not numbered:
+# Cloudflare counts 1 as Sunday, so "1-5" meant Sunday to Thursday and the
+# Friday editions never fired (2026-10-09).
 [triggers]
-crons = ["20 20,21 * * 1-5", "35 22,23 * * 1-5"]
+crons = ["20 20,21 * * MON-FRI", "35 22,23 * * MON-FRI"]
 
 [vars]
 REPO = "Henrywzh/market-recap"
