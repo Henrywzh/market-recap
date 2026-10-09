@@ -918,25 +918,20 @@ _REASON_TEXT = {
 
 
 def _since_first_seen(ctx: Any, ticker: str, peers: list[str], start: str, as_of: str,
-                      columns: dict[str, pd.Series | None] | None = None) -> tuple[float | None, float | None]:
+                      closes_on: dict | None = None) -> tuple[float | None, float | None]:
     """Adjusted return since the first queue date, and the peers' median.
-
-    ``columns`` holds each symbol's normalised price column across calls: the
-    same peers are asked about for every candidate, and normalising a column
-    (a date parse, a group-by, a sort) was most of MONITOR's time."""
+    ``closes_on`` keeps each date's closes for the next row."""
 
     closes = getattr(ctx, "closes", None)
     if start >= as_of or not isinstance(closes, pd.DataFrame):
         return None, None
-    columns = {} if columns is None else columns
-
-    def column(symbol: str) -> pd.Series | None:
-        if symbol not in columns:
-            columns[symbol] = M.numeric_column(closes, symbol)
-        return columns[symbol]
+    closes_on = {} if closes_on is None else closes_on
+    for day in (start, as_of):
+        if day not in closes_on:
+            closes_on[day] = M.frame_values(closes, day)
 
     def ret(symbol: str) -> float | None:
-        a, b = M.value_on(column(symbol), start), M.value_on(column(symbol), as_of)
+        a, b = closes_on[start].get(symbol), closes_on[as_of].get(symbol)
         return (b / a - 1.0) * 100.0 if a and b is not None and a > 0 else None
 
     own = ret(ticker)
@@ -1142,7 +1137,7 @@ def build(ctx, *, valuation=None, catalysts=None, previous=None, trends=None, no
         row["return_pct"] = _number(excess + market_return, 2) if excess is not None and market_return is not None else None
 
     changes: list[dict] = []
-    price_columns: dict[str, pd.Series | None] = {}   # each symbol's price column, normalised once for every candidate
+    closes_on: dict[str, dict[str, float]] = {}
     for row in rows:
         ticker = row["ticker"]
         old = old_rows.get(ticker)
@@ -1170,7 +1165,7 @@ def build(ctx, *, valuation=None, catalysts=None, previous=None, trends=None, no
         row["first_seen"] = first
         if first and current:
             row["since_first_seen_pct"], row["peers_since_first_seen_pct"] = _since_first_seen(
-                ctx, ticker, sector_members.get(row.get("sector") or "", []), first["date"], as_of, price_columns)
+                ctx, ticker, sector_members.get(row.get("sector") or "", []), first["date"], as_of, closes_on)
         old_log = (old or {}).get("state_log") or []
         before = _last_state(old_log, as_of)
         row["state_log"] = _log_state(old_log, as_of, _loggable(row)) if current else [

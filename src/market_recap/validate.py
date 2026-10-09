@@ -13,10 +13,12 @@ comes from the build itself rather than from someone opening every tab.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import json
 import re
 
 from .config import ARTIFACT_DIR, PERIOD_TRADING_DAYS, SESSION_COVERAGE_THRESHOLD, load_config
+from .compute.catalysts import latest_completed_session
 
 # error: not publishable. warning: publishable, but --strict refuses it.
 # notice: a gap in an optional feed, shown on its own tab; never blocks.
@@ -28,7 +30,7 @@ SEVERITIES = ("error", "warning", "notice")
 # down must not hold back the prices every other tab needs.
 OPTIONAL_SOURCES = re.compile(r"^(catalysts_\w+|(ssga|ishares|vanguard|invesco)_xray_holdings|yahoo_estimates(_quarter)?|factset_insight(_pdf)?|earnings_season_nasdaq"
                               # THEMES' industry data: each is one card's content, never the page's.
-                              r"|sec_capex|sec_releases(_guidance)?|nasdaq_earnings_history|mops_revenue|korea_customs|motie_trade|eia_weekly|fred_(housing|banks|consumer)|alfred_releases|tradingview_forecasts|finnhub_news|adata_market_watch|pcpartpicker|altdata_\w+|chain_\w+)$")
+                              r"|sec_capex|sec_releases(_guidance)?|nasdaq_earnings_history|mops_revenue|korea_customs|motie_trade|eia_weekly|fred_(housing|banks|consumer)|alfred_releases|tradingview_forecasts|finnhub_news|adata_market_watch|pcpartpicker|korea_customs_memory|fred_chip_prices|altdata_\w+|chain_\w+)$")
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,24 @@ def _check_as_of(manifest: dict, panels: dict[str, dict]) -> list[Finding]:
         if as_of != reference:
             out.append(Finding("error", "as_of", f"{name} is dated {as_of}, manifest says {reference}"))
     return out
+
+
+def _check_current_edition(manifest: dict) -> list[Finding]:
+    """A green scheduled edition must describe the latest completed session."""
+    if manifest.get("edition") not in {"close", "evening"}:
+        return []  # historical / explicitly partial builds are not editions
+    try:
+        started = datetime.fromisoformat(manifest["generated_at"].replace("Z", "+00:00"))
+        if started.tzinfo is None:
+            raise ValueError("missing timezone")
+        expected = latest_completed_session(started).isoformat()
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return [Finding("error", "edition_session", "edition has no valid timezone-aware generated_at")]
+    if manifest.get("as_of") != expected:
+        return [Finding("error", "edition_session",
+                        f"{manifest['edition']} edition is dated {manifest.get('as_of')}; "
+                        f"latest completed NYSE session is {expected}; not publishable")]
+    return []
 
 
 def _check_coverage(manifest: dict) -> list[Finding]:
@@ -334,6 +354,51 @@ def _check_flow_attribution(heatmaps: dict | None) -> list[Finding]:
     return out
 
 
+def _check_industries(payload: dict | None) -> list[Finding]:
+    """The industry scorecard: empty means nothing was read; missing inputs are named."""
+    if not payload:
+        return []
+    out = []
+    if not payload.get("sub_industries") and not payload.get("sectors"):
+        out.append(Finding("warning", "industries", "no group was read: the scorecard is empty"))
+    if payload.get("missing"):
+        out.append(Finding("notice", "industries",
+                           f"{', '.join(payload['missing'])} did not build this session; its columns are empty"))
+    return out
+
+
+def _check_sec_filings(manifest: dict) -> list[Finding]:
+    """Filers whose latest 10-K / 10-Q company facts did not carry.
+
+    One read from the filing itself is a notice: the statements are right, and
+    SEC's feed is what lagged. One that could not be read leaves that company's
+    VALUATION row a quarter or more behind its peers, so it is a warning.
+    """
+    sec = manifest.get("sec_filings") or {}
+    out = [Finding("warning", "sec_filings", f"CIK {cik}: {why}") for cik, why in (sec.get("unprocessed") or {}).items()]
+    read = sec.get("backfilled") or {}
+    if read:
+        # Most nights some filers' newest filing has not reached company facts
+        # yet; one line says how many, not one line each.
+        out.append(Finding("notice", "sec_filings",
+                           f"{len(read)} filers' latest statements were read from the filings themselves because company "
+                           f"facts lacked them (CIK {', '.join(sorted(read)[:5])}{', ...' if len(read) > 5 else ''})"))
+    return out
+
+
+def _check_price_actions(manifest: dict) -> list[Finding]:
+    """Spin-off adjustments that could not be computed, and moves to look at."""
+    out = [Finding("warning", "corporate_actions",
+                   f"{a['ticker']}: no price for {' or '.join(a.get('unpriced') or [a['distributed']])} on {a['ex_date']}, "
+                   "so history before it was dropped")
+           for a in manifest.get("corporate_actions") or [] if a.get("factor") is None]
+    out += [Finding("notice", "price_jump",
+                    f"{m['ticker']} moved {m['move_pct']:+.1f}% on {m['date']} with no split on record; "
+                    "if it was a spin-off, add it to [[corporate_actions]]")
+            for m in manifest.get("price_jumps") or []]
+    return out
+
+
 def _check_sources(manifest: dict) -> list[Finding]:
     out = []
     for record in manifest.get("sources", []):
@@ -361,6 +426,7 @@ def run() -> dict:
     findings = (
         _check_period_labels(config)
         + _check_as_of(manifest, panels)
+        + _check_current_edition(manifest)
         + _check_coverage(manifest)
         + _check_latest_session(panels.get("markets"))
         + _check_presets(config, panels.get("technicals"))
@@ -374,6 +440,9 @@ def run() -> dict:
         + _check_monitor_carried(manifest)
         + _check_cross_listing(config, panels.get("cross_listing"))
         + _check_flow_attribution(panels.get("heatmaps"))
+        + _check_industries(panels.get("industries"))
+        + _check_sec_filings(manifest)
+        + _check_price_actions(manifest)
         + _check_sources(manifest)
     )
     for name, reason in (manifest.get("errors") or {}).items():

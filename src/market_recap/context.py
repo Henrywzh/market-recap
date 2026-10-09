@@ -14,12 +14,11 @@ Nasdaq-only names in the S&P 500's breadth.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime
 
 import pandas as pd
 
-from . import gapfill
+from . import corporate_actions, gapfill
 from .compute import catalysts
 from .config import SESSION_COVERAGE_THRESHOLD, load_config
 from .sources import nasdaq, ssga, wikipedia, yahoo
@@ -42,15 +41,14 @@ def completed_sessions(closes: pd.DataFrame, *, now: datetime | None = None) -> 
         return closes
     # Yahoo may return a fully populated *intraday* daily row at 09:33 ET.
     # Cross-sectional coverage alone cannot call that a completed session.
-    ny = (now or datetime.now(ZoneInfo("America/New_York"))).astimezone(ZoneInfo("America/New_York"))
-    last_allowed = ny.date() if ny.time() >= time(16, 15) else ny.date() - timedelta(days=1)
+    last_allowed = catalysts.latest_completed_session(now)
     closes = closes.loc[pd.to_datetime(closes.index).date <= last_allowed]
     if closes.empty:
         return closes
     coverage = closes.notna().sum(axis=1) / closes.shape[1]
     complete = coverage >= SESSION_COVERAGE_THRESHOLD
     if not complete.any():
-        return closes
+        return closes.iloc[:0]
     return closes.loc[: complete[complete].index[-1]]
 
 
@@ -125,8 +123,15 @@ class MarketContext:
     prices: pd.DataFrame = field(default_factory=pd.DataFrame)
     # Sessions Yahoo skipped that were filled from other sources, by day and frame.
     filled_sessions: dict = field(default_factory=dict)
+    # Corporate actions the feed does not adjust for, already applied to closes
+    # and prices (corporate_actions.py), and recent moves too big to take on trust.
+    adjustments: list = field(default_factory=list)
+    price_jumps: list = field(default_factory=list)
     # Yahoo's closes against IVV's on the holdings date (gapfill.verify).
     session_check: dict | None = None
+    # What a panel wants on record about its own run: seconds by step, requests
+    # asked and served from cache. The manifest carries it as `diagnostics`.
+    diagnostics: dict = field(default_factory=dict)
 
     @property
     def as_of(self) -> str | None:
@@ -250,8 +255,11 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
             *(set(frame["yahoo_symbol"]) for frame in ctx.members.values())
         )
     )
+    # Both lines of a spin-off are priced for its factor even when the index
+    # no longer holds one of them, and dropped again once the factor is known.
+    extra = corporate_actions.priced_lines(config) - set(symbols)
     ctx.closes = mark_missing_sessions(completed_sessions(
-        yahoo.fetch_closes(symbols, period=history_period, need_ohlcv=True)))
+        yahoo.fetch_closes(sorted(set(symbols) | extra), period=history_period, need_ohlcv=True)))
     if ctx.closes.empty:
         raise RuntimeError("no constituent prices were fetched; the page has no session to describe")
     ctx.splits = _through(yahoo.fetch_splits(history_period), ctx.closes.index[-1])
@@ -276,6 +284,14 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
             filled.update(again)
     ctx.session_check = {"holdings": check, "latest": latest}
     ctx.filled_sessions.update({f"{day} constituents": r for day, r in filled.items()})
+    # Yahoo adjusts for splits and dividends, not spin-offs: a spun-off parent
+    # would read as a loss in every window that spans the distribution.
+    ctx.adjustments = corporate_actions.resolve(config, ctx.prices)
+    ctx.closes = corporate_actions.drop_extra(corporate_actions.adjust(ctx.closes, ctx.adjustments), extra)
+    ctx.prices = corporate_actions.drop_extra(corporate_actions.adjust(ctx.prices, ctx.adjustments), extra)
+    ctx.splits = corporate_actions.drop_extra(ctx.splits, extra)
+    ctx.price_jumps = corporate_actions.unexplained_moves(
+        ctx.prices, ctx.splits, **{key: config["price_checks"][key] for key in ("drop_pct", "rise_pct", "sessions")})
     missing = sorted(set(symbols) - set(ctx.closes.columns))
     log.add(SourceRecord(
         "yahoo_constituents",

@@ -15,7 +15,7 @@ Two groups carry industry data (docs/information_architecture.md):
   author, and Ramp's AI adoption and spend per employee (both read from
   alternative-data's published files).
 - SEMICONDUCTORS & MEMORY: TSMC and Nanya monthly revenue (MOPS), Korean IC
-  exports (Korea Customs), ADATA's monthly memory note, and UK retail prices
+  exports (Korea Customs), the memory, DRAM and flash lines inside them, BLS semiconductor price indexes (FRED), ADATA's monthly memory note, and UK retail prices
   of memory kits and CPUs read from PCPartPicker's trend charts.
 
 Each source is optional: one that fails leaves its section's reason on the
@@ -27,7 +27,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 import os
 import re
-import statistics
+from pathlib import Path
+import json
 
 import pandas as pd
 
@@ -359,7 +360,7 @@ def _korea(as_of: date) -> dict:
     rows, fetched = korea_customs.fetch_exports(as_of)
     rows = T.yoy_monthly(rows, "exports_k")
     latest = rows[-1]["month"] if rows else None
-    return {"months": [{**r, "exports_bn": round(r["exports_k"] / 1e6, 2)} for r in rows], "fetched": fetched,
+    return {"months": [{**r, "exports_bn": None if r["exports_k"] is None else round(r["exports_k"] / 1e6, 2)} for r in rows], "fetched": fetched,
             "due": T.monthly_due(latest, 15, as_of)}
 
 
@@ -371,40 +372,94 @@ def _korea_flash(as_of: date) -> dict:
     return {"months": rows, "failed": failed, "due": T.monthly_due(latest, 1, as_of), "page": motie.LIST_URL}
 
 
-def _family(title: str) -> str:
-    return next((key for key in ("DDR5", "DDR4", "AMD", "Intel") if title.startswith(key)), "other")
-
-
 # PCPartPicker's Cloudflare refuses cloud servers (HTTP 403) and is not worked
-# around: the scheduled build does not ask, and says so, instead of logging
-# the same refusal as an error every night. A local build still reads it.
-PCPP_SKIP_REASON = "not fetched by the cloud build: PCPartPicker refuses cloud servers (HTTP 403); a local build reads it"
+# around. The cloud build reads the ratios a home-connection job committed;
+# it does not ask the site. A local build still reads it.
+PCPP_SKIP_REASON = pcpartpicker.SKIPPED
 
 
-def _pcpp() -> dict:
+def _pcpp(as_of: date) -> dict:
     if os.environ.get("GITHUB_ACTIONS") == "true":
-        return {"skipped": PCPP_SKIP_REASON}
-    out: dict = {"failed": []}
-    for kind in ("memory", "cpu"):
-        charts, failed = pcpartpicker.fetch(kind)
-        out["failed"] += failed
-        rows = []
-        for c in charts:
-            day = date.fromisoformat(c["image_date"])
-            rows.append({"title": c["title"], "family": _family(c["title"]), "image_date": c["image_date"],
-                         **pcpartpicker.summary(c["series"], day), "index": pcpartpicker.weekly_index(c["series"])})
-        families = {}
-        for fam in sorted({r["family"] for r in rows}):
-            members = [r for r in rows if r["family"] == fam]
-            agg = {k: (round(statistics.median(v), 1) if (v := [r[k] for r in members if r.get(k) is not None]) else None)
-                   for k in ("chg_1m", "chg_3m", "chg_6m", "chg_12m")}
-            dates = members[0]["index"]["dates"]
-            series = [round(statistics.median(vals), 1) if (vals := [m["index"]["values"][i] for m in members
-                      if i < len(m["index"]["values"]) and m["index"]["values"][i] is not None]) else None
-                      for i in range(len(dates))]
-            families[fam] = {**agg, "count": len(members), "index": {"dates": dates, "values": series}}
-        out[kind] = {"rows": rows, "families": families, "page": pcpartpicker.BASE.format(kind=kind)}
-    return out
+        return pcpartpicker.load_feed(as_of)
+    return pcpartpicker.snapshot()
+
+
+MEMORY_MONTHS = 48
+CHIP_MONTHS = 60
+PUBLISH_DAY = 15
+# Before the mid-month publication, the latest confirmed customs period is
+# two months behind. Keep that lag as well as twelve months of YoY bases.
+CUSTOMS_RELEASE_LAG_MONTHS = 2
+
+
+def _specs(settings: dict, key: str) -> list[dict]:
+    rows = settings.get(key) or []
+    if not rows:
+        raise RuntimeError(f"themes.{key} is empty")
+    return rows
+
+
+def _memory_exports(settings: dict, as_of: date) -> dict:
+    """HS 854232 and the DRAM and flash lines inside it. Codes come from config."""
+    series, failed = [], []
+    for spec in _specs(settings, "memory_exports"):
+        code, label = str(spec["code"]), str(spec["label"])
+        try:
+            rows, fetched = korea_customs.fetch_code(as_of, code, MEMORY_MONTHS + 12 + CUSTOMS_RELEASE_LAG_MONTHS)
+            if not rows:
+                raise RuntimeError("no monthly observations")
+        except Exception as exc:  # one code fails alone
+            failed.append(f"{label} ({code}): {describe_error(exc)}")
+            continue
+        by_month = {row["month"]: row for row in rows if row["month"] <= as_of.strftime("%Y-%m")}
+        rows = [{"exports_k": None, "usd_per_kg": None, **row, **by_month.get(row["month"], {})}
+                for row in T.fill_months({month: None for month in by_month})]
+        rows = T.yoy_monthly(T.yoy_monthly(rows, "exports_k"), "usd_per_kg", key="unit_yoy_pct")[-MEMORY_MONTHS:]
+        months = []
+        for row in rows:
+            months.append({
+                "month": row["month"],
+                "exports_bn": None if row["exports_k"] is None else round(row["exports_k"] / 1e6, 2),
+                "yoy_pct": row.get("yoy_pct"),
+                "usd_per_kg": None if row.get("usd_per_kg") is None else round(row["usd_per_kg"], 2),
+                "unit_yoy_pct": row.get("unit_yoy_pct"),
+                "weight_t": None if row.get("weight_t") is None else round(row["weight_t"], 1),
+                "first_seen": row.get("first_seen"),
+            })
+        latest = next((row["month"] for row in reversed(months) if row["exports_bn"] is not None), None)
+        series.append({"code": code, "label": label, "detail": spec.get("detail"), "months": months,
+                       "fetched": fetched, "due": T.monthly_due(latest, PUBLISH_DAY, as_of)})
+    if not series:
+        raise RuntimeError("; ".join(failed) or "no memory exports read")
+    return {"series": series, "failed": failed}
+
+
+def _chip_prices(settings: dict, as_of: date) -> dict:
+    """BLS semiconductor price indexes via FRED. Ids come from config."""
+    series, failed = [], []
+    for spec in _specs(settings, "chip_prices"):
+        sid, label = str(spec["id"]), str(spec["label"])
+        try:
+            frame, url = fred.fetch_series(sid)
+        except Exception as exc:
+            failed.append(f"{label} ({sid}): {describe_error(exc)}")
+            continue
+        by_month = {}
+        for dt, value in zip(frame["date"], frame["value"]):
+            if pd.Timestamp(dt).date() <= as_of:
+                by_month[pd.Timestamp(dt).strftime("%Y-%m")] = None if pd.isna(value) else float(value)
+        rows = T.yoy_monthly(T.fill_months(by_month), "value")[-CHIP_MONTHS:]
+        if not rows:
+            failed.append(f"{label} ({sid}): no monthly observations")
+            continue
+        months = [{"month": row["month"], "value": None if row["value"] is None else round(float(row["value"]), 3),
+                   "yoy_pct": row.get("yoy_pct")} for row in rows]
+        latest = next((row["month"] for row in reversed(months) if row["value"] is not None), None)
+        series.append({"id": sid, "label": label, "detail": spec.get("detail"), "url": url, "page": "https://fred.stlouisfed.org/series/" + sid, "months": months,
+                       "due": T.monthly_due(latest, PUBLISH_DAY, as_of)})
+    if not series:
+        raise RuntimeError("; ".join(failed) or "no chip prices read")
+    return {"series": series, "failed": failed}
 
 
 # --- ENERGY -------------------------------------------------------------------------
@@ -468,7 +523,53 @@ def _energy(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
     out["sensitivity"] = {"drivers": {"wti": "WTI, per 1% move", "gas": "Henry Hub, per 1% move", "crack": "3-2-1 crack, per $1 move"},
                           "rows": _sensitivities(excess, [spec.get("etf") or ""] + list(spec.get("bellwethers") or []), drivers)}
     out["next"] = {"petroleum": eia.next_release(as_of, 2).isoformat(), "gas_storage": eia.next_release(as_of, 3).isoformat()}
+    out["chokepoints"] = _chokepoints()
     return out
+
+
+ENERGY_CHOKEPOINTS = (
+    "Strait of Hormuz", "Bab el-Mandeb Strait", "Suez Canal", "Cape of Good Hope", "Malacca Strait",
+)
+
+
+def _chokepoints() -> dict:
+    """Read the existing PortWatch snapshot. No fetch and no invented route."""
+    path = Path(os.environ.get("MARKET_RECAP_PORTWATCH") or (Path(__file__).resolve().parents[4] / "quantamental-lab" / "data" / "research-intelligence" / "institutional" / "latest" / "imf_portwatch.json"))
+    if not path.exists():
+        return {"status": "missing", "series": []}
+    payload = json.loads(path.read_text())
+    rows = [r for r in payload.get("rows") or [] if r.get("portname") in ENERGY_CHOKEPOINTS]
+    by_name = {}
+    for row in rows:
+        by_name.setdefault(row["portname"], []).append(row)
+    series = []
+    for name in ENERGY_CHOKEPOINTS:
+        events = sorted(by_name.get(name, []), key=lambda r: r["date"])
+        if not events:
+            continue
+        latest, prior = events[-1], events[-8] if len(events) >= 8 else None
+        def avg(window, field):
+            return None if not window else sum(r[field] or 0 for r in window) / len(window)
+        recent, previous = events[-7:], events[-14:-7]
+        series.append({
+            "name": name,
+            "dates": [r["date"] for r in events],
+            "tankers": [r.get("n_tanker") for r in events],
+            "vessels": [r.get("n_total") for r in events],
+            "latest_date": latest["date"],
+            "tankers_latest": latest.get("n_tanker"),
+            "vessels_latest": latest.get("n_total"),
+            "tankers_7d": None if not recent else round(avg(recent, "n_tanker"), 1),
+            "tankers_prior_7d": None if len(previous) < 7 else round(avg(previous, "n_tanker"), 1),
+            "observed_at": latest.get("observed_at"),
+        })
+        if prior and series[-1]["tankers_7d"] is not None and series[-1]["tankers_prior_7d"] not in (None, 0):
+            series[-1]["tankers_7d_change_pct"] = round(100 * (series[-1]["tankers_7d"] / series[-1]["tankers_prior_7d"] - 1), 1)
+        else:
+            series[-1]["tankers_7d_change_pct"] = None
+    return {"status": "ok" if series else "empty", "coverage": payload.get("stored_coverage"),
+            "source_url": "https://portwatch.imf.org/", "series": series,
+            "note": "IMF PortWatch modeled vessel transits. Daily observations, normally published weekly; recent missing days are not filled. Capacity is modeled vessel capacity, not USD trade value."}
 
 
 # --- HOUSING ------------------------------------------------------------------------
@@ -801,6 +902,18 @@ def _drivers(cloud: dict, semis: dict, energy: dict | None = None, housing: dict
                        _monthly((semis.get("korea") or {}).get("months"), "yoy_pct", 15)))
     out.append(_driver("korea_flash", "Korea chip exports (1st-of-month release), y/y", ["semis"], "yoy", "pct",
                        _monthly((semis.get("korea_flash") or {}).get("months"), "semis_yoy_pct", 1, released="released")))
+    mem = semis.get("memory_exports") or {}
+    if "unavailable" not in mem:
+        for series in mem.get("series") or []:
+            out.append(_driver(f"kr_{series['code']}", f"Korea {series['label']} exports, y/y", ["semis"], "yoy", "pct",
+                               _monthly(series.get("months"), "yoy_pct", PUBLISH_DAY)))
+            out.append(_driver(f"kr_{series['code']}_unit", f"Korea {series['label']} export value per kg, y/y", ["semis"], "yoy", "pct",
+                               _monthly(series.get("months"), "unit_yoy_pct", PUBLISH_DAY)))
+    chips = semis.get("chip_prices") or {}
+    if "unavailable" not in chips:
+        for series in chips.get("series") or []:
+            out.append(_driver(f"bls_{series['id'].lower()}", f"{series['label']}, y/y", ["semis"], "yoy", "pct",
+                               _monthly(series.get("months"), "yoy_pct", PUBLISH_DAY)))
     for family, agg in ((semis.get("pcpp") or {}).get("memory") or {}).get("families", {}).items():
         index = agg.get("index") or {}
         out.append(_driver(f"pcpp_{family.lower()}", f"{family} retail price index (PCPartPicker UK)", ["semis"], "level", "index",
@@ -911,7 +1024,9 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         "korea": _section(lambda: _korea(as_of)),
         "korea_flash": _section(lambda: _korea_flash(as_of)),
         "adata": _section(lambda: {"notes": adata.fetch_recent(as_of, 6)}),
-        "pcpp": _section(_pcpp),
+        "memory_exports": _section(lambda: _memory_exports(settings, as_of)),
+        "chip_prices": _section(lambda: _chip_prices(settings, as_of)),
+        "pcpp": _section(lambda: _pcpp(as_of)),
     }
     specs = {g["key"]: g for g in settings["groups"]}
     energy = _section(lambda: _energy(specs.get("energy", {}), excess, as_of))
@@ -1009,6 +1124,10 @@ def _data_dates(groups: list[dict], cloud: dict, semis: dict, as_of: date, setti
     add("semis", "Korea IC exports (customs, confirmed)", korea.get("due"))
     flash = semis.get("korea_flash") or {}
     add("semis", "Korea exports, 1st-of-month release (semis first)", flash.get("due"))
+    for series in (semis.get("memory_exports") or {}).get("series") or []:
+        add("semis", f"Korea {series['label']} exports (customs)", series.get("due"))
+    for series in (semis.get("chip_prices") or {}).get("series") or []:
+        add("semis", series["label"], series.get("due"))
 
 
 def _weekly_dates(groups: list[dict], energy: dict, housing: dict, banks: dict, as_of: date) -> None:
@@ -1074,43 +1193,73 @@ def _log_studies(ctx, studies: dict) -> None:
         error=studies.get("unavailable") or (None if keyed else "no FRED_API_KEY: release days approximated") or (", ".join(bad) or None)))
 
 
+def _count(items, key: str) -> int:
+    """Observations across a section's series: each series' ``key`` list summed."""
+    return sum(len(item.get(key) or []) for item in items or [] if isinstance(item, dict))
+
+
 def _log(ctx, cloud: dict, semis: dict) -> None:
-    def record(source_id, label, url, section, observed, policy):
+    def record(source_id, label, url, section, observed, policy, rows=0):
         failed = isinstance(section, dict) and "unavailable" in section
         ctx.log.add(SourceRecord(source_id, label, url, None if failed else observed, status="error" if failed else "ok",
-                                 error=section["unavailable"][:ERROR_DETAIL_CHARS] if failed else None, policy=policy))
+                                 error=section["unavailable"][:ERROR_DETAIL_CHARS] if failed else None, policy=policy,
+                                 rows=0 if failed else rows))
 
     capex = cloud["capex"]
     record("sec_capex", "Cloud capex (SEC XBRL 10-Q/10-K)", "https://www.sec.gov/edgar/search/", capex,
            None if "unavailable" in capex else max((c["quarters"][-1]["end"] for c in capex["companies"] if c["quarters"]), default=None),
-           "quarterly_filing")
+           "quarterly_filing", _count(capex.get("companies"), "quarters"))
     nv = cloud["nvda"]
     record("sec_releases", "Earnings releases (8-K Ex. 99.1): NVIDIA Data Center, capex guidance", "https://www.sec.gov/edgar/search/", nv,
-           None if "unavailable" in nv else nv["quarters"][-1]["filed"], "quarterly_filing")
+           None if "unavailable" in nv else nv["quarters"][-1]["filed"], "quarterly_filing", len(nv.get("quarters") or []))
     odm = cloud["odm"]
     record("mops_revenue", "Taiwan monthly revenue (MOPS)", mops.PAGE_URL, odm if isinstance(odm, dict) else {},
            None if isinstance(odm, dict) else max((s["months"][-1]["month"] + "-01" for s in odm if s["months"]), default=None),
-           "monthly_release")
+           "monthly_release", 0 if isinstance(odm, dict) else _count(odm, "months"))
     orr = cloud["openrouter"]
     record("altdata_openrouter", "OpenRouter tokens & estimated revenue (alternative-data)", altdata.OPENROUTER_URL, orr,
-           None if "unavailable" in orr else (orr["dates"][-1] if orr["dates"] else None), "daily_close")
+           None if "unavailable" in orr else (orr["dates"][-1] if orr["dates"] else None), "daily_close", len(orr.get("dates") or []))
     ramp = cloud["ramp"]
     record("altdata_ramp", "Ramp AI Index (alternative-data)", altdata.RAMP_URL, ramp,
-           None if "unavailable" in ramp else (ramp["months"][-1] + "-01" if ramp["months"] else None), "monthly_release")
+           None if "unavailable" in ramp else (ramp["months"][-1] + "-01" if ramp["months"] else None), "monthly_release",
+           len(ramp.get("months") or []))
     korea = semis["korea"]
     record("korea_customs", "Korea Customs IC exports (HS 8542)", korea_customs.HOME_URL, korea,
-           None if "unavailable" in korea else (korea["months"][-1]["month"] + "-01" if korea["months"] else None), "monthly_release")
+           None if "unavailable" in korea else (korea["months"][-1]["month"] + "-01" if korea["months"] else None), "monthly_release",
+           len(korea.get("months") or []))
     flash = semis["korea_flash"]
     record("motie_trade", "Korea monthly trade release (MOTIE, 1st of month)", motie.LIST_URL, flash,
-           None if "unavailable" in flash else flash["months"][-1]["month"] + "-01", "monthly_release")
+           None if "unavailable" in flash else flash["months"][-1]["month"] + "-01", "monthly_release", len(flash.get("months") or []))
     notes = semis["adata"]
     record("adata_market_watch", "ADATA Memory & Flash Market Watch", "https://industrial.adata.com/en/edm", notes,
-           None if "unavailable" in notes or not notes["notes"] else notes["notes"][0]["month"] + "-01", "monthly_release")
+           None if "unavailable" in notes or not notes["notes"] else notes["notes"][0]["month"] + "-01", "monthly_release",
+           len(notes.get("notes") or []))
+    mem = semis["memory_exports"]
+    mem_failed = isinstance(mem, dict) and "unavailable" in mem
+    mem_months = [s["months"][-1]["month"] for s in (mem.get("series") or []) if s.get("months")] if not mem_failed else []
+    ctx.log.add(SourceRecord(
+        "korea_customs_memory", "Korea Customs memory exports (HS 854232, DRAM, flash)", korea_customs.HOME_URL,
+        None if mem_failed or not mem_months else min(mem_months) + "-01",
+        rows=0 if mem_failed else _count(mem.get("series"), "months"),
+        status="error" if mem_failed else ("partial" if mem.get("failed") else "ok"),
+        error=(mem.get("unavailable") if mem_failed else None) or ("; ".join(mem.get("failed") or []) or None),
+        policy="monthly_release"))
+    chips = semis["chip_prices"]
+    chip_failed = isinstance(chips, dict) and "unavailable" in chips
+    chip_months = [s["months"][-1]["month"] for s in (chips.get("series") or []) if s.get("months")] if not chip_failed else []
+    ctx.log.add(SourceRecord(
+        "fred_chip_prices", "BLS semiconductor producer and import prices (FRED)",
+        next((series["page"] for series in chips.get("series") or []), "https://fred.stlouisfed.org/"),
+        None if chip_failed or not chip_months else min(chip_months) + "-01",
+        rows=0 if chip_failed else _count(chips.get("series"), "months"),
+        status="error" if chip_failed else ("partial" if chips.get("failed") else "ok"),
+        error=(chips.get("unavailable") if chip_failed else None) or ("; ".join(chips.get("failed") or []) or None),
+        policy="monthly_release"))
     pc = semis["pcpp"]
     if "skipped" in pc:
         ctx.log.add(SourceRecord("pcpartpicker", "PCPartPicker UK price trends (memory, CPU)", "https://uk.pcpartpicker.com/trends/",
                                  None, status="skipped", error=pc["skipped"], policy="daily_close"))
     else:
         record("pcpartpicker", "PCPartPicker UK price trends (memory, CPU)", "https://uk.pcpartpicker.com/trends/", pc,
-               None if "unavailable" in pc else max((r["image_date"] for k in ("memory", "cpu") for r in pc.get(k, {}).get("rows", [])), default=None),
-               "daily_close")
+               None if "unavailable" in pc else min((r["image_date"] for k in ("memory", "cpu") for r in pc.get(k, {}).get("rows", [])), default=None),
+               "daily_close", sum(len((pc.get(k) or {}).get("rows") or []) for k in ("memory", "cpu")))

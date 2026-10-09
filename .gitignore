@@ -16,3 +16,6 @@ node_modules/
 data/probes/
 # Recorded snapshots live on their own branch, checked out here by the job
 data/snapshots/
+
+# DRAMeXchange homepage archive. Local only; the terms forbid publishing it.
+data/private/

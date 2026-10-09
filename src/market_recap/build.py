@@ -16,7 +16,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, evidence, financials, fixed_income, heatmaps, macro, markets, monitor, overview, positioning, priced, risk, rotation, themes, valuation, xray
+from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, evidence, financials, fixed_income, heatmaps, industries, macro, markets, monitor, overview, positioning, priced, risk, rotation, themes, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -52,6 +52,8 @@ PANELS = {
     "chain": chain.build,
     "anchor": anchor.build,
     "monitor": monitor.build,
+    # Reads this session's MONITOR (drawdowns, EPS revisions) and VALUATION.
+    "industries": industries.build,
     # OVERVIEW reads this session's other panels and so runs last.
     "overview": overview.build,
 }
@@ -95,15 +97,18 @@ def run(
     config = load_config()
     ctx = build_context(history_period=history_period)
     generated_at = utc_now_iso()
+    # Seconds spent on each part of the build, so a slow night says where:
+    # the shared context (constituents, prices), each panel, and the tail.
+    timings: dict = {"context": round(time.monotonic() - started, 1), "panels": {}}
 
     selected = [name for name in (panels or list(PANELS)) if name in PANELS]
     if skip_sec:
         selected = [name for name in selected if name not in SEC_PANELS]
-    # Also honor dependency order when the user passes --panels monitor valuation.
-    if "monitor" in selected:
-        selected = [name for name in selected if name != "monitor"] + ["monitor"]
-    if "overview" in selected:
-        selected = [name for name in selected if name != "overview"] + ["overview"]
+    # Also honor dependency order when the user passes --panels monitor valuation:
+    # monitor after what it reads, industries after monitor, overview last.
+    for late in ("monitor", "industries", "overview"):
+        if late in selected:
+            selected = [name for name in selected if name != late] + [late]
 
     written: list[str] = []
     built: dict[str, dict] = {}
@@ -123,10 +128,9 @@ def run(
                           if os.environ.get("MONITOR_PUBLISHED_STATE") == "1" else None)
     monitor_carried: dict | None = None
 
-    # Where the time goes: seconds per panel in the manifest and on the build
-    # log, and, with MARKET_RECAP_PROFILE_DIR set, each panel's cProfile top
-    # functions in that folder (an investigation, off in the nightly build).
-    panel_seconds: dict[str, float] = {}
+    # With MARKET_RECAP_PROFILE_DIR set, each panel's cProfile top functions are
+    # written to that folder (an investigation, off in the nightly build). The
+    # seconds per panel are in the manifest's `timings` and on the build log.
     profile_dir = Path(os.environ["MARKET_RECAP_PROFILE_DIR"]) if os.environ.get("MARKET_RECAP_PROFILE_DIR") else None
     if profile_dir:
         profile_dir.mkdir(parents=True, exist_ok=True)
@@ -137,61 +141,66 @@ def run(
         if profiler:
             profiler.enable()
         try:
-            if name == "monitor":
-                previous = load_previous(
-                    local_path=ARTIFACT_DIR / "monitor.json",
-                    published_base_url=published_base_url,
-                )
-                payload = PANELS[name](ctx, valuation=optional_panel("valuation"),
-                                      catalysts=optional_panel("catalysts"), previous=previous)
-                payload["generated_at"] = generated_at
-                validate_previous(payload)
-                # Replace atomically: interruption must not truncate the ledger.
-                pending = ARTIFACT_DIR / "monitor.pending"
-                write_json(pending, payload)
-                pending.replace(ARTIFACT_DIR / "monitor.json")
-            elif name == "overview":
-                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in overview.INPUTS})
-            elif name == "positioning":
-                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in positioning.INPUTS})
-            elif name == "events":
-                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in events.INPUTS})
-            elif name == "themes":
-                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in themes.INPUTS})
-            elif name == "chain":
-                payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in chain.INPUTS})
-            else:
-                payload = PANELS[name](ctx)
-        except Exception as exc:
-            if name == "monitor" and published_base_url:
-                monitor_carried = _carry_monitor(published_base_url, ctx, exc)
-                if monitor_carried is not None:
-                    written.append(name)
-                    continue
-            # A panel that fails leaves a named gap. The page renders the gap
-            # instead of an empty tab that looks like a quiet market.
-            ctx.log.fail(name, exc)
-            continue
+            try:
+                if name == "monitor":
+                    previous = load_previous(
+                        local_path=ARTIFACT_DIR / "monitor.json",
+                        published_base_url=published_base_url,
+                    )
+                    payload = PANELS[name](ctx, valuation=optional_panel("valuation"),
+                                          catalysts=optional_panel("catalysts"), previous=previous)
+                    payload["generated_at"] = generated_at
+                    validate_previous(payload)
+                    # Replace atomically: interruption must not truncate the ledger.
+                    pending = ARTIFACT_DIR / "monitor.pending"
+                    write_json(pending, payload)
+                    pending.replace(ARTIFACT_DIR / "monitor.json")
+                elif name == "overview":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in overview.INPUTS})
+                elif name == "industries":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in industries.INPUTS})
+                elif name == "positioning":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in positioning.INPUTS})
+                elif name == "events":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in events.INPUTS})
+                elif name == "themes":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in themes.INPUTS})
+                elif name == "chain":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in chain.INPUTS})
+                else:
+                    payload = PANELS[name](ctx)
+            except Exception as exc:
+                if name == "monitor" and published_base_url:
+                    monitor_carried = _carry_monitor(published_base_url, ctx, exc)
+                    if monitor_carried is not None:
+                        written.append(name)
+                        continue
+                # A panel that fails leaves a named gap. The page renders the gap
+                # instead of an empty tab that looks like a quiet market.
+                ctx.log.fail(name, exc)
+                continue
+            if name != "monitor":
+                write_json(ARTIFACT_DIR / f"{name}.json", payload)
+            built[name] = payload
+            written.append(name)
         finally:
             if profiler:
                 profiler.disable()
                 with (profile_dir / f"{name}.txt").open("w") as handle:
                     pstats.Stats(profiler, stream=handle).sort_stats("cumulative").print_stats(45)
-            panel_seconds[name] = round(time.monotonic() - panel_started, 1)
-            print(f"[build] {name}: {panel_seconds[name]}s", flush=True)
-        if name != "monitor":
-            write_json(ARTIFACT_DIR / f"{name}.json", payload)
-        built[name] = payload
-        written.append(name)
+            timings["panels"][name] = round(time.monotonic() - panel_started, 1)
+            print(f"[build] {name}: {timings['panels'][name]}s", flush=True)
 
+    tail_started = time.monotonic()
     check = sec.filing_check()
+    timings["sec_check"] = round(time.monotonic() - tail_started, 1)
     if check["checked"]:
         ctx.log.add(SourceRecord(
             "sec_submissions", "SEC submissions index (new 10-K / 10-Q since the last fetch)",
             "https://data.sec.gov/submissions/",
-            observed_date=check["latest_filed"],
+            observed_date=check["index_observed_date"],
             rows=check["checked"],
-            policy="filings",
+            policy="daily_close",
             status="ok" if not check["failed"] else "partial",
             error=f"{check['failed']} of {check['checked']} indexes unreadable" if check["failed"] else None,
         ))
@@ -201,9 +210,13 @@ def run(
         "as_of": ctx.as_of,
         "holdings_as_of": ctx.holdings_as_of,
         "generated_at": generated_at,
+        # "close" half an hour after the bell, "evening" once the evening
+        # publishers have posted; None for a build run by hand.
+        "edition": os.environ.get("MARKET_RECAP_EDITION") or None,
         "monitor_schema_version": 1,
         "build_seconds": round(time.monotonic() - started, 1),
-        "panel_seconds": panel_seconds,
+        "timings": timings,
+        "diagnostics": getattr(ctx, "diagnostics", {}),
         "build_age_hours": BUILD_AGE_HOURS,
         # Per index, not as a union: ``closes`` spans every basket, so one
         # "priced" number would overstate each index's own coverage.
@@ -224,6 +237,11 @@ def run(
         # Sessions Yahoo skipped, filled from iShares holdings and Nasdaq closes.
         "filled_sessions": ctx.filled_sessions,
         "session_check": ctx.session_check,
+        # Spin-offs the price feed does not adjust for, as applied to every
+        # close and price this build read; and recent moves too big to take on
+        # trust, which may be one that is not yet configured.
+        "corporate_actions": [item.as_dict() for item in ctx.adjustments],
+        "price_jumps": ctx.price_jumps,
         "panels": written,
         "skipped_panels": sorted(set(selected) - set(written)),
         # Set when MONITOR could not be rebuilt and the published ledger was
@@ -234,7 +252,9 @@ def run(
         **ctx.log.to_dict(),
     }
     if prune_cache:
+        prune_started = time.monotonic()
         manifest["cache_pruned"] = cache.prune()
+        timings["cache_prune"] = round(time.monotonic() - prune_started, 1)
     write_json(ARTIFACT_DIR / "manifest.json", manifest)
     # Assemble the deployable tree last, so it contains the manifest that was
     # just written rather than the previous build's.

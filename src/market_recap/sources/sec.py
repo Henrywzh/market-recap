@@ -13,9 +13,13 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+import hashlib
 import math
 from functools import lru_cache
 import json
+import os
+from pathlib import Path
+import pickle
 import re
 import threading
 import time
@@ -25,6 +29,7 @@ import pandas as pd
 
 from .. import cache
 from ..config import SEC_USER_AGENT
+from . import xbrl_instance
 from .http import FetchError
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -241,9 +246,9 @@ class LatestFiling:
 _checked: dict[int, dict] = {}
 
 
-def _latest_statement(recent: dict) -> LatestFiling | None:
-    """The newest statement filing with XBRL in a submissions index's recent block."""
-    filings = [
+def _statement_filings(recent: dict) -> list[LatestFiling]:
+    """Every statement filing with XBRL in a submissions index's recent block."""
+    return [
         LatestFiling(form, accession, filed, datetime.fromisoformat(accepted.replace("Z", "+00:00")))
         for form, accession, filed, accepted, xbrl in zip(
             recent.get("form", []), recent.get("accessionNumber", []), recent.get("filingDate", []),
@@ -251,7 +256,24 @@ def _latest_statement(recent: dict) -> LatestFiling | None:
         )
         if form in STATEMENT_FORMS and xbrl
     ]
-    return max(filings, key=lambda f: f.accepted, default=None)
+
+
+def _latest_statement(recent: dict) -> LatestFiling | None:
+    """The newest statement filing with XBRL in a submissions index's recent block."""
+    return max(_statement_filings(recent), key=lambda f: f.accepted, default=None)
+
+
+def _recent_block(cik: int, *, use_cache: bool = True) -> dict:
+    text = cache.fetch_text(
+        f"{NAMESPACE}/submissions",
+        f"CIK{cik:010d}",
+        lambda: _get(SUBMISSIONS_URL.format(cik=cik), 45.0),
+        kind="daily_file",
+        suffix=".json",
+        use_cache=use_cache,
+        compress=True,
+    )
+    return json.loads(text).get("filings", {}).get("recent", {})
 
 
 def latest_statement_filing(cik: int, *, use_cache: bool = True) -> LatestFiling | None:
@@ -262,16 +284,7 @@ def latest_statement_filing(cik: int, *, use_cache: bool = True) -> LatestFiling
     index instead: tens of KB, updated as each filing is accepted. Read once
     per session, like the closes.
     """
-    text = cache.fetch_text(
-        f"{NAMESPACE}/submissions",
-        f"CIK{cik:010d}",
-        lambda: _get(SUBMISSIONS_URL.format(cik=cik), 45.0),
-        kind="daily_file",
-        suffix=".json",
-        use_cache=use_cache,
-        compress=True,
-    )
-    return _latest_statement(json.loads(text).get("filings", {}).get("recent", {}))
+    return _latest_statement(_recent_block(cik, use_cache=use_cache))
 
 
 def predates(fetched: datetime | None, latest: LatestFiling | None) -> bool:
@@ -307,7 +320,8 @@ def _needs_refetch(cik: int) -> bool:
         return False
     fetched = cache.modified(path)
     refetch = predates(fetched, latest) or backstop_due(cik, fetched, datetime.now(timezone.utc))
-    _checked[cik] = {"latest": latest, "refetched": refetch}
+    index_path = cache.path_for(f"{NAMESPACE}/submissions", f"CIK{cik:010d}", ".json" + cache.GZIP_SUFFIX)
+    _checked[cik] = {"latest": latest, "refetched": refetch, "index_fetched": cache.modified(index_path)}
     return refetch
 
 
@@ -328,12 +342,121 @@ def check_filings(ciks) -> None:
 def filing_check() -> dict:
     """Summary of this build's submissions checks."""
     latest = [c["latest"] for c in _checked.values() if c.get("latest")]
+    fetched = [c["index_fetched"] for c in _checked.values() if c.get("index_fetched")]
     return {
         "checked": len(_checked),
         "failed": sum(1 for c in _checked.values() if "error" in c),
         "refetched": sum(1 for c in _checked.values() if c.get("refetched")),
         "latest_filed": max((f.filed for f in latest), default=None),
+        # Company facts lacked these filers' latest filing: read from the
+        # filing itself ("backfilled"), or not readable at all ("unprocessed").
+        "backfilled": {f"{cik:010d}": accessions for cik, accessions in sorted(_backfilled.items())},
+        "unprocessed": {f"{cik:010d}": why for cik, why in sorted(_unprocessed.items())},
+        # A quiet filer can have an old 10-Q and a freshly fetched index. Use
+        # the oldest actual index fetch, so stale-cache fallback stays visible.
+        "index_observed_date": min(fetched).date().isoformat() if fetched else None,
     }
+
+
+ARCHIVE_FOLDER_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{folder}/"
+INSTANCE_NAMESPACE = f"{NAMESPACE}/instance"
+_NOT_AN_INSTANCE = re.compile(r"_(cal|def|lab|pre)\.xml$|FilingSummary|MetaLinks", re.I)
+
+# Filers whose latest statement filing company facts did not carry, and what
+# became of each: read from the filing's own instance, or why that failed.
+_backfilled: dict[int, str] = {}
+_unprocessed: dict[int, str] = {}
+
+
+def _carries(facts: dict, accession: str) -> bool:
+    """Whether any company-facts row came from ``accession``."""
+    for taxonomy in facts.get("facts", {}).values():
+        for concept in taxonomy.values():
+            for rows in concept.get("units", {}).values():
+                if any(row.get("accn") == accession for row in rows):
+                    return True
+    return False
+
+
+def instance_facts(cik: int, filing: LatestFiling) -> dict:
+    """Company-facts rows read from a filing's XBRL instance, kept per filing.
+
+    A filing never changes, so the derived rows are cached on their own and the
+    17 MB instance is downloaded once, not once a night.
+    """
+    folder = filing.accession.replace("-", "")
+
+    def fetch() -> str:
+        base = ARCHIVE_FOLDER_URL.format(cik=cik, folder=folder)
+        listing = json.loads(_get(base + "index.json", 45.0))
+        names = [item["name"] for item in listing.get("directory", {}).get("item", [])]
+        # EDGAR extracts the inline XBRL into "<name>_htm.xml"; older filings
+        # carry a plain "<name>.xml" instance.
+        instance = next((n for n in names if n.endswith("_htm.xml")), None) or next(
+            (n for n in names if n.endswith(".xml") and not _NOT_AN_INSTANCE.search(n)), None)
+        if instance is None:
+            raise LookupError(f"{filing.accession} lists no XBRL instance")
+        rows = xbrl_instance.facts_from_instance(
+            _get(base + instance, 180.0), accession=filing.accession, filed=filing.filed)
+        return json.dumps(rows)
+
+    text = cache.fetch_text(INSTANCE_NAMESPACE, folder, fetch, kind="filings", suffix=".json", compress=True)
+    _record_read(cache.path_for(INSTANCE_NAMESPACE, folder, ".json" + cache.GZIP_SUFFIX))
+    return json.loads(text)
+
+
+def _newest_filed(facts: dict) -> str:
+    """The latest date a statement filing (10-K, 10-Q or an amendment) is
+    carried by company facts. An 8-K's cover facts do not count: Citigroup's
+    September 8-K is there while both its 2026 10-Qs are not."""
+    newest = ""
+    for taxonomy in facts.get("facts", {}).values():
+        for concept in taxonomy.values():
+            for rows in concept.get("units", {}).values():
+                newest = max([newest, *(row.get("filed") or "" for row in rows if row.get("form") in STATEMENT_FORMS)])
+    return newest
+
+
+def _backfill(cik: int, facts: dict) -> dict:
+    """Add the filer's statement filings that company facts lack.
+
+    SEC builds company facts in a second pipeline and can skip filings for
+    months (Citigroup's two 2026 10-Qs). Left alone, that is a row quietly
+    valued on statements two quarters old while its peers are current. Every
+    statement filing newer than the newest one company facts carries is read
+    from the filing itself; one accepted inside the processing margin may
+    still be on its way and is left. A filing that cannot be read is reported,
+    never guessed.
+    """
+    latest = _checked.get(cik, {}).get("latest")
+    # An IFRS filer's statements are not US-GAAP and are not extracted here at
+    # all (FINANCIALS lists them as such); reading its amendment would only
+    # report a failure about something nobody asked for.
+    if latest is None or "us-gaap" not in facts.get("facts", {}) or _carries(facts, latest.accession):
+        return facts
+    newest = _newest_filed(facts)
+    now = datetime.now(timezone.utc)
+    newer = [f for f in _statement_filings(_recent_block(cik)) if f.filed > newest and not _carries(facts, f.accession)]
+    missing = sorted((f for f in newer if now - f.accepted >= PROCESSING_MARGIN), key=lambda f: f.accepted)
+    for waiting in (f for f in newer if now - f.accepted < PROCESSING_MARGIN):
+        # Left for now; a parsed filer kept from this build is stale once it is due.
+        _record_recheck(waiting.accepted + PROCESSING_MARGIN)
+    for filing in missing:
+        try:
+            extra = instance_facts(cik, filing)
+            if not extra.get("us-gaap"):
+                # An amendment often carries a cover or an exhibit and no
+                # statements (Nebius's 20-F/A of 2026-05-22): nothing to add.
+                # An original filing with no statements was not read right.
+                if filing.form.endswith("/A"):
+                    continue
+                raise LookupError("instance carried no US-GAAP facts")
+        except Exception as exc:
+            _unprocessed[cik] = f"{filing.form} {filing.accession} filed {filing.filed}: {exc}"
+            continue
+        _backfilled[cik] = ", ".join(filter(None, [_backfilled.get(cik), filing.accession]))
+        facts = xbrl_instance.merge_into(facts, extra)
+    return facts
 
 
 def fetch_company_facts(cik: int, *, use_cache: bool = True) -> dict:
@@ -351,7 +474,8 @@ def fetch_company_facts(cik: int, *, use_cache: bool = True) -> dict:
         # 3-4 MB of JSON per filer, of which this reads a handful of tags.
         compress=True,
     )
-    return json.loads(text)
+    _record_read(cache.path_for(f"{NAMESPACE}/facts", f"CIK{cik:010d}", ".json" + cache.GZIP_SUFFIX))
+    return _backfill(cik, json.loads(text))
 
 
 def _has_annual_facts(facts: dict) -> bool:
@@ -1010,18 +1134,125 @@ class Filer:
 
 
 def filer(cik: int, use_cache: bool = True) -> Filer:
-    """Parsed once per build: FINANCIALS, VALUATION, the DCF, EVIDENCE and
-    EVENTS read the same filer, and a company-facts document is tens of MB once
-    parsed -- what the panels need is kept, the document is not.
+    """Parsed once per build: FINANCIALS, VALUATION, the DCF, EVIDENCE and EVENTS
+    read the same filer, and a company-facts document is tens of MB once parsed
+    -- what the panels need is kept, the document is not.
 
-    ``filer(cik)`` and ``filer(cik, True)`` are one call: functools keys a
-    default argument apart from the same value passed, and EVENTS' 293 filers
-    were parsed a second time because they were asked for the first way."""
+    The arguments are normalised before the memo: ``lru_cache`` keys
+    ``filer(cik)`` and ``filer(cik, True)`` apart, so EVENTS, calling the short
+    form, parsed every filer a second time (about a minute a build)."""
     return _filer(int(cik), bool(use_cache))
+
+
+# --- The parsed filer, kept between builds ---------------------------------------
+# Parsing ~500 company-facts documents (JSON decode, then the statements, the
+# trailing figures and the EPS history) took about a minute a build, and on most
+# nights none of them had changed. The parsed Filer is kept with what it was
+# built from, and reused only while all of it still holds:
+#   - every cached document it read (company facts, filing instances) is unchanged;
+#   - the filer's latest statement filing is the same, and not due a refetch;
+#   - no filing it left inside the processing margin has come due since;
+#   - the code that parses it is the same (a hash of the modules involved).
+# What the parse recorded about backfilled filings is kept and replayed with it.
+FILER_NAMESPACE = f"{NAMESPACE}/filer"
+# Per thread: a parse records only what it read itself.
+_local = threading.local()
+
+
+def _recorders() -> list[dict]:
+    if not hasattr(_local, "recording"):
+        _local.recording = []
+    return _local.recording
+
+
+def _record_read(path: Path) -> None:
+    for recorder in _recorders():
+        recorder["reads"].add(str(path))
+
+
+def _record_recheck(when: datetime) -> None:
+    for recorder in _recorders():
+        recorder["recheck"] = when if recorder["recheck"] is None else min(recorder["recheck"], when)
+
+
+@lru_cache(maxsize=1)
+def _code_version() -> str:
+    from ..compute import capex
+
+    digest = hashlib.sha256()
+    for path in (__file__, xbrl_instance.__file__, capex.__file__):
+        digest.update(Path(path).read_bytes())
+    return digest.hexdigest()[:16]
+
+
+def _file_stamp(path: str) -> tuple[int, int] | None:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def _filer_state(cik: int) -> dict:
+    checked = _checked.get(cik) or {}
+    latest = checked.get("latest")
+    return {"latest": latest.accession if latest else None, "error": "error" in checked}
+
+
+def _kept_filer(cik: int) -> dict | None:
+    path = cache.path_for(FILER_NAMESPACE, f"CIK{cik:010d}", ".pkl")
+    if not path.exists() or (_checked.get(cik) or {}).get("refetched"):
+        return None
+    try:
+        entry = pickle.loads(path.read_bytes())
+    except Exception:
+        return None
+    if entry.get("code") != _code_version() or entry.get("state") != _filer_state(cik):
+        return None
+    if entry.get("recheck") is not None and datetime.now(timezone.utc) >= entry["recheck"]:
+        return None
+    if any(_file_stamp(read) != stamp for read, stamp in entry.get("reads", {}).items()):
+        return None
+    return entry
+
+
+def _keep_filer(cik: int, result: Filer, recorder: dict, before: tuple[dict, dict]) -> None:
+    changed = lambda now, then: {k: v for k, v in now.items() if then.get(k) != v}  # noqa: E731
+    entry = {
+        "code": _code_version(), "state": _filer_state(cik), "recheck": recorder["recheck"],
+        "reads": {read: _file_stamp(read) for read in recorder["reads"]},
+        "backfilled": changed(_backfilled, before[0]), "unprocessed": changed(_unprocessed, before[1]),
+        "filer": result,
+    }
+    path = cache.path_for(FILER_NAMESPACE, f"CIK{cik:010d}", ".pkl")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".pkl.part")
+        temporary.write_bytes(pickle.dumps(entry, protocol=pickle.HIGHEST_PROTOCOL))
+        temporary.replace(path)
+    except OSError:
+        pass  # A filer not kept is parsed again next build, never wrong.
 
 
 @lru_cache(maxsize=None)
 def _filer(cik: int, use_cache: bool) -> Filer:
+    if use_cache and (entry := _kept_filer(cik)) is not None:
+        _backfilled.update(entry["backfilled"])
+        _unprocessed.update(entry["unprocessed"])
+        return entry["filer"]
+    recorder = {"reads": set(), "recheck": None}
+    before = (dict(_backfilled), dict(_unprocessed))
+    _recorders().append(recorder)
+    try:
+        result = _parse_filer(cik, use_cache)
+    finally:
+        _recorders().remove(recorder)
+    if use_cache:
+        _keep_filer(cik, result, recorder, before)
+    return result
+
+
+def _parse_filer(cik: int, use_cache: bool) -> Filer:
     facts, ciks = fetch_filer_facts(cik, use_cache=use_cache)
     # A period with neither revenue nor net income is not a set of statements:
     # an IFRS filer's few stray US-GAAP tags would otherwise pass as ten
@@ -1082,16 +1313,7 @@ ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{docume
 def submissions_recent(cik: int, *, use_cache: bool = True) -> dict:
     """The filer's recent-filings block (form, dates, items, documents), from
     the same cached submissions index the statement check reads."""
-    text = cache.fetch_text(
-        f"{NAMESPACE}/submissions",
-        f"CIK{cik:010d}",
-        lambda: _get(SUBMISSIONS_URL.format(cik=cik), 45.0),
-        kind="daily_file",
-        suffix=".json",
-        use_cache=use_cache,
-        compress=True,
-    )
-    return json.loads(text).get("filings", {}).get("recent", {})
+    return _recent_block(cik, use_cache=use_cache)
 
 
 INDEX_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{folder}/{accession}-index.html"

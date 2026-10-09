@@ -15,7 +15,7 @@ def pipeline(tmp_path, monkeypatch):
     cfg = config.load_config()
     ctx = SimpleNamespace(config=cfg, as_of="2026-09-23", holdings_as_of="2026-09-23",
                           log=BuildLog(), indices=[], closes=pd.DataFrame(),
-                          filled_sessions={}, session_check=None)
+                          filled_sessions={}, session_check=None, adjustments=[], price_jumps=[], diagnostics={})
     monkeypatch.setattr(build, "ARTIFACT_DIR", tmp_path)
     monkeypatch.setattr(build, "ensure_dirs", lambda: None)
     monkeypatch.setattr(build, "load_config", lambda: cfg)
@@ -167,3 +167,59 @@ def test_local_monitor_failure_is_not_carried(pipeline, monkeypatch):
     monkeypatch.setattr(build, "PANELS", {"monitor": lambda ctx, **kw: (_ for _ in ()).throw(RuntimeError("x"))})
     manifest = build.run(prune_cache=False)
     assert "monitor" in manifest["errors"]
+
+
+def test_the_manifest_says_how_long_each_part_of_the_build_took(pipeline, monkeypatch):
+    _, ctx, _ = pipeline
+
+    def slow(ctx):
+        import time
+        time.sleep(0.12)
+        ctx.diagnostics["valuation"] = {"seconds": {"fetch": 0.1}, "requests": {"asked": 3}}
+        return {"as_of": ctx.as_of}
+
+    def broken(ctx):
+        raise RuntimeError("upstream failure")
+
+    monkeypatch.setattr(build, "PANELS", {"valuation": slow, "markets": broken})
+    manifest = build.run(prune_cache=False)
+    timings = manifest["timings"]
+    assert set(timings["panels"]) == {"valuation", "markets"}      # a failed panel is timed too
+    assert timings["panels"]["valuation"] >= 0.1
+    assert timings["context"] >= 0 and "sec_check" in timings
+    # A panel's own account of its run reaches the manifest as written.
+    assert manifest["diagnostics"]["valuation"]["requests"] == {"asked": 3}
+
+
+def test_frame_values_reads_a_date_exactly_as_series_value_does():
+    import numpy as np
+    import pandas as pd
+    from market_recap.compute import monitor as M
+
+    index = pd.to_datetime(["2026-10-05", "2026-10-06", "2026-10-06", "2026-10-07"])
+    frame = pd.DataFrame({
+        "A": [1.0, 2.0, 3.0, 4.0],          # a duplicated date: the last print
+        "B": [1.0, 5.0, np.nan, 4.0],       # ... the last numeric one
+        "C": [1.0, np.inf, np.inf, 4.0],    # not finite: no value
+        "D": ["x", "7", "y", 4.0],          # text coerced, as series_value does
+    }, index=index)
+    for day in ("2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"):
+        fast = M.frame_values(frame, day)
+        slow = {c: M.series_value(frame, c, day) for c in frame.columns}
+        assert fast == {c: v for c, v in slow.items() if v is not None}, day
+    twice = pd.DataFrame([[1.0, 2.0]], columns=["A", "A"], index=index[:1])
+    assert M.frame_values(twice, "2026-10-05") == {}           # a column named twice is no column
+
+
+def test_a_clean_close_column_is_taken_as_it_is():
+    import numpy as np
+    import pandas as pd
+    from market_recap.compute import monitor as M
+
+    index = pd.date_range("2026-01-02", periods=6, freq="B")
+    clean = pd.Series([1.0, np.nan, 3.0, 4.0, np.nan, 6.0], index=index, name="AAPL")
+    fast = M._numeric_series(clean)
+    slow = M._numeric_series(clean.astype(object))           # the general path
+    pd.testing.assert_series_equal(fast, slow, check_dtype=False)
+    shuffled = clean.iloc[[3, 0, 5, 1, 4, 2]]                 # unsorted: the general path still sorts
+    pd.testing.assert_series_equal(M._numeric_series(shuffled), slow, check_dtype=False, check_freq=False)

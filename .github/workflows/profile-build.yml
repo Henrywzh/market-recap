@@ -5,9 +5,9 @@
 # no deploy, no cache save.
 #
 # Manual only. Run it again after a change meant to make the build faster and compare
-# panel_seconds with the previous run's manifest.
+# timings.panels with the previous run's manifest.
 #
-# Read panel_seconds in manifest.json, profile/<panel>.txt for the hottest
+# Read timings.panels in manifest.json, profile/<panel>.txt for the hottest
 # functions, refresh.log for what validation said, and valuation.json for the
 # P / tangible book and sub-sector groups on real filings.
 name: profile-build
@@ -90,7 +90,7 @@ jobs:
               raise SystemExit("no manifest")
           print(f"build_seconds: {m.get('build_seconds')}")
           print("| panel | seconds |\n|---|---:|")
-          for name, sec in sorted((m.get("panel_seconds") or {}).items(), key=lambda kv: -kv[1]):
+          for name, sec in sorted(((m.get("timings") or {}).get("panels") or {}).items(), key=lambda kv: -kv[1]):
               print(f"| {name} | {sec} |")
           PY
           } >> "$GITHUB_STEP_SUMMARY"

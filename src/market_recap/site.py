@@ -50,34 +50,51 @@ def import_map(web: Path = WEB_DIR) -> str:
 
 
 def live_contract(config: dict | None = None, *, weighted_names: list[str] | None = None) -> dict:
-    """What the intraday strip may fetch, derived from the dashboard contract.
+    """What the intraday quotes may fetch, derived from the dashboard contract.
 
     The quote function reads this file and fetches nothing else, so it is an
     allowlist as much as a list: the endpoint cannot be used to proxy
-    arbitrary symbols, and adding a watchlist name adds it here without a
-    second list to keep in step.
+    arbitrary symbols. ``weighted_names`` are the heat map's members, heaviest
+    first; they are the heat-map board and the trade desk's pre-market scan.
     """
     config = config or load_config()
     live = config.get("live", {})
-    universe = config["universe"]
-    equities: list[dict] = []
-    for ticker in universe.get("quote_tickers", []):
-        equities.append({"symbol": ticker, "label": ticker, "kind": "etf"})
-    for index in universe.get("indices", []):
-        equities.append({"symbol": index["symbol"], "label": index["key"], "kind": "index"})
-    for entry in config.get("watchlist", []):
-        equities.append({"symbol": entry["ticker"], "label": entry["ticker"], "kind": "watchlist"})
+    strip: list[dict] = [{"symbol": e["symbol"], "label": e["label"], "kind": e.get("kind", "index")}
+                         for e in live.get("strip", [])]
+    strip += [{"symbol": t, "label": t, "kind": "watch"} for t in live.get("strip_names", [])]
     seen: set[str] = set()
-    equities = [e for e in equities if not (e["symbol"] in seen or seen.add(e["symbol"]))]
+    strip = [e for e in strip if not (e["symbol"] in seen or seen.add(e["symbol"]))]
     limit = max(0, min(int(live.get("premarket_top_weight_names", 0)), 50))
     candidates = (weighted_names or [])[:limit] if weighted_names else live.get("premarket_movers", [])
     candidates = list(dict.fromkeys([*candidates, *(e["ticker"] for e in config.get("watchlist", []))]))
+    board = {"refresh_seconds": live.get("board_refresh_seconds", 300),
+             "closed_refresh_seconds": live.get("board_closed_refresh_seconds", 900)}
+    boards = {"indices": {**board, "series": True, "symbols": [e["symbol"] for e in live.get("index_board", [])],
+                          "labels": {e["symbol"]: e["label"] for e in live.get("index_board", [])}}}
+    if weighted_names:
+        boards["heatmap"] = {**board, "series": False, "symbols": list(dict.fromkeys(weighted_names))}
+    # Asked for only on REFRESH (SECTORS, MACRO, the Treasury table).
+    etfs = live.get("sector_etfs", [])
+    if etfs:
+        bench = live.get("sector_benchmark", "SPY")
+        boards["sector_etfs"] = {**board, "series": False, "symbols": [e["symbol"] for e in etfs] + [bench],
+                                 "labels": {**{e["symbol"]: e["sector"] for e in etfs}, bench: "benchmark"}}
+    commodities = config.get("macro", {}).get("commodities", {})
+    if commodities:
+        boards["macro"] = {**board, "series": False, "symbols": list(dict.fromkeys(commodities.values())),
+                           "labels": {symbol: label for label, symbol in commodities.items()}}
+    if live.get("yield_board"):
+        boards["yields"] = {**board, "source": "cnbc", "symbols": [e["symbol"] for e in live["yield_board"]],
+                            "labels": {e["symbol"]: e["label"] for e in live["yield_board"]}}
     return {
         "refresh_seconds": live.get("refresh_seconds", 60),
         "closed_refresh_seconds": live.get("closed_refresh_seconds", 300),
         "server_cache_seconds": live.get("server_cache_seconds", 15),
+        "board_cache_seconds": live.get("board_cache_seconds", 60),
+        "manual_min_seconds": live.get("manual_min_seconds", 30),
         "stale_after_seconds": live.get("stale_after_seconds", 1200),
-        "equities": equities,
+        "strip": strip,
+        "boards": boards,
         "overnight": [{"symbol": r["symbol"], "label": r["label"], "kind": "overnight", "region": r["region"]}
                       for r in live.get("overnight", [])],
         "premarket_movers": [{"symbol": symbol, "label": symbol, "kind": "premarket"} for symbol in candidates],

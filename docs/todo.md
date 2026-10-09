@@ -182,3 +182,92 @@ Open:
 - **Implied vs realised scorecard** over a season: the per-report implied
   move is now kept on each timeline report where the options snapshot has
   that afternoon; a season-level table needs a few weeks of snapshots.
+
+## 6. Paper to study: Asymmetric Reversals (NBER w35840, October 2026)
+
+Baldi-Lanfranchi, Collin-Dufresne and Daniel. Only the abstract has been
+read: a stock's return splits into SYS (systematic risk and public
+information releases, which continues) and RES (an orthogonal residual, which
+reverses); positive RES shocks take much longer to reverse than negative
+ones; a factor built on that (AIR) absorbs idiosyncratic volatility and
+several short-horizon anomalies. The NBER page gives no sample, universe,
+frequency, horizon or SYS/RES construction; read the PDF for those.
+
+A rough check on this site's data (2026-10-07, not committed): the current 503
+S&P 500 names over ten years, return minus market and sector-ex-self, equal
+weighted quintiles. Next-week residual: losers +0.04%, winners -0.04%, spread
++0.08% a week (t 1.1). Next month: +0.18% (t 0.6). The sign is right, the size
+is small, and no asymmetry shows. It is not a test of the paper: the residual
+is cruder than SYS/RES, the universe is large caps with survivorship bias.
+
+To decide, after reading the paper:
+
+- Whether SYS (the part tied to public information) can be built from what the
+  site already has: earnings releases, EPS revisions, the event cards.
+- Whether the INDUSTRIES "sold off, estimates held" screen should be read as
+  a RES-style signal and scored forward, which needs archived daily history.
+- Whether a wider universe than the S&P 500 is available for a fair replication.
+
+## 7. FTSE 100 as a second index (2026-10-08)
+
+Idea: price, sector rotation and breadth for the 100 UK names, as NDX is
+handled (`[[universe.indices]]`). Nothing built; nothing has been tested yet
+beyond the Yahoo `.L` charts of 28 names.
+
+What is known:
+
+- Constituents: Wikipedia's FTSE 100 page has a 100-row table (company, EPIC
+  ticker, ICB sector) listing the 1 October 2026 changes; `sources/wikipedia.py`
+  does the same for the S&P 500. Community-edited, so check the row count.
+- Weights should come from the issuer's file, as the repo does for SPY and
+  QNDX. iShares Core FTSE 100 is the candidate; `sources/ishares.py` is wired
+  to the US site and whether the London fund downloads in the same shape is
+  untested.
+- Prices: Yahoo `.L` quotes are in pence (GBp), not pounds; a USD view needs
+  GBP/USD.
+- Classification is ICB, one level, no sub-industry. 100 names over about 25
+  sectors is about 4 each, so most groups fall under `min_members` and
+  `thin_below`: INDUSTRIES would work at sector level only.
+- Open: EPS revisions, forward P/E and its own-history percentile come from
+  US-filer sources. No free source for UK estimates has been checked.
+
+To decide: build the price layer first (constituents, weights, prices,
+rotation, breadth) and look for a UK estimates source before promising the
+valuation columns. The same pattern would extend to FTSE 250 or the euro area.
+
+## 8. Implied move on the event card (2026-10-09)
+
+The card shows `none in snapshot` for most reporters. Two causes found, and
+a source that can fill in the past.
+
+- **Expiry gap.** `compute.options.select_expiries` picks the nearest expiry
+  plus the ones around fixed targets (`target_days`), not the first expiry
+  after each reporter's date. JPM reports 13 Oct and needs 16 Oct; the
+  snapshot holds 9 Oct, 30 Oct, 6 Nov. `build_universe` already knows who
+  reports; pass each reporter's date through to the expiry choice.
+- **Stale snapshot.** The 6 Oct build used the 30 Sep snapshot while the
+  `snapshots` branch had options through 7 Oct. Check what
+  `snapshot_store.latest_options_summary` takes and why.
+- **No history from Yahoo.** Free chains are current only; our own snapshots
+  start 30 Sep. Past implied moves cannot be fetched from yfinance.
+- **Alpaca (paper key, free) can rebuild them.** Tried on JPM, PEP, JNJ,
+  UNH, GS, C: 47 of 48 reports back to Oct 2024. Method: spot at the close
+  before the reaction session, the first expiry with contracts on or after
+  it, the strike nearest spot, call + put daily-bar close / spot. Expired
+  contracts are listed by `/v2/options/contracts?status=inactive`; prices from
+  `/v1beta1/options/bars`. Caveats: bar close is the last trade, not a mid
+  (six of 48 had under 20 contracts: PEP once traded 1); expiries sit 1-4
+  days past the report, so the figure carries a few ordinary days; the
+  paper-account data policy may change.
+- Over the 41 liquid ones: mean implied 4.9%, mean |move| 3.8%, move beyond
+  implied 11 times, median |move| / implied 0.75. Six large caps, not a
+  market result.
+
+Proposed order: (1) snapshot the first expiry after each reporter's date and
+fix the stale-snapshot read, no new secret; (2) local script backfilling the
+straddle per past report into `events/{SYM}.json` history (drop under 20
+contracts, show days to expiry), drawn beside the reaction bars; (3) event
+premium = short expiry IV less the next-month IV, from the snapshots' multi-
+expiry `atm_iv`; (4) IV level and percentile once the snapshots hold 2-3
+months. Open: whether to put the Alpaca key in GitHub secrets so the nightly
+build can use it; otherwise it stays a local script. Futu OpenD untested.

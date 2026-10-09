@@ -2,7 +2,7 @@
 // each index, with the closes that flip it tomorrow; and FINRA short interest
 // for the members, the watchlist and the broad ETFs.
 
-import { el, card, num, metaRow, tag, DASH } from '../fmt.js';
+import { el, card, num, metaRow, table, tag, DASH } from '../fmt.js';
 import { render, timeLines } from '../charts.js';
 import { rangeSwitch, sliceRange, initialRange } from '../range.js';
 import { spark } from '../spark.js';
@@ -287,4 +287,20 @@ export default function renderPositioning(root, data) {
   root.append(blackoutSection(data.blackout));
   root.append(el('h2', { class: 'section-title', text: 'INSIDER BUYING' }));
   root.append(insiderSection(data.insiders));
+
+  const flows = data.fund_flows;
+  if (flows?.categories?.length) {
+    const latestWeek = flows.categories.map((r) => r.week_ended).sort().at(-1);
+    const rows = flows.categories.filter((r) => r.week_ended === latestWeek).map((r) => el('tr', {}, [
+      el('td', { text: r.category.replaceAll('_', ' ') }),
+      el('td', { class: r.combined == null ? 'dim' : r.combined < 0 ? 'down' : 'up', text: r.combined == null ? DASH : num(r.combined, 0) }),
+      el('td', { class: 'dim', text: r.etf == null ? DASH : num(r.etf, 0) }),
+      el('td', { class: 'dim', text: r.mutual_fund == null ? DASH : num(r.mutual_fund, 0) }),
+    ]));
+    root.append(el('h2', { class: 'section-title', text: 'INDUSTRY FUND FLOWS' }));
+    root.append(card(`ICI LONG-TERM FLOWS · WEEK ENDED ${latestWeek}`, el('span', { class: flows.status === 'ok' ? 'dim' : 'down', text: flows.status === 'ok' ? 'USD million' : 'LAST CAPTURE · DIRECT REFRESH FAILED' }), [
+      table(['CATEGORY', 'COMBINED', 'ETF ISSUANCE', 'MUTUAL FUNDS'], rows),
+      el('div', { class: 'field-note', text: flows.note }),
+    ]));
+  }
 }

@@ -13,6 +13,7 @@ it raises, carries it.
 from __future__ import annotations
 
 from datetime import date
+import gzip
 import json
 import os
 from pathlib import Path
@@ -94,3 +95,28 @@ def company_news(symbol: str, start: date, end: date, today: date) -> list[dict]
                             kind=kind, suffix=".json", compress=True)
     rows = json.loads(text)
     return rows if isinstance(rows, list) else []
+
+
+def recent_window(symbol: str, today: date, days: int, *, max_age: int) -> list[dict] | None:
+    """The newest ``days``-long window already on disk for ``symbol`` that
+    ended at most ``max_age`` days before ``today``, without asking Finnhub;
+    None when there is none. A large-move window (a few days around one
+    session) is not this: only a window exactly ``days`` long counts."""
+    folder = cache.path_for(NAMESPACE, "probe").parent
+    best = None
+    for path in folder.glob(f"{symbol}-*.json.gz"):
+        found = re.fullmatch(re.escape(symbol) + r"-(\d{4}-\d{2}-\d{2})-(\d{4}-\d{2}-\d{2})\.json\.gz", path.name)
+        if not found:
+            continue
+        start, end = (date.fromisoformat(d) for d in found.groups())
+        if (end - start).days != days or end > today or (today - end).days > max_age:
+            continue
+        if best is None or end > best[0]:
+            best = (end, path)
+    if best is None:
+        return None
+    try:
+        rows = json.loads(gzip.decompress(best[1].read_bytes()).decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return rows if isinstance(rows, list) else None

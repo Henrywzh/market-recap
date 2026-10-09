@@ -673,41 +673,12 @@ def test_aggregates_carry_a_ptbv_history_beside_the_pe_history():
     assert len(full["Financials"]["ptbv"]) == len(full["Financials"]["pe"]) and full["Financials"]["coverage_ptbv"] == 1.0
 
 
-# --- The split schedule must answer exactly as the series did ----------------------------
-def _old_split_factor_after(splits, date):
-    """The implementation SplitSchedule replaced, kept as the reference."""
-    if splits is None:
-        return 1.0
-    ratios = splits.dropna()
-    return float(ratios[ratios.index > pd.Timestamp(date)].prod()) if not ratios.empty else 1.0
-
-
-def test_split_schedule_agrees_bit_for_bit_with_the_series_it_replaced():
-    import random
-    rng = random.Random(7)
-    days = pd.bdate_range("2014-01-01", "2026-09-30")
-    for _ in range(300):
-        series = pd.Series(float("nan"), index=days)
-        for stamp in rng.sample(list(days), rng.randint(0, 5)):
-            series[stamp] = rng.choice([2.0, 3.0, 4.0, 10.0, 20.0, 1.5, 0.1, 0.5, 1 / 3, 0.2])
-        schedule = V.SplitSchedule(series)
-        for _ in range(25):
-            date = (pd.Timestamp("2013-06-01") + pd.Timedelta(days=rng.randint(0, 4900))).strftime("%Y-%m-%d")
-            assert V.split_factor_after(schedule, date) == _old_split_factor_after(series, date)
-            assert V.split_factor_after(series, date) == _old_split_factor_after(series, date)
-
-
-def test_no_splits_is_a_factor_of_one():
-    assert V.split_factor_after(None, "2020-01-01") == 1.0
-    assert V.split_factor_after(pd.Series(dtype=float), "2020-01-01") == 1.0
-    assert V.split_factor_after(pd.Series([float("nan")], index=[pd.Timestamp("2021-01-04")]), "2020-01-01") == 1.0
-
-
-def test_a_schedule_passed_to_the_step_builders_changes_nothing():
+# --- A split lookup passed to the step builders changes nothing ---------------------------
+def test_a_split_lookup_passed_to_the_step_builders_changes_nothing():
     history = sec.eps_history(_annual_bank_facts())
     split = pd.Series([2.0], index=[pd.Timestamp("2025-06-01")])
-    assert V.eps_steps(history, V.SplitSchedule(split)) == V.eps_steps(history, split)
-    assert V.tbv_steps(history, V.SplitSchedule(split)) == V.tbv_steps(history, split)
+    assert V.eps_steps(history, V.split_lookup(split)) == V.eps_steps(history, split)
+    assert V.tbv_steps(history, V.split_lookup(split)) == V.tbv_steps(history, split)
 
 
 # --- The ways real filers report tangible book (found with scripts/probe_book_tags.py) ---------
@@ -791,3 +762,19 @@ def test_the_history_carries_a_10k_only_line_too():
     book = [q["book"] for q in sec.eps_history(facts)]
     assert [b["goodwill"] for b in book] == [100e6, 100e6, 100e6]     # 2024's, missing, is the year before's
     assert [round(v, 2) for _, _, v in V.tbv_steps(sec.eps_history(facts), None)] == [8.30, 9.30, 10.30]
+
+
+def test_a_split_lookup_gives_the_same_factor_as_filtering_the_series():
+    import numpy as np
+    days = pd.date_range("2016-01-04", "2026-10-07", freq="B")
+    splits = pd.Series(np.nan, index=days)
+    splits[pd.Timestamp("2020-08-31")] = 4.0
+    splits[pd.Timestamp("2024-06-10")] = 10.0
+    splits[pd.Timestamp("2025-01-02")] = 1 / 3
+    after = V.split_lookup(splits)
+    for date in ("2015-01-01", "2020-08-28", "2020-08-31", "2022-03-01", "2024-06-10", "2025-01-02", "2026-10-07"):
+        ratios = splits.dropna()
+        assert after(date) == float(ratios[ratios.index > pd.Timestamp(date)].prod()), date
+        assert V.split_factor_after(splits, date) == after(date)
+    assert V.split_lookup(None)("2020-01-01") == 1.0
+    assert V.split_lookup(pd.Series(np.nan, index=days))("2020-01-01") == 1.0

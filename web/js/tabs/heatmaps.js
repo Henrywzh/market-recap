@@ -2,8 +2,25 @@ import { el, card, num, pct, money, aum, dirClass, periodSwitch, sectionTitle, n
 import { drawTreemap, returnColor } from '../treemap.js';
 import { render, multiLine } from '../charts.js';
 import { tickerHref } from '../routes.js';
+import { createFeed } from '../live-feed.js';
 
 const ETF_BASE = 'artifacts/etfs';
+const LIVE = 'LIVE';
+
+function clock(seconds) {
+  if (typeof seconds !== 'number') return DASH;
+  return new Date(seconds * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York', hour12: false }) + ' ET';
+}
+
+// What the LIVE tiles are: today's move so far against yesterday's close,
+// how many names answered, and how old the answer is.
+function liveCaption(state) {
+  const body = state.body;
+  if (!body) return state.error ? `LIVE prices unavailable: ${state.error}. Tiles are blank, not filled from the close.` : 'Loading live prices…';
+  const priced = body.quotes.filter((q) => q.price !== null && q.price !== undefined).length;
+  return `LIVE: today's move against the previous close, ${priced} of ${body.quotes.length} names priced (Yahoo, unofficial, every `
+    + `${Math.round((body.refresh_seconds || 300) / 60)} minutes while the session is open; the time is in the card's corner).`;
+}
 
 // Percent move that saturates a constituent tile's colour. A single day and a
 // multi-month window are not comparable on one scale: ±3% is a dramatic
@@ -44,36 +61,68 @@ export default function renderHeatmaps(root, data) {
   const [defaultPeriod] = periods;
 
   // ---------------- S&P 500 by official weight --------------------------
+  // LIVE colours the tiles by today's move so far (the quote function's
+  // heat-map board, every few minutes); the other windows are the build's
+  // closes. During the session LIVE is shown first unless the reader has
+  // picked a window; after the close the page opens on the close.
   root.append(sectionTitle('S&P 500 HEAT MAP', 'SIZED BY OFFICIAL SPY WEIGHT · COLOURED BY RETURN'));
   const stockNode = el('div', { class: 'treemap' });
+  const liveNote = el('div', { class: 'field-note' });
+  const stockPeriods = [LIVE, ...periods];
   let stockPeriod = defaultPeriod;
+  let picked = false;
+  let live = new Map();
+
+  const valueOf = (row, period) => (period === LIVE ? live.get(row.ticker)?.change_pct ?? null : row.returns[period]);
 
   const drawStocks = (period) => {
     stockPeriod = period;
     const bySector = new Map();
     data.constituents.forEach((row) => {
-      const ret = row.returns[period];
+      const ret = valueOf(row, period);
       if (!bySector.has(row.sector)) bySector.set(row.sector, []);
       bySector.get(row.sector).push({
         key: row.ticker,
         value: row.weight || 0,
-        color: returnColor(ret, period === defaultPeriod ? RETURN_COLOUR_CAP.day : RETURN_COLOUR_CAP.period),
+        color: returnColor(ret, period === defaultPeriod || period === LIVE ? RETURN_COLOUR_CAP.day : RETURN_COLOUR_CAP.period),
         label: row.ticker,
         sublabel: ret === null || ret === undefined ? DASH : pct(ret),
         payload: row,
       });
     });
+    liveNote.textContent = period === LIVE ? liveCaption(feed.state) : '';
     drawTreemap(stockNode, [...bySector.entries()].map(([group, items]) => ({ group, items })),
-      (row, event) => showTooltip(
-        `<div class="t-head">${row.ticker} <span class="${dirClass(row.returns[period])}">${pct(row.returns[period])}</span></div>
-         <div class="t-meta">${row.name}<br>${row.sector} · ${row.sub_sector}<br>weight ${num(row.weight, 2)}% · $${num(row.price)}</div>
-         <table>${rowsHtml(row.returns, periods, (v) => pct(v))}</table>`, event),
+      (row, event) => {
+        const now = live.get(row.ticker);
+        const head = valueOf(row, period);
+        showTooltip(
+          `<div class="t-head">${row.ticker} <span class="${dirClass(head)}">${pct(head)}</span>${period === LIVE ? ' <span class="dim">LIVE</span>' : ''}</div>
+           <div class="t-meta">${row.name}<br>${row.sector} · ${row.sub_sector}<br>weight ${num(row.weight, 2)}% · close $${num(row.price)}`
+          + (now && now.price !== null && now.price !== undefined ? `<br>live $${num(now.price)} · ${pct(now.change_pct)} · ${clock(now.time)}` : '')
+          + `</div><table>${rowsHtml(row.returns, periods, (v) => pct(v))}</table>`, event);
+      },
       hideTooltip,
       (row) => { hideTooltip(); location.hash = tickerHref(row.ticker); });
   };
 
-  root.append(card(`S&P 500 CONSTITUENTS (${data.constituents.length} NAMES)`,
-    periodSwitch(periods, defaultPeriod, drawStocks), stockNode));
+  const stockSwitch = periodSwitch(stockPeriods, defaultPeriod, (period) => { picked = true; drawStocks(period); });
+  const stockCard = card(`S&P 500 CONSTITUENTS (${data.constituents.length} NAMES)`,
+    el('div', { class: 'tag-row' }, [stockSwitch]), [liveNote, stockNode]);
+  root.append(stockCard);
+  const feed = createFeed('api/quotes?board=heatmap', {
+    node: stockNode,
+    onData: (body) => {
+      live = new Map(body.quotes.filter((q) => q.price !== null && q.price !== undefined).map((q) => [q.symbol, q]));
+      if (!picked && body.session?.open && stockPeriod !== LIVE) {
+        [...stockSwitch.children].find((b) => b.textContent === LIVE)?.click();
+        picked = false;              // the page chose LIVE, not the reader
+      } else if (stockPeriod === LIVE) {
+        drawStocks(LIVE);
+      }
+    },
+    onTick: (state) => { if (stockPeriod === LIVE) liveNote.textContent = liveCaption(state); },
+  });
+  stockCard.querySelector('.card-head').append(feed.controls);
 
   // ---------------- US ETFs by published net flow -----------------------
   root.append(sectionTitle('US ETF HEAT MAP', 'SIZED BY AUM · COLOURED BY PUBLISHED NET FLOW'));

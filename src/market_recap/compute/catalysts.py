@@ -10,12 +10,14 @@ changes (a national day of mourning) are not knowable in advance.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from dateutil.easter import easter
 import pandas as pd
 
 from . import periods
+from ..config import MARKET_TIMEZONE
 
 MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY = range(7)
 QUARTER_END_MONTHS = (3, 6, 9, 12)
@@ -82,6 +84,22 @@ SPECIAL_CLOSURES = {
 
 def is_session(day: date) -> bool:
     return day.weekday() < SATURDAY and day not in nyse_holidays(day.year) and day not in SPECIAL_CLOSURES
+
+
+def latest_completed_session(now: datetime | None = None) -> date:
+    """Latest NYSE close, allowing fifteen minutes for the daily bars to settle.
+
+    Use market time even when the runner is already on the next UTC day;
+    weekends, holidays and 13:00 early closes share the existing calendar.
+    """
+    ny = (now or datetime.now(ZoneInfo(MARKET_TIMEZONE))).astimezone(ZoneInfo(MARKET_TIMEZONE))
+    day = ny.date()
+    settled = time(13, 15) if day in nyse_early_closes(day.year) else time(16, 15)
+    if ny.time() < settled:
+        day -= timedelta(days=1)
+    while not is_session(day):
+        day -= timedelta(days=1)
+    return day
 
 
 def sessions(start: date, end: date) -> list[date]:

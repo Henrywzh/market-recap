@@ -123,6 +123,28 @@ def test_missing_observation_date_is_unknown_not_current():
     assert freshness_status(pd.Timestamp.today(), "daily_close") == "current"
 
 
+def test_sec_index_freshness_uses_the_fetch_date_for_a_quiet_filer(monkeypatch):
+    from datetime import datetime, timezone
+    checked = datetime(2026, 10, 4, tzinfo=timezone.utc)
+    filing = sec.LatestFiling("10-Q", "example", "2026-09-11", datetime(2026, 9, 11, tzinfo=timezone.utc))
+    monkeypatch.setattr(sec, "_checked", {})
+    monkeypatch.setattr(sec, "latest_statement_filing", lambda cik: filing)
+    monkeypatch.setattr(sec.cache, "modified", lambda path: checked if path.parent.name == "submissions" else None)
+    sec._needs_refetch(1)
+    out = sec.filing_check()
+    assert out["latest_filed"] == "2026-09-11"
+    assert out["index_observed_date"] == "2026-10-04"
+
+
+def test_sec_index_freshness_keeps_the_oldest_cached_index(monkeypatch):
+    from datetime import datetime, timezone
+    monkeypatch.setattr(sec, "_checked", {
+        1: {"index_fetched": datetime(2026, 10, 4, tzinfo=timezone.utc)},
+        2: {"index_fetched": datetime(2026, 9, 1, tzinfo=timezone.utc)},
+    })
+    assert sec.filing_check()["index_observed_date"] == "2026-09-01"
+
+
 def test_ishares_historical_sheet_parses_nav_and_units():
     """The flow series depends entirely on this sheet being read correctly."""
     workbook = """<?xml version="1.0"?>
@@ -366,8 +388,10 @@ def test_the_par_curve_is_fetched_once_per_year_however_many_panels_ask(monkeypa
     assert first.loc[first["tenor"] == "10Y", "yield_pct"].iloc[0] == 4.12
 
 
-def test_filer_is_one_cache_entry_however_it_is_called(monkeypatch):
+def test_filer_is_one_cache_entry_however_it_is_called(monkeypatch, tmp_path):
+    from market_recap import cache
     from market_recap.sources import sec
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)       # the parsed filer is also kept on disk between builds
     calls = []
     monkeypatch.setattr(sec, "fetch_filer_facts", lambda cik, use_cache=True: calls.append((cik, use_cache)) or
                         ({"entityName": "X", "facts": {}}, [cik]))

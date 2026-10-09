@@ -17,23 +17,27 @@ from each image's pixels:
 Resolution: 400 pixels span the axis, so a kit at a tenth of the axis height
 reads to about +/-2.5%. The site asks for use by reference; only the derived
 changes are kept, with a link to the page, and the images are not
-republished. robots.txt allows these pages.
+republished. robots.txt allows these pages. Requests carry this project's own User-Agent: the
+browser one this module once sent was never needed.
 """
 
 from __future__ import annotations
 
 from datetime import date, timedelta
+import json
+from pathlib import Path
 import re
+import statistics
 
 import numpy as np
 
 from .. import cache
 from ..compute import png
+from ..config import REPO_ROOT
 from .http import get_bytes, get_text
 
 BASE = "https://uk.pcpartpicker.com/trends/price/{kind}/"
 NAMESPACE = "pcpartpicker"
-USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
 # The plot box every chart shares, in pixels.
 LEFT, RIGHT, TOP, ZERO = 55, 1149, 27, 427
 GRID_ROWS = [27, 94, 161, 227, 294, 361, 427]
@@ -93,7 +97,11 @@ def read_line(pixels: np.ndarray, image_date: date) -> list[tuple[str, float]]:
 
 
 def _page(kind: str, use_cache: bool) -> str:
-    return cache.fetch_text(NAMESPACE, f"{kind}-page", lambda: get_text(BASE.format(kind=kind), user_agent=USER_AGENT, retries=1),
+    if not use_cache:
+        # An unattended refresh must report a failed fetch, rather than stamp
+        # an old cached page with a new fetched_at timestamp.
+        return get_text(BASE.format(kind=kind), retries=1)
+    return cache.fetch_text(NAMESPACE, f"{kind}-page", lambda: get_text(BASE.format(kind=kind), retries=1),
                             kind="daily_file", suffix=".html", use_cache=use_cache)
 
 
@@ -105,9 +113,10 @@ def fetch(kind: str, *, use_cache: bool = True) -> tuple[list[dict], list[str]]:
     for item in images(_page(kind, use_cache)):
         name = re.sub(r"[^A-Za-z0-9]+", "-", item["title"]).strip("-")
         try:
-            data = cache.fetch_bytes(NAMESPACE, f"{kind}-{name}-{item['image_date']}",
-                                     lambda: get_bytes(item["url"], user_agent=USER_AGENT, retries=1),
-                                     kind="archive", suffix=".png", use_cache=use_cache)
+            data = (cache.fetch_bytes(NAMESPACE, f"{kind}-{name}-{item['image_date']}",
+                                      lambda: get_bytes(item["url"], retries=1),
+                                      kind="archive", suffix=".png")
+                    if use_cache else get_bytes(item["url"], retries=1))
             series = read_line(png.decode(data), date.fromisoformat(item["image_date"]))
         except Exception as exc:  # noqa: BLE001 - one unreadable chart must not drop the rest
             failed.append(f"{item['title']}: {str(exc)[:120]}")
@@ -139,10 +148,138 @@ def summary(series: list[tuple[str, float]], image_date: date) -> dict:
     return out
 
 
-def weekly_index(series: list[tuple[str, float]]) -> dict:
+def weekly_index(series: list[tuple[str, float]], dates: list[str] | None = None) -> dict:
     """The line as an index, first reading = 100, one point a week."""
     if not series:
         return {"dates": [], "values": []}
+    series = sorted(series)
     base = series[0][1]
-    picked = series[::7] + ([series[-1]] if (len(series) - 1) % 7 else [])
-    return {"dates": [d for d, _ in picked], "values": [round(100 * h / base, 1) if base else None for _, h in picked]}
+    if dates is None:
+        first, last = date.fromisoformat(series[0][0]), date.fromisoformat(series[-1][0])
+        day = first + timedelta(days=(-first.weekday()) % 7)
+        dates = []
+        while day <= last:
+            dates.append(day.isoformat())
+            day += timedelta(days=7)
+        if not dates or dates[-1] != last.isoformat():
+            dates.append(last.isoformat())
+    values = []
+    by_day = dict(series)
+    for day in dates:
+        current = by_day.get(day)
+        values.append(round(100 * current / base, 1) if current is not None and base > 3 else None)
+    return {"dates": dates, "values": values}
+
+
+FEED_PATH = REPO_ROOT / "data" / "feeds" / "pcpartpicker.json"
+SCHEMA = 1
+STALE_DAYS = 4
+SKIPPED = (
+    "not fetched by the cloud build: PCPartPicker refuses cloud servers (HTTP 403), "
+    "and no home-connection snapshot is in data/feeds/pcpartpicker.json. "
+    "Its bot protection is not worked around."
+)
+_FAMILIES = ("DDR5", "DDR4", "AMD", "Intel")
+
+
+def family(title: str) -> str:
+    return next((key for key in _FAMILIES if title.startswith(key)), "other")
+
+
+def _aggregate(kind: str, charts: list[dict]) -> dict:
+    """Charts reduced to ratios on shared calendar dates; no image in the feed."""
+    rows = []
+    charts = [chart for chart in charts if chart["series"]]
+    observed = [day for chart in charts for day, _ in chart["series"]]
+    dates = weekly_index([(day, 100.0) for day in sorted(set(observed))])["dates"]
+    for chart in charts:
+        day = date.fromisoformat(chart["image_date"])
+        rows.append({"title": chart["title"], "family": family(chart["title"]), "image_date": chart["image_date"],
+                     **summary(chart["series"], day), "index": weekly_index(chart["series"], dates)})
+    families = {}
+    for name in sorted({row["family"] for row in rows}):
+        members = [row for row in rows if row["family"] == name]
+        agg = {}
+        for key in ("chg_1m", "chg_3m", "chg_6m", "chg_12m"):
+            vals = [row[key] for row in members if row.get(key) is not None]
+            agg[key] = round(statistics.median(vals), 1) if vals else None
+        series = []
+        for i in range(len(dates)):
+            vals = [member["index"]["values"][i] for member in members
+                    if i < len(member["index"]["values"]) and member["index"]["values"][i] is not None]
+            series.append(round(statistics.median(vals), 1) if vals else None)
+        families[name] = {**agg, "count": len(members), "index": {"dates": dates, "values": series}}
+    return {"rows": rows, "families": families, "page": BASE.format(kind=kind)}
+
+
+def snapshot(*, use_cache: bool = True) -> dict:
+    """Both trend pages, as ratios only."""
+    from ..util import utc_now_iso
+    out: dict = {"schema": SCHEMA, "fetched_at": utc_now_iso(), "failed": []}
+    for kind in ("memory", "cpu"):
+        charts, failed = fetch(kind, use_cache=use_cache)
+        out["failed"].extend(failed)
+        out[kind] = _aggregate(kind, charts)
+    return out
+
+
+def write_feed(payload: dict, path: Path | None = None) -> Path:
+    path = path or FEED_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = json.dumps({
+        "schema": SCHEMA,
+        "fetched_at": payload.get("fetched_at"),
+        "failed": payload.get("failed") or [],
+        "memory": payload.get("memory") or {},
+        "cpu": payload.get("cpu") or {},
+    }, indent=2, sort_keys=True)
+    temporary = path.with_suffix(".json.part")
+    temporary.write_text(body + chr(10), encoding="utf-8")
+    temporary.replace(path)
+    return path
+
+
+def _chart_dates(payload: dict) -> list[str]:
+    found = []
+    for kind in ("memory", "cpu"):
+        rows = (payload.get(kind) or {}).get("rows") or []
+        dates = [row.get("image_date") for row in rows if row.get("image_date")]
+        if dates:
+            found.extend(dates)
+    return found
+
+
+def load_feed(as_of: date, path: Path | None = None) -> dict:
+    """The committed snapshot. Missing means the cloud build has nothing to show.
+    A file that is present but unreadable is an error, not an empty card."""
+    path = path or FEED_PATH
+    if not path.exists():
+        return {"skipped": SKIPPED}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"PCPartPicker feed {path} is unreadable: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("PCPartPicker feed must be an object")
+    if payload.get("schema") != SCHEMA:
+        raise RuntimeError(f"PCPartPicker feed schema {payload.get('schema')!r}")
+    for kind in ("memory", "cpu"):
+        section = payload.get(kind)
+        if not isinstance(section, dict) or not isinstance(section.get("rows"), list) or not section["rows"]:
+            raise RuntimeError(f"PCPartPicker feed has no {kind} charts")
+        if not isinstance(section.get("families"), dict):
+            raise RuntimeError(f"PCPartPicker feed has invalid {kind} families")
+        for row in section["rows"]:
+            try:
+                date.fromisoformat(row["image_date"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError(f"PCPartPicker feed has invalid {kind} chart date") from exc
+    dates = _chart_dates(payload)
+    if not dates:
+        raise RuntimeError("PCPartPicker feed has no chart date")
+    out = {**payload, "from_feed": True}
+    oldest = min(dates)
+    age = (as_of - date.fromisoformat(oldest)).days
+    if age > STALE_DAYS:
+        out["stale"] = f"last chart is {oldest}, {age} days before this build"
+    return out

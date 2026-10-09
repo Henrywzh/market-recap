@@ -66,16 +66,94 @@ commodity_history = "10y"
 above_ma_windows = [5, 20, 50, 100, 200]
 slope_lookbacks = [5, 20, 50, 100, 200]
 
-# Intraday strip on MARKETS, fetched in the reader's browser through
-# functions/api/quotes.js. It sits beside the recap, never inside it: every
-# other figure on the page is the nightly build's close. The symbols are the
-# quote strip, the indices and the watchlist above; only the rates are named
-# here, because they come from a different publisher (CNBC).
+# Corporate actions the price feed does not adjust for (see
+# src/market_recap/corporate_actions.py). Yahoo adjusts for splits and
+# dividends but not spin-offs, so a spun-off parent shows the distribution as a
+# loss. ``ratio`` is shares of ``distributed`` received per share held, read
+# from the company's filing; the adjustment factor is computed from both lines'
+# prices on ``ex_date`` and is not typed in. The build downloads both lines
+# for that even after the index drops one; if either still has no price on
+# ``ex_date``, history before the date is dropped instead.
+[[corporate_actions]]
+ticker = "CTVA"
+kind = "spin-off"
+ex_date = "2026-10-01"
+distributed = "VYLR"
+ratio = 1.0
+source = "https://www.sec.gov/Archives/edgar/data/0001755672/000119312526414490/ck0001755672-20260929.htm"
+note = "Corteva distributed its seed business, Vylor Inc., one share per Corteva share (record date 2026-09-24); Vylor began regular-way trading on 2026-10-01."
+
+# A recent one-session move this large with no split on record is listed as a
+# notice, because it may be a distribution that needs an entry above. News
+# produces these too (a bid, an earnings gap), so it is a prompt to look and
+# never blocks a build.
+[price_checks]
+drop_pct = 60
+rise_pct = 150
+sessions = 10
+
+# INDUSTRIES view (src/market_recap/compute/industries.py): each sub-industry
+# and sector as the median of its members, beside the evidence that tells a
+# fall the estimates explain from one they do not. Evidence is listed, never
+# scored (docs/information_architecture.md); a reading is flagged only where it
+# crosses a threshold written here beforehand.
+[industries]
+min_members = 3             # a group of fewer names is not a reading and is not shown
+thin_below = 5              # fewer names than this: shown, marked thin (a median of three is noise)
+ma_sessions = 200           # trend: the share of names above their average of this many sessions
+# A group is SOLD OFF when its median 1M return is at or below this and at
+# least this share of its names fell over the month (one name's crash is not
+# an industry's).
+sold_off_return_pct = -6.0
+sold_off_down_share = 0.8
+# Estimates are CUT when the median FY1 EPS revision is below either figure
+# (percent over 30 and 90 days). A revision under half a percent is noise: with
+# the 90-day line at zero, Insurance Brokers' median of -0.04% read as a cut.
+# Only names whose EPS is positive are read: a percentage off a loss is not a
+# revision.
+estimates_cut_30d_pct = -0.5
+estimates_cut_90d_pct = -0.5
+# P/E is CHEAP against its own ten years at or below this percentile.
+cheap_percentile = 50.0
+# Sectors where P/E is not the multiple (a REIT is valued on funds from
+# operations): neither the forward P/E nor its percentile is shown.
+no_pe_sectors = ["Real Estate"]
+
+# Intraday prices, fetched in the reader's browser through
+# functions/api/quotes.js (Yahoo's spark, 20 symbols a call; CNBC for the
+# yields). Beside the recap, never inside it: every other figure on the page
+# is the nightly build's close. The strip leads MARKETS and OVERVIEW; the
+# boards are the heat map's members (from the heat-map artifact) and the index
+# charts on INDICES.
 [live]
-refresh_seconds = 60        # automatic refresh while the session is open and the tab visible
+refresh_seconds = 60        # the strip, while the session is open and the tab visible
 closed_refresh_seconds = 300  # how often a closed session checks whether it has opened
 server_cache_seconds = 15   # repeated clicks and readers share one fetch per window
 stale_after_seconds = 1200  # during the session, an older price is marked STALE
+board_refresh_seconds = 300   # heat map and index charts, while the session is open
+board_closed_refresh_seconds = 900
+board_cache_seconds = 60
+manual_min_seconds = 30     # REFRESH asks again, but not sooner than this after the last fetch
+# The strip: cash indices, volatility, the dollar and two commodities (Yahoo
+# chart symbols), then a second row of names to watch.
+strip = [
+  { symbol = "^GSPC", label = "SPX", kind = "index" },
+  { symbol = "^NDX", label = "NDX", kind = "index" },
+  { symbol = "^RUT", label = "RUT", kind = "index" },
+  { symbol = "^DJI", label = "DOW", kind = "index" },
+  { symbol = "^VIX", label = "VIX", kind = "macro" },
+  { symbol = "DX-Y.NYB", label = "DXY", kind = "macro" },
+  { symbol = "CL=F", label = "WTI", kind = "macro" },
+  { symbol = "GC=F", label = "GOLD", kind = "macro" },
+]
+strip_names = ["SKHY", "GOOG", "NVDA", "AMD"]
+# The INDICES intraday charts.
+index_board = [
+  { symbol = "^GSPC", label = "S&P 500" },
+  { symbol = "^NDX", label = "Nasdaq 100" },
+  { symbol = "^RUT", label = "Russell 2000" },
+  { symbol = "^DJI", label = "Dow Jones" },
+]
 # Overnight board; these are Yahoo chart symbols, never proxies for cash SPX/NDX.
 overnight = [
   { symbol = "ES=F", label = "S&P 500 futures", region = "US" },
@@ -94,6 +172,32 @@ rates = [
   { symbol = "US2Y", label = "UST 2Y" },
   { symbol = "US10Y", label = "UST 10Y" },
   { symbol = "US30Y", label = "UST 30Y" },
+]
+# Pages that take live prices only when the reader presses REFRESH: SECTORS
+# (the heat-map board for its baskets, plus the SPDR sector funds beside them),
+# the commodity table on MACRO (its own symbols, [macro.commodities]) and the
+# Treasury table (CNBC's on-the-run yields, one call for the whole curve).
+sector_benchmark = "SPY"
+sector_etfs = [
+  { symbol = "XLK", sector = "Information Technology" },
+  { symbol = "XLF", sector = "Financials" },
+  { symbol = "XLV", sector = "Health Care" },
+  { symbol = "XLY", sector = "Consumer Discretionary" },
+  { symbol = "XLC", sector = "Communication Services" },
+  { symbol = "XLI", sector = "Industrials" },
+  { symbol = "XLP", sector = "Consumer Staples" },
+  { symbol = "XLE", sector = "Energy" },
+  { symbol = "XLU", sector = "Utilities" },
+  { symbol = "XLRE", sector = "Real Estate" },
+  { symbol = "XLB", sector = "Materials" },
+]
+# CNBC symbol per tenor; the labels are the Treasury table's own tenors.
+yield_board = [
+  { symbol = "US1M", label = "1M" }, { symbol = "US2M", label = "2M" }, { symbol = "US3M", label = "3M" },
+  { symbol = "US4M", label = "4M" }, { symbol = "US6M", label = "6M" }, { symbol = "US1Y", label = "1Y" },
+  { symbol = "US2Y", label = "2Y" }, { symbol = "US3Y", label = "3Y" }, { symbol = "US5Y", label = "5Y" },
+  { symbol = "US7Y", label = "7Y" }, { symbol = "US10Y", label = "10Y" }, { symbol = "US20Y", label = "20Y" },
+  { symbol = "US30Y", label = "30Y" },
 ]
 
 # Names to follow that no tracked index carries. A watchlist entry gets the
@@ -216,9 +320,12 @@ moves_days = 730
 news_days = 365
 news_budget = 250
 # Company events announced ahead, read from the deep names' last
-# event_news_days of headlines (event_news_budget requests a build).
+# event_news_days of headlines (event_news_budget requests a build). Each
+# name is asked once every event_news_rotation_days sessions -- Finnhub's free
+# tier is one request a second -- and its last window is read in between.
 event_news_days = 45
 event_news_budget = 150
+event_news_rotation_days = 3
 # Hand-kept company and industry events, each with the page that states its
 # date. symbols and/or themes say whose timelines carry it: a company's own
 # event goes on that company alone (symbols); themes are for events with no
@@ -329,6 +436,56 @@ member_corr = 0.55
 
 # Korean bellwethers: results dates from DART, own move on the Korean session.
 korea_index = "^KS11"
+
+# Public stand-ins for a memory-price tape. Government statistics only.
+# Korea Customs codes use the same USD-thousands unit as HS 8542.
+# FRED ids are BLS producer and import price indexes, public domain.
+# None of these is a DRAM or NAND spot or contract quote.
+
+[[themes.memory_exports]]
+code = "854232"
+label = "Memories"
+detail = "HS 854232, electronic integrated circuits: memories"
+
+[[themes.memory_exports]]
+code = "8542321010"
+label = "DRAM"
+detail = "HS 8542321010, DRAM"
+
+[[themes.memory_exports]]
+code = "8542321030"
+label = "Flash"
+detail = "HS 8542321030, flash memory"
+
+[[themes.memory_exports]]
+code = "8542323000"
+label = "Multi-chip"
+detail = "HS 8542323000, multi-chip integrated circuits."
+
+[[themes.memory_exports]]
+code = "8542324000"
+label = "MCOs"
+detail = "HS 8542324000, multi-component integrated circuits."
+
+[[themes.chip_prices]]
+id = "IZ3344"
+label = "Import prices, electronic components"
+detail = "BLS import price index, NAICS 3344 (semiconductors and other electronic components), Dec 2005=100."
+
+[[themes.chip_prices]]
+id = "IR21320"
+label = "Import prices, end-use semiconductors"
+detail = "BLS import price index, end use: semiconductors, 2000=100."
+
+[[themes.chip_prices]]
+id = "PCU334413334413"
+label = "PPI, semiconductor devices"
+detail = "BLS PPI, NAICS 334413, Dec 1998=100."
+
+[[themes.chip_prices]]
+id = "PCU3344133344131"
+label = "PPI, integrated-circuit packages"
+detail = "BLS PPI, NAICS 334413 integrated circuit packages, Dec 1998=100. Some months are unpublished."
 
 [[themes.korean]]
 label = "Samsung Electronics"

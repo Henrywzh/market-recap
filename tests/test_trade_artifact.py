@@ -16,7 +16,8 @@ def test_intraday_price_cache_expires_at_close(monkeypatch, tmp_path):
     saved = datetime(2026, 9, 29, 9, 33, tzinfo=ny)
     monkeypatch.setattr(yahoo.cache, "is_fresh", lambda *a, **k: True)
     monkeypatch.setattr(yahoo.cache, "modified", lambda path: saved)
-    monkeypatch.setattr(pd, "read_parquet", lambda path: pd.DataFrame({"SPY": [1]}))
+    monkeypatch.setattr(pd, "read_parquet", lambda path: pd.DataFrame(
+        {"SPY": [1]}, index=pd.to_datetime(["2026-09-29"])))
     path = tmp_path / "closes.parquet"
     assert not yahoo._read(path, now=datetime(2026, 9, 29, 12, tzinfo=ny)).empty
     assert yahoo._read(path, now=datetime(2026, 9, 29, 16, 20, tzinfo=ny)).empty

@@ -22,7 +22,10 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
+import hashlib
+import time
 
+import numpy as np
 import pandas as pd
 
 from ..compute import events as E
@@ -263,6 +266,57 @@ def _calendars(dates: set[str], as_of: date, budget: int) -> tuple[dict[str, dic
     return out, left
 
 
+def _prior_weekday(day: str) -> str:
+    d = date.fromisoformat(day) - timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d.isoformat()
+
+
+def _calendar_days(report: dict) -> list[str]:
+    """The days Nasdaq may list a report under, best first: the release's own
+    date, the session that traded on it, and the weekday before. The sources
+    disagree by a day in both directions: PepsiCo's release carries the evening
+    before its morning report, and an after-close report is listed on the
+    evening while the release is stamped the next day."""
+    days = [report.get("date"), report.get("session")]
+    if report.get("date"):
+        days.append(_prior_weekday(report["date"]))
+    out = []
+    for day in days:
+        if day and day not in out:
+            out.append(day)
+    return out
+
+
+def _own_calendar(symbol: str, reactions: list[dict], calendars: dict[str, dict[str, dict]]) -> dict[str, dict]:
+    """{report date: Nasdaq row} for one name, trying each of the report's
+    possible calendar days in turn."""
+    alt = symbol.replace("-", ".")
+    out = {}
+    for r in reactions:
+        for day in _calendar_days(r):
+            rows = calendars.get(day) or {}
+            row = rows.get(symbol) or rows.get(alt)
+            if row:
+                out[r["date"]] = row
+                break
+    return out
+
+
+def _days_to_try(reactions: dict[str, list[dict]], calendars: dict[str, dict[str, dict]]) -> set[str]:
+    """Calendar days worth reading beyond the release dates: those of a report
+    whose own date had no row for the name."""
+    days = set()
+    for symbol, rs in reactions.items():
+        alt = symbol.replace("-", ".")
+        for r in rs:
+            rows = calendars.get(r.get("date")) or {}
+            if r.get("date") and symbol not in rows and alt not in rows:
+                days.update(_calendar_days(r)[1:])
+    return days
+
+
 # A release names its business items; these are the ones a card lists.
 FILING_ITEMS = {
     "1.01": "material agreement", "1.02": "agreement ended", "2.01": "acquisition or disposal",
@@ -381,6 +435,17 @@ def _news_window(excess_index: pd.DatetimeIndex, day: str) -> tuple[date, date, 
     return prev.date(), date.fromisoformat(day), close(prev), close(pd.Timestamp(day))
 
 
+def rotation_due(symbol: str, day: date, every: int) -> bool:
+    """Whether ``symbol`` is asked on session ``day`` when each name is asked
+    once every ``every`` weekdays: a stable hash of the name picks its slot,
+    and weekdays are counted so a weekend does not skip a slot."""
+    if every <= 1:
+        return True
+    weekdays = int(np.busday_count(date(2000, 1, 3), day))
+    slot = int(hashlib.md5(symbol.encode("utf-8")).hexdigest(), 16) % every   # md5 spreads short names evenly; crc32 did not
+    return slot == weekdays % every
+
+
 def _kept_events(entries: list[dict], as_of: str) -> list[dict]:
     """The config's hand-kept company and industry events still ahead, each
     with its source: {date, kind, text, url, symbols, themes, origin}."""
@@ -419,7 +484,7 @@ def _guides(symbol: str, cik: int | None, reactions: list[dict], calendar: dict[
         found = None
         for filer_cik, block in blocks:
             try:
-                found = releases.release_on(filer_cik, day, block, fetch=budget["left"] > 0)
+                found = releases.release_on(filer_cik, day, block, fetch=budget["left"] > 0, counts=budget)
             except Exception:
                 found = None
             if found:
@@ -427,6 +492,7 @@ def _guides(symbol: str, cik: int | None, reactions: list[dict], calendar: dict[
         if found is None:
             continue
         url, text, fresh = found
+        budget["found"] = budget.get("found", 0) + 1
         if fresh:
             budget["left"] -= 1
         eps_ref = ((calendar.get(day) or {}).get(symbol) or {}).get("eps")
@@ -474,6 +540,13 @@ def _macro(catalysts: dict, as_of: str, days: int) -> list[dict]:
     return keep
 
 
+def _timed(call, **kwargs):
+    """``(call(**kwargs), seconds it took)``, for work that runs on a thread."""
+    started = time.monotonic()
+    result = call(**kwargs)
+    return result, round(time.monotonic() - started, 1)
+
+
 def _finnhub_phase(*, as_of: date, settings: dict, excess: pd.DataFrame, reactions: dict, everyone: list[str],
                    meta: dict, deep: list[str], priority) -> tuple[dict, dict, dict, dict, dict]:
     """Large moves and their headlines, then the announced company events:
@@ -509,11 +582,21 @@ def _finnhub_phase(*, as_of: date, settings: dict, excess: pd.DataFrame, reactio
     # read for a dated investor day, product event, FDA date, meeting or
     # ruling; plus the hand-kept list in the config.
     announced: dict[str, list[dict]] = {}
-    event_state = {"asked": 0, "failed": 0, "budget": int(settings.get("event_news_budget", 150))}
+    event_state = {"asked": 0, "failed": 0, "reused": 0, "budget": int(settings.get("event_news_budget", 150))}
     if news_state["keyed"]:
-        lookback = as_of - timedelta(days=int(settings.get("event_news_days", 45)))
+        event_days = int(settings.get("event_news_days", 45))
+        lookback = as_of - timedelta(days=event_days)
+        rotation = max(1, int(settings.get("event_news_rotation_days", 3)))
         for symbol in sorted(deep, key=priority):
             asked = symbol.replace("-", ".")
+            # Each name is asked every `rotation` sessions; between, its last
+            # window is read again (an announcement is weeks ahead of its date).
+            if not rotation_due(symbol, as_of, rotation):
+                rows = finnhub.recent_window(asked, as_of, event_days, max_age=2 * rotation + 4)
+                if rows is not None:
+                    event_state["reused"] += 1
+                    announced[symbol] = E.announced_events(rows, symbol, meta.get(symbol, {}).get("name"), as_of)
+                    continue
             if not finnhub.is_cached(asked, lookback, as_of, as_of):
                 if event_state["asked"] >= event_state["budget"]:
                     continue
@@ -534,6 +617,14 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         raise RuntimeError("EVENTS needs this session's CATALYSTS and EVIDENCE")
     settings = dict(ctx.config.get("events", {}))
     as_of = date.fromisoformat(ctx.as_of)
+    # Seconds by step, for the manifest: EVENTS is most of a build's time.
+    steps: dict[str, float] = {}
+    clock = {"t": time.monotonic()}
+
+    def lap(step: str) -> None:
+        now = time.monotonic()
+        steps[step] = round(steps.get(step, 0.0) + now - clock["t"], 1)
+        clock["t"] = now
     names = evidence.get("names") or {}
     meta = _universe(ctx)
     meta = {info["symbol"]: info for info in meta.values()}
@@ -567,7 +658,9 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     # Every name's trend: the revisions table is on every ticker page, and
     # EARNINGS has already read the whole universe's this session (cached).
     everyone = sorted(set(ctx.closes.columns) & set(meta))
+    lap("setup")
     trends, missing = estimates.fetch_trends(everyone) if everyone else ({}, {})
+    lap("yahoo_estimates")
     ctx.log.add(SourceRecord("yahoo_estimates_quarter", "EPS and revenue estimates and revisions (Yahoo earningsTrend)",
                              estimates.URL.format(symbol="{symbol}"), ctx.as_of, rows=len(trends),
                              status="ok" if len(missing) <= 0.2 * max(len(everyone), 1) else "partial",
@@ -576,6 +669,10 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     # Past reports: each date's Nasdaq calendar (consensus, actual, surprise).
     report_dates = {r["date"] for rs in reactions.values() for r in rs if r.get("date")}
     calendars, dates_left = _calendars(report_dates, as_of, int(settings.get("history_new_dates", 120)))
+    more, more_left = _calendars(_days_to_try(reactions, calendars) - set(calendars), as_of, int(settings.get("history_new_dates", 120)))
+    calendars.update(more)
+    dates_left += more_left
+    lap("nasdaq_history")
     ctx.log.add(SourceRecord("nasdaq_earnings_history", "Nasdaq earnings calendar on past report dates (EPS vs consensus)",
                              nasdaq.EARNINGS_URL.format(date="{date}"), ctx.as_of, rows=len(calendars),
                              status="ok" if not dates_left else "partial",
@@ -585,7 +682,8 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     except Exception:
         cik_map = {}
     focus = set(evidence.get("focus") or [])
-    guide_budget = {"left": int(settings.get("guide_new_releases", 200))}
+    guide_cap = int(settings.get("guide_new_releases", 200))
+    guide_budget = {"left": guide_cap, "found": 0, "waiting": 0}
     themes = inputs.get("themes") or {}
     drivers = themes.get("drivers") if isinstance(themes.get("drivers"), list) else []
     membership = themes.get("membership") or {}
@@ -615,21 +713,23 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     # nothing it finds: run side by side, the build waits for the longer of the
     # two instead of both. One thread, so the rate limit holds.
     finnhub_pool = ThreadPoolExecutor(1)
-    finnhub_future = finnhub_pool.submit(_finnhub_phase, as_of=as_of, settings=settings, excess=excess, reactions=reactions,
+    finnhub_future = finnhub_pool.submit(_timed, _finnhub_phase, as_of=as_of, settings=settings, excess=excess, reactions=reactions,
                                          everyone=everyone, meta=meta, deep=deep, priority=priority)
 
     guides_by_symbol = {}
     for symbol in sorted(deep, key=priority):
-        rows = {d: {symbol: r} for d, rs in calendars.items() if (r := rs.get(symbol) or rs.get(symbol.replace("-", ".")))}
+        rows = {d: {symbol: r} for d, r in _own_calendar(symbol, reactions.get(symbol) or [], calendars).items()}
         guides_by_symbol[symbol] = _guides(symbol, cik_for(symbol, cik_map) if cik_map else None, reactions.get(symbol) or [],
                                            rows, int(settings.get("guide_reports", 4)), guide_budget)
 
     # The guides are done: take the headlines, waiting for whatever is left of the rate limit.
-    moves_by_symbol, news, news_state, announced, event_state = finnhub_future.result()
+    (moves_by_symbol, news, news_state, announced, event_state), finnhub_seconds = finnhub_future.result()
     finnhub_pool.shutdown()
-
+    lap("sec_guidance")                    # the guides, plus the wait for the Finnhub thread if it was the longer
+    steps["finnhub_overlapped"] = finnhub_seconds   # the thread's own time, run beside the guides: not part of the sum
     kept_events = _kept_events(settings.get("company_events") or [], ctx.as_of)
 
+    lap("finnhub_events")
     snapshot = snapshot_store.latest_options_summary(as_of)
     history = snapshot_store.options_summaries(as_of - timedelta(days=400), as_of) if snapshot else pd.DataFrame()
 
@@ -645,6 +745,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
             readthrough = {"unavailable": describe_error(exc)}
         payload = {
             "symbol": symbol, "as_of": ctx.as_of, "name": info.get("name"), "sector": info.get("sector"),
+            "industry": industry.get(symbol),
             "weights": {k: clean_float(v, 3) for k, v in (info.get("weights") or {}).items()},
             "watchlist": bool(info.get("watchlist")),
             "readthrough": readthrough,
@@ -652,8 +753,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         }
         cik = cik_for(symbol, cik_map) if cik_map else None
         own = entry.get("reactions") or []
-        nasdaq_symbol = symbol.replace("-", ".")
-        calendar = {d: rows.get(symbol) or rows.get(nasdaq_symbol) for d, rows in calendars.items()}
+        calendar = _own_calendar(symbol, own, calendars)
         guides = guides_by_symbol.get(symbol) or {}
         close = ctx.closes[symbol] if symbol in ctx.closes.columns else pd.Series(dtype=float)
         payload["history"] = E.report_history(own, {d: r for d, r in calendar.items() if r}, guides, close, index_close)
@@ -675,7 +775,8 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         # bellwethers of its themes -- not every name in its industry.
         movers = {r["symbol"] for r in readthrough.get("into") or []} | {
             b for g in theme_groups if g.get("key") in theme_keys for b in bellwethers.get(g["key"], [])}
-        peer_reports = {p: _sessions_of(reactions.get(p)) for p in movers - {symbol} if reactions.get(p)}
+        # Sorted: a set's order changes from run to run, and so did the reasons'.
+        peer_reports = {p: _sessions_of(reactions.get(p)) for p in sorted(movers - {symbol}) if reactions.get(p)}
         releases_on = _releases_by_day(drivers, theme_keys)
         payload["moves"] = [{**m, "reasons": E.move_reasons(m["date"], payload["timeline"], peer_reports, releases_on),
                              "news": news.get((symbol, m["date"]), []), "news_checked": (symbol, m["date"]) in news}
@@ -700,6 +801,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
             cards.append(_summary(payload))
         if "outcome" in payload and (_heavy(payload, settings) or payload["watchlist"]):
             outcomes.append(_summary(payload))
+    lap("per_name")
     prune_stale(EVENTS_ARTIFACT_DIR, written)
 
     cards.sort(key=lambda c: (c["card"]["date"], {"bmo": 0, "intraday": 1, "amc": 2}.get(c["card"]["timing"], 3),
@@ -715,8 +817,26 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     ctx.log.add(SourceRecord("sec_releases_guidance", "Guidance stated in earnings releases (8-K Item 2.02, EX-99)",
                              "https://www.sec.gov/cgi-bin/browse-edgar", ctx.as_of,
                              rows=sum(1 for s in written if (s in carded or s in focus)),
-                             status="ok" if guide_budget["left"] > 0 else "partial",
-                             error=None if guide_budget["left"] > 0 else "release budget spent; the rest are read next build"))
+                             status="ok" if not guide_budget["waiting"] else "partial",
+                             error=None if not guide_budget["waiting"]
+                             else f"release budget spent; {guide_budget['waiting']} releases are read next build"))
+    lap("tail")
+    if hasattr(ctx, "diagnostics"):
+        # How the Finnhub budget went: asked tonight, read from the cache (a
+        # settled day, or a name off its turn in the rotation), and failed.
+        ctx.diagnostics["events"] = {
+            "seconds": steps,
+            "finnhub_moves": {"asked": news_state["asked"], "budget": news_state["budget"], "failed": news_state["failed"],
+                              "from_cache": max(0, len(news) - news_state["asked"])},
+            "finnhub_events": {"names": len(deep), "asked": event_state["asked"], "budget": event_state["budget"],
+                               "reused_off_turn": event_state["reused"], "failed": event_state["failed"],
+                               "from_cache": max(0, len(announced) - event_state["asked"] - event_state["reused"])},
+            # Releases behind the guides: read tonight for the first time,
+            # read from the cache, and left for a later build by the budget.
+            "sec_guidance": {"budget": guide_cap, "read_new": guide_cap - guide_budget["left"],
+                             "from_cache": guide_budget["found"] - (guide_cap - guide_budget["left"]),
+                             "waiting": guide_budget["waiting"]},
+        }
     return {
         "as_of": ctx.as_of,
         "options_snapshot": snapshot[0].isoformat() if snapshot else None,

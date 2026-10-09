@@ -21,6 +21,8 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, timedelta
 import json
+import os
+from pathlib import Path
 import statistics
 import time
 
@@ -361,5 +363,35 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         "short_interest": shorts,
         "blackout": blackout,
         "insiders": insiders,
+        "fund_flows": _ici_flows(),
         "lookbacks": P.LOOKBACKS,
     }
+
+
+def _ici_flows() -> dict:
+    root = Path(os.environ.get("MARKET_RECAP_ICI") or (Path(__file__).resolve().parents[4] / "quantamental-lab" / "data" / "research-intelligence" / "institutional"))
+    latest = root / "latest" / "ici_fund_flows.json"
+    attempt_path = root / "attempts" / "ici_fund_flows.json"
+    attempt = json.loads(attempt_path.read_text()) if attempt_path.exists() else None
+    if not latest.exists():
+        return {"status": "missing", "last_attempt": attempt, "categories": []}
+    payload = json.loads(latest.read_text())
+    wanted = {"equity", "equity_domestic", "equity_world", "bond", "total"}
+    grouped = {}
+    for row in payload.get("rows") or []:
+        if row.get("category") not in wanted:
+            continue
+        grouped.setdefault((row["week_ended"], row["category"]), {})[row["family"]] = row
+    weeks = []
+    for (week, category), families in sorted(grouped.items()):
+        def value(name):
+            row = families.get(name)
+            return None if not row else row.get("value")
+        weeks.append({"week_ended": week, "category": category, "combined": value("combined"),
+                      "etf": value("etf"), "mutual_fund": value("mutual_fund"),
+                      "released_on": max((r["released_on"] for r in families.values()), default=None)})
+    mismatches = [r for r in payload.get("reconciliation") or [] if r.get("status") != "rounding_consistent" and r.get("category") in wanted]
+    return {"status": "stale_capture" if (attempt or {}).get("status") == "failed" else "ok", "unit": "USD_million",
+            "last_attempt": {"status": (attempt or {}).get("status"), "observed_at": (attempt or {}).get("attempted_at")},
+            "categories": weeks, "reconciliation_exceptions": len(mismatches),
+            "note": "ICI long-term industry flows, in millions of dollars. ETF and mutual-fund components are already inside the combined total; do not add them again. This is not per-fund ETF flow, and money-market funds are excluded. Direct refresh currently fails; this is the last authorized public capture."}

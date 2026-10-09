@@ -360,7 +360,7 @@ function koreaFlashCard(k) {
 
 function pcppCard(pc) {
   if (pc.skipped) {
-    return card('RETAIL PRICES · PCPARTPICKER UK', null, gap('PCPartPicker refuses requests from cloud servers (HTTP 403), so the scheduled build does not ask; a build run from a home connection includes these prices. Its bot protection is not worked around.'));
+    return card('RETAIL PRICES · PCPARTPICKER UK', null, gap(pc.skipped));
   }
   if (pc.unavailable) {
     // PCPartPicker's Cloudflare answers cloud servers with 403; it is read
@@ -392,8 +392,71 @@ function pcppCard(pc) {
   return card('RETAIL PRICES · PCPARTPICKER UK', el('span', { class: 'dim', text: `charts of ${date || DASH}` }), [
     el('div', { class: 'grid two' }, blocks),
     pc.failed?.length ? el('div', { class: 'field-note down', text: `Not read: ${pc.failed.join('; ')}` }) : null,
+    pc.stale ? el('div', { class: 'field-note down', text: pc.stale }) : null,
+    pc.from_feed ? el('div', { class: 'field-note', text: 'Ratios from a snapshot taken on a home connection (data/feeds/pcpartpicker.json). The cloud build does not contact PCPartPicker.' }) : null,
     el('div', { class: 'field-note', text: 'Average UK retail price across sellers, read from the pixels of PCPartPicker\'s daily trend charts (the axis starts at zero, so ratios need no scale; about ±2.5% at a tenth of the axis). Kit averages jump when sellers enter or leave. Source: uk.pcpartpicker.com/trends.' }),
   ]);
+}
+
+
+function latestMonth(months, key) {
+  for (let i = months.length - 1; i >= 0; i -= 1) {
+    if (months[i][key] !== null && months[i][key] !== undefined) return months[i];
+  }
+  return months[months.length - 1] || {};
+}
+
+function memoryExportsCard(block) {
+  if (!block || block.unavailable) return card('KOREA MEMORY EXPORTS', null, unavailable(block || { unavailable: 'not built' }));
+  const series = (block.series || []).filter((s) => s.months && s.months.length);
+  if (!series.length) return card('KOREA MEMORY EXPORTS', null, gap((block.failed || []).join('; ') || 'No breakout read.'));
+  const entries = series.map((s) => ({
+    id: s.label.toUpperCase(),
+    chart() {
+      const last = latestMonth(s.months, 'exports_bn');
+      return el('div', {}, [
+        el('div', { class: 'tag-row' }, [
+          tag(last.month + ' $' + num(last.exports_bn, 1) + 'B · ' + pct(last.yoy_pct, 0) + ' Y/Y', last.yoy_pct > 0 ? 'up' : 'down'),
+          last.unit_yoy_pct === null || last.unit_yoy_pct === undefined ? null : tag('USD/kg ' + pct(last.unit_yoy_pct, 0) + ' Y/Y', last.unit_yoy_pct > 0 ? 'up' : 'down'),
+          el('span', { class: s.due && s.due.late ? 'down' : 'dim', text: s.due ? s.due.month + ' due ~' + s.due.due : '' }),
+        ]),
+        viewChart({
+          dates: s.months.map((m) => m.month), type: 'bar', views: VIEWS.monthly(), tail: 24, fmt: (v) => '$' + num(v, 1) + 'B',
+          series: [{ name: s.label + ' exports $B', values: s.months.map((m) => m.exports_bn), color: (p) => p.blue }],
+        }),
+      ]);
+    },
+  }));
+  const failed = block.failed && block.failed.length ? ' Not read: ' + block.failed.join('; ') + '.' : '';
+  return pickerCard('KOREA MEMORY EXPORTS', null, entries,
+    'Korea Customs Service, confirmed monthly exports, customs-acceptance basis, the same USD-thousands unit as the HS 8542 card, shown in billions. Memories are HS 854232; the others are 10-digit lines inside it (DRAM, flash, multi-chip, MCOs), which together make up nearly all of it. USD/kg divides export value by customs weight in metric tons. Mix and density move that ratio, so it is not a spot or contract price. Public statistics.' + failed);
+}
+
+function chipPricesCard(block) {
+  if (!block || block.unavailable) return card('US CHIP PRICES · BLS', null, unavailable(block || { unavailable: 'not built' }));
+  const series = (block.series || []).filter((s) => s.months && s.months.length);
+  if (!series.length) return card('US CHIP PRICES · BLS', null, gap((block.failed || []).join('; ') || 'No index read.'));
+  const entries = series.map((s) => ({
+    id: s.label.toUpperCase(),
+    chart() {
+      const last = latestMonth(s.months, 'value');
+      return el('div', {}, [
+        el('div', { class: 'tag-row' }, [
+          tag((last.month || '') + ' ' + num(last.value, 1) + ' · ' + pct(last.yoy_pct, 0) + ' Y/Y', last.yoy_pct > 0 ? 'up' : 'down'),
+          s.page ? el('a', { href: s.page, target: '_blank', rel: 'noopener', text: s.id }) : null,
+          el('span', { class: s.due && s.due.late ? 'down' : 'dim', text: s.due ? s.due.month + ' due ~' + s.due.due : '' }),
+        ]),
+        viewChart({
+          dates: s.months.map((m) => m.month), views: VIEWS.monthly(), tail: 36, connectNulls: false, showSymbol: true, fmt: (v) => num(v, 1),
+          series: [{ name: s.label, values: s.months.map((m) => m.value), width: 1.8 }],
+        }),
+        s.detail ? el('div', { class: 'field-note', text: s.detail }) : null,
+      ]);
+    },
+  }));
+  const failed = block.failed && block.failed.length ? ' Not read: ' + block.failed.join('; ') + '.' : '';
+  return pickerCard('US CHIP PRICES · BLS', null, entries,
+    'U.S. Bureau of Labor Statistics via FRED, public domain. Producer and import price indexes for semiconductors and electronic components, not DRAM or NAND spot quotes. Product coverage differs by index; each series has its own base year. Missing observations remain blank. Current vintage. The due date is the 15th, an approximation of the mid-month release.' + failed);
 }
 
 function adataCard(a) {
@@ -428,6 +491,7 @@ function pickerCard(title, right, entries, note) {
   const draw = () => host.replaceChildren(entries.find((e) => e.id === active).chart());
   draw();
   const picker = ids.length > 1 ? periodSwitch(ids, active, (id) => { active = id; draw(); }) : null;
+  if (picker) picker.classList.add('series-picker');
   return card(title, el('span', { class: 'tag-row' }, [right, picker]), [host, note ? el('div', { class: 'field-note', text: note }) : null]);
 }
 
@@ -492,6 +556,23 @@ function pricesCard(e) {
     last('crack') !== null ? `crack $${num(last('crack'), 1)}` : null].filter(Boolean).join(' · ') });
   return pickerCard('OIL, GAS & REFINING MARGIN', right, entries,
     'Front-month futures (Yahoo: CL, BZ, NG, RB, HO). 3-2-1 crack = (2 bbl gasoline + 1 bbl heating oil − 3 bbl crude) / 3, $/bbl -- the refiners\' margin. Pump price: EIA weekly US regular, via FRED.');
+}
+
+function chokepointCard(e) {
+  const c = e?.chokepoints;
+  if (!c || c.status === 'missing' || !c.series?.length) return null;
+  const rows = c.series.map((row) => el('tr', {}, [
+    el('td', { text: row.name }),
+    el('td', { text: row.latest_date }),
+    el('td', { text: row.tankers_latest == null ? DASH : String(row.tankers_latest) }),
+    el('td', { text: row.tankers_7d == null ? DASH : num(row.tankers_7d, 1) }),
+    el('td', { class: row.tankers_7d_change_pct == null ? 'dim' : row.tankers_7d_change_pct < 0 ? 'down' : 'up', text: row.tankers_7d_change_pct == null ? DASH : `${row.tankers_7d_change_pct > 0 ? '+' : ''}${num(row.tankers_7d_change_pct, 1)}%` }),
+    el('td', { class: 'dim', text: row.vessels_latest == null ? DASH : String(row.vessels_latest) }),
+  ]));
+  return card('SHIPPING CHOKEPOINTS · TANKER TRANSITS', el('span', { class: 'dim', text: c.coverage ? `${c.coverage.start} to ${c.coverage.end}` : '' }), [
+    table(['ROUTE', 'LATEST DAY', 'TANKERS', '7-DAY AVG', 'VS PRIOR 7D', 'ALL VESSELS'], rows),
+    el('div', { class: 'field-note', text: c.note }),
+  ]);
 }
 
 // How each name's excess return over the S&P 500 has moved with each driver
@@ -728,12 +809,13 @@ function industry(key, data) {
       twRevenueCard('TSMC & NANYA · MONTHLY REVENUE', s.tw, 'TSMC: leading-edge foundry demand. Nanya: commodity DRAM, the purest listed read on DRAM pricing. Published by the 10th of the next month.'),
       koreaFlashCard(s.korea_flash)]),
     koreaCard(s.korea),
+    el('div', { class: 'grid two' }, [memoryExportsCard(s.memory_exports), chipPricesCard(s.chip_prices)]),
     adataCard(s.adata), pcppCard(s.pcpp)];
   }
   if (key === 'energy' && data.energy) {
     const e = data.energy;
     return [eiaCard(e), pricesCard(e), sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', e.sensitivity,
-      'Correlation and beta of each name\'s daily return beyond the S&P 500 with the driver\'s daily change. Producers trade on crude; refiners also on the crack; services on neither as much. History, not a forecast.')].filter(Boolean);
+      'Correlation and beta of each name\'s daily return beyond the S&P 500 with the driver\'s daily change. Producers trade on crude; refiners also on the crack; services on neither as much. History, not a forecast.'), chokepointCard(e)].filter(Boolean);
   }
   if (key === 'housing' && data.housing) {
     const h = data.housing;

@@ -1,16 +1,7 @@
 import { el, card, table, num, pct, dirClass, periodSwitch, sectionTitle, notice, DASH } from '../fmt.js';
 import { areaLine, zeroLine, multiLine } from '../charts.js';
 import { mountLive } from '../live.js';
-
-function quoteStat(quote) {
-  return el('div', { class: 'stat' }, [
-    el('div', { class: 'stat-label', text: quote.ticker }),
-    el('div', { class: 'stat-value', text: `$${num(quote.price)}` }),
-    el('div', { class: `stat-note ${dirClass(quote.change_pct)}` }, [
-      `${quote.change >= 0 ? '+' : ''}${num(quote.change)} (${pct(quote.change_pct)})`,
-    ]),
-  ]);
-}
+import { mountIndexCharts } from '../live-indices.js';
 
 function drawdownStat(entry) {
   return el('div', { class: 'stat' }, [
@@ -114,6 +105,18 @@ function filledNotice(manifest) {
   );
 }
 
+// A spin-off the price feed does not adjust for, adjusted by the build: said at
+// the top, because a returns table that read it as a loss would be wrong, and a
+// table that quietly corrected it would be unexplained.
+function actionsNotice(manifest) {
+  const actions = (manifest && manifest.corporate_actions) || [];
+  if (!actions.length) return null;
+  return notice(actions.map((a) => (a.factor === null
+    ? `${a.ticker}: the ${a.kind} on ${a.ex_date} could not be adjusted, so its history before that date is blank.`
+    : `${a.ticker}: prices before ${a.ex_date} are adjusted (x${a.factor.toFixed(4)}) for the ${a.kind} of ${a.distributed}, `
+      + `${a.ratio} share per share held; the feed does not adjust for spin-offs.`)).join(' '));
+}
+
 export default function renderMarkets(root, data, manifest) {
   // Indices are read in the order the contract declares them, so adding one is
   // a config change here too -- nothing on this tab names an index.
@@ -121,6 +124,8 @@ export default function renderMarkets(root, data, manifest) {
   const blocks = order.map((key) => data.indices[key]).filter(Boolean);
   const filled = filledNotice(manifest);
   if (filled) root.append(filled);
+  const actions = actionsNotice(manifest);
+  if (actions) root.append(actions);
   // The night's session is cross-checked against Nasdaq's closes; when too few
   // came back to judge, the page says it was not, rather than implying it was.
   const latest = manifest && manifest.session_check && manifest.session_check.latest;
@@ -132,9 +137,11 @@ export default function renderMarkets(root, data, manifest) {
   // Intraday prices first, the recap's closes beneath: the live strip is
   // labelled as such and nothing below it changes during the session.
   root.append(mountLive());
+  root.append(mountIndexCharts());
 
   root.append(el('div', { class: 'stat-strip' }, [
-    ...data.quotes.map(quoteStat),
+    // The ETFs' closes are not repeated here: the live strip above carries
+    // the cash indices they track.
     ...blocks.map((block) => drawdownStat({ label: block.key, ...block.drawdown })),
     ...blocks.map((block) => adStat(block.key, block.advance_decline)),
   ]));

@@ -60,6 +60,13 @@ def _numeric_series(series: Any) -> pd.Series | None:
 
     if series is None:
         return None
+    # The build's own close columns are already what this returns: a unique,
+    # sorted, tz-naive date index over floats. Normalising each again cost
+    # MONITOR some 15 s a build, every name read several times.
+    if (isinstance(series, pd.Series) and isinstance(series.index, pd.DatetimeIndex)
+            and series.index.tz is None and series.dtype.kind == "f" and not series.index.hasnans
+            and series.index.is_unique and series.index.is_monotonic_increasing):
+        return pd.Series(series.to_numpy(dtype=float), index=series.index)
     if isinstance(series, pd.DataFrame):
         if series.shape[1] != 1:
             return None
@@ -111,13 +118,12 @@ def _window(series: Any, as_of: Any, count: int, *, label: str) -> tuple[pd.Seri
     return values.astype(float), None
 
 
-def numeric_column(frame: Any, ticker: str) -> pd.Series | None:
-    """``ticker``'s column of a frame or mapping as a unique, sorted, numeric,
-    date-indexed series (``_numeric_series``), or None when there is none.
+def series_value(frame: Any, ticker: str, as_of: Any) -> float | None:
+    """Read a value on exactly ``as_of`` from a frame or mapping.
 
-    Normalising a column costs a date parse, a group-by and a sort over its
-    whole history. ``series_value`` did it on every question; a caller asking
-    many questions of one column does it once and uses ``value_on``."""
+    This helper intentionally does not use ``last_valid_index``: a stale last
+    value is not today's quote.
+    """
 
     series: Any = None
     if isinstance(frame, pd.DataFrame):
@@ -129,12 +135,7 @@ def numeric_column(frame: Any, ticker: str) -> pd.Series | None:
         series = frame.get(ticker)
     if series is None:
         return None
-    return _numeric_series(series)
-
-
-def value_on(clean: pd.Series | None, as_of: Any) -> float | None:
-    """The finite value of a normalised series on exactly ``as_of``."""
-
+    clean = _numeric_series(series)
     day = _as_date(as_of)
     if clean is None or day is None:
         return None
@@ -148,14 +149,33 @@ def value_on(clean: pd.Series | None, as_of: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def series_value(frame: Any, ticker: str, as_of: Any) -> float | None:
-    """Read a value on exactly ``as_of`` from a frame or mapping.
+def frame_values(frame: Any, as_of: Any) -> dict[str, float]:
+    """``series_value`` for every column of ``frame`` on ``as_of`` at once.
 
-    This helper intentionally does not use ``last_valid_index``: a stale last
-    value is not today's quote.
+    Same rules -- the date exactly, the last numeric print of a duplicated
+    date, finite values only, no column that appears twice -- but only that
+    date's rows are read. Normalising the whole column per call cost MONITOR
+    about a minute: a return since first seen reads two dates for every name
+    and every one of its sector peers.
     """
 
-    return value_on(numeric_column(frame, ticker), as_of)
+    day = _as_date(as_of)
+    if not isinstance(frame, pd.DataFrame) or day is None:
+        return {}
+    try:
+        index = pd.to_datetime(frame.index, errors="coerce")
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(index, pd.DatetimeIndex):
+        return {}
+    if index.tz is not None:
+        index = index.tz_localize(None)
+    hit = np.asarray(index == pd.Timestamp(day))
+    if not hit.any():
+        return {}
+    rows = frame.loc[hit, ~frame.columns.duplicated(keep=False)]
+    last = rows.apply(pd.to_numeric, errors="coerce").ffill().iloc[-1]
+    return {str(c): float(v) for c, v in last.items() if pd.notna(v) and math.isfinite(float(v))}
 
 
 def _endpoint_return(values: pd.Series, sessions: int) -> float | None:

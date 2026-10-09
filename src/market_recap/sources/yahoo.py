@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from .. import cache
+from ..compute.catalysts import latest_completed_session
 
 CHUNK_SIZE = 60
 # Yahoo rate-limits a client that pulls the whole index twice in a row: the
@@ -119,7 +120,7 @@ def _cache_path(period: str, kind: str = "closes") -> Path:
 
 
 def _read(path: Path, *, now: datetime | None = None) -> pd.DataFrame:
-    if not cache.is_fresh(path, "daily_file"):
+    if not cache.is_fresh(path, "daily_file", now=now):
         return pd.DataFrame()
     # The general cache rolls over at 18:30 ET, but this feed's intraday
     # "daily" bar must not be reused as a completed close at 16:15 ET.
@@ -130,7 +131,12 @@ def _read(path: Path, *, now: datetime | None = None) -> pd.DataFrame:
             and stamp.astimezone(ny) < datetime.combine(now.date(), clock_time(16, 15), tzinfo=ny):
         return pd.DataFrame()
     try:
-        return pd.read_parquet(path)
+        frame = pd.read_parquet(path)
+        # A newly saved file can still contain yesterday's feed. Its mtime
+        # must not turn those old observations into today's settled prices.
+        if frame.empty or pd.to_datetime(frame.index).max().date() < latest_completed_session(now):
+            return pd.DataFrame()
+        return frame
     except Exception:
         return pd.DataFrame()
 
@@ -193,6 +199,7 @@ def fetch_closes(
     rather than back-filling it.
     """
     wanted = sorted({s for s in symbols if s})
+    required_session = latest_completed_session()
     collected: dict[str, pd.Series] = {}
     companions: dict[str, dict[str, pd.Series]] = {kind: {} for kind in FIELDS if kind != "closes"}
     companions.update({kind: {} for kind in OHLCV_FIELDS})
@@ -209,7 +216,15 @@ def fetch_closes(
                 symbol in extra[kind].columns and not extra[kind][symbol].dropna().empty
                 for kind in OHLCV_REQUIRED)}
 
-    pending = [s for s in wanted if s not in collected or (need_ohlcv and s not in ohlcv_ready)]
+    def needs_refresh(symbol: str) -> bool:
+        series = collected.get(symbol)
+        return (series is None or required_session not in pd.to_datetime(series.dropna().index).date
+                or (need_ohlcv and symbol not in ohlcv_ready))
+
+    # A symbol with years of history but no latest close is still pending.
+    # Otherwise a partial feed gets accepted on the first sweep and the
+    # context quietly dates the entire page to the previous session.
+    pending = [s for s in wanted if needs_refresh(s)]
     deadline = time.monotonic() + retry_budget_seconds
     for attempt in range(retries + 1):
         if not pending or time.monotonic() > deadline:
@@ -237,7 +252,7 @@ def fetch_closes(
                            for kind in OHLCV_REQUIRED):
                         ohlcv_ready.add(str(column))
             time.sleep(CHUNK_PAUSE_SECONDS)
-        pending = [s for s in wanted if s not in collected or (need_ohlcv and s not in ohlcv_ready)]
+        pending = [s for s in wanted if needs_refresh(s)]
 
     if not collected:
         return pd.DataFrame()

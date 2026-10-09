@@ -378,11 +378,29 @@ def test_as_published_reads_the_year_earlier_value_as_known_on_release_day():
     assert row["released"] == t("2026-09-16") and row["value"] == 106.0 and row["year_ago"] == 100.0
 
 
-def test_pcpartpicker_is_skipped_not_failed_on_the_cloud_build(monkeypatch):
+def test_pcpartpicker_is_skipped_not_failed_on_the_cloud_build(monkeypatch, tmp_path):
     from market_recap.panels import themes as P
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(P.pcpartpicker, "FEED_PATH", tmp_path / "missing.json")
     monkeypatch.setattr(P.pcpartpicker, "fetch", lambda kind: pytest.fail("the cloud build must not ask PCPartPicker"))
-    assert P._pcpp() == {"skipped": P.PCPP_SKIP_REASON}
+    assert P._pcpp(date(2026, 10, 4)) == {"skipped": P.PCPP_SKIP_REASON}
+
+
+def test_pcpartpicker_cloud_build_reads_the_committed_snapshot(monkeypatch, tmp_path):
+    from market_recap.panels import themes as P
+    feed = tmp_path / "pcpartpicker.json"
+    feed.write_text('{"schema": 1, "fetched_at": "2026-10-04T00:00:00Z", "failed": [], '
+                    '"memory": {"rows": [{"title": "DDR5-6000", "family": "DDR5", "image_date": "2026-10-03", '
+                    '"index": {"dates": ["2026-10-03"], "values": [100]}}], "families": {}, "page": "https://example.test"}, '
+                    '"cpu": {"rows": [{"title": "AMD Ryzen", "family": "AMD", "image_date": "2026-10-03", '
+                    '"index": {"dates": ["2026-10-03"], "values": [100]}}], "families": {}, "page": "https://example.test"}}',
+                    encoding="utf-8")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(P.pcpartpicker, "FEED_PATH", feed)
+    monkeypatch.setattr(P.pcpartpicker, "fetch", lambda kind: pytest.fail("the cloud build must not ask PCPartPicker"))
+    out = P._pcpp(date(2026, 10, 4))
+    assert out["from_feed"] is True and "stale" not in out
+    assert out["memory"]["rows"][0]["image_date"] == "2026-10-03"
 
 
 def test_tv_surprises_take_actual_less_forecast_on_the_new_york_day():
@@ -451,3 +469,30 @@ def test_motie_fetch_with_no_readable_list_page_still_says_so(monkeypatch):
     monkeypatch.setattr(motie, "_list_page", lambda keyword, number, use_cache: (None, f"{keyword} {number}: down"))
     with pytest.raises(RuntimeError, match="no list page could be read"):
         motie.fetch(__import__("datetime").date(2026, 9, 1))
+
+
+def test_theme_sources_record_how_many_observations_they_carry():
+    from types import SimpleNamespace
+    from market_recap.panels import themes as panel
+
+    records = []
+    ctx = SimpleNamespace(log=SimpleNamespace(add=records.append))
+    months = lambda n: [{"month": f"2026-0{i + 1}"} for i in range(n)]  # noqa: E731
+    cloud = {
+        "capex": {"companies": [{"quarters": [{"end": "2026-06-30"}] * 3}, {"quarters": [{"end": "2026-06-30"}] * 2}]},
+        "nvda": {"quarters": [{"filed": "2026-08-26"}] * 4},
+        "odm": [{"months": months(3)}, {"months": months(2)}],
+        "openrouter": {"dates": ["2026-10-01", "2026-10-02"]},
+        "ramp": {"months": ["2026-07", "2026-08"]},
+    }
+    semis = {
+        "korea": {"months": months(5)}, "korea_flash": {"months": months(2)}, "adata": {"notes": [{"month": "2026-09"}]},
+        "memory_exports": {"series": [{"months": months(4)}, {"months": months(4)}], "failed": []},
+        "chip_prices": {"series": [{"months": months(6), "page": "https://fred.stlouisfed.org/series/IZ3344"}, {"months": months(3)}], "failed": []},
+        "pcpp": {"memory": {"rows": [{"image_date": "2026-10-04"}] * 13}, "cpu": {"rows": [{"image_date": "2026-10-04"}] * 20}},
+    }
+    panel._log(ctx, cloud, semis)
+    rows = {r.source_id: r.rows for r in records}
+    assert rows == {"sec_capex": 5, "sec_releases": 4, "mops_revenue": 5, "altdata_openrouter": 2, "altdata_ramp": 2,
+                    "korea_customs": 5, "motie_trade": 2, "adata_market_watch": 1, "korea_customs_memory": 8,
+                    "fred_chip_prices": 9, "pcpartpicker": 33}

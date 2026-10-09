@@ -450,3 +450,4 @@ def test_an_annual_filing_is_not_stale_after_three_weeks():
     five_weeks = (date.today() - timedelta(days=35)).isoformat()
     assert freshness_status(five_weeks, "filings") == "stale"
     assert freshness_status(five_weeks, "annual_filings") != "stale"
+

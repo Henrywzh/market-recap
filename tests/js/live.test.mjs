@@ -2,7 +2,7 @@
 // and when the page asks again.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseYahooChart, parseCnbcRates, sessionState, buildBody } from '../../functions/api/quotes.js';
+import { parseYahooChart, parseCnbcRates, sessionState, buildBody, parseSpark, batches, scopeOf, SPARK_BATCH } from '../../functions/api/quotes.js';
 import * as L from '../../web/js/live-model.js';
 
 const yahoo = (meta) => ({ chart: { result: [{ meta }], error: null } });
@@ -71,25 +71,46 @@ test('the session is open only inside the regular period, and unknown without on
   assert.equal(sessionState([{ error: 'x' }], 150).open, null);
 });
 
+const spark = (rows) => Object.fromEntries(Object.entries(rows).map(([symbol, r]) => [symbol, {
+  symbol, timestamp: r.t, close: r.c, previousClose: r.prev, chartPreviousClose: r.prev, start: r.start ?? 0, end: r.end ?? 100,
+}]));
+
+test('a spark answer prices each symbol at its last close, against the previous close', () => {
+  const out = parseSpark(spark({ NVDA: { t: [10, 20, 30], c: [100, 101, null], prev: 98 } }));
+  const q = out.get('NVDA');
+  assert.equal(q.price, 101);
+  assert.equal(q.time, 20);                       // the last bar with a price, not the last stamp
+  assert.ok(Math.abs(q.change_pct - (101 / 98 - 1) * 100) < 1e-9);
+  assert.deepEqual(q.session, { start: 0, end: 100 });
+  assert.deepEqual(q.series, { t: [10, 20], c: [100, 101] });
+  assert.equal(parseSpark(spark({ X: { t: [1], c: [null], prev: 1 } })).get('X').error, 'no price in response');
+  assert.equal(parseSpark({ spark: { result: null, error: { code: 'Bad Request' } } }).size, 0);
+});
+
+test('a board asks Yahoo twenty symbols a call', () => {
+  const list = Array.from({ length: 504 }, (_, i) => i);
+  const parts = batches(list);
+  assert.equal(parts.length, 26);
+  assert.ok(parts.every((p) => p.length <= SPARK_BATCH));
+});
+
 test('a failed source leaves its own rows as errors and the rest priced', async () => {
   const real = globalThis.fetch;
   globalThis.fetch = async (url) => {
     if (String(url).includes('yahoo')) {
-      return new Response(JSON.stringify(yahoo({
-        regularMarketPrice: 5, chartPreviousClose: 4, regularMarketTime: 10,
-        currentTradingPeriod: { regular: { start: 0, end: 100 } },
-      })), { status: 200 });
+      return new Response(JSON.stringify(spark({ '^GSPC': { t: [10], c: [5], prev: 4 } })), { status: 200 });
     }
     return new Response('nope', { status: 503 });
   };
   try {
     const body = await buildBody({
       refresh_seconds: 60,
-      equities: [{ symbol: 'SPY', label: 'SPY', kind: 'etf' }],
+      strip: [{ symbol: '^GSPC', label: 'SPX', kind: 'index' }],
       rates: [{ symbol: 'US10Y', label: 'UST 10Y', kind: 'rate' }],
     }, 50_000);
     assert.equal(body.quotes[0].price, 5);
     assert.equal(body.quotes[0].session, undefined);
+    assert.equal(body.quotes[0].series, undefined);   // the strip carries no chart
     assert.equal(body.quotes[1].error, 'HTTP 503');
     assert.equal(body.quotes[1].price, undefined);
     assert.equal(body.session.open, true);
@@ -98,21 +119,56 @@ test('a failed source leaves its own rows as errors and the rest priced', async 
   }
 });
 
+test('a board returns its own symbols, with the day\'s series only where it asks', async () => {
+  const real = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url) => {
+    seen.push(decodeURIComponent(String(url)));
+    const symbols = decodeURIComponent(String(url)).match(/symbols=([^&]+)/)[1].split(',');
+    return new Response(JSON.stringify(spark(Object.fromEntries(symbols.map((s) => [s, { t: [1, 2], c: [9, 10], prev: 8 }])))), { status: 200 });
+  };
+  try {
+    const contract = { boards: {
+      heatmap: { symbols: Array.from({ length: 45 }, (_, i) => `S${i}`), series: false, refresh_seconds: 300, closed_refresh_seconds: 900 },
+      indices: { symbols: ['^GSPC'], series: true, refresh_seconds: 300 },
+    } };
+    const heat = await buildBody(contract, 1000, 'board:heatmap');
+    assert.equal(seen.length, 3);                          // 45 names, three calls
+    assert.equal(heat.quotes.length, 45);
+    assert.equal(heat.quotes[0].series, undefined);
+    assert.equal(heat.refresh_seconds, 300);
+    const idx = await buildBody(contract, 1000, 'board:indices');
+    assert.deepEqual(idx.quotes[0].series, { t: [1, 2], c: [9, 10] });
+    assert.equal((await buildBody(contract, 1000, 'board:nope')).error, 'no board nope');
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test('a request names the strip, a board the contract has, or the trade desk', () => {
+  const contract = { boards: { heatmap: { symbols: [] } } };
+  assert.equal(scopeOf(new URLSearchParams(''), contract), 'default');
+  assert.equal(scopeOf(new URLSearchParams('board=heatmap'), contract), 'board:heatmap');
+  assert.equal(scopeOf(new URLSearchParams('board=anything'), contract), 'default');
+  assert.equal(scopeOf(new URLSearchParams('scope=trade'), contract), 'trade');
+});
+
 test('trade scope fetches its bounded list without slowing the main live strip', async () => {
   const original = globalThis.fetch;
   const seen = [];
   globalThis.fetch = async (url) => {
     seen.push(String(url));
+    if (String(url).includes('/spark')) return new Response(JSON.stringify(spark({ '^GSPC': { t: [1], c: [10], prev: 9 } })), { status: 200 });
     return new Response(JSON.stringify(yahoo({ regularMarketPrice: 10, previousClose: 9 })), { status: 200 });
   };
   try {
-    const contract = { equities: [{ symbol: 'SPY', kind: 'etf' }],
+    const contract = { strip: [{ symbol: '^GSPC', kind: 'index' }],
       overnight: [{ symbol: 'ES=F', kind: 'overnight' }], premarket_movers: [{ symbol: 'AAPL', kind: 'premarket' }] };
     const regular = await buildBody(contract, 1000);
-    assert.deepEqual(regular.quotes.map((q) => q.symbol), ['SPY']);
+    assert.deepEqual(regular.quotes.map((q) => q.symbol), ['^GSPC']);
     const trade = await buildBody(contract, 1000, 'trade');
     assert.deepEqual(trade.quotes.map((q) => q.symbol), ['ES=F', 'AAPL']);
-    assert.ok(seen[2].includes('interval=1m&range=1d&includePrePost=true'));
+    assert.ok(seen.some((u) => u.includes('interval=1m&range=1d&includePrePost=true')));
   } finally {
     globalThis.fetch = original;
   }
@@ -148,4 +204,50 @@ test('a tab shown again fetches only if a refresh fell due while hidden', () => 
   assert.equal(L.dueOnShow(0, body, 5), true);
   assert.equal(L.dueOnShow(1_000, body, 30_000), false);
   assert.equal(L.dueOnShow(1_000, body, 61_000), true);
+});
+
+test('the strip leads with indices, then VIX, the yields and the rest; names on their own row', async () => {
+  const { stripRows } = await import('../../web/js/live.js');
+  const quotes = [
+    { label: 'WTI', kind: 'macro' }, { label: 'SPX', kind: 'index' }, { label: 'NVDA', kind: 'watch' },
+    { label: 'UST 10Y', kind: 'rate' }, { label: 'VIX', kind: 'macro' }, { label: 'NDX', kind: 'index' },
+  ];
+  const [first, names] = stripRows(quotes);
+  assert.deepEqual(first.map((q) => q.label), ['SPX', 'NDX', 'VIX', 'UST 10Y', 'WTI']);
+  assert.deepEqual(names.map((q) => q.label), ['NVDA']);
+});
+
+test('REFRESH asks the function for a fresh answer, whatever the URL already carries', async () => {
+  const { withFresh } = await import('../../web/js/live-feed.js');
+  assert.equal(withFresh('api/quotes'), 'api/quotes?fresh=1');
+  assert.equal(withFresh('api/quotes?board=heatmap'), 'api/quotes?board=heatmap&fresh=1');
+});
+
+test('an index chart keeps a gap in the day as a gap', async () => {
+  const { points } = await import('../../web/js/live-indices.js');
+  assert.deepEqual(points({ t: [1, 2, 3], c: [10, null, 11] }), [[1000, 10], [2000, null], [3000, 11]]);
+  assert.deepEqual(points(null), []);
+});
+
+test('an index chart spans the whole session, Yahoo\'s own or 09:30-16:00 New York on the series\' day', async () => {
+  const { sessionWindow, newYorkOpen } = await import('../../web/js/live-indices.js');
+  const open = Date.parse('2026-10-08T13:30:00Z') / 1000;       // 09:30 EDT
+  const series = { t: [open, open + 300], c: [1, 2] };
+  assert.deepEqual(sessionWindow({ start: open, end: open + 23400 }, series), [open * 1000, (open + 23400) * 1000]);
+  // An early close comes from Yahoo's period, not from a calendar here.
+  assert.deepEqual(sessionWindow({ start: open, end: open + 12600 }, series)[1], (open + 12600) * 1000);
+  // After the close Yahoo may report tomorrow's period: the series' own day wins.
+  const tomorrow = { start: open + 86400, end: open + 86400 + 23400 };
+  assert.deepEqual(sessionWindow(tomorrow, series), [open * 1000, (open + 23400) * 1000]);
+  assert.equal(newYorkOpen(Date.parse('2026-12-08T18:00:00Z') / 1000), Date.parse('2026-12-08T14:30:00Z') / 1000);  // EST
+  assert.equal(sessionWindow(null, { t: [] }), null);
+});
+
+test('an index chart\'s value range always holds the previous close', async () => {
+  const { valueRange } = await import('../../web/js/live-indices.js');
+  const [low, high] = valueRange({ c: [7773, 7794, null] }, 7801.77);
+  assert.ok(high > 7801.77 && low < 7773);
+  const [l2, h2] = valueRange({ c: [100, 100] }, null);
+  assert.ok(l2 < 100 && h2 > 100);
+  assert.equal(valueRange({ c: [] }, null), null);
 });

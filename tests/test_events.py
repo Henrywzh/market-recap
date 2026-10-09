@@ -357,8 +357,8 @@ def test_the_finnhub_phase_gives_the_same_answer_on_a_thread(fake_finnhub):
     from market_recap.panels import events as panel
     direct = panel._finnhub_phase(**_phase_args())
     with ThreadPoolExecutor(1) as pool:
-        threaded = pool.submit(panel._finnhub_phase, **_phase_args()).result()
-    assert threaded == direct
+        threaded, seconds = pool.submit(panel._timed, panel._finnhub_phase, **_phase_args()).result()
+    assert threaded == direct and seconds >= 0
 
 
 def test_a_failed_request_is_counted_and_does_not_stop_the_phase(monkeypatch, fake_finnhub):
@@ -372,3 +372,84 @@ def test_a_failed_request_is_counted_and_does_not_stop_the_phase(monkeypatch, fa
     since = (args["as_of"] - pd.Timedelta(days=365)).isoformat()
     assert news_state["failed"] == len([m for m in moves["AAA"] if m["date"] >= since])
     assert event_state["failed"] == 1 and news == {} and announced == {}
+
+
+def test_each_name_is_asked_once_in_any_run_of_rotation_weekdays():
+    from datetime import date, timedelta
+    import numpy as np
+    from market_recap.panels.events import rotation_due
+
+    days = [d for d in (date(2026, 9, 1) + timedelta(n) for n in range(60)) if d.weekday() < 5]
+    for symbol in ("AAPL", "MSFT", "NVDA", "BRK-B", "000660.KS"):
+        due = [rotation_due(symbol, d, 3) for d in days]
+        for i in range(len(days) - 2):
+            assert sum(due[i:i + 3]) == 1, (symbol, days[i])     # a weekend does not skip a turn
+    assert all(rotation_due("AAPL", d, 1) for d in days)
+    shares = np.mean([[rotation_due(f"S{i}", d, 3) for i in range(300)] for d in days[:3]], axis=1)
+    assert all(0.25 < s < 0.42 for s in shares)                   # about a third of names each night
+
+
+def test_a_names_last_event_window_is_read_again_between_its_turns(tmp_path, monkeypatch):
+    import gzip
+    import json
+    from datetime import date
+    from market_recap import cache
+    from market_recap.sources import finnhub
+
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    folder = tmp_path / finnhub.NAMESPACE
+    folder.mkdir()
+    write = lambda name, rows: (folder / name).write_bytes(gzip.compress(json.dumps(rows).encode()))  # noqa: E731
+    write("AAPL-2026-08-20-2026-10-04.json.gz", [{"headline": "older"}])
+    write("AAPL-2026-08-21-2026-10-05.json.gz", [{"headline": "newest"}])
+    write("AAPL-2026-10-04-2026-10-07.json.gz", [{"headline": "a move window"}])
+    write("AAPLX-2026-08-21-2026-10-05.json.gz", [{"headline": "another name"}])
+    assert finnhub.recent_window("AAPL", date(2026, 10, 7), 45, max_age=10) == [{"headline": "newest"}]
+    assert finnhub.recent_window("AAPL", date(2026, 10, 30), 45, max_age=10) is None
+    assert finnhub.recent_window("MSFT", date(2026, 10, 7), 45, max_age=10) is None
+
+
+INDEX_PAGE = """<table class="tableFile"><tr><td>1</td><td>Press release</td><td>a.htm</td>
+<td>EX-99.1</td><td><a href="/Archives/a.htm">a.htm</a></td></tr></table>"""
+
+
+def test_a_release_is_turned_into_text_once(monkeypatch, tmp_path):
+    from market_recap import cache
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    asked = []
+    monkeypatch.setattr(R.sec, "_get", lambda url, timeout: asked.append(url) or (INDEX_PAGE if "index" in url else "<p>Revenue is expected to be $5.0 billion.</p>"))
+    parsed = []
+    real = R._text
+    monkeypatch.setattr(R, "_text", lambda html: parsed.append(html) or real(html))
+    first = R._exhibit(320193, "0000320193-26-000001")
+    again = R._exhibit(320193, "0000320193-26-000001")
+    assert first == again == ("https://www.sec.gov/Archives/a.htm", "Revenue is expected to be $5.0 billion.")
+    assert len(asked) == 2 and len(parsed) == 1
+
+
+def test_a_release_past_the_budget_is_counted_as_waiting(monkeypatch, tmp_path):
+    from market_recap import cache
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    block = {"form": ["8-K"], "items": ["2.02,9.01"], "filingDate": ["2026-10-01"], "accessionNumber": ["0000320193-26-000001"]}
+    counts = {"waiting": 0}
+    assert R.release_on(320193, "2026-10-01", block, fetch=False, counts=counts) is None
+    assert counts["waiting"] == 1
+
+
+def test_own_calendar_tries_the_session_and_the_weekday_before():
+    from market_recap.panels.events import _calendar_days, _days_to_try, _own_calendar
+    reactions = {"PEP": [{"date": "2026-07-08", "session": "2026-07-09"}, {"date": "2026-04-15", "session": "2026-04-16"}],
+                 "TER": [{"date": "2026-07-29", "session": "2026-07-29"}, {"date": "2026-08-03", "session": "2026-08-03"}],
+                 "JPM": [{"date": "2026-07-14", "session": "2026-07-14"}]}
+    calendars = {"2026-07-08": {}, "2026-07-09": {"PEP": {"eps": 2.2, "surprise_pct": 0.46}},
+                 "2026-04-15": {"PEP": {"eps": 1.0, "surprise_pct": 1.0}}, "2026-07-14": {"JPM": {"eps": 5.0}},
+                 "2026-07-28": {"TER": {"eps": 2.47, "surprise_pct": 21.08}}, "2026-07-29": {},
+                 "2026-07-31": {"TER": {"eps": 2.0, "surprise_pct": 5.0}}, "2026-08-03": {}}
+    assert _calendar_days({"date": "2026-08-03", "session": "2026-08-03"}) == ["2026-08-03", "2026-07-31"]  # Monday: back to Friday
+    assert _own_calendar("PEP", reactions["PEP"], calendars) == {
+        "2026-07-08": {"eps": 2.2, "surprise_pct": 0.46}, "2026-04-15": {"eps": 1.0, "surprise_pct": 1.0}}
+    assert _own_calendar("TER", reactions["TER"], calendars) == {
+        "2026-07-29": {"eps": 2.47, "surprise_pct": 21.08}, "2026-08-03": {"eps": 2.0, "surprise_pct": 5.0}}
+    # Only a report whose own date missed the name sends us to other days.
+    assert _days_to_try(reactions, calendars) == {"2026-07-07", "2026-07-09", "2026-07-28", "2026-07-31"}
+    assert _own_calendar("PEP", [{"date": "2026-01-01", "session": "2026-01-02"}], calendars) == {}

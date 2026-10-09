@@ -17,7 +17,7 @@ The views are grouped by the question they answer
 
 | Group | Views |
 |---|---|
-| **MARKET** | **Overview** (the default view) · Indices · Heat maps · Sectors (rotation and index/sector P/E) |
+| **MARKET** | **Overview** (the default view) · Indices · Heat maps · Sectors (rotation, the industry scorecard and index/sector P/E) |
 | **RISK** | **Risk** · Rates & macro · **Priced path** |
 | **NAMES** | Monitor · Screen (VALUATION & QUALITY) · **Ticker** · Cross-listing |
 | **CATALYSTS** | Calendar · Earnings · Themes · **AI chain** |
@@ -79,10 +79,11 @@ The panels, as each is built:
 | Tab | Contents |
 |---|---|
 | **MONITOR** | Research queue over the S&P 500 and the watchlist. A name enters at a 20% drawdown from its 1Y high or when it trails its sector peers (company excluded) by 10 pp over 1M. **TODAY** lists what changed since the previous build (entered, stabilising, evidence turned, reported, left), with weak-as-a-whole sectors grouped as one event; **QUEUE** has a price-state × evidence-state 2×2; evidence for and against (FY1 EPS revisions from Yahoo, revenue, FCF, last quarter vs consensus) is listed, never scored; candidate history persists between builds, and watch/exclude reasons live in `config/monitor_notes.toml`. See [the monitor contract](docs/monitor.md). |
-| **MARKETS** | A **live intraday strip** (see below), then the recap: SPY/QQQ/IWM quote strip, SPX/NDX drawdown with sessions since the high, advance/decline, a price + net-breadth + movers block for **each index**, a **watchlist** of names no index holds, sector performance / weight / **contribution**, sectors rebased to 100, % of each sector above its moving averages, SMA200 slope by sector |
+| **SECTORS → INDUSTRIES** | Every sub-industry (three names or more) and sector as the **median member**, so a few large names do not speak for it: 1M / 3M / 6M return, the share of names down over the month, drawdown from the one-year high, the share above the 200-session average, the FY1 EPS revision over 30 and 90 days (from MONITOR; read only for names with positive EPS), and the forward P/E with its percentile against the company's own ten years (from VALUATION; not shown for REITs, whose multiple is not P/E). Tags are evidence, not a verdict -- SOLD OFF, EST CUT / EST HELD, P/E LOW -- and appear only where a reading crosses a threshold in `[industries]` of `config/dashboard.toml`; a group of fewer than five names is marked thin. A group opens to its names. It runs after MONITOR in the build and names an input that did not build rather than borrow another session's. See [how to tell an oversold group from a deserved fall](docs/sectors/selloff-screen.md) |
+| **MARKETS** | A **live strip** and **intraday index charts** (see below), then the recap: SPX/NDX drawdown with sessions since the high, advance/decline, a price + net-breadth + movers block for **each index**, a **watchlist** of names no index holds, sector performance / weight / **contribution**, sectors rebased to 100, % of each sector above its moving averages, SMA200 slope by sector |
 | **CATALYSTS → CALENDAR** | Things to watch, in two lanes. **Macro & broad index**: BLS, BEA and Census releases at the time each agency publishes, FOMC decisions / press conferences / minutes and Board speeches from the Fed's calendar, announced Treasury coupon auctions, rule-based events (options expiry and quad witching, S&P rebalance, VIX expiry, jobless claims, ISM, EIA crude inventories) and hand-kept events (elections, deadlines) from the config — each with the previous print from FRED and the period it covers. **Single name**: earnings of every S&P 500 / Nasdaq-100 member and watchlist name with before-open / after-close timing, consensus EPS, estimates and index weight. A **last session** block shows what was released and who reported, with EPS vs. consensus and the day's move. Times in New York and the reader's own zone; every event says how its date is known | High-importance releases (FOMC, CPI, payrolls, GDP) are listed 45 days out. After a release the last-session block shows the actual against the survey point (TradingView).
 | **CATALYSTS → EARNINGS** | S&P 500 earnings in three blocks. **FactSet Earnings Insight** figures read from its articles (growth, beat rates, forward P/E vs its 10-year average, the quarter's and year's EPS revision against FactSet's typical one; history from 2014). A **daily bottom-up revision tracker** built from every member's consensus trend (current quarter, this year and next, 7–90 days, by sector, with the names that moved it). The **reporting season** from Nasdaq's calendar: reported, beat rate, surprise, growth against year-ago EPS captured before each report |
-| **CATALYSTS → THEMES** | Six groups of names that trade together (cloud & AI capex, semiconductors & memory, energy, banks, consumer, housing), each with a proxy (an ETF, or an equal-weight basket) and its run-in against the S&P 500, its bellwethers' next reports (scheduled, or projected from their own rhythm) with how far the proxy moved on their past reports, and a six-week calendar of those reports, the macro releases that bear on it and its own data's due dates. CLOUD adds hyperscaler capex from 10-Q/10-K XBRL, three Taiwanese AI-server makers' monthly revenue, OpenRouter tokens and estimated revenue by model author, and the Ramp AI Index; SEMIS adds TSMC and Nanya monthly revenue, Korean IC exports, ADATA's monthly memory note and UK retail memory/CPU prices read from PCPartPicker's trend charts; ENERGY adds EIA's weekly crude, gasoline, distillate and gas inventories against the same week of the last five years, refinery utilization and production, WTI/Brent/Henry Hub, the 3-2-1 crack and the pump price; HOUSING adds the 30-year mortgage rate, starts, permits, new home sales, months' supply and Case-Shiller; BANKS adds H.8 loans and deposits, the 2s10s and 3m10y curve, the high-yield spread, call-report delinquency rates and the loan officer survey; CONSUMER adds retail sales, real spending and the saving rate, consumer credit, Michigan sentiment and jobless claims (all from FRED, each dated by when its publisher releases it). A RELEASE DAYS card for each of the four shows how its ETF moved beyond the S&P 500 on the session of each past release of the series that bear on it (payrolls, core CPI, retail sales, claims, starts, new home sales, EIA crude stocks): the size of the move against any other day, and how often it rose after a print above or below the published forecast (TradingView's economic calendar, back to 2016), or its own trend where no forecast covers most releases. Each of the four also shows what moves the names: each bellwether's correlation and beta with oil, gas and the crack, the 10-year yield, the curve, the high-yield spread or gasoline futures, over the last year, and its series feed the stock cards' since-the-last-report table |
+| **CATALYSTS → THEMES** | Six groups of names that trade together (cloud & AI capex, semiconductors & memory, energy, banks, consumer, housing), each with a proxy (an ETF, or an equal-weight basket) and its run-in against the S&P 500, its bellwethers' next reports (scheduled, or projected from their own rhythm) with how far the proxy moved on their past reports, and a six-week calendar of those reports, the macro releases that bear on it and its own data's due dates. CLOUD adds hyperscaler capex from 10-Q/10-K XBRL, three Taiwanese AI-server makers' monthly revenue, OpenRouter tokens and estimated revenue by model author, and the Ramp AI Index; SEMIS adds TSMC and Nanya monthly revenue, Korean IC exports and the memory, DRAM and flash lines inside them, BLS semiconductor producer and import price indexes, ADATA's monthly memory note and UK retail memory/CPU prices read from PCPartPicker's trend charts; ENERGY adds EIA's weekly crude, gasoline, distillate and gas inventories against the same week of the last five years, refinery utilization and production, WTI/Brent/Henry Hub, the 3-2-1 crack and the pump price; HOUSING adds the 30-year mortgage rate, starts, permits, new home sales, months' supply and Case-Shiller; BANKS adds H.8 loans and deposits, the 2s10s and 3m10y curve, the high-yield spread, call-report delinquency rates and the loan officer survey; CONSUMER adds retail sales, real spending and the saving rate, consumer credit, Michigan sentiment and jobless claims (all from FRED, each dated by when its publisher releases it). A RELEASE DAYS card for each of the four shows how its ETF moved beyond the S&P 500 on the session of each past release of the series that bear on it (payrolls, core CPI, retail sales, claims, starts, new home sales, EIA crude stocks): the size of the move against any other day, and how often it rose after a print above or below the published forecast (TradingView's economic calendar, back to 2016), or its own trend where no forecast covers most releases. Each of the four also shows what moves the names: each bellwether's correlation and beta with oil, gas and the crack, the 10-year yield, the curve, the high-yield spread or gasoline futures, over the last year, and its series feed the stock cards' since-the-last-report table |
 | **HEAT MAPS** | S&P 500 treemap sized by the **issuer-published SPY weight** and coloured by return; US ETF treemap sized by AUM and coloured by estimated net flow |
 | **RATES & MACRO → FIXED INCOME** | Published par yield curve vs. 1 week / 1 month / start of year, level and bps change by tenor, 10Y−2Y and 10Y−3M spreads |
 | **RATES & MACRO → MACRO** | Commodity futures/ETF proxies with multi-period returns, last 12 monthly inflation releases as a heat table |
@@ -113,9 +114,9 @@ Every one of these is free and requires no account.
 | **Nasdaq** earnings calendar (`api.nasdaq.com/api/calendar/earnings`) | CATALYSTS single-name lane | Unofficial JSON behind nasdaq.com; timing, consensus EPS and, for past dates, reported EPS. Not marked company-confirmed |
 | **SEC** XBRL company facts | FINANCIALS, VALUATION & QUALITY and the DCF | Annual and quarterly 10-K/10-Q figures with their filing dates, plus the cover-page share count; one parse per filer feeds all three tabs |
 | **MOPS** (`mops.twse.com.tw/mops/api/t05st10_ifrs`) | THEMES: TSMC, Nanya, Quanta, Wiwynn, Wistron monthly revenue | The TWSE's disclosure system; published by the 10th. No publication date in the answer, so the date first seen here is kept |
-| **Korea Customs Service** trade statistics (`tradedata.go.kr`) | THEMES: Korean IC (HS 8542) exports | Confirmed monthly figures, mid-month; certificate verification on |
+| **Korea Customs Service** trade statistics (`tradedata.go.kr`) | THEMES: Korean IC (HS 8542) exports, plus memories (HS 854232) and the DRAM, flash, multi-chip and MCO lines inside it | Confirmed monthly figures, mid-month; certificate verification on. The breakout is export value, and value per kilogram of customs weight. It is not a spot price |
 | **ADATA Industrial** Memory & Flash Market Watch | THEMES: monthly DRAM / NAND note | A module maker's read, quoted; its charts are images and are not read |
-| **PCPartPicker** UK price trends (`uk.pcpartpicker.com/trends/price/{memory,cpu}/`) | THEMES: retail memory-kit and CPU prices | Read from the chart images' pixels (the page has no numbers); only ratios are reported, with the source linked. Its Cloudflare refuses cloud servers (HTTP 403) and is not worked around: the nightly build does not ask and logs the source as skipped; a local build reads it |
+| **PCPartPicker** UK price trends (`uk.pcpartpicker.com/trends/price/{memory,cpu}/`) | THEMES: retail memory-kit and CPU prices | Read from the chart images' pixels (the page has no numbers); only ratios are reported, with the source linked. Its Cloudflare refuses cloud servers (HTTP 403) and is not worked around: the nightly build reads the committed ratios in data/feeds/pcpartpicker.json and does not ask the site. scripts/refresh_pcpartpicker.py refreshes that file from a home connection |
 | **DART** (FSS electronic disclosure, public search `dsab007/detailSearch.ax`) | THEMES and AI CHAIN: Samsung Electronics and SK hynix results dates (the preliminary results first) | Their "영업(잠정)실적" fair disclosures, corrections dropped; no key needed |
 | **Korea MOTIE** monthly trade release (`motir.go.kr`, PDF attachment) | THEMES: 1st-of-month semiconductor and total exports | Read with `pdftotext` (poppler, installed by the workflow); the site is slow, so only the last 13 releases are read, each cached once |
 | **SEC EDGAR** earnings releases (8-K Item 2.02, Exhibit 99.1) | THEMES: NVIDIA Data Center revenue and outlook; capex guidance quoted from the releases | Segment revenue is not in XBRL company facts; matched text is quoted as written. Older submissions pages are read when a heavy filer's recent block (one year for the big banks) holds fewer than eight earnings releases; TSMC and ASML results come from their 6-K filings |
@@ -123,6 +124,7 @@ Every one of these is free and requires no account.
 | **Yahoo** front-month futures (CL, BZ, NG, RB, HO) | THEMES: oil, gas and the 3-2-1 crack | Cached apart from the members' prices |
 | **Yahoo** fundamentals-timeseries (`/ws/fundamentals-timeseries/v1/finance/timeseries/<symbol>`, types `monthly`, `quarterly`, `annualForwardPeRatio`) | VALUATION: each company's own forward P/E at every month end back about fifteen months, and at its last four fiscal year ends | Unofficial and undocumented, like the other Yahoo feeds. One series per request (several together come back truncated). Point in time, but on a fiscal-year EPS, not the next twelve months: see "Yahoo's forward P/E history" |
 | **Yahoo** market cap (quoteSummary `price`) | VALUATION: the market cap of a company whose filings count shares only class by class (Berkshire, Hershey, Ares), so P/E, EV and yields exist for it | Labelled on the row's share basis; such a row stays out of the index and sector P/E aggregates, as its per-share EPS may be in another class's shares |
+| **FRED** BLS semiconductor prices (PCU334413334413, PCU3344133344131, IZ3344, IR21320) | THEMES: US producer and import price indexes for semiconductors | Public domain, keyless CSV, current vintage. BLS indexes of its own product basket, not DRAM or NAND spot quotes. Ids live in config/dashboard.toml |
 | **FRED** housing series (MORTGAGE30US, HOUST, HOUST1F, PERMIT, HSN1F, MSACSR, CSUSHPINSA), GASREGW, DGS10 | THEMES: housing data, the pump price, rate sensitivity | Current vintage, keyless CSV |
 | **Finnhub** company news (`FINNHUB_API_KEY`) | TICKER: headlines on large-move days and company events announced ahead (investor days, product events, FDA dates) | Free tier: about a year of news, 60 requests a minute; a budget per build, settled days kept a year; without the key, moves are explained from filings, ratings, peers and data only |
 | **EDGAR filing index pages** | Earnings releases' acceptance time (Eastern), for the eight reports measured | The submissions JSON stamp ran twice the Eastern offset late in October 2026; fetched once per filing and kept |
@@ -133,6 +135,11 @@ Every one of these is free and requires no account.
 | **alternative-data** (github.com/Henrywzh/alternative-data) normalized files | THEMES: OpenRouter daily tokens and estimated revenue; Ramp AI Index | Read from the public repo, with the commit that last touched each file |
 
 ### Two things worth knowing about the feeds
+
+DRAMeXchange spot and contract prices are not on this site. Its terms forbid republication, and contract history sits behind the member login. scripts/refresh_dramexchange.py archives the public homepage on this machine only, under data/private/dramexchange/, which is gitignored and is not read by the build.
+
+The public alternatives have explicit reuse guidance: [BLS copyright information](https://www.bls.gov/opub/copyright-information.htm) places its published data in the public domain and requests source attribution. Korea Customs' [product-level trade-statistics dataset](https://www.data.go.kr/data/15101609/openapi.do) lists unrestricted permission (이용허락범위 제한 없음), and its [public-data policy](https://www.customs.go.kr/cvnci/cm/cntnts/cntntsView.do?mi=7613&cntntsId=2611) permits reuse including commercial purposes, excluding protected third-party information. The dashboard identifies both publishers and links to their data; export value per kilogram is a customs unit value, not a memory spot quote.
+
 
 **Identify yourself honestly.** FRED's edge accepts curl's own identifier
 instantly and stalls the identical request when it carries a Chrome
@@ -167,8 +174,8 @@ python -m market_recap.cli refresh --panels markets --skip-sec
 ### Running it on a schedule
 
 The nightly job is a GitHub Actions workflow,
-[`.github/workflows/refresh.yml`](.github/workflows/refresh.yml): weekdays at
-23:47 UTC it tests, refreshes with `--strict`, and deploys only if that passed.
+[`.github/workflows/refresh.yml`](.github/workflows/refresh.yml): it tests,
+refreshes with `--strict`, and deploys only if that passed.
 It runs on GitHub's machines, so it does not depend on a laptop being awake —
 the launchd job this replaced missed its first night because the lid was shut.
 
@@ -177,23 +184,34 @@ make status    # last five runs, and the as_of the live site is showing
 make run-now   # trigger it now (gh workflow run refresh.yml)
 ```
 
+Two feeds are not fetched from GitHub's machines. PCPartPicker refuses cloud IPs, so a local job runs scripts/refresh_pcpartpicker.py each morning and commits data/feeds/pcpartpicker.json; the nightly build only reads that file. DRAMeXchange's terms forbid putting its prices on this site, so scripts/refresh_dramexchange.py archives the public homepage under data/private/ and never commits it.
+
 A failed scheduled run emails the repo owner. `workflow_dispatch` takes a
 `deploy` input, so a run can build and validate without publishing.
 
-Not the closing bell, because the publishers this reads post after it: State
-Street's holdings and NAV files land in the evening, and Treasury sometimes
-does not post the par curve until early evening ET. A job firing at 16:00 ET
-builds a page entirely from the previous session and reports itself perfectly
-healthy. GitHub cron is UTC, and 23:47 UTC is after 18:30 New York in both
-halves of the year:
+Two editions a weekday, started on time by a Cloudflare cron Worker
+([`workers/dispatch`](workers/dispatch), `make deploy-dispatch`), which calls
+the workflow's `workflow_dispatch` with an `edition` input:
 
-| UTC | New York |
-|---|---|
-| 23:47 | 19:47 EDT (Mar – Nov) |
-| 23:47 | 18:47 EST (Nov – Mar) |
+| New York | Edition | What it has |
+|---|---|---|
+| 16:20 | `close` | The session's closes and everything built from them: returns, heat maps, sectors, technicals, risk, valuation, earnings cards. Up about half an hour after the bell. Yahoo's prices cached before 16:15 are stale after it, so the closes are fetched; every other daily file is still last evening's (the 18:30 rollover has not passed), so nothing else is downloaded again. Not published unless it covers the session that just closed. |
+| 18:35 | `evening` | Everything, after the 18:30 rollover: the evening publishers' files (Treasury's par curve, fund NAVs and flows, Cboe's put/call, late earnings figures) are fetched again. |
 
-GitHub can start a scheduled run late under load; minute 37 avoids the
-on-the-hour and half-hour slots that are delayed most.
+The header says when the page is the close edition. Both fire within the
+minute; GitHub's own schedule (23:47 UTC) started two to three hours late
+every night, so it stays only as the fallback and skips itself when an
+evening edition passed in the last ten hours **and the live manifest confirms
+that evening edition covers the latest completed NYSE session**. A successful
+dry run or an old published session does not suppress the fallback. The Worker fires at both
+daylight-saving candidates (20:20/21:20 and 22:35/23:35 UTC) and keeps the
+ones that are 16:20 and 18:35 in New York.
+
+The Worker needs one secret: a fine-grained GitHub token for this repository
+only, with Actions read and write, set with
+`cd workers/dispatch && ../../node_modules/.bin/wrangler secret put GITHUB_TOKEN`.
+Without it the Worker logs that nothing was dispatched and the late GitHub
+schedule is all there is.
 
 The run uses `--strict`, so a warning fails it. Nobody reads the output of an
 unattended job, and a job that exits 0 on a degraded build is how a stale page
@@ -205,8 +223,14 @@ anything this was tested on — and failed. `make lock` re-resolves the lock on
 purpose; upgrading is then a commit that was tested, not something a clean
 machine does on its own one night.
 
-Two checks sit around the deploy, because `--strict` validates a build
-against its own contract and cannot see the calendar:
+Three checks protect the published session:
+
+- **An edition must cover the latest completed NYSE session.** Strict
+  validation compares its `as_of` with the build timestamp in New York,
+  including holidays and early closes. Yesterday's internally consistent
+  build is not today's evening edition. Price caches are checked by their
+  observation date as well as their file timestamp, and missing latest
+  closes are retried without inventing them.
 
 - **Daily files expire at the session rollover, not after 24 hours.** Prices
   and issuer files count as fresh only if fetched after the latest weekday
@@ -230,7 +254,7 @@ are not reused.
 
 ### Where the time goes
 
-The manifest's `panel_seconds` and the build log say how long each panel took, and
+The manifest's `timings.panels` and the build log say how long each panel took, and
 `MARKET_RECAP_PROFILE_DIR=profile make refresh` writes each panel's hottest
 functions to `profile/<panel>.txt`. `.github/workflows/profile-build.yml` runs the
 nightly job's refresh on a branch, with the same cache and secrets and nothing
@@ -448,37 +472,67 @@ report in `valuation.json` after a build.
 under `data/snapshots/` locally. The plan they serve is
 `docs/information_architecture.md`.
 
-## Live intraday strip
+## Live intraday prices
 
-The top of MARKETS carries intraday prices for the quote strip, the indices
-and the watchlist (Yahoo's v8 chart) and the 2Y/10Y/30Y Treasury yields
-(CNBC's quote service). It is the only thing on the page that changes during
-the session, and it is labelled that way: each price shows its source and its
-age, the strip says whether the session is open, a price older than
-`stale_after_seconds` during the session is marked STALE, and one that did not
-arrive is a dash. The recap beneath it is untouched: every other figure is
-the nightly build's close.
+Three things on the page change on their own during the session, each labelled live with
+its age: the **strip** at the top of MARKETS and OVERVIEW (SPX, NDX, RUT, Dow,
+VIX, the 2Y/10Y/30Y yields, the dollar index, WTI and gold, then a row of
+names to watch: `[live] strip` and `strip_names`), the **intraday index
+charts** on INDICES (five-minute closes against the previous close), and the
+**S&P 500 heat map's LIVE window** (each tile coloured by today's move so far).
+Prices are Yahoo's spark (indices, VIX, the dollar, futures, stocks) and
+CNBC's quote service (yields). Each price shows its source and age; one older
+than `stale_after_seconds` during the session is marked STALE, and one that
+did not arrive is a dash, never a number from elsewhere. Everything else on
+the page is the nightly build's close; LIVE is the heat map's default only
+while the session is open.
 
-- **Refresh.** Every `refresh_seconds` (60) while the regular session is open
-  and the tab is visible; every `closed_refresh_seconds` (300) otherwise, to
-  notice the open. A hidden tab or another dashboard tab does not poll. The
-  REFRESH button fetches on demand.
+Three more blocks take live prices **only when the reader presses REFRESH**,
+and never fetch on their own:
+
+- **SECTORS: a TODAY window.** The page's own GICS baskets priced at each
+  member's live change from the heat-map board, weighted by today's official
+  SPY weight, against the whole index built the same way. Relative strength,
+  breadth, sub-industries and the members that moved a sector all get TODAY;
+  members without a live price are left out and counted. Beside each basket
+  is its SPDR fund against SPY (`[live] sector_etfs`), as the tradable
+  comparison. The rotation graph stays on weekly closes.
+- **MACRO commodities.** PRICE and 1D from Yahoo (`[macro.commodities]`);
+  1W and longer stay on the build's closes.
+- **Treasury yields.** CNBC's on-the-run yields for all 13 tenors in one call
+  (`[live] yield_board`), as LIVE and TODAY columns, live 10Y-2Y and 10Y-3M,
+  and a dashed live curve on the chart. These are market yields, not
+  Treasury's fitted par curve: the two differ by a few bp on coupons and
+  about ten on bills on the same day, so TODAY is the comparison, not the
+  level.
+
+- **Refresh.** The strip every `refresh_seconds` (60) during the session; the
+  heat map and the index charts every `board_refresh_seconds` (300). Closed,
+  each checks every `closed_refresh_seconds` / `board_closed_refresh_seconds`
+  for the open. A hidden tab does not poll and catches up when shown. REFRESH
+  asks again at once, though never sooner than `manual_min_seconds` (30)
+  after the last fetch.
 - **Server side.** `functions/api/quotes.js` is a Cloudflare Pages Function,
   deployed with the site because `wrangler pages deploy` picks up
   `functions/` from the repository root. It fetches only what `dist/live.json`
-  lists; `site.build` writes that file from `config/dashboard.toml`
-  (`[universe]`, `[[watchlist]]`, `[live]`), so the endpoint cannot proxy
-  arbitrary symbols. Readers share one fetch per `server_cache_seconds` (15)
-  per Cloudflare isolate, so clicks do not multiply requests to Yahoo.
-- **Session.** Open means now falls inside the regular period Yahoo reports
-  for the symbols, which handles weekends and exchange holidays without a
-  calendar here. Change is against Yahoo's previous close.
+  lists; `site.build` writes that file from `[live]` and the heat-map
+  artifact's members, so the endpoint cannot proxy arbitrary symbols. Spark
+  takes 20 symbols a call: the 504-name heat map is 26 calls, inside the 50
+  sub-requests a Function may make. Readers share one fetch per
+  `server_cache_seconds` (15, the strip) or `board_cache_seconds` (60) per
+  Cloudflare isolate.
+- **Session.** Open means now falls inside the regular session Yahoo reports
+  for the indices (or the board's stocks), which handles weekends and
+  holidays without a calendar here. Change is against Yahoo's previous close.
+  Yahoo's Russell 2000 quote runs about 15 minutes behind and its futures and
+  dollar index about 10; their ages say so.
 - **Sources were chosen by measurement** from Cloudflare's edge (2026-09-24
-  after the close, 2026-09-25 mid-session): Yahoo chart ~45 ms with prices a
-  few seconds old, CNBC ~120 ms and ~15 s behind. Nasdaq (2-3 s per call) and
+  after the close, 2026-09-25 mid-session): Yahoo ~45 ms with prices a few
+  seconds old, CNBC ~120 ms and ~15 s behind. Nasdaq (2-3 s per call) and
   Cboe (15-minute delay, up to 0.3% off) were not used.
-- **Locally**, `make serve` has no function, so the strip reports HTTP 404;
-  `make serve-live` runs the same tree under `wrangler pages dev` with it.
+- **Locally**, `make serve` has no function, so the live blocks report HTTP
+  404 and the heat map stays on the close; `make serve-live` runs the same
+  tree under `wrangler pages dev` with it.
 
 ## Design rules this repo follows
 
@@ -519,7 +573,9 @@ the nightly build's close.
   copy fetched within six hours of that filing is fetched again the next
   night, in case SEC had not processed it yet. The thirty-day cache lifetime
   is only the backstop. The manifest's `sec_filings` says how many were
-  checked and refetched, and the SEC sources carry the latest filing date.
+  checked and refetched and keeps the latest filing date. Submissions-index
+  freshness uses the oldest actual index-fetch date, so a quiet filer does
+  not look like a failed fetch and a stale cache fallback stays visible.
 
 ## Known limits
 
@@ -539,6 +595,33 @@ the nightly build's close.
   comes out the morning after, so the night's own session is checked against
   Nasdaq's closes for the 30 largest members instead; when too few answer,
   the page says the session was not cross-checked.
+- **Spin-offs are adjusted from `[[corporate_actions]]`, not by Yahoo.** Yahoo
+  adjusts closes for splits and dividends but not distributions: Corteva's
+  separation of Vylor (one share per share, ex-date 2026-10-01) showed CTVA as
+  77.65 to 12.57, an 84% loss on a holder who had lost nothing, and dragged
+  Materials 4 points under on the rotation tab. Each entry in
+  `config/dashboard.toml` names the ticker, ex-date, the distributed ticker and
+  the ratio from the filing; the factor is computed from both lines' prices on
+  the ex-date (`corporate_actions.py`), applied to every close and traded price
+  before it, and said at the top of MARKETS and in the manifest. If the
+  distributed line has no price that day, history before the date is dropped
+  rather than left wrong. `[price_checks]` lists any recent one-session fall of
+  60% or rise of 150% with no split on record as a notice, because it may be
+  the next one; news produces these too, so it never blocks a build. VALUATION
+  for a spun-off parent stays on pre-spin EPS until its first post-spin 10-Q.
+- **SEC's company-facts feed can skip a filing, so the build reads it itself.**
+  Citigroup's 10-Qs of 2026-05-07 and 2026-08-06 never reached company facts,
+  and the VALUATION row sat on FY2025 (P/E 15.7, ROE 6.8%) while every other
+  bank was on 2026-06-30. Each night the build compares a filer's statement
+  filings in the submissions index with what company facts carry, and reads any
+  it lacks from the filing's own XBRL instance (`sources/xbrl_instance.py`:
+  facts with no dimension, in company-facts' shape, cached per filing). A
+  filing accepted in the last six hours is left for SEC to process. The
+  manifest's `sec_filings.backfilled` lists the filers; one that cannot be read
+  is `unprocessed` and fails `--strict`. IFRS filers are not read. Checked
+  against SEC's own rows for 13 filers (5,292 rows): the only differences are
+  four figures Veeva's instance states rounded to the million, and six rows the
+  parser left out.
 - **Optional feeds cannot hold back the page.** Validation has three levels:
   an error is not publishable, a warning makes `--strict` refuse the deploy,
   and a notice is shown on its tab and nothing more. The catalyst calendars

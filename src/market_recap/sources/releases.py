@@ -5,7 +5,9 @@ facts: segment revenue (facts carry no dimensions) and management's outlook.
 The release is found through the filing index's document types, read as
 text, and searched with patterns; what matched is quoted, never paraphrased.
 
-A filed release never changes and is cached as an archive.
+A filed release never changes and is cached as an archive -- and so is the
+text read out of it, because turning the HTML into text is what costs: about
+0.13 s a release, and EVENTS reads some two thousand every build.
 """
 
 from __future__ import annotations
@@ -34,9 +36,16 @@ def _text(html: str) -> str:
     return re.sub(r"\s+", " ", BeautifulSoup(html, "html.parser").get_text(" ")).strip()
 
 
-def _read_exhibit(cik: int, accession: str) -> tuple[str, str] | None:
-    """(url, text) of the filing's EX-99.1, read from the filing's index page
-    and the exhibit itself (each kept as fetched). Parses both documents."""
+def _exhibit(cik: int, accession: str) -> tuple[str, str] | None:
+    """(url, text) of the filing's EX-99.1, the text kept once read."""
+    acc = accession.replace("-", "")
+    payload = cache.fetch_bytes(NAMESPACE, f"{acc}-text", lambda: json.dumps(_read_exhibit(cik, accession)).encode("utf-8"),
+                                kind="archive", suffix=".json", compress=True)
+    found = json.loads(payload)
+    return (found["url"], found["text"]) if found else None
+
+
+def _read_exhibit(cik: int, accession: str) -> dict | None:
     acc = accession.replace("-", "")
     base = ARCHIVE.format(cik=cik, acc=acc)
     index = cache.fetch_text(NAMESPACE, f"{acc}-index", lambda: sec._get(f"{base}{accession}-index.html", 30.0),
@@ -52,24 +61,8 @@ def _read_exhibit(cik: int, accession: str) -> tuple[str, str] | None:
     exhibits.sort(key=lambda e: (e[0] != "EX-99.1", e[0]))
     for _, url in exhibits[:1]:
         html = cache.fetch_text(NAMESPACE, f"{acc}-ex991", lambda: sec._get(url, 30.0), kind="archive", suffix=".html")
-        return url, _text(html)
+        return {"url": url, "text": _text(html)}
     return None
-
-
-def _exhibit(cik: int, accession: str) -> tuple[str, str] | None:
-    """(url, text) of the filing's EX-99.1.
-
-    A filed release never changes, yet every build parsed the same index page
-    and press release again: 2,351 BeautifulSoup runs over 8 million tags, most
-    of an EVENTS build's CPU. What is kept is the answer -- the url and the
-    extracted text, or that there is no exhibit -- so each filing is parsed once
-    and read back thereafter."""
-    acc = accession.replace("-", "")
-    answer = cache.fetch_text(NAMESPACE, f"{acc}-exhibit",
-                              lambda: json.dumps(_read_exhibit(cik, accession)),
-                              kind="archive", suffix=".json", compress=True)
-    found = json.loads(answer)
-    return (found[0], found[1]) if found else None
 
 
 def recent(cik: int, count: int) -> list[dict]:
@@ -208,10 +201,11 @@ def outlook(text: str) -> dict | None:
 
 
 def release_on(cik: int, day: str, block: dict, *, tolerance_days: int = 1,
-               fetch: bool = True) -> tuple[str, str, bool] | None:
+               fetch: bool = True, counts: dict | None = None) -> tuple[str, str, bool] | None:
     """(url, text, read for the first time) of the earnings release (8-K Item
     2.02) filed on ``day``, from a submissions block. None when there is none
-    within the tolerance -- or when it is not cached and ``fetch`` is off."""
+    within the tolerance -- or when it is not cached and ``fetch`` is off,
+    which ``counts["waiting"]`` tallies."""
     target = date.fromisoformat(day)
     forms, items = block.get("form") or [], block.get("items") or []
     for i, form in enumerate(forms):
@@ -223,6 +217,8 @@ def release_on(cik: int, day: str, block: dict, *, tolerance_days: int = 1,
         acc = block["accessionNumber"][i]
         cached = cache.path_for(NAMESPACE, f"{acc.replace('-', '')}-index", ".html").exists()
         if not cached and not fetch:
+            if counts is not None:
+                counts["waiting"] = counts.get("waiting", 0) + 1
             return None
         found = _exhibit(cik, acc)
         return (found[0], found[1], not cached) if found else None
