@@ -376,3 +376,13 @@ def test_own_calendar_tries_the_session_and_the_weekday_before():
     # Only a report whose own date missed the name sends us to other days.
     assert _days_to_try(reactions, calendars) == {"2026-07-07", "2026-07-09", "2026-07-28", "2026-07-31"}
     assert _own_calendar("PEP", [{"date": "2026-01-01", "session": "2026-01-02"}], calendars) == {}
+
+
+def test_the_close_edition_asks_finnhub_nothing_new(monkeypatch):
+    """Read in build(): the close edition sets the budgets so only cached windows are read."""
+    import inspect
+    from market_recap.panels import events as panel
+    source = inspect.getsource(panel.build)
+    assert 'os.environ.get("MARKET_RECAP_EDITION") == "close"' in source
+    assert '"budget": 0 if deferred' in source
+    assert "if deferred or not rotation_due" in source

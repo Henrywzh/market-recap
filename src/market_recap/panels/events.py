@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 import hashlib
+import os
 import time
 
 import numpy as np
@@ -651,7 +652,12 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     moves_by_symbol = {s: E.big_moves(excess[s], since=move_since, skip=set(_sessions_of(reactions.get(s))))
                        for s in everyone if s in excess.columns}
     news: dict[tuple[str, str], list[dict]] = {}
-    news_state = {"asked": 0, "failed": 0, "budget": int(settings.get("news_budget", 250)), "keyed": finnhub.available()}
+    # The close edition asks Finnhub nothing new: at about one request a second
+    # the day's asks took some 2.5 minutes of a build meant to be up half an
+    # hour after the bell. It reads what is cached; the evening edition asks.
+    deferred = os.environ.get("MARKET_RECAP_EDITION") == "close"
+    news_state = {"asked": 0, "failed": 0, "budget": 0 if deferred else int(settings.get("news_budget", 250)),
+                  "keyed": finnhub.available(), "deferred": deferred}
     if news_state["keyed"]:
         wanted = sorted(((priority(s), m["date"], s) for s, ms in moves_by_symbol.items() for m in ms if m["date"] >= news_since),
                         key=lambda x: (x[0][1], x[0][2], -int(x[1].replace("-", "")), x[0][3]))
@@ -683,11 +689,14 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
             asked = symbol.replace("-", ".")
             # Each name is asked every `rotation` sessions; between, its last
             # window is read again (an announcement is weeks ahead of its date).
-            if not rotation_due(symbol, as_of, rotation):
+            # The close edition reads the last window for every name.
+            if deferred or not rotation_due(symbol, as_of, rotation):
                 rows = finnhub.recent_window(asked, as_of, event_days, max_age=2 * rotation + 4)
                 if rows is not None:
                     event_state["reused"] += 1
                     announced[symbol] = E.announced_events(rows, symbol, meta.get(symbol, {}).get("name"), as_of)
+                    continue
+                if deferred:
                     continue
             if not finnhub.is_cached(asked, lookback, as_of, as_of):
                 if event_state["asked"] >= event_state["budget"]:
@@ -784,6 +793,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         ctx.as_of if news else None, rows=len(news),
         status="skipped" if not news_state["keyed"] else ("partial" if news_state["failed"] or news_state["asked"] >= news_state["budget"] else "ok"),
         error=("no FINNHUB_API_KEY: moves explained without headlines" if not news_state["keyed"]
+               else "close edition: new headlines are asked by the evening edition" if deferred and not news_state["failed"]
                else f"{news_state['failed']} failed; budget {news_state['asked']}/{news_state['budget']} new requests" if news_state["failed"] or news_state["asked"] >= news_state["budget"] else None),
         policy="daily_close"))
     ctx.log.add(SourceRecord("sec_releases_guidance", "Guidance stated in earnings releases (8-K Item 2.02, EX-99)",
@@ -798,6 +808,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         # settled day, or a name off its turn in the rotation), and failed.
         ctx.diagnostics["events"] = {
             "seconds": steps,
+            "finnhub_deferred": deferred,
             "finnhub_moves": {"asked": news_state["asked"], "budget": news_state["budget"], "failed": news_state["failed"],
                               "from_cache": max(0, len(news) - news_state["asked"])},
             "finnhub_events": {"names": len(deep), "asked": event_state["asked"], "budget": event_state["budget"],
