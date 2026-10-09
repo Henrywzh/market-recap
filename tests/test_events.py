@@ -453,3 +453,31 @@ def test_own_calendar_tries_the_session_and_the_weekday_before():
     # Only a report whose own date missed the name sends us to other days.
     assert _days_to_try(reactions, calendars) == {"2026-07-07", "2026-07-09", "2026-07-28", "2026-07-31"}
     assert _own_calendar("PEP", [{"date": "2026-01-01", "session": "2026-01-02"}], calendars) == {}
+
+
+def test_the_close_edition_asks_finnhub_nothing_new(monkeypatch, fake_finnhub):
+    """build() reads the edition and hands it to the phase, which then asks nothing whatever the budgets say."""
+    import inspect
+    from market_recap.panels import events as panel
+    assert 'os.environ.get("MARKET_RECAP_EDITION") == "close"' in inspect.getsource(panel.build)
+    monkeypatch.setattr(panel.finnhub, "recent_window", lambda *a, **k: None)         # nothing cached for this name
+    _, news, news_state, announced, event_state = panel._finnhub_phase(**_phase_args(), deferred=True)
+    assert fake_finnhub == []                                                          # not one request
+    assert news == {} and announced == {}
+    assert news_state["asked"] == 0 and news_state["budget"] == 0 and news_state["deferred"] is True
+    assert event_state["asked"] == 0 and event_state["reused"] == 0
+
+
+def test_the_close_edition_still_reads_what_is_cached(monkeypatch, fake_finnhub):
+    from market_recap.panels import events as panel
+    cached = [{"datetime": 0, "headline": "Alpha Inc to hold investor day", "source": "wire", "url": "https://example.test/a"}]
+    monkeypatch.setattr(panel.finnhub, "recent_window", lambda *a, **k: cached)
+    _, _, news_state, announced, event_state = panel._finnhub_phase(**_phase_args(), deferred=True)
+    assert fake_finnhub == [] and event_state["reused"] == 1 and set(announced) == {"AAA"}
+    assert news_state["asked"] == 0
+
+
+def test_the_evening_edition_asks_as_before(fake_finnhub):
+    from market_recap.panels import events as panel
+    _, _, news_state, _, event_state = panel._finnhub_phase(**_phase_args())
+    assert news_state["deferred"] is False and news_state["asked"] > 0 and event_state["asked"] == 1
