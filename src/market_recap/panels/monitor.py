@@ -269,6 +269,7 @@ def _settings(ctx: Any) -> tuple[dict, list[str]]:
         "min_analysts": positive_int("min_analysts", 3),
         "report_days": positive_int("report_days", 100),
         "expectations": monitor.get("expectations", False) is True,
+        "price_rule": M.PRICE_RULE,
     }
     return settings, notices
 
@@ -865,7 +866,8 @@ def _log_state(log: list[list[Any]], as_of: str, today: Mapping[str, Any]) -> li
 
 
 def _changes(row: Mapping[str, Any], before: Mapping[str, Any] | None, *, new_row: bool,
-             baseline: bool, was_index: bool | None, as_of: str, settings: Mapping[str, Any]) -> list[dict]:
+             baseline: bool, was_index: bool | None, as_of: str, settings: Mapping[str, Any],
+             price_rule_changed: bool = False) -> list[dict]:
     """What is different about this row today, in the reader's terms."""
 
     out: list[dict] = []
@@ -890,11 +892,13 @@ def _changes(row: Mapping[str, Any], before: Mapping[str, Any] | None, *, new_ro
     if not (candidate or watched) or before is None:
         return out
     price, was_price = row.get("price_state"), before.get("price_state")
-    if price == "stabilising" and was_price == "weak":
-        add("stabilising", "Relative strength against peers turned up and the close is back above its average")
+    if price_rule_changed:
+        pass  # re-labelled by the new rule, not moved: no transition to report
+    elif price == "stabilising" and was_price == "weak":
+        add("stabilising", "Gaining on its peers over the month and the close is back above its average")
     elif price == "weak" and was_price == "stabilising":
-        add("weakening", "Stabilisation failed: " + ("lagging peers again" if row.get("rs_improving") is False
-                                                     else "back below its average"))
+        add("weakening", "Stabilisation failed: " + ("losing ground to its peers over the month"
+                                                     if row.get("rs_improving") is False else "back below its average"))
     evidence, was_evidence = _loggable(row)["evidence_state"], before.get("evidence_state")
     if evidence == "deteriorating" and was_evidence != "deteriorating" and was_evidence is not None:
         add("evidence_down", "; ".join(row.get("evidence_against") or []))
@@ -1024,6 +1028,10 @@ def build(ctx, *, valuation=None, catalysts=None, previous=None, trends=None, no
     # A rerun of the first session is still the baseline, and a rerun of any
     # session compares with the build before it, not with itself.
     baseline = previous_state is None or previous_state["tracking_started"] == as_of
+    # The ledger's last price states were judged under the rule it names; under
+    # a different one a changed label is the rule, not the stock.
+    price_rule_changed = (previous_state is not None and not baseline
+                          and (previous_state["settings"] or {}).get("price_rule") != M.PRICE_RULE)
     if previous_state is None:
         compared_with = None
     elif previous_state["as_of"] < as_of:
@@ -1180,6 +1188,7 @@ def build(ctx, *, valuation=None, catalysts=None, previous=None, trends=None, no
                               sector_etfs=sector_etfs, market_return=market_return,
                               members_median=members_median)
     event_sectors = {s["sector"] for s in sectors if s["event"]}
+    relabelled = 0
     for row in rows:
         if row["candidate"]:
             if "peer_laggard" in row["reasons"]:
@@ -1188,11 +1197,19 @@ def build(ctx, *, valuation=None, catalysts=None, previous=None, trends=None, no
                 row["anomaly"] = "sector"
             else:
                 row["anomaly"] = "drawdown"
-        found = _changes(row, row.pop("_changes_before"), new_row=row.pop("_new_row"), baseline=baseline,
-                         was_index=row.pop("_was_index"), as_of=as_of, settings=settings)
+        before = row.pop("_changes_before")
+        if price_rule_changed and before and {before.get("price_state"), row.get("price_state")} == {"weak", "stabilising"}:
+            relabelled += 1
+        found = _changes(row, before, new_row=row.pop("_new_row"), baseline=baseline,
+                         was_index=row.pop("_was_index"), as_of=as_of, settings=settings,
+                         price_rule_changed=price_rule_changed)
         row["why_today"] = [change["kind"] for change in found]
         changes.extend(found)
 
+    if price_rule_changed:
+        notices.append(
+            f"Price-state rule changed to {M.PRICE_RULE}: {relabelled} names were re-labelled weak/stabilising "
+            "today by the rule, not by a move, so no stabilising or weakening changes are listed for this session")
     if not members:
         notices.append(f"configured monitor universe {index_key} has no members in context")
     notices = list(dict.fromkeys(notices))
@@ -1210,6 +1227,7 @@ def build(ctx, *, valuation=None, catalysts=None, previous=None, trends=None, no
             "watchlist": len(watch),
         },
         "settings": settings,
+        "price_rule_changed": price_rule_changed,
         "market_return_pct": _number(market_return, 2),
         # Equal-weight against cap-weighted: the breadth of the move.
         "members_median_return_pct": _number(members_median, 2),
@@ -1223,8 +1241,8 @@ def build(ctx, *, valuation=None, catalysts=None, previous=None, trends=None, no
             "equally weighted, the company excluded) by the peer margin. Nothing is scored. Evidence for "
             "and against is listed side by side: FY1 consensus EPS revisions (Yahoo earningsTrend, same "
             "fiscal period), revenue growth and free cash flow from the latest filing, and the last "
-            "reported quarter against consensus. Price is 'stabilising' only when relative strength "
-            "against peers turned up and the close is above its average. Unknown is never steady. "
+            "reported quarter against consensus. Price is 'stabilising' only when the stock gained on its "
+            "peers over the relative period and the close is above its average. Unknown is never steady. "
             "History is prospective from the first build; a first observation is not a historical entry."
         ),
     }

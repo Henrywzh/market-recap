@@ -317,9 +317,10 @@ export const CHANGE_LABELS = Object.freeze({
 
 /**
  * Transitions recorded in a row's state log on the artifact date. Used for
- * browser-local follows, which the build cannot see.
+ * browser-local follows, which the build cannot see. On the session the
+ * price-state rule changed, a weak/stabilising flip is the rule, not a move.
  */
-export function logChanges(row, asOf) {
+export function logChanges(row, asOf, { priceRuleChanged = false } = {}) {
   const log = Array.isArray(row?.state_log) ? row.state_log : [];
   const last = log[log.length - 1];
   const prev = log[log.length - 2];
@@ -328,8 +329,10 @@ export function logChanges(row, asOf) {
   const add = (kind, text) => out.push({
     ticker: row.ticker, sector: row.sector ?? null, anomaly: row.anomaly ?? null, kind, text,
   });
-  if (prev[2] === 'weak' && last[2] === 'stabilising') {
-    add('stabilising', 'Relative strength against peers turned up and the close is back above its average');
+  if (priceRuleChanged) {
+    // re-labelled, not moved
+  } else if (prev[2] === 'weak' && last[2] === 'stabilising') {
+    add('stabilising', 'Gaining on its peers over the month and the close is back above its average');
   } else if (prev[2] === 'stabilising' && last[2] === 'weak') {
     add('weakening', 'Stabilisation failed');
   }
@@ -350,7 +353,7 @@ export function todayChanges(data, followed = []) {
   const seen = new Set(changes.map((c) => `${c.ticker}:${c.kind}`));
   for (const row of rows) {
     if (!follows.has(normalizeTicker(row?.ticker)) || excluded.has(row.ticker)) continue;
-    for (const change of logChanges(row, data?.as_of)) {
+    for (const change of logChanges(row, data?.as_of, { priceRuleChanged: data?.price_rule_changed === true })) {
       if (!seen.has(`${change.ticker}:${change.kind}`)) changes.push({ ...change, followed: true });
     }
   }

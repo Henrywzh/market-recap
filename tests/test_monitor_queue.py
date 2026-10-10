@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -250,3 +252,42 @@ def test_notes_need_a_status_and_a_reason(tmp_path):
     notes, problems = monitor.load_notes(path)
     assert notes == {"ABC": {"status": "exclude", "since": None, "reason": "restating", "outcome": None}}
     assert problems == ["monitor note 2 needs ticker, status (watch or exclude) and reason"]
+
+
+def test_relative_strength_is_a_state_not_the_session_it_turned():
+    dates = _dates(count=60)
+    peers = pd.Series(np.full(60, 100.0), index=dates)
+    # Gaining on its peers for two months running: still improving. The old
+    # rule wanted the month before to have been weak, so a name like this went
+    # back to "weak" the session after it stabilised.
+    rising = pd.Series(np.linspace(80.0, 120.0, 60), index=dates)
+    assert M.relative_strength_improving(rising, peers, dates[-1], 21) == (True, None)
+    falling = pd.Series(np.linspace(120.0, 80.0, 60), index=dates)
+    assert M.relative_strength_improving(falling, peers, dates[-1], 21) == (False, None)
+
+
+def test_a_price_rule_change_relabels_without_reporting_transitions():
+    def ctx(as_of):
+        dates = _dates(as_of, 252)
+        recovering = np.full(252, 100.0)
+        recovering[-60:] = 60.0
+        recovering[-21:] = np.linspace(60.0, 70.0, 21)
+        return _ctx(as_of=as_of, close_dates=dates,
+                    close_values={"AAA": recovering, "BBB": np.full(252, 100.0)})
+
+    first = monitor.build(ctx("2026-09-22"))
+    assert first["settings"]["price_rule"] == M.PRICE_RULE
+    assert _row(first, "AAA")["price_state"] == "stabilising"
+    # A ledger written under the old rule, which had AAA as weak.
+    old = deepcopy(first)
+    del old["settings"]["price_rule"]
+    _row(old, "AAA")["state_log"][-1][2] = "weak"
+
+    relabelled = monitor.build(ctx("2026-09-23"), previous=old)
+    assert relabelled["price_rule_changed"] is True
+    assert not [c for c in relabelled["changes"] if c["kind"] in ("stabilising", "weakening")]
+    assert any("1 names were re-labelled" in n for n in relabelled["notices"])
+
+    # The next session compares like with like again.
+    later = monitor.build(ctx("2026-09-24"), previous=relabelled)
+    assert later["price_rule_changed"] is False

@@ -228,26 +228,36 @@ def above_moving_average(series: Any, as_of: Any, sessions: int) -> tuple[bool |
     return bool(float(values.iloc[-1]) > float(values.mean())), None
 
 
+# Names the rule behind ``price_state``. A build whose previous ledger was
+# written under another rule re-labels names without anything having moved, so
+# it records no price transitions that day (panels.monitor).
+PRICE_RULE = "rs_ratio_up_1m_and_above_ma"
+
+
 def relative_strength_improving(
     stock: Any, sector: Any, as_of: Any, sessions: int
 ) -> tuple[bool | None, str | None]:
-    """Whether stock/sector improved in the current window after a weak one."""
+    """Whether stock/peers rose over the latest window: gaining on its peers.
+
+    A state, not a crossing. Requiring the window before to have been weak as
+    well made a name that kept outperforming for a second month "not
+    improving", so it fell back to ``weak`` the session after it stabilised.
+    The moment it turns up is the weak -> stabilising transition in the ledger.
+    """
 
     if sessions <= 0:
         return None, "relative-strength window must contain at least one session"
-    count = 2 * sessions + 1
+    count = sessions + 1
     stock_values, stock_reason = _window(stock, as_of, count, label="relative-strength stock")
     if stock_values is None:
         return None, stock_reason
     sector_values, sector_reason = _window(sector, as_of, count, label="relative-strength sector")
     if sector_values is None:
         return None, sector_reason
-    ratio = stock_values / sector_values
-    current = _endpoint_return(ratio.iloc[sessions:], sessions)
-    preceding = _endpoint_return(ratio.iloc[: sessions + 1], sessions)
-    if current is None or preceding is None:
+    current = _endpoint_return(stock_values / sector_values, sessions)
+    if current is None:
         return None, "relative-strength ratio has no valid endpoints"
-    return bool(current > 0.0 and preceding <= 0.0), None
+    return bool(current > 0.0), None
 
 
 

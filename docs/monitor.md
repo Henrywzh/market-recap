@@ -36,9 +36,15 @@ their sector event.
 ## Price state × evidence state
 
 **Price:** `stabilising` only when relative strength against peers improved
-(latest 1M ratio return positive after a non-positive one) **and** the close
-is above its 20-session average; `weak` when either check fails; unknown
-otherwise. Two complementary checks, not a pattern library.
+(the stock / peer-basket ratio rose over the latest 1M) **and** the close is
+above its 20-session average; `weak` when either check fails; unknown
+otherwise. Two complementary checks, not a pattern library. It is a state: the
+session it turns is the weak → stabilising change, and a name that keeps
+gaining on its peers stays stabilising. (Until 2026-10 the ratio also had to
+have fallen over the 1M before, which sent a name back to `weak` the session
+after it stabilised. The build after a rule change lists no price transitions
+and says so in the notices, because the new rule re-labels names that did not
+move.)
 
 **Evidence** is listed for and against, never netted:
 
