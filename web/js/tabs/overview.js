@@ -4,12 +4,12 @@
 // recent changes and six months of line -- then the Fed and the next three
 // sessions.
 
-import { el, card, num, pct, dirClass, metaRow, periodSwitch, DASH } from '../fmt.js';
+import { el, card, num, pct, dirClass, metaRow, periodSwitch, tag, DASH } from '../fmt.js';
 import { render, SERIES_COLORS } from '../charts.js';
 import { mountLive } from '../live.js';
 import { tickerHref } from '../routes.js';
 import { spark } from '../spark.js';
-import { formatValue } from './risk.js';
+import { formatValue, ordinal } from './risk.js';
 
 const present = (v) => v !== null && v !== undefined && Number.isFinite(v);
 const signed = (v, digits = 1, suffix = '') => (present(v) ? `${v > 0 ? '+' : ''}${num(v, digits)}${suffix}` : DASH);
@@ -253,7 +253,37 @@ function ratesCard(rows, fed, history) {
   ]);
 }
 
-function crossCard(rows) {
+// MOVE beside VIX: each one's place in its own last year, the ratio's place in
+// RISK's weekly history, and -- when they disagree by a wide margin -- which
+// market is calm while the other is not.
+const VOL_READINGS = {
+  rates: ['RATES STRESS, EQUITIES CALM', 'warn', 'Treasury volatility is high for its year while the VIX is low: rate risk the stock market is not showing.'],
+  equities: ['EQUITY STRESS, RATES CALM', 'warn', 'The VIX is high for its year while Treasury volatility is low: the strain is in stocks, not in rates.'],
+  both: ['BOTH ELEVATED', 'down', 'Both are high for their year.'],
+  in_line: ['IN LINE', 'dim', 'Neither is far from the other against its own year.'],
+};
+
+export function volReading(vol) {
+  return vol && VOL_READINGS[vol.reading] ? VOL_READINGS[vol.reading] : null;
+}
+
+function volLine(vol) {
+  const reading = volReading(vol);
+  if (!vol || !reading) return null;
+  const [label, tone, text] = reading;
+  return el('div', { class: 'ov-vol' }, [
+    el('div', { class: 'ov-vol-head' }, [
+      el('span', { class: 'dim', text: 'BOND VS EQUITY VOLATILITY' }),
+      tag(label, tone),
+      el('a', { href: '#risk', class: 'dim', text: 'risk ↗' }),
+    ]),
+    el('div', { class: 'ov-vol-stats', text: `MOVE ${num(vol.move, 1)} (1Y ${ordinal(vol.move_pct_1y)}) · VIX ${num(vol.vix, 1)} (1Y ${ordinal(vol.vix_pct_1y)})`
+      + ` · MOVE/VIX ${num(vol.ratio, 1)}${vol.ratio_pct !== null && vol.ratio_pct !== undefined ? `, ${ordinal(vol.ratio_pct)} since ${String(vol.ratio_since || '').slice(0, 4)} (weekly)` : ''}` }),
+    el('div', { class: 'note-text', text: `${text} MOVE is the implied volatility of one-month Treasury options, in basis points of yield; its line on RISK is ${num(vol.move_threshold, 0)}.` }),
+  ]);
+}
+
+function crossCard(rows, vol) {
   const body = rows.map((r) => {
     const change = (k) => (r.unit === 'pts'
       ? el('td', { class: present(r[k]) ? (r[k] > 0 ? 'down' : 'up') : 'dim', text: signed(r[k], 1) })
@@ -265,8 +295,8 @@ function crossCard(rows) {
       line(r.spark),
     ]);
   });
-  return card('DOLLAR, COMMODITIES & VOLATILITY', el('span', { class: 'dim', text: 'VIX changes in points' }),
-    grid(['', 'LAST', '1D', '1W', '1M', 'YTD', '6M'], body));
+  return card('DOLLAR, COMMODITIES & VOLATILITY', el('span', { class: 'dim', text: 'VIX and MOVE change in points' }),
+    [grid(['', 'LAST', '1D', '1W', '1M', 'YTD', '6M'], body), volLine(vol)].filter(Boolean));
 }
 
 function printsCard(rows) {
@@ -346,7 +376,7 @@ export default function renderOverview(root, data) {
     el('div', { class: 'ov-col' }, [
       performanceCard(data.performance, data.equal_vs_cap),
       breadthCard(data.breadth, data.breadth_history, data.distribution),
-      crossCard(data.cross_asset),
+      crossCard(data.cross_asset, data.vol),
       aheadCard(data.ahead),
     ].filter(Boolean)),
   ]));

@@ -802,6 +802,12 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .ov-chips .mchip { margin: 0; font-size: 10.5px; line-height: 18px; padding: 0 6px; }
 .ov-chips-sectors { font-size: 11px; margin-top: 5px; }
 .ov-fed { font-size: 11.5px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); line-height: 1.5; }
+.ov-vol { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); font-size: 11.5px; line-height: 1.5; }
+.ov-vol-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; letter-spacing: 0.06em; }
+.ov-vol-head a { margin-left: auto; }
+.ov-vol-stats { margin-top: 3px; font-variant-numeric: tabular-nums; }
+.move-card { display: grid; grid-template-columns: minmax(180px, 240px) 1fr; gap: 12px; align-items: start; }
+@media (max-width: 720px) { .move-card { grid-template-columns: 1fr; } }
 .ov-risk { display: flex; gap: 8px; align-items: baseline; font-size: 11.5px; padding: 6px 10px; margin-bottom: 10px; border: 1px solid var(--border); background: var(--panel); text-decoration: none; color: inherit; }
 .ov-risk.down { border-color: color-mix(in srgb, var(--down) 60%, transparent); }
 .ov-risk:hover { border-color: var(--border-strong); text-decoration: none; }

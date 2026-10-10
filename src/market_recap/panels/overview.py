@@ -66,7 +66,14 @@ CROSS_ASSET = [
     ("HG=F", "Copper", "pct"),
     ("GC=F", "Gold", "pct"),
     ("^VIX", "VIX", "pts"),
+    # Treasury options' implied volatility (ICE BofA MOVE, as Yahoo serves it):
+    # the bond market's VIX, in basis points of yield.
+    ("^MOVE", "MOVE", "pts"),
 ]
+# How far apart the two volatilities' one-year percentiles must sit before the
+# page says one market is pricing stress the other is not.
+VOL_GAP_PCT = 40
+VOL_HIGH_PCT = 80
 # Macro prints: FRED series, how each is shown, and its unit.
 PRINTS = [
     ("CPIAUCSL", "CPI", "yoy", "% y/y"),
@@ -364,6 +371,42 @@ def risk_line(risk: dict | None) -> dict | None:
     }
 
 
+def bond_equity_vol(risk: dict | None) -> dict | None:
+    """MOVE beside VIX, from RISK's own tiles so the percentiles agree with that
+    page: each one's place in its last year, the MOVE/VIX ratio's place in the
+    weekly history RISK keeps, and which market, if either, is the calm one."""
+    tiles = {t["key"]: t for s in (risk or {}).get("sections", []) for t in s.get("tiles", [])}
+    move, vix = tiles.get("move"), tiles.get("vix")
+    if not move or not vix or move.get("value") is None or not vix.get("value"):
+        return None
+    ratio = move["value"] / vix["value"]
+    hm, hv = move.get("history") or {}, vix.get("history") or {}
+    vix_on = dict(zip(hv.get("dates") or [], hv.get("values") or []))
+    pairs = [(d, m / vix_on[d]) for d, m in zip(hm.get("dates") or [], hm.get("values") or [])
+             if m is not None and vix_on.get(d)]
+    ratios = [r for _, r in pairs]
+    pm, pv = move.get("pct_1y"), vix.get("pct_1y")
+    reading = None
+    if pm is not None and pv is not None:
+        if pm - pv >= VOL_GAP_PCT:
+            reading = "rates"
+        elif pv - pm >= VOL_GAP_PCT:
+            reading = "equities"
+        elif pm >= VOL_HIGH_PCT and pv >= VOL_HIGH_PCT:
+            reading = "both"
+        else:
+            reading = "in_line"
+    return {
+        "date": move.get("date"),
+        "move": move["value"], "move_pct_1y": pm, "move_threshold": move.get("threshold"),
+        "vix": vix["value"], "vix_pct_1y": pv,
+        "ratio": clean_float(ratio, 2),
+        "ratio_pct": round(100 * sum(r <= ratio for r in ratios) / len(ratios)) if ratios else None,
+        "ratio_since": pairs[0][0] if pairs else None,
+        "reading": reading,
+    }
+
+
 def build(ctx, *, inputs: dict[str, dict | None]) -> dict:
     settings = ctx.config.get("overview", {})
     as_of = pd.Timestamp(ctx.as_of)
@@ -425,7 +468,7 @@ def build(ctx, *, inputs: dict[str, dict | None]) -> dict:
     cross = [cross_row(symbol, label, unit, closes[symbol] if symbol in closes.columns else pd.Series(dtype=float))
              for symbol, label, unit in CROSS_ASSET]
     ctx.log.add(SourceRecord(
-        "yahoo_overview", "Yahoo: dollar index, crude, copper, gold and VIX", "https://finance.yahoo.com",
+        "yahoo_overview", "Yahoo: dollar index, crude, copper, gold, VIX and MOVE", "https://finance.yahoo.com",
         to_iso_date(closes.index[-1]) if not closes.empty else None, rows=int(closes.shape[1]),
         status="ok" if closes.shape[1] == len(CROSS_ASSET) else ("partial" if not closes.empty else "error"),
     ))
@@ -468,5 +511,6 @@ def build(ctx, *, inputs: dict[str, dict | None]) -> dict:
         "fed": fed(inputs.get("priced")),
         "ahead": ahead(inputs.get("catalysts"), top, ctx.as_of),
         "risk": risk_line(inputs.get("risk")),
+        "vol": bond_equity_vol(inputs.get("risk")),
         "failed": failed,
     }

@@ -42,7 +42,7 @@ function sinceLabel(tile) {
   return tile.since ? `${tile.since.slice(0, 4)}–` : 'ALL';
 }
 
-function ordinal(n) {
+export function ordinal(n) {
   if (!present(n)) return DASH;
   const r = Math.round(n);
   const t = r % 100;
@@ -87,7 +87,7 @@ export function tileNode(tile, { asOf, onPick = null, selected = false, compact 
   return node;
 }
 
-function historyChart(node, tile, range = 'MAX') {
+export function historyChart(node, tile, range = 'MAX') {
   const full = tile.history || { dates: [], values: [] };
   const h = sliceRange(full.dates, { values: full.values }, range);
   render(node, (option, p) => ({
