@@ -284,10 +284,16 @@ def test_a_price_rule_change_relabels_without_reporting_transitions():
     _row(old, "AAA")["state_log"][-1][2] = "weak"
 
     relabelled = monitor.build(ctx("2026-09-23"), previous=old)
-    assert relabelled["price_rule_changed"] is True
+    assert relabelled["settings"]["price_rule_since"] == "2026-09-23"
     assert not [c for c in relabelled["changes"] if c["kind"] in ("stabilising", "weakening")]
-    assert any("1 names were re-labelled" in n for n in relabelled["notices"])
+    assert any("1 queued or watched names were re-labelled" in n for n in relabelled["notices"])
+    # Built again for the same session, it still compares with the old-rule
+    # state before the session, and still reports no transition.
+    rerun = monitor.build(ctx("2026-09-23"), previous=relabelled)
+    assert rerun["settings"]["price_rule_since"] == "2026-09-23"
+    assert not [c for c in rerun["changes"] if c["kind"] in ("stabilising", "weakening")]
 
     # The next session compares like with like again.
-    later = monitor.build(ctx("2026-09-24"), previous=relabelled)
-    assert later["price_rule_changed"] is False
+    later = monitor.build(ctx("2026-09-24"), previous=rerun)
+    assert later["settings"]["price_rule_since"] == "2026-09-23"
+    assert not any("re-labelled" in n for n in later["notices"])

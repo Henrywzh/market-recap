@@ -865,9 +865,14 @@ def _log_state(log: list[list[Any]], as_of: str, today: Mapping[str, Any]) -> li
     return kept
 
 
+def _judged_before(before: Mapping[str, Any] | None, since: str | None) -> bool:
+    """Whether the ledger's last state predates the current price rule."""
+    return bool(since and before and before.get("date") and before["date"] < since)
+
+
 def _changes(row: Mapping[str, Any], before: Mapping[str, Any] | None, *, new_row: bool,
              baseline: bool, was_index: bool | None, as_of: str, settings: Mapping[str, Any],
-             price_rule_changed: bool = False) -> list[dict]:
+             price_rule_since: str | None = None) -> list[dict]:
     """What is different about this row today, in the reader's terms."""
 
     out: list[dict] = []
@@ -892,8 +897,8 @@ def _changes(row: Mapping[str, Any], before: Mapping[str, Any] | None, *, new_ro
     if not (candidate or watched) or before is None:
         return out
     price, was_price = row.get("price_state"), before.get("price_state")
-    if price_rule_changed:
-        pass  # re-labelled by the new rule, not moved: no transition to report
+    if _judged_before(before, price_rule_since):
+        pass  # judged under the old rule: a changed label is the rule, not the stock
     elif price == "stabilising" and was_price == "weak":
         add("stabilising", "Gaining on its peers over the month and the close is back above its average")
     elif price == "weak" and was_price == "stabilising":
@@ -1028,10 +1033,16 @@ def build(ctx, *, valuation=None, catalysts=None, previous=None, trends=None, no
     # A rerun of the first session is still the baseline, and a rerun of any
     # session compares with the build before it, not with itself.
     baseline = previous_state is None or previous_state["tracking_started"] == as_of
-    # The ledger's last price states were judged under the rule it names; under
-    # a different one a changed label is the rule, not the stock.
-    price_rule_changed = (previous_state is not None and not baseline
-                          and (previous_state["settings"] or {}).get("price_rule") != M.PRICE_RULE)
+    # The session the price rule took effect. A ledger state from before it
+    # was judged under the old rule, so a changed label against it is the rule,
+    # not the stock -- also when that session is built again, which compares
+    # with the state before the session.
+    old_settings = (previous_state or {}).get("settings") or {}
+    if previous_state is not None and old_settings.get("price_rule") == M.PRICE_RULE:
+        settings["price_rule_since"] = old_settings.get("price_rule_since") or previous_state["as_of"]
+    else:
+        settings["price_rule_since"] = as_of
+    price_rule_since = settings["price_rule_since"]
     if previous_state is None:
         compared_with = None
     elif previous_state["as_of"] < as_of:
@@ -1198,18 +1209,20 @@ def build(ctx, *, valuation=None, catalysts=None, previous=None, trends=None, no
             else:
                 row["anomaly"] = "drawdown"
         before = row.pop("_changes_before")
-        if price_rule_changed and before and {before.get("price_state"), row.get("price_state")} == {"weak", "stabilising"}:
+        if (_judged_before(before, price_rule_since) and (row.get("candidate") or (row.get("note") or {}).get("status") == "watch")
+                and {before.get("price_state"), row.get("price_state")} == {"weak", "stabilising"}):
             relabelled += 1
         found = _changes(row, before, new_row=row.pop("_new_row"), baseline=baseline,
                          was_index=row.pop("_was_index"), as_of=as_of, settings=settings,
-                         price_rule_changed=price_rule_changed)
+                         price_rule_since=price_rule_since)
         row["why_today"] = [change["kind"] for change in found]
         changes.extend(found)
 
-    if price_rule_changed:
+    if relabelled:
         notices.append(
-            f"Price-state rule changed to {M.PRICE_RULE}: {relabelled} names were re-labelled weak/stabilising "
-            "today by the rule, not by a move, so no stabilising or weakening changes are listed for this session")
+            f"Price-state rule {M.PRICE_RULE} took effect on {price_rule_since}: {relabelled} queued or watched names "
+            "were re-labelled weak/stabilising by the rule, not by a move, so their stabilising or weakening "
+            "changes are not listed for this session")
     if not members:
         notices.append(f"configured monitor universe {index_key} has no members in context")
     notices = list(dict.fromkeys(notices))
@@ -1227,7 +1240,6 @@ def build(ctx, *, valuation=None, catalysts=None, previous=None, trends=None, no
             "watchlist": len(watch),
         },
         "settings": settings,
-        "price_rule_changed": price_rule_changed,
         "market_return_pct": _number(market_return, 2),
         # Equal-weight against cap-weighted: the breadth of the move.
         "members_median_return_pct": _number(members_median, 2),

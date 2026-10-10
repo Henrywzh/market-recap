@@ -42,9 +42,10 @@ otherwise. Two complementary checks, not a pattern library. It is a state: the
 session it turns is the weak → stabilising change, and a name that keeps
 gaining on its peers stays stabilising. (Until 2026-10 the ratio also had to
 have fallen over the 1M before, which sent a name back to `weak` the session
-after it stabilised. The build after a rule change lists no price transitions
-and says so in the notices, because the new rule re-labels names that did not
-move.)
+after it stabilised. `settings.price_rule_since` is the session the current
+rule took effect; a flip against a ledger state from before it is the rule
+re-labelling a name that did not move, so it is not listed as a change, and
+the notices say how many queued or watched names it touched.)
 
 **Evidence** is listed for and against, never netted:
 

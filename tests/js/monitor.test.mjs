@@ -162,7 +162,7 @@ test('followed names get their own transitions; excluded names are dropped from 
   assert.deepEqual(groups[0].items.map((c) => c.ticker), ['AAA']);
   assert.equal(groups[2].items[0].text, 'cut');
   assert.deepEqual(logChanges(data.rows[3], '2026-09-23'), []);
-  // On the session the price rule changed, a flip is the rule, not a move.
-  const relabelled = todayChanges({ ...data, price_rule_changed: true }, ['FOL']);
+  // Against a state logged before the price rule took effect, a flip is the rule, not a move.
+  const relabelled = todayChanges({ ...data, settings: { price_rule_since: '2026-09-23' } }, ['FOL']);
   assert.deepEqual(relabelled.map((g) => g.kind), ['entered', 'evidence_down']);
 });
