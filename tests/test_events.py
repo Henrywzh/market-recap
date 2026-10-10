@@ -297,6 +297,83 @@ def test_a_name_quoted_as_the_commentator_is_not_the_story():
     assert E.rank_headlines(analyst, "JPM", "JPMorgan Chase & Co", start, end) == []
 
 
+# --- The Finnhub phase runs beside the release guides without changing what it finds ---------
+def _excess_with_spikes():
+    import numpy as np
+    days = pd.bdate_range("2025-01-02", periods=420)
+    rng = np.random.default_rng(3)
+    series = pd.Series(rng.normal(0, 0.8, len(days)), index=days)
+    for spike in (300, 330, 380):
+        series.iloc[spike] = 9.0                                    # well past 2.5 sigma and the minimum move
+    return pd.DataFrame({"AAA": series})
+
+
+@pytest.fixture
+def fake_finnhub(monkeypatch):
+    from market_recap.panels import events as panel
+    calls = []
+
+    def news(symbol, start, end, today):
+        calls.append((symbol, start, end))
+        stamp = pd.Timestamp(end.isoformat() + " 12:00", tz="America/New_York").timestamp()
+        return [{"datetime": stamp, "headline": f"Alpha Inc shares jump after upgrade on {end}", "source": "wire",
+                 "url": f"https://example.test/{end}", "summary": "Alpha Inc rose."}]
+    monkeypatch.setattr(panel.finnhub, "available", lambda: True)
+    monkeypatch.setattr(panel.finnhub, "is_cached", lambda *a: False)
+    monkeypatch.setattr(panel.finnhub, "company_news", news)
+    return calls
+
+
+def _phase_args(budget=250, event_budget=150):
+    excess = _excess_with_spikes()
+    return dict(as_of=excess.index[-1].date(), settings={"news_budget": budget, "event_news_budget": event_budget},
+                excess=excess, reactions={}, everyone=["AAA"], meta={"AAA": {"name": "Alpha Inc"}}, deep=["AAA"],
+                priority=lambda s: ("9999", False, 0.0, s))
+
+
+def test_the_finnhub_phase_asks_for_each_large_move_and_the_announced_events(fake_finnhub):
+    from market_recap.panels import events as panel
+    args = _phase_args()
+    moves, news, news_state, announced, event_state = panel._finnhub_phase(**args)
+    # Headlines are asked for the moves inside the news window (a year), not the older ones.
+    since = (args["as_of"] - pd.Timedelta(days=365)).isoformat()
+    recent = [m["date"] for m in moves["AAA"] if m["date"] >= since]
+    assert len(moves["AAA"]) > len(recent) >= 3                    # the noise made one older natural move too
+    assert news_state["asked"] == len(recent) and event_state["asked"] == 1 and news_state["failed"] == 0
+    assert len(fake_finnhub) == news_state["asked"] + event_state["asked"]
+    assert set(news) == {("AAA", day) for day in recent}
+    assert set(announced) == {"AAA"}
+
+
+def test_the_finnhub_phase_stops_asking_at_its_budget(fake_finnhub):
+    from market_recap.panels import events as panel
+    _, news, news_state, _, event_state = panel._finnhub_phase(**_phase_args(budget=2, event_budget=0))
+    assert news_state["asked"] == 2 and event_state["asked"] == 0 and len(fake_finnhub) == 2
+    assert len(news) == 2                                          # the unasked moves have no headlines, not stale ones
+
+
+def test_the_finnhub_phase_gives_the_same_answer_on_a_thread(fake_finnhub):
+    from concurrent.futures import ThreadPoolExecutor
+    from market_recap.panels import events as panel
+    direct = panel._finnhub_phase(**_phase_args())
+    with ThreadPoolExecutor(1) as pool:
+        threaded, seconds = pool.submit(panel._timed, panel._finnhub_phase, **_phase_args()).result()
+    assert threaded == direct and seconds >= 0
+
+
+def test_a_failed_request_is_counted_and_does_not_stop_the_phase(monkeypatch, fake_finnhub):
+    from market_recap.panels import events as panel
+
+    def flaky(symbol, start, end, today):
+        raise RuntimeError("HTTP 429")
+    monkeypatch.setattr(panel.finnhub, "company_news", flaky)
+    args = _phase_args()
+    moves, news, news_state, announced, event_state = panel._finnhub_phase(**args)
+    since = (args["as_of"] - pd.Timedelta(days=365)).isoformat()
+    assert news_state["failed"] == len([m for m in moves["AAA"] if m["date"] >= since])
+    assert event_state["failed"] == 1 and news == {} and announced == {}
+
+
 def test_each_name_is_asked_once_in_any_run_of_rotation_weekdays():
     from datetime import date, timedelta
     import numpy as np
@@ -378,11 +455,29 @@ def test_own_calendar_tries_the_session_and_the_weekday_before():
     assert _own_calendar("PEP", [{"date": "2026-01-01", "session": "2026-01-02"}], calendars) == {}
 
 
-def test_the_close_edition_asks_finnhub_nothing_new(monkeypatch):
-    """Read in build(): the close edition sets the budgets so only cached windows are read."""
+def test_the_close_edition_asks_finnhub_nothing_new(monkeypatch, fake_finnhub):
+    """build() reads the edition and hands it to the phase, which then asks nothing whatever the budgets say."""
     import inspect
     from market_recap.panels import events as panel
-    source = inspect.getsource(panel.build)
-    assert 'os.environ.get("MARKET_RECAP_EDITION") == "close"' in source
-    assert '"budget": 0 if deferred' in source
-    assert "if deferred or not rotation_due" in source
+    assert 'os.environ.get("MARKET_RECAP_EDITION") == "close"' in inspect.getsource(panel.build)
+    monkeypatch.setattr(panel.finnhub, "recent_window", lambda *a, **k: None)         # nothing cached for this name
+    _, news, news_state, announced, event_state = panel._finnhub_phase(**_phase_args(), deferred=True)
+    assert fake_finnhub == []                                                          # not one request
+    assert news == {} and announced == {}
+    assert news_state["asked"] == 0 and news_state["budget"] == 0 and news_state["deferred"] is True
+    assert event_state["asked"] == 0 and event_state["reused"] == 0
+
+
+def test_the_close_edition_still_reads_what_is_cached(monkeypatch, fake_finnhub):
+    from market_recap.panels import events as panel
+    cached = [{"datetime": 0, "headline": "Alpha Inc to hold investor day", "source": "wire", "url": "https://example.test/a"}]
+    monkeypatch.setattr(panel.finnhub, "recent_window", lambda *a, **k: cached)
+    _, _, news_state, announced, event_state = panel._finnhub_phase(**_phase_args(), deferred=True)
+    assert fake_finnhub == [] and event_state["reused"] == 1 and set(announced) == {"AAA"}
+    assert news_state["asked"] == 0
+
+
+def test_the_evening_edition_asks_as_before(fake_finnhub):
+    from market_recap.panels import events as panel
+    _, _, news_state, _, event_state = panel._finnhub_phase(**_phase_args())
+    assert news_state["deferred"] is False and news_state["asked"] > 0 and event_state["asked"] == 1

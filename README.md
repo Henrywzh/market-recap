@@ -122,6 +122,7 @@ Every one of these is free and requires no account.
 | **SEC EDGAR** earnings releases (8-K Item 2.02, Exhibit 99.1) | THEMES: NVIDIA Data Center revenue and outlook; capex guidance quoted from the releases | Segment revenue is not in XBRL company facts; matched text is quoted as written. Older submissions pages are read when a heavy filer's recent block (one year for the big banks) holds fewer than eight earnings releases; TSMC and ASML results come from their 6-K filings |
 | **EIA** weekly history pages (`eia.gov/dnav/pet/hist`, `/dnav/ng/hist`) | THEMES: weekly crude, gasoline, distillate and gas inventories, refinery utilization, crude production | Keyless HTML tables, petroleum back to 1982, gas storage to 2010; current vintage. The 5-year average is the same week of the five years before |
 | **Yahoo** front-month futures (CL, BZ, NG, RB, HO) | THEMES: oil, gas and the 3-2-1 crack | Cached apart from the members' prices |
+| **Yahoo** fundamentals-timeseries (`/ws/fundamentals-timeseries/v1/finance/timeseries/<symbol>`, types `monthly`, `quarterly`, `annualForwardPeRatio`) | VALUATION: each company's own forward P/E at every month end back about fifteen months, and at its last four fiscal year ends | Unofficial and undocumented, like the other Yahoo feeds. One series per request (several together come back truncated). Point in time, but on a fiscal-year EPS, not the next twelve months: see "Yahoo's forward P/E history" |
 | **Yahoo** market cap (quoteSummary `price`) | VALUATION: the market cap of a company whose filings count shares only class by class (Berkshire, Hershey, Ares), so P/E, EV and yields exist for it | Labelled on the row's share basis; such a row stays out of the index and sector P/E aggregates, as its per-share EPS may be in another class's shares |
 | **FRED** BLS semiconductor prices (PCU334413334413, PCU3344133344131, IZ3344, IR21320) | THEMES: US producer and import price indexes for semiconductors | Public domain, keyless CSV, current vintage. BLS indexes of its own product basket, not DRAM or NAND spot quotes. Ids live in config/dashboard.toml |
 | **FRED** housing series (MORTGAGE30US, HOUST, HOUST1F, PERMIT, HSN1F, MSACSR, CSUSHPINSA), GASREGW, DGS10 | THEMES: housing data, the pump price, rate sensitivity | Current vintage, keyless CSV |
@@ -251,6 +252,22 @@ exported/imported. The cache key
 includes `requirements.lock`'s hash: files written by other library versions
 are not reused.
 
+### Where the time goes
+
+The manifest's `timings.panels` and the build log say how long each panel took, and
+`MARKET_RECAP_PROFILE_DIR=profile make refresh` writes each panel's hottest
+functions to `profile/<panel>.txt`. `.github/workflows/profile-build.yml` runs the
+nightly job's refresh on a branch, with the same cache and secrets and nothing
+published, and uploads both: measure there before optimising, because the cost
+was nowhere a reading of the code suggested. The first profile (1,823 s with
+cProfile) found EVENTS alone at 1,111 s -- the same earnings releases parsed
+again every build and Finnhub's rate limit waited out after the work instead of
+beside it -- and Treasury's curve downloaded eight times. After fixing those and
+a handful of smaller ones (the split-factor lookup, the SEC filer cache keyed two
+ways, MONITOR re-normalising every peer's prices) the same profile took 990 s.
+What is left is mostly waiting: Finnhub's 400 requests a build at 60 a minute
+(`news_budget`, `event_news_budget`) and the Korean ministry's slow server.
+
 ### Deploying
 
 ```bash
@@ -368,6 +385,88 @@ measure as the trailing one on filed EPS. The S&P 500's own forward P/E,
 with its 5- and 10-year averages, comes from FactSet: the blog's articles in
 season and the weekly Earnings Insight PDF every Friday (its text, via
 pdftotext; the sector page is an image and is not read).
+
+**Financials, divided.** A sector can be opened beside its parts: the P/E
+chart's SECTORS / FINANCIALS switch compares Financials with diversified
+banks, regional banks, investment banks and brokers, asset managers, insurers,
+payments and consumer finance, and exchanges. The split is `[[valuation.subgroups]]`
+in `config/dashboard.toml` -- a GICS sub-industry (the S&P 500 labels on
+Wikipedia) belongs to one group, never a ticker -- and each group is
+aggregated exactly as a sector is, with a path and a grid of its own. What the
+config cannot place is printed under the chart, not guessed: a configured
+sub-industry no company carries (a renamed label), a group under
+`subgroup_min_members`, and sub-industries in no group.
+
+**P / tangible book and ROTCE.** VALUATION adds both as columns (so the
+scatter can set one against the other), and each index, sector and Financials
+group shows them as totals. Tangible book is shareholders' equity less
+preferred stock, goodwill and other intangibles, as filed in the latest 10-Q;
+ROTCE is TTM net income to common holders over the average of tangible book
+now and a year ago. A company that tags neither goodwill nor intangibles has no
+tangible book; an untagged preferred is taken as none and the row says so. Not
+adjusted for deferred tax or servicing rights, so a bank's own tangible book per
+share can differ. P / TBV has ten years too: the P/E chart's P/E / P/TBV switch
+and a percentile column draw it, each quarter's tangible book per share built
+only from the balance sheet filed by that day, on today's share basis over the
+quarter's diluted count (a little above the period-end count for a company
+that buys back stock). ROTCE has no history yet.
+
+**Valuation path and a forward P/E's missing past.** MARKET → SECTORS adds,
+for each index and sector, its multiple at four points on the same analyst
+basis -- last fiscal year's actual, this fiscal year, the next twelve months
+and next fiscal year -- with the earnings growth each step carries, counted
+over the same companies at every stage; and a grid of the price change implied
+by moving the forward P/E and revising NTM EPS (`[valuation.scenario]` sets the
+axes). The grid is price = multiple x EPS on today's multiple, not a forecast.
+A sector's next-twelve-months P/E has no past before 2026-10-01: the earningsTrend
+module Yahoo serves gives only today's consensus, so that measure cannot be
+back-filled (Yahoo's own per-company history is on another basis, below).
+FactSet's sector page might supply averages and history, and `probe-factset.yml`
+(manual) measures whether its numbers can be read and how far back the PDFs go,
+before any reader is written.
+
+**Yahoo's forward P/E history.** Separately from earningsTrend, Yahoo's
+fundamentals-timeseries service keeps a forward P/E for each company at every
+month end (about fifteen), at its fiscal quarter ends (which add points the
+monthly series lacks) and at its last four fiscal year ends. `sources/forward_pe_history.py`
+reads it, `compute/valuation.py` shapes it, and the P/E history on the ticker
+page draws it beside, never in place of, the recorded NTM multiple. Measured on
+the 512 companies of the universe (2026-10-09):
+
+- **Coverage.** 507 have a history (the other five, CRWV, ERIE, L, NBIS and
+  RKLB, are named in the build's `fiscal_forward` report); 483 have twelve or
+  more monthly points. 186 lack July 2026 and 18 lack April and May 2025: Yahoo's
+  gaps, listed per company on the page, not bridged. None is negative.
+- **Point in time.** The EPS behind a point (close / P/E) rises through the year
+  as estimates were revised (Goldman: 44.3 in June 2025, 52.3, 55.5, 58.9, 64.6
+  in August 2026), so a point is what the market was told that day; it is not
+  today's consensus applied backwards.
+- **Not a twelve-month multiple.** The EPS is a fiscal year's consensus that
+  moves to the next year three months before the year ends. At that month the
+  implied EPS jumps by a median of +12.4% (94% of those 497 observations by more
+  than 3%), against 0.0% in the 5,811 others; moving the assumed roll to 1, 2, 4 or 5
+  months before year end shows no jump at all. So each point looks 4 to 15
+  months ahead, the line steps down at the roll, and the page marks that month.
+  `FY_ROLL_MONTHS` is a rule read off this data, not published by Yahoo. It
+  follows that the series is not the page's NTM multiple (a different horizon
+  and, through the year, a different level), and the two are not drawn as one line.
+- **How to compare.** A point against the same month a year earlier (same
+  horizon), or the fiscal year ends, which are always exactly twelve months
+  ahead. Four year ends and fifteen months are not a ten-year history; the
+  percentiles above still come from the filed trailing P/E.
+- **One series per request.** Asked for monthly, quarterly and annual in a
+  single call, Yahoo answers with only the last four monthly points. The source
+  makes three requests per company (1,536 in about 80 seconds; weekly-cached) and
+  VALIDATION warns when fewer than 80% of companies have twelve monthly points.
+- **Extremes are kept.** Boeing's 3,333x and Warner Bros. Discovery's 5,000x are
+  a near-zero EPS, a growth stock's 120x is real, and the multiple alone cannot
+  tell them apart. Nothing is removed: the table shows the figure, the report names
+  the companies above `EXTREME_FORWARD_PE` (100x), and the chart's axis stops at
+  2.5 times the 75th percentile.
+
+The audit behind these figures was a one-off run. To repeat it, call
+`forward_pe_history.fetch_series` for the universe, or read the `fiscal_forward`
+report in `valuation.json` after a build.
 
 `make snapshot-options` and `make snapshot-expectations` write the same files
 under `data/snapshots/` locally. The plan they serve is

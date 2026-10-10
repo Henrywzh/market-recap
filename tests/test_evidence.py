@@ -149,3 +149,35 @@ def test_release_time_comes_from_the_index_page_then_the_filing_date():
     # No index page: the reading whose date is the filing date (UTC here).
     mu = V.earnings_announcements(recent, today=date(2026, 10, 3))[0]
     assert (mu["date"], mu["timing"]) == ("2026-09-30", "amc")
+
+
+# --- Short interest is asked for together, and a failure is still reported where it is used --
+def test_prefetch_returns_each_answer_or_the_exception_it_raised():
+    from market_recap.panels import evidence as panel
+
+    def fetch(symbol):
+        if symbol == "BAD":
+            raise RuntimeError("HTTP 429")
+        return [symbol.lower()]
+    answers = panel.prefetch(fetch, ["AAA", "BAD", "CCC"])
+    assert answers["AAA"] == (["aaa"], None) and answers["CCC"] == (["ccc"], None)
+    assert answers["BAD"][0] is None and str(answers["BAD"][1]) == "HTTP 429"
+    assert list(answers) == ["AAA", "BAD", "CCC"]                     # the order asked, whatever finished first
+
+
+def test_prefetch_asks_several_at_a_time():
+    import threading
+    import time
+    from market_recap.panels import evidence as panel
+    lock, live, peak = threading.Lock(), [0], [0]
+
+    def slow(symbol):
+        with lock:
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        time.sleep(0.05)
+        with lock:
+            live[0] -= 1
+        return symbol
+    assert len(panel.prefetch(slow, [f"S{i}" for i in range(12)], workers=4)) == 12
+    assert 1 < peak[0] <= 4                                           # together, but never past the pool

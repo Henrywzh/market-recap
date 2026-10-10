@@ -886,6 +886,7 @@ def eps_history(facts: dict) -> list[dict]:
     eps = _vintages(facts, item, days)
     core = {key: _vintages(facts, ITEMS_BY_KEY[key], days) for key in CORE_KEYS + ("shares",)}
     core |= {item.key: _vintages(facts, item, days) for item in CORE_EXTRA}
+    book = {item.key: _vintages(facts, item, days) for item in BOOK_BALANCE}
     history = []
     for end in sorted(first_filed):
         filed = first_filed[end]
@@ -896,6 +897,9 @@ def eps_history(facts: dict) -> list[dict]:
                 "filed": filed,
                 "parts": [(entry["value"], entry["filed"], sign) for entry, sign in parts],
                 "core": core_inputs({key: vintage[filed] for key, vintage in core.items()}, end),
+                # The balance sheet at quarter end as filed that day, for tangible book per share.
+                "book": {"equity": _instant_near(book["equity"][filed], end),
+                         **book_at({k: book[k][filed] for k in BOOK_KEYS}, end)[0]},
             })
     return history
 
@@ -915,6 +919,94 @@ CORE_EXTRA = (
     LineItem("profit_loss", "Net income including non-controlling interests", ("ProfitLoss",), "income"),
     LineItem("parent_income", "Net income to the parent", ("NetIncomeLoss",), "income"),
 )
+# What tangible book and ROTCE are built from. Kept apart from LINE_ITEMS for
+# the same reason as CORE_EXTRA: the statements tab and the DCF do not show them
+# as lines. Read into the trailing snapshot's ``balance`` and ``ttm`` (resolved by
+# ``book_at``: the raw items below are components, not what the snapshot carries).
+#
+# Found against real filings (probe_book_tags.py), not assumed: JPMorgan files its
+# preferred stock under ...NetOfDiscount and Bank of America only in its 10-K;
+# American Express, Aflac, Prudential and Apollo tag goodwill only in the 10-K;
+# Raymond James and Arch tag one combined goodwill-and-intangibles line in a 10-Q;
+# and Ameriprise splits intangibles into finite- and indefinite-lived lines.
+BOOK_ITEMS: tuple[LineItem, ...] = (
+    LineItem("goodwill", "Goodwill", ("Goodwill",), "balance"),
+    LineItem("intangibles_total", "Intangible assets excluding goodwill", ("IntangibleAssetsNetExcludingGoodwill",), "balance"),
+    LineItem("intangibles_finite", "Finite-lived intangible assets", ("FiniteLivedIntangibleAssetsNet",), "balance"),
+    LineItem("intangibles_indefinite", "Indefinite-lived intangible assets",
+             ("IndefiniteLivedIntangibleAssetsExcludingGoodwill",), "balance"),
+    LineItem("goodwill_and_intangibles", "Goodwill and intangible assets", ("IntangibleAssetsNetIncludingGoodwill",), "balance"),
+    # Carrying value of preferred stock, which sits inside StockholdersEquity but
+    # belongs to no common holder.
+    LineItem("preferred", "Preferred stock", (
+        "PreferredStockValue", "PreferredStockIncludingAdditionalPaidInCapital",
+        "PreferredStockIncludingAdditionalPaidInCapitalNetOfDiscount"), "balance"),
+    LineItem("income_to_common", "Net income to common holders", ("NetIncomeLossAvailableToCommonStockholdersBasic",), "income"),
+)
+# The balance-sheet lines of tangible book, read as they stood the day each
+# quarter was filed (``eps_history``'s ``book``).
+BOOK_BALANCE: tuple[LineItem, ...] = (ITEMS_BY_KEY["equity"],) + tuple(i for i in BOOK_ITEMS if i.instant)
+BOOK_KEYS = tuple(i.key for i in BOOK_ITEMS if i.instant)
+# A balance-sheet line a 10-Q leaves out is carried from the latest earlier
+# period that has it, up to this old: a 10-K's goodwill and preferred stock are
+# the best figure for the next three quarters' balance sheets. Older is unknown.
+CARRY_BOOK_DAYS = 400
+
+
+def _instant_carried(periods: dict, end: str) -> tuple[float | None, str | None]:
+    """(value, the period end it is from): the instant at ``end`` (within the
+    usual tolerance), else the latest earlier one no older than CARRY_BOOK_DAYS."""
+    ends = [e for (start, e) in periods if start is None]
+    near = _near(end, ends)
+    if near is not None:
+        return periods[(None, near)]["value"], near
+    earlier = [e for e in ends if e < end and _days(e, end) <= CARRY_BOOK_DAYS]
+    if not earlier:
+        return None, None
+    last = max(earlier)
+    return periods[(None, last)]["value"], last
+
+
+def book_at(periods: dict[str, dict], end: str) -> tuple[dict, dict]:
+    """Goodwill, intangibles, preferred stock and the combined goodwill-and-
+    intangibles line as they stood at ``end``, and which of them are carried from
+    an earlier period ({key: its period end}).
+
+    Intangibles are the filer's net total, else its finite- and indefinite-lived
+    lines added. A current combined line replaces goodwill and intangibles that
+    would only be carried: the combined figure is this quarter's, they are not.
+    """
+    raw, source = {}, {}
+    for key in BOOK_KEYS:
+        raw[key], source[key] = _instant_carried(periods[key], end)
+    fresh = {key: source[key] is not None and abs(_days(source[key], end)) <= PERIOD_MATCH_DAYS for key in BOOK_KEYS}
+    parts = ("intangibles_total", "intangibles_finite", "intangibles_indefinite")
+    if raw["intangibles_total"] is not None:
+        intangibles, used = raw["intangibles_total"], ("intangibles_total",)
+    elif raw["intangibles_finite"] is not None or raw["intangibles_indefinite"] is not None:
+        used = tuple(k for k in parts[1:] if raw[k] is not None)
+        intangibles = sum(raw[k] for k in used)
+    else:
+        intangibles, used = None, ()
+    values = {"goodwill": raw["goodwill"], "intangibles": intangibles,
+              "goodwill_and_intangibles": raw["goodwill_and_intangibles"], "preferred": raw["preferred"]}
+    carried = {}
+    if raw["goodwill_and_intangibles"] is not None and fresh["goodwill_and_intangibles"] \
+            and not fresh["goodwill"] and not any(fresh[k] for k in parts):
+        values["goodwill"] = values["intangibles"] = None
+    else:
+        if raw["goodwill"] is not None and not fresh["goodwill"]:
+            carried["goodwill"] = source["goodwill"]
+        if used and not all(fresh[k] for k in used):
+            carried["intangibles"] = min(source[k] for k in used)
+        values["goodwill_and_intangibles"] = values["goodwill_and_intangibles"] if values["goodwill"] is None and intangibles is None else None
+    if raw["preferred"] is not None and not fresh["preferred"]:
+        carried["preferred"] = source["preferred"]
+    if values["goodwill_and_intangibles"] is not None and not fresh["goodwill_and_intangibles"]:
+        carried["goodwill_and_intangibles"] = source["goodwill_and_intangibles"]
+    return values, carried
+
+
 # A share count is an average over a period; anything shorter is a stub.
 MIN_SHARE_PERIOD_DAYS = 80
 
@@ -943,7 +1035,8 @@ def trailing_snapshot(facts: dict) -> dict | None:
     """The latest reported quarter: TTM flows and balances at its end, the same a
     year earlier (for growth and averages), and a share count for market cap."""
     splits = share_splits(facts)
-    periods = {item.key: _period_values(facts, item, splits) for item in LINE_ITEMS}
+    read = LINE_ITEMS + BOOK_ITEMS
+    periods = {item.key: _period_values(facts, item, splits) for item in read}
     anchors = sorted({e for key in ("revenue", "net_income") for (start, e) in periods[key] if start is not None})
     if not anchors:
         return None
@@ -965,10 +1058,18 @@ def trailing_snapshot(facts: dict) -> dict | None:
         return value
 
     def flows(at, record=False):
-        return {item.key: flow(item.key, at, record) for item in LINE_ITEMS if not item.instant} if at else {}
+        return {item.key: flow(item.key, at, record) for item in read if not item.instant} if at else {}
 
-    def balances(at):
-        return {item.key: _instant_near(periods[item.key], at) for item in LINE_ITEMS if item.instant} if at else {}
+    book_carried: dict[str, str] = {}
+
+    def balances(at, record=False):
+        if not at:
+            return {}
+        out = {item.key: _instant_near(periods[item.key], at) for item in read if item.instant and item.key not in BOOK_KEYS}
+        values, carried = book_at({key: periods[key] for key in BOOK_KEYS}, at)
+        if record:
+            book_carried.update(carried)
+        return out | values
 
     filed = max((trailing_value(periods[k], end)[1] or "") for k in ("revenue", "net_income")) or None
     debt_tag = next(
@@ -982,7 +1083,10 @@ def trailing_snapshot(facts: dict) -> dict | None:
         "prior_period_end": prior_end,
         "ttm": flows(end, record=True),
         "ttm_prior": flows(prior_end),
-        "balance": balances(end),
+        "balance": balances(end, record=True),
+        # Tangible-book lines this quarter's balance sheet left out, with the
+        # period end of the earlier one they are carried from.
+        "balance_carried": book_carried,
         "balance_prior": balances(prior_end),
         # LongTermDebt already includes the current portion; LongTermDebtNoncurrent does not.
         "debt_includes_current": debt_tag == "LongTermDebt",

@@ -387,6 +387,383 @@ def test_row_takes_yahoo_cap_only_without_a_share_count_and_flags_history_truthf
     assert row["market_cap"] == 2e10 and row["pe_history"] is True    # the filings' count wins
 
 
+def test_fiscal_path_needs_both_years_and_tolerates_a_missing_actual():
+    ntm = {"eps": 11.0}
+    trend = {"0y": {"eps": 10.0, "year_ago_eps": 8.0}, "+1y": {"eps": 12.0}}
+    assert V.fiscal_path(trend, ntm) == {"fy_prev": 8.0, "fy0": 10.0, "ntm": 11.0, "fy1": 12.0}
+    assert V.fiscal_path({"0y": {"eps": 10.0}, "+1y": {"eps": 12.0}}, ntm)["fy_prev"] is None
+    assert V.fiscal_path({"0y": {"eps": 10.0}}, ntm) is None
+    assert V.fiscal_path(trend, None) is None
+
+
+def test_aggregate_path_counts_the_same_companies_at_every_stage():
+    caps = {"A": 100.0, "B": 100.0, "C": 100.0}
+    stages = {"fy_prev": {"A": 4.0, "B": 4.0, "C": 4.0}, "fy0": {"A": 5.0, "B": 5.0, "C": 5.0},
+              "ntm": {"A": 5.5, "B": 5.5, "C": 5.5}, "fy1": {"A": 6.0, "B": 6.0}}
+    # C has no FY+1, so no stage counts it: a step is earnings growth, not a new member.
+    out = V.aggregate_path(caps, stages)
+    assert out is None                                    # A and B hold 67% of the cap, under the 80% floor
+    stages["fy1"]["C"] = 6.0
+    out = V.aggregate_path(caps, stages)
+    assert [s["key"] for s in out["stages"]] == ["fy_prev", "fy0", "ntm", "fy1"]
+    assert out["stages"][0]["pe"] == pytest.approx(300 / 12) and out["stages"][3]["pe"] == pytest.approx(300 / 18)
+    assert out["stages"][0]["growth"] is None             # nothing before the first stage
+    assert out["stages"][1]["growth"] == pytest.approx(25.0)
+    assert out["companies"] == 3 and out["coverage"] == pytest.approx(1.0)
+
+
+def test_aggregate_path_drops_only_the_stage_nobody_reports():
+    caps = {"A": 100.0, "B": 100.0}
+    stages = {"fy0": {"A": 5.0, "B": 5.0}, "ntm": {"A": 5.5, "B": 5.5}, "fy1": {"A": 6.0, "B": 6.0}}
+    out = V.aggregate_path(caps, stages)                  # no last-year actuals at all
+    assert [s["key"] for s in out["stages"]] == ["fy0", "ntm", "fy1"]
+
+
+def test_aggregate_path_leaves_a_loss_blank_not_zero():
+    caps = {"A": 100.0}
+    out = V.aggregate_path(caps, {"fy_prev": {"A": -1.0}, "fy0": {"A": 2.0}, "ntm": {"A": 3.0}, "fy1": {"A": 4.0}})
+    assert out["stages"][0]["pe"] is None
+    assert out["stages"][1]["growth"] is None             # growth off a loss is not a percentage
+    assert out["stages"][2]["growth"] == pytest.approx(50.0)
+
+
+def test_scenario_grid_is_price_equals_multiple_times_eps():
+    grid = V.scenario_grid(20.0, [-2.0, 0.0, 2.0], [-10.0, 0.0, 10.0])
+    assert grid[1][1] == pytest.approx(0.0)               # nothing moves: no change
+    assert grid[1][2] == pytest.approx(10.0)              # EPS +10% at an unchanged multiple
+    assert grid[0][1] == pytest.approx(-10.0)             # 2 turns lower on 20x
+    assert grid[2][2] == pytest.approx((22 / 20 * 1.1 - 1) * 100)
+    assert V.scenario_grid(None, [0.0], [0.0]) == [[None]]
+    assert V.scenario_grid(1.0, [-2.0], [0.0]) == [[None]]   # a negative multiple is not a price
+
+
+def _fin(ticker, sub):
+    return {"ticker": ticker, "sector": "Financials", "sub_sector": sub}
+
+
+def test_assign_subgroups_reports_what_it_cannot_place():
+    rows = [_fin("A", "Diversified Banks"), _fin("B", "Diversified Banks"), _fin("C", "Diversified Banks"),
+            _fin("D", "Regional Banks"), _fin("E", "Multi-Sector Holdings"),
+            {"ticker": "Z", "sector": "Energy", "sub_sector": "Oil & Gas"}]
+    specs = [{"sector": "Financials", "key": "banks", "label": "Banks", "sub_industries": ["Diversified Banks"]},
+             {"sector": "Financials", "key": "regional", "label": "Regional", "sub_industries": ["Regional Banks"]},
+             {"sector": "Financials", "key": "ins", "label": "Insurance", "sub_industries": ["Reinsurance"]}]
+    out = V.assign_subgroups(rows, specs, min_members=3)
+    assert [g["key"] for g in out["groups"]] == ["banks"] and out["groups"][0]["tickers"] == ["A", "B", "C"]
+    assert out["groups"][0]["parent"] == "Financials"
+    assert out["too_small"] == [{"key": "regional", "label": "Regional", "companies": 1}]
+    assert out["unmatched"] == ["Financials: Reinsurance"]            # configured, but no company carries it
+    assert out["unassigned"] == [{"sector": "Financials", "sub_industry": "Multi-Sector Holdings", "tickers": ["E"]}]
+    # Energy is not divided, so its sub-industry is not an unassigned remainder.
+
+
+def test_a_sub_industry_in_two_groups_is_a_config_error():
+    specs = [{"sector": "Financials", "key": "a", "label": "A", "sub_industries": ["Regional Banks"]},
+             {"sector": "Financials", "key": "b", "label": "B", "sub_industries": ["Regional Banks"]}]
+    with pytest.raises(ValueError, match="both"):
+        V.assign_subgroups([], specs, min_members=1)
+
+
+def test_the_shipped_subgroups_are_well_formed():
+    from market_recap.config import load_config
+    settings = load_config()["valuation"]
+    specs = settings["subgroups"]
+    assert settings["subgroup_min_members"] >= 1
+    assert len({s["key"] for s in specs}) == len(specs)
+    assert all(s["sub_industries"] and s["label"] for s in specs)
+    V.assign_subgroups([], specs, settings["subgroup_min_members"])   # raises on a sub-industry claimed twice
+
+
+def test_aggregates_draw_each_financials_group_beside_the_sector():
+    import types
+    from market_recap.config import load_config
+    days = pd.bdate_range("2026-01-01", periods=V.MIN_HISTORY_SESSIONS + 60)
+    subs = {"B1": "Diversified Banks", "B2": "Diversified Banks", "B3": "Diversified Banks",
+            "I1": "Investment Banking & Brokerage", "I2": "Investment Banking & Brokerage", "I3": "Investment Banking & Brokerage",
+            "BRK": "Multi-Sector Holdings"}
+    rows = [{"ticker": t, "sector": "Financials", "sub_sector": sub, "indices": ["SPX"], "market_cap": 100.0, "price": 10.0,
+             "eps_ntm": 1.1, "eps_fy0": 1.0, "eps_fy1": 1.2, "eps_fy_prev": 0.8} for t, sub in subs.items()]
+    caps = {t: pd.Series(100.0, index=days) for t in subs}
+    earn = {V.OPERATING: {t: pd.Series(10.0 if t.startswith("B") else 5.0, index=days) for t in subs},
+            V.REPORTED: {t: pd.Series(5.0, index=days) for t in subs}}
+    ctx = types.SimpleNamespace(indices=[types.SimpleNamespace(key="SPX", label="S&P 500")],
+                                primary=types.SimpleNamespace(key="SPX"), config=load_config())
+    out = panel._aggregates(ctx, rows, caps, earn, {})
+    by_key = {s["key"]: s for s in out["series"]}
+    assert by_key["Financials"]["kind"] == "sector" and by_key["Financials"]["companies"] == 7
+    banks, brokers = by_key["fin-diversified-banks"], by_key["fin-investment-banks"]
+    assert banks["kind"] == "subsector" and banks["parent"] == "Financials" and banks["companies"] == 3
+    assert banks["stats"]["current"] == pytest.approx(10.0) and brokers["stats"]["current"] == pytest.approx(20.0)
+    assert "fin-regional-banks" not in by_key                              # no regional bank in the data
+    report = out["subgroups"]
+    assert any("Regional Banks" in name for name in report["unmatched"])   # configured, carried by no company
+    assert report["unassigned"] == [{"sector": "Financials", "sub_industry": "Multi-Sector Holdings", "tickers": ["BRK"]}]
+
+
+# --- Tangible book, P / TBV and ROTCE ---------------------------------------------------
+def _bank_facts(*, preferred=True, goodwill=True):
+    """A calendar-year bank at 2026-09-30: a 10-K for 2025 and a 10-Q with nine
+    months of 2026 and 2025, each line in the US-GAAP tag it is filed under."""
+    def flow(tag, fy, ytd, ytd_prior):
+        rows = [{"start": "2025-01-01", "end": "2025-12-31", "val": fy, "filed": "2026-02-20", "form": "10-K", "fp": "FY"},
+                {"start": "2026-01-01", "end": "2026-09-30", "val": ytd, "filed": "2026-11-05", "form": "10-Q", "fp": "Q3"},
+                {"start": "2025-01-01", "end": "2025-09-30", "val": ytd_prior, "filed": "2026-11-05", "form": "10-Q", "fp": "Q3"}]
+        return {tag: {"units": {"USD": rows}}}
+
+    def inst(tag, now, year_ago):
+        return {tag: {"units": {"USD": [
+            {"end": "2026-09-30", "val": now, "filed": "2026-11-05", "form": "10-Q", "fp": "Q3"},
+            {"end": "2025-09-30", "val": year_ago, "filed": "2025-11-05", "form": "10-Q", "fp": "Q3"}]}}}
+
+    gaap = {}
+    gaap |= flow("Revenues", 120.0, 100.0, 85.0)
+    gaap |= flow("NetIncomeLoss", 40.0, 36.0, 28.0)                         # TTM 48
+    gaap |= flow("NetIncomeLossAvailableToCommonStockholdersBasic", 37.0, 33.0, 25.0)   # TTM 45
+    gaap |= inst("StockholdersEquity", 400.0, 360.0)
+    if goodwill:
+        gaap |= inst("Goodwill", 60.0, 60.0)
+        gaap |= inst("IntangibleAssetsNetExcludingGoodwill", 20.0, 24.0)
+    if preferred:
+        gaap |= inst("PreferredStockValue", 30.0, 30.0)
+    return {"facts": {"us-gaap": gaap}}
+
+
+def test_trailing_snapshot_reads_the_book_lines_and_income_to_common():
+    snapshot = sec.trailing_snapshot(_bank_facts())
+    assert snapshot["balance"]["goodwill"] == 60.0 and snapshot["balance"]["intangibles"] == 20.0
+    assert snapshot["balance"]["preferred"] == 30.0 and snapshot["balance_prior"]["intangibles"] == 24.0
+    assert snapshot["ttm"]["income_to_common"] == pytest.approx(45.0)
+
+
+def test_tangible_book_takes_out_preferred_goodwill_and_intangibles():
+    book = V.tangible_book(sec.trailing_snapshot(_bank_facts())["balance"])
+    assert book == {"value": 400.0 - 30.0 - 60.0 - 20.0, "assumed_none": []}
+    assert V.ptbv(580.0, sec.trailing_snapshot(_bank_facts())["balance"]) == pytest.approx(580.0 / 290.0)
+
+
+def test_rotce_is_income_to_common_over_average_tangible_common_equity():
+    snapshot = sec.trailing_snapshot(_bank_facts())
+    prior_tbv = 360.0 - 30.0 - 60.0 - 24.0                                  # 246
+    assert V.rotce(snapshot) == pytest.approx(45.0 / ((290.0 + prior_tbv) / 2) * 100)
+
+
+def test_an_untagged_preferred_is_taken_as_none_and_said_so():
+    book = V.tangible_book(sec.trailing_snapshot(_bank_facts(preferred=False))["balance"])
+    assert book["value"] == 400.0 - 60.0 - 20.0 and book["assumed_none"] == ["preferred"]
+
+
+def test_no_goodwill_and_no_intangibles_tagged_is_not_a_tangible_book():
+    balance = sec.trailing_snapshot(_bank_facts(goodwill=False))["balance"]
+    assert V.tangible_book(balance) is None and V.ptbv(500.0, balance) is None
+    assert V.tangible_book({"equity": 100.0, "goodwill": -5.0}) is None     # a negative asset is a filing error
+
+
+def test_a_negative_tangible_book_has_no_multiple_and_no_return():
+    balance = {"equity": 50.0, "goodwill": 80.0, "intangibles": 0.0}
+    assert V.tangible_book(balance)["value"] == -30.0
+    assert V.ptbv(100.0, balance) is None
+    assert V.rotce({"balance": balance, "balance_prior": {}, "ttm": {"income_to_common": 10.0}}) is None
+
+
+def test_rotce_needs_income_to_common_not_net_income():
+    snapshot = {"balance": {"equity": 100.0, "goodwill": 10.0}, "balance_prior": {}, "ttm": {"net_income": 20.0}}
+    assert V.rotce(snapshot) is None
+
+
+def test_group_book_totals_need_coverage_and_skip_members_without_positive_book():
+    members = [{"market_cap": 100.0, "tbv": 50.0, "tbv_avg": 48.0, "income_common": 6.0},
+               {"market_cap": 100.0, "tbv": 100.0, "tbv_avg": 100.0, "income_common": 10.0},
+               {"market_cap": 40.0, "tbv": -5.0, "tbv_avg": None, "income_common": 1.0}]
+    out = V.aggregate_book(members)
+    assert out["ptbv"] == pytest.approx(200.0 / 150.0) and out["ptbv_coverage"] == pytest.approx(200 / 240)
+    assert out["rotce"] == pytest.approx(16.0 / 148.0 * 100)
+    # A group whose positive-book members hold under 80% of its cap draws nothing.
+    assert V.aggregate_book(members[:1] + [dict(members[2], market_cap=400.0)]) is None
+    assert V.aggregate_book([]) is None
+
+
+# --- P / tangible book against its own history ---------------------------------------------
+def _annual_bank_facts():
+    """Three 10-Ks of a bank with 100m diluted shares: tangible common book
+    is 830, 930 and 1,030 at the three year ends (equity less 50 preferred,
+    100 goodwill and 20 intangibles), each filed on the date below."""
+    def annual(tag, values, unit="USD", instant=False):
+        rows = []
+        for year, (val, filed) in zip((2023, 2024, 2025), values):
+            row = {"end": f"{year}-12-31", "val": val, "filed": filed, "form": "10-K", "fp": "FY"}
+            if not instant:
+                row["start"] = f"{year}-01-01"
+            rows.append(row)
+        return {tag: {"units": {unit: rows}}}
+
+    filed = ["2024-02-20", "2025-02-20", "2026-02-20"]
+    pair = lambda *vals: list(zip(vals, filed))  # noqa: E731
+    gaap = {}
+    gaap |= annual("EarningsPerShareDiluted", pair(2.0, 2.5, 3.0), unit="USD/shares")
+    gaap |= annual("WeightedAverageNumberOfDilutedSharesOutstanding", pair(1e8, 1e8, 1e8), unit="shares")
+    gaap |= annual("NetIncomeLoss", pair(2e8, 2.5e8, 3e8))
+    gaap |= annual("Revenues", pair(9e8, 9e8, 9e8))
+    gaap |= annual("StockholdersEquity", pair(1000e6, 1100e6, 1200e6), instant=True)
+    gaap |= annual("Goodwill", pair(100e6, 100e6, 100e6), instant=True)
+    gaap |= annual("IntangibleAssetsNetExcludingGoodwill", pair(20e6, 20e6, 20e6), instant=True)
+    gaap |= annual("PreferredStockValue", pair(50e6, 50e6, 50e6), instant=True)
+    return {"facts": {"us-gaap": gaap}}
+
+
+def _sessions(start, end, price):
+    return pd.Series(price, index=pd.bdate_range(start, end))
+
+
+def test_eps_history_carries_the_balance_sheet_as_filed_that_day():
+    history = sec.eps_history(_annual_bank_facts())
+    assert [q["filed"] for q in history] == ["2024-02-20", "2025-02-20", "2026-02-20"]
+    assert history[0]["book"] == {"equity": 1000e6, "goodwill": 100e6, "intangibles": 20e6,
+                                  "goodwill_and_intangibles": None, "preferred": 50e6}
+
+
+def test_tbv_steps_are_book_per_share_on_todays_basis():
+    history = sec.eps_history(_annual_bank_facts())
+    assert [round(v, 2) for _, _, v in V.tbv_steps(history, None)] == [8.30, 9.30, 10.30]
+    split = pd.Series([2.0], index=[pd.Timestamp("2025-06-01")])      # 2:1 after the second filing
+    halved = [round(v, 3) for _, _, v in V.tbv_steps(history, split)]
+    assert halved == [4.15, 4.65, 10.30]                              # earlier years restated, the latest not
+
+
+def test_ptbv_series_divides_by_the_book_public_that_day_not_the_next_one():
+    steps = V.tbv_steps(sec.eps_history(_annual_bank_facts()), None)
+    prices = _sessions("2024-01-02", "2026-06-30", 20.0)
+    ptbv = V.ptbv_series(prices, steps)
+    assert pd.isna(ptbv[pd.Timestamp("2024-02-20")])                  # filed that evening: not yet in force
+    assert ptbv[pd.Timestamp("2024-02-21")] == pytest.approx(20.0 / 8.30)
+    assert ptbv[pd.Timestamp("2025-03-03")] == pytest.approx(20.0 / 9.30)
+    assert ptbv.iloc[-1] == pytest.approx(20.0 / 10.30)
+
+
+def test_a_tangible_book_far_above_the_price_is_a_filing_error():
+    steps = [("2024-02-20", "2023-12-31", 500.0)]
+    prices = _sessions("2024-03-01", "2024-03-29", 10.0)
+    assert V.ptbv_series(prices, steps).isna().all()                  # 50x book per share on a 10 share price
+
+
+def test_a_quarter_with_no_tangible_book_leaves_the_earlier_figure_standing():
+    history = sec.eps_history(_annual_bank_facts())
+    history[1]["book"] = {"equity": 1100e6, "goodwill": None, "intangibles": None, "preferred": None}
+    assert [round(v, 2) for _, _, v in V.tbv_steps(history, None)] == [8.30, 10.30]
+
+
+def test_aggregates_carry_a_ptbv_history_beside_the_pe_history():
+    import types
+    from market_recap.config import load_config
+    days = pd.bdate_range("2024-01-01", periods=V.MIN_HISTORY_SESSIONS + 60)
+    tickers = ["B1", "B2", "B3"]
+    rows = [{"ticker": t, "sector": "Financials", "sub_sector": "Diversified Banks", "indices": ["SPX"], "market_cap": 100.0,
+             "price": 10.0, "eps_ntm": None} for t in tickers]
+    caps = {t: pd.Series(150.0, index=days) for t in tickers}
+    earn = {b: {t: pd.Series(15.0, index=days) for t in tickers} for b in (V.OPERATING, V.REPORTED)}
+    book = {t: pd.Series(100.0, index=days) for t in tickers}
+    book["B3"] = pd.Series(float("nan"), index=days)                     # no tangible book for one of three
+    ctx = types.SimpleNamespace(indices=[types.SimpleNamespace(key="SPX", label="S&P 500")],
+                                primary=types.SimpleNamespace(key="SPX"), config=load_config())
+    thin = {s["key"]: s for s in panel._aggregates(ctx, rows, caps, earn, {}, book)["series"]}
+    assert "ptbv" not in thin["Financials"]                              # 2 of 3 equal caps: 67%, under the 80% floor
+    book["B3"] = pd.Series(100.0, index=days)
+    full = {s["key"]: s for s in panel._aggregates(ctx, rows, caps, earn, {}, book)["series"]}
+    assert full["Financials"]["stats_ptbv"]["current"] == pytest.approx(1.5)      # 450 cap over 300 book
+    assert full["fin-diversified-banks"]["stats_ptbv"]["current"] == pytest.approx(1.5)
+    assert len(full["Financials"]["ptbv"]) == len(full["Financials"]["pe"]) and full["Financials"]["coverage_ptbv"] == 1.0
+
+
+# --- A split lookup passed to the step builders changes nothing ---------------------------
+def test_a_split_lookup_passed_to_the_step_builders_changes_nothing():
+    history = sec.eps_history(_annual_bank_facts())
+    split = pd.Series([2.0], index=[pd.Timestamp("2025-06-01")])
+    assert V.eps_steps(history, V.split_lookup(split)) == V.eps_steps(history, split)
+    assert V.tbv_steps(history, V.split_lookup(split)) == V.tbv_steps(history, split)
+
+
+# --- The ways real filers report tangible book (found with scripts/probe_book_tags.py) ---------
+def _facts_with(instants):
+    """Equity and the income lines of _bank_facts (period end 2026-09-30), plus the given
+    balance-sheet tags: {tag: [(form, period end, value, filed)]}."""
+    facts = _bank_facts(preferred=False, goodwill=False)
+    for tag, rows in instants.items():
+        facts["facts"]["us-gaap"][tag] = {"units": {"USD": [
+            {"end": end, "val": val, "filed": filed, "form": form, "fp": "Q"} for form, end, val, filed in rows]}}
+    return facts
+
+
+def test_a_line_only_the_10k_tags_is_carried_into_the_next_quarters_and_said_so():
+    """American Express, Aflac, Prudential: goodwill in the 10-K, nothing in the 10-Qs.
+    Bank of America: preferred stock in the 10-K only."""
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-K", "2025-12-31", 60.0, "2026-02-20")],
+        "PreferredStockIncludingAdditionalPaidInCapital": [("10-K", "2025-12-31", 30.0, "2026-02-20")]}))
+    assert snapshot["balance"]["goodwill"] == 60.0 and snapshot["balance"]["preferred"] == 30.0
+    assert snapshot["balance_carried"] == {"goodwill": "2025-12-31", "preferred": "2025-12-31"}
+    assert V.tangible_book(snapshot["balance"])["value"] == 400.0 - 30.0 - 60.0
+
+
+def test_a_line_older_than_the_carry_limit_is_unknown_not_carried():
+    snapshot = sec.trailing_snapshot(_facts_with({"Goodwill": [("10-K", "2024-12-31", 60.0, "2025-02-20")]}))   # 639 days back
+    assert snapshot["balance"]["goodwill"] is None and snapshot["balance_carried"] == {}
+    assert V.tangible_book(snapshot["balance"]) is None
+
+
+def test_a_line_in_the_quarter_is_not_called_carried():
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-K", "2025-12-31", 55.0, "2026-02-20"), ("10-Q", "2026-09-30", 60.0, "2026-11-05")]}))
+    assert snapshot["balance"]["goodwill"] == 60.0 and snapshot["balance_carried"] == {}
+
+
+def test_jpmorgans_preferred_stock_tag_is_read():
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-Q", "2026-09-30", 60.0, "2026-11-05")],
+        "PreferredStockIncludingAdditionalPaidInCapitalNetOfDiscount": [("10-Q", "2026-09-30", 21.0, "2026-11-05")]}))
+    assert snapshot["balance"]["preferred"] == 21.0
+    assert V.tangible_book(snapshot["balance"]) == {"value": 400.0 - 21.0 - 60.0, "assumed_none": ["intangibles"]}
+
+
+def test_a_current_combined_line_replaces_goodwill_and_intangibles_that_would_only_be_carried():
+    """Raymond James and Arch tag one goodwill-and-intangibles line in the 10-Q."""
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-K", "2025-12-31", 40.0, "2026-02-20")],
+        "IntangibleAssetsNetExcludingGoodwill": [("10-K", "2025-12-31", 10.0, "2026-02-20")],
+        "IntangibleAssetsNetIncludingGoodwill": [("10-Q", "2026-09-30", 80.0, "2026-11-05")]}))
+    assert snapshot["balance"]["goodwill"] is None and snapshot["balance"]["intangibles"] is None
+    assert snapshot["balance"]["goodwill_and_intangibles"] == 80.0
+    assert V.tangible_book(snapshot["balance"]) == {"value": 400.0 - 80.0, "assumed_none": ["preferred"]}
+
+
+def test_a_combined_line_does_not_replace_goodwill_the_quarter_reports_itself():
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-Q", "2026-09-30", 60.0, "2026-11-05")],
+        "IntangibleAssetsNetIncludingGoodwill": [("10-Q", "2026-09-30", 999.0, "2026-11-05")]}))
+    assert snapshot["balance"]["goodwill"] == 60.0 and snapshot["balance"]["goodwill_and_intangibles"] is None
+
+
+def test_finite_and_indefinite_lived_intangibles_are_added_unless_a_total_is_filed():
+    """Ameriprise files the two lines; BlackRock and Moody's file the total."""
+    split = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-Q", "2026-09-30", 60.0, "2026-11-05")],
+        "FiniteLivedIntangibleAssetsNet": [("10-Q", "2026-09-30", 5.0, "2026-11-05")],
+        "IndefiniteLivedIntangibleAssetsExcludingGoodwill": [("10-Q", "2026-09-30", 8.0, "2026-11-05")]}))
+    assert split["balance"]["intangibles"] == 13.0
+    total = sec.trailing_snapshot(_facts_with({
+        "Goodwill": [("10-Q", "2026-09-30", 60.0, "2026-11-05")],
+        "IntangibleAssetsNetExcludingGoodwill": [("10-Q", "2026-09-30", 20.0, "2026-11-05")],
+        "FiniteLivedIntangibleAssetsNet": [("10-Q", "2026-09-30", 5.0, "2026-11-05")]}))
+    assert total["balance"]["intangibles"] == 20.0                   # the total already holds the finite-lived part
+
+
+def test_the_history_carries_a_10k_only_line_too():
+    facts = _annual_bank_facts()
+    rows = facts["facts"]["us-gaap"]["Goodwill"]["units"]["USD"]
+    facts["facts"]["us-gaap"]["Goodwill"]["units"]["USD"] = [r for r in rows if not r["end"].startswith("2024")]
+    book = [q["book"] for q in sec.eps_history(facts)]
+    assert [b["goodwill"] for b in book] == [100e6, 100e6, 100e6]     # 2024's, missing, is the year before's
+    assert [round(v, 2) for _, _, v in V.tbv_steps(sec.eps_history(facts), None)] == [8.30, 9.30, 10.30]
+
+
 def test_a_split_lookup_gives_the_same_factor_as_filtering_the_series():
     import numpy as np
     days = pd.date_range("2016-01-04", "2026-10-07", freq="B")

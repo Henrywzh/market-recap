@@ -1,0 +1,43 @@
+# Research: why do some companies have no tangible book, or an implausible one?
+# scripts/probe_book_tags.py prints their SEC goodwill / intangible / preferred /
+# equity tags tag by tag, beside what the build's snapshot took from them.
+# Touches no build, cache or deploy. Manual only. Last run: after the carry-forward /
+# preferred-tag / combined-line fixes, the same companies, against real filings.
+name: probe-book
+
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: "Tickers to look at"
+        default: "BLK MCO SPGI AXP AFL PRU PGR RJF KKR APO IBKR ACGL CINF AMP ERIE EG JPM BAC"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Install
+        run: |
+          python -m pip install -r requirements.lock
+          python -m pip install --no-deps -e .
+      - name: Probe
+        run: python scripts/probe_book_tags.py ${{ inputs.tickers || 'BLK MCO SPGI AXP AFL PRU PGR RJF KKR APO IBKR ACGL CINF AMP ERIE EG JPM BAC' }} --out probes/book
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: probe-book-${{ github.run_id }}
+          path: probes/book/
+          if-no-files-found: ignore
+          retention-days: 30

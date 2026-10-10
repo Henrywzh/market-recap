@@ -6,6 +6,9 @@
 
 import { el, card, table, num, sectionTitle, notice, metaRow, periodSwitch, DASH } from '../fmt.js';
 import { render, SERIES_COLORS } from '../charts.js';
+import * as FF from '../fiscal-forward.js';
+
+const { quantile } = FF;
 
 const BILLION = 1e9;
 const HISTORY_BASE = 'artifacts/valuation';
@@ -18,6 +21,10 @@ const AXIS_PERCENTILES = [0.05, 0.95];
 const ALL = '';
 // The P/E history's earnings bases, as the switch names them.
 const BASIS_NAMES = { operating: 'OPERATING', ex_gains: 'EX GAINS', reported: 'REPORTED' };
+// The scope switch's first option: the index and every sector, no sub-sector group.
+const SECTORS_SCOPE = 'SECTORS';
+// The valuation path's stages, in order (compute/valuation.py PATH_STAGES).
+const PATH_LABELS = { fy_prev: 'LAST FISCAL YEAR (actual)', fy0: 'THIS FISCAL YEAR', ntm: 'NEXT 12 MONTHS', fy1: 'NEXT FISCAL YEAR' };
 
 function format(value, unit) {
   if (value === null || value === undefined) return DASH;
@@ -26,14 +33,6 @@ function format(value, unit) {
   if (unit === 'pp') return num(value, 1);
   if (unit === 'score') return num(value, 0);
   return num(value, 2);
-}
-
-function quantile(sorted, q) {
-  if (!sorted.length) return null;
-  const position = (sorted.length - 1) * q;
-  const low = Math.floor(position);
-  const high = Math.ceil(position);
-  return sorted[low] + (sorted[high] - sorted[low]) * (position - low);
 }
 
 const median = (values) => quantile([...values].sort((a, b) => a - b), 0.5);
@@ -82,6 +81,9 @@ function rowNote(row, data) {
   ];
   if (row.lagged.length) parts.push(`from the prior quarter (not tagged in the latest 10-Q): ${row.lagged.join(', ')}`);
   if (row.sector === data.financials_sector) parts.push('Financials: EV, gross-profit, FCF and accrual metrics not computed');
+  if (row.tbv_carried) parts.push(`tangible book: ${Object.entries(row.tbv_carried).map(([k, d]) => `${k} from ${d}`).join(', ')} (not in the latest 10-Q)`);
+  if (row.tbv_assumed_none?.length) parts.push(`tangible book: no ${row.tbv_assumed_none.join(', ')} tagged in the filing, taken as none`);
+  else if (row.tbv === null || row.tbv === undefined) parts.push('tangible book: needs goodwill or intangibles tagged in the filing');
   if (row.piotroski === null && row.piotroski_tested) parts.push(`Piotroski: ${row.piotroski_tested} of 9 signals testable`);
   return parts.join('\n');
 }
@@ -183,7 +185,7 @@ const SECTOR_SHORT = {
 
 // Where each index and sector P/E sits in its own ten years, most expensive
 // on top; a click draws that group's decade beside it.
-function percentileChart(node, series, selected, onPick) {
+function percentileChart(node, series, selected, onPick, measure = 'P/E') {
   const shown = series.filter((s) => s.stats && s.stats.percentile !== null)
     .sort((a, b) => a.stats.percentile - b.stats.percentile);
   const chart = render(node, (option, p) => ({
@@ -195,7 +197,7 @@ function percentileChart(node, series, selected, onPick) {
       axisPointer: undefined,
       formatter: (q) => {
         const s = shown[q.dataIndex];
-        return `<b>${s.label}</b> · ${s.companies} companies<br>P/E ${num(s.stats.current, 1)}x · 10Y median ${num(s.stats.median, 1)}x`
+        return `<b>${s.label}</b> · ${s.companies} companies<br>${measure} ${num(s.stats.current, 1)}x · 10Y median ${num(s.stats.median, 1)}x`
           + `<br>${num(s.stats.percentile, 0)}th percentile of its own ten years`;
       },
     },
@@ -261,9 +263,33 @@ export function renderAggregates(root, data) {
       + 'An EPS more than twice the share price either way is taken as a units error in the filing and left out. '
       + 'OPERATING (the default) divides by each company\'s operating earnings: pre-tax income, capped at operating income less interest paid, taxed at the company\'s own rate -- so gains on stakes (Alphabet and Amazon on Anthropic), divestitures and one-off tax items do not make a group look cheap. Financials and utilities, whose ordinary earnings are partly below the operating line, and companies that report no operating line, are on reported EPS less gains on equity securities. REPORTED is plain diluted EPS. '
       + 'Both are trailing, not FactSet\'s forward operating P/E (on EARNINGS), so they run higher and move more around recessions. Percentile and band are over the last ten years of sessions, each on its own basis.',
+    'VALUATION PATH: total market cap over total consensus EPS at last fiscal year (the actual, as Yahoo carries it), this fiscal year, the next twelve months and next fiscal year -- all on the analysts\' basis, so a step is earnings growth, not a change of accounting, and the same companies count at every stage. A group is drawn only when they hold at least '
+      + `${num(agg.min_coverage * 100, 0)}% of its market cap. Each company's fiscal year is its own, so a sector mixes year-ends. These multiples are not comparable with the trailing P/E above (filed EPS, a different basis), and a sector's forward P/E has no history of its own until consensus has been recorded for a year.`,
+    'SUB-SECTOR GROUPS: a sector the config divides (Financials) can be opened beside its parts -- diversified banks, regional banks, investment banks and brokers, asset managers, insurers, payments and consumer finance, exchanges -- each a total of its own members\' market cap over their earnings, on the same bases and with the same member and weight caveats as a sector. A company sits in one group by its current GICS sub-industry (the S&P 500 labels on Wikipedia); the groups need not add up to the sector.',
+    'P / TANGIBLE BOOK and ROTCE: market cap over total common tangible book (shareholders\' equity less preferred stock, goodwill and other intangibles, from the latest 10-Q), and total TTM income to common over total average tangible book. The P/TBV switch draws its ten years: the same total over time, each quarter\'s tangible book per share only from the balance sheet filed by that day (on today\'s share basis, over the quarter\'s diluted count, which for a company that buys back stock runs a little above the period-end count), weights and members today\'s, as for P/E. ROTCE has no history yet. A company that tags neither goodwill nor intangibles has no tangible book, one that tags no preferred stock is taken as having none (said on its row), and deferred tax on intangibles and mortgage-servicing rights are not adjusted, so a bank\'s own reported tangible book per share can differ. A company counts only with a positive tangible book; the figure is drawn when those companies hold the minimum share of the group\'s cap, which most non-financial groups do not. Beside P / TBV on the table, the scatter can set it against ROTCE: what a bank earns on tangible equity is what its multiple should follow.',
+    'WHAT YOU WOULD NEED TO BELIEVE: price = multiple x EPS, so a forward P/E moved by some turns with next-twelve-months EPS revised by some percent implies the price change shown. The axes are set in config/dashboard.toml. It is arithmetic on today\'s multiple; neither the multiple nor the revision is forecast.',
   ]));
   root.append(aggregateSection(data));
+  root.append(...subgroupNotes(agg.subgroups));
   return true;
+}
+
+// What the config's split of a sector could not place, said where the groups
+// are drawn: a group that vanished because of a renamed label must not vanish quietly.
+function subgroupNotes(report) {
+  if (!report) return [];
+  const notes = [];
+  if (report.unmatched?.length) {
+    notes.push(notice(`Configured sub-industries that no company carries (check the GICS spelling in config): ${report.unmatched.join(' · ')}.`));
+  }
+  if (report.too_small?.length) {
+    notes.push(notice(`Groups under ${report.min_members} companies, not drawn: ${report.too_small.map((g) => `${g.label} (${g.companies})`).join(' · ')}.`));
+  }
+  if (report.unassigned?.length) {
+    notes.push(el('div', { class: 'dim', text: 'SUB-INDUSTRIES IN NO GROUP (still in their sector\'s total): '
+      + report.unassigned.map((u) => `${u.sector} · ${u.sub_industry} (${u.tickers.join(', ')})`).join(' · ') }));
+  }
+  return notes;
 }
 
 function aggregateSection(data) {
@@ -271,10 +297,19 @@ function aggregateSection(data) {
   if (!agg || !agg.series?.length) return null;
   const primary = agg.series.find((s) => s.kind === 'index') || agg.series[0];
   let selected = primary.key;
+  // The bars compare the index and the sectors; a divided sector (Financials)
+  // can be opened to compare it with its own parts instead.
+  const parents = [...new Set(agg.series.filter((s) => s.kind === 'subsector').map((s) => s.parent))];
+  let scope = SECTORS_SCOPE;
+  const inScope = (s) => (scope === SECTORS_SCOPE ? s.kind !== 'subsector'
+    : (s.kind === 'sector' && s.label === scope) || (s.kind === 'subsector' && s.parent === scope));
   const barsNode = el('div', { class: 'chart tall' });
   const lineNode = el('div', { class: 'chart tall' });
   const lineTitle = el('span', { class: 'dim' });
   const stats = el('div', { class: 'stat-strip val-agg-stats' });
+  const pathNode = el('div');
+  const pathNote = el('span', { class: 'dim' });
+  const scenarioNode = el('div');
   const stat = (label, value, note, cls = '') => el('div', { class: 'stat' }, [
     el('div', { class: 'stat-label', text: label }),
     el('div', { class: `stat-value ${cls}`, text: value }),
@@ -284,43 +319,104 @@ function aggregateSection(data) {
   // Older artifacts carry only the reported series, under the plain keys.
   const bases = agg.alternate ? [BASIS_NAMES[agg.basis], BASIS_NAMES[agg.alternate]] : ['REPORTED'];
   let basis = bases[0];
+  // P / tangible book has its own ten years where the build had the balance sheets for it.
+  const MEASURES = ['P/E', 'P/TBV'];
+  const hasBook = agg.series.some((s) => s.stats_ptbv);
+  let measure = MEASURES[0];
   const view = (s) => {
+    if (measure === 'P/TBV') return { ...s, stats: s.stats_ptbv, pe: s.ptbv, coverage: s.coverage_ptbv };
     const suffix = basis === 'REPORTED' && agg.alternate ? `_${agg.alternate}` : '';
     return { ...s, stats: s[`stats${suffix}`], pe: s[`pe${suffix}`], coverage: s[`coverage${suffix}`] };
   };
   const other = (s) => {
-    if (!agg.alternate) return null;
+    if (!agg.alternate || measure === 'P/TBV') return null;
     const suffix = basis === 'REPORTED' ? '' : `_${agg.alternate}`;
     return { name: basis === 'REPORTED' ? 'operating' : 'reported', pe: s[`pe${suffix}`] };
   };
   const draw = () => {
-    const shown = agg.series.map(view);
+    const shown = agg.series.map(view).filter(inScope);
+    if (!shown.some((x) => x.key === selected)) selected = (shown.find((x) => x.kind === 'index') || shown[0]).key;
     const s = shown.find((x) => x.key === selected);
-    percentileChart(barsNode, shown, selected, (key) => { selected = key; draw(); });
-    lineTitle.textContent = `${s.label} · ${s.companies} companies · weekly · ${basis.toLowerCase()} earnings`;
+    percentileChart(barsNode, shown, selected, (key) => { selected = key; draw(); }, measure);
+    const book = measure === 'P/TBV';
+    barsTitle.textContent = `${measure} VS OWN 10 YEARS · INDICES & SECTORS`;
+    lineCardTitle.textContent = `${measure} · 10 YEARS`;
+    if (basisSwitch) basisSwitch.style.display = book ? 'none' : '';
+    lineTitle.textContent = book
+      ? `${s.label} · ${s.companies} companies · weekly · common tangible book as filed`
+      : `${s.label} · ${s.companies} companies · weekly · ${basis.toLowerCase()} earnings`;
     if (s.stats) {
       const cap = s.stats.max > s.stats.p90 * AGGREGATE_AXIS_CAP ? s.stats.p90 * AGGREGATE_AXIS_CAP : null;
-      historyChart(lineNode, { dates: agg.dates, pe: s.pe, stats: s.stats, name: basis.toLowerCase() }, { cap, compare: other(agg.series.find((x) => x.key === selected)) });
+      historyChart(lineNode, { dates: agg.dates, pe: s.pe, stats: s.stats, name: book ? 'p/tbv' : basis.toLowerCase() }, { cap, compare: other(agg.series.find((x) => x.key === selected)) });
     }
     const st = s.stats || {};
     stats.replaceChildren(
-      stat(`P/E (TTM, ${basis.toLowerCase()})`, present(st.current) ? `${num(st.current, 1)}x` : DASH, s.label),
+      stat(book ? 'P / TANGIBLE BOOK (as filed)' : `P/E (TTM, ${basis.toLowerCase()})`, present(st.current) ? `${num(st.current, 1)}x` : DASH, s.label),
       stat('OWN 10Y PERCENTILE', present(st.percentile) ? `${num(st.percentile, 0)}th` : DASH, `range ${num(st.min, 1)}x – ${num(st.max, 1)}x`,
         st.percentile >= 80 ? 'down' : st.percentile <= 20 ? 'up' : ''),
       stat('VS 10Y MEDIAN', present(st.vs_median) ? `${st.vs_median > 0 ? '+' : ''}${num(st.vs_median, 0)}%` : DASH, `median ${num(st.median, 1)}x · IQR ${num(st.p25, 1)}–${num(st.p75, 1)}x`),
-      stat('COVERAGE', present(s.coverage) ? `${num(s.coverage * 100, 0)}%` : DASH, 'of its market cap with filed EPS'),
+      stat('COVERAGE', present(s.coverage) ? `${num(s.coverage * 100, 0)}%` : DASH,
+        book ? 'of its market cap with a positive tangible book' : 'of its market cap with filed EPS'),
       stat('FORWARD P/E (NTM)', present(s.forward_now?.pe) ? `${num(s.forward_now.pe, 1)}x` : DASH,
         s.forward_now ? `consensus EPS, ${num(s.forward_now.coverage * 100, 0)}% of cap · ${(s.forward_history?.dates || []).length} recorded days` : 'no consensus'),
+      stat('P / TANGIBLE BOOK', present(s.book?.ptbv) ? `${num(s.book.ptbv, 2)}x` : DASH,
+        s.book?.ptbv_coverage ? `latest filings, ${num(s.book.ptbv_coverage * 100, 0)}% of cap` : 'needs tangible book on most of its cap'),
+      stat('ROTCE (TTM)', present(s.book?.rotce) ? `${num(s.book.rotce, 1)}%` : DASH,
+        s.book?.rotce_coverage ? `income to common / avg tangible equity, ${num(s.book.rotce_coverage * 100, 0)}% of cap` : 'needs income to common'),
     );
+    drawPath(s, pathNode, pathNote);
+    drawScenario(s, agg.scenario, scenarioNode);
   };
   const basisSwitch = bases.length > 1 ? periodSwitch(bases, basis, (b) => { basis = b; draw(); }) : null;
+  const scopeSwitch = parents.length ? periodSwitch([SECTORS_SCOPE, ...parents], scope, (v) => { scope = v; draw(); }) : null;
+  const measureSwitch = hasBook ? periodSwitch(MEASURES, measure, (m) => { measure = m; draw(); }) : null;
   const section = el('div', { class: 'grid two val-agg' }, [
     card('P/E VS OWN 10 YEARS · INDICES & SECTORS', el('span', { class: 'tag-row' }, [
-      el('span', { class: 'dim', text: 'percentile · red ≥ 80th · green ≤ 20th · click to chart' }), basisSwitch]), [barsNode]),
+      el('span', { class: 'dim', text: 'percentile · red ≥ 80th · green ≤ 20th · click to chart' }), measureSwitch, scopeSwitch, basisSwitch]), [barsNode]),
     card('P/E · 10 YEARS', lineTitle, [stats, lineNode]),
   ]);
+  const [barsTitle, lineCardTitle] = section.querySelectorAll('.card-title');
   requestAnimationFrame(draw);
-  return section;
+  const forward = el('div', { class: 'grid two val-agg' }, [
+    card('VALUATION PATH · ANALYST CONSENSUS', pathNote, [pathNode]),
+    card('WHAT YOU WOULD NEED TO BELIEVE', el('span', { class: 'dim', text: 'price change implied · arithmetic on today\'s forward P/E, not a forecast' }), [scenarioNode]),
+  ]);
+  return el('div', {}, [section, forward]);
+}
+
+// The group's multiple at last fiscal year, this one, the next twelve months
+// and next year, all on Yahoo's consensus basis, with the earnings growth each
+// step carries. The same companies count at every stage.
+function drawPath(s, node, note) {
+  const path = s.path;
+  if (!path) {
+    note.textContent = '';
+    node.replaceChildren(el('div', { class: 'gap', text: `${s.label}: no valuation path (consensus covers too little of its market cap).` }));
+    return;
+  }
+  note.textContent = `${path.companies} companies · ${num(path.coverage * 100, 0)}% of cap · each company's own fiscal year`;
+  const rows = path.stages.map((st) => el('tr', {}, [
+    el('td', { text: PATH_LABELS[st.key] || st.key }),
+    el('td', { text: present(st.pe) ? `${num(st.pe, 1)}x` : DASH }),
+    el('td', { class: present(st.growth) ? (st.growth >= 0 ? 'up' : 'down') : 'dim',
+      text: present(st.growth) ? `${st.growth > 0 ? '+' : ''}${num(st.growth, 1)}%` : DASH }),
+  ]));
+  node.replaceChildren(table(['STAGE', 'P/E', 'EARNINGS VS STAGE BEFORE'], rows));
+}
+
+// Price change if the forward multiple moves by some turns and NTM consensus
+// EPS is revised by some percent (price = multiple x EPS).
+function drawScenario(s, axes, node) {
+  if (!s.scenario || !axes || !present(s.forward_now?.pe)) {
+    node.replaceChildren(el('div', { class: 'gap', text: `${s.label}: no forward P/E to move.` }));
+    return;
+  }
+  const rows = axes.multiple_turns.map((turn, i) => el('tr', {}, [
+    el('td', { text: `${num(s.forward_now.pe + turn, 1)}x (${turn > 0 ? '+' : ''}${turn})` }),
+    ...s.scenario[i].map((v) => el('td', { class: !present(v) ? 'dim' : v > 0 ? 'up' : v < 0 ? 'down' : '',
+      text: present(v) ? `${v > 0 ? '+' : ''}${num(v, 1)}%` : DASH })),
+  ]));
+  node.replaceChildren(table(['FWD P/E', ...axes.eps_change_pct.map((c) => `EPS ${c > 0 ? '+' : ''}${c}%`)], rows));
 }
 
 function epsChart(node, history) {
@@ -343,6 +439,37 @@ function epsChart(node, history) {
   }));
 }
 
+// Yahoo's own forward P/E at each month end: the line is what the market was told that
+// day, the large markers are the fiscal year ends (each exactly twelve months ahead), and a
+// dashed vertical marks the month Yahoo's EPS moved on to the next fiscal year.
+function fiscalForwardChart(node, fiscal) {
+  const data = FF.chartData(fiscal);
+  const cap = FF.axisCap([...data.line, ...data.annual]);
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, top: 22, bottom: 28, right: 16 },
+    legend: { top: 0, textStyle: { color: p.dim, fontSize: 9 }, itemWidth: 10, itemHeight: 2 },
+    tooltip: { ...option.tooltip, trigger: 'axis', formatter: (items) => FF.tooltipText(items[0].value[0], data) },
+    xAxis: { ...option.xAxis, type: 'time', data: undefined, axisLabel: { ...option.xAxis?.axisLabel, formatter: '{yyyy}-{MM}' } },
+    yAxis: { ...option.yAxis, max: cap ?? undefined, axisLabel: { color: p.dim, fontSize: 10, formatter: (v) => `${v}x` } },
+    series: [
+      {
+        name: 'month and fiscal-quarter ends', type: 'line', data: data.linePairs, showSymbol: true, symbolSize: 4, connectNulls: false,
+        itemStyle: { color: p.text }, lineStyle: { width: 1.2, color: p.text },
+        markLine: {
+          silent: true, symbol: 'none',
+          label: { color: p.dim, fontSize: 9, position: 'insideEndTop', formatter: 'next FY' },
+          data: data.rolled.map((d) => ({ xAxis: d, lineStyle: { color: p.faint, type: 'dashed' } })),
+        },
+      },
+      {
+        name: 'fiscal year end (12 months ahead)', type: 'line', data: data.annualPairs, showSymbol: true, symbolSize: 9,
+        connectNulls: false, lineStyle: { width: 0 }, itemStyle: { color: p.accent },
+      },
+    ],
+  }));
+}
+
 function historyTable(history, view) {
   const s = view.stats;
   const latest = history.eps?.[history.eps.length - 1];
@@ -358,8 +485,10 @@ function historyTable(history, view) {
       + ` · NTM EPS $${num(fwd.eps_ntm[fwd.eps_ntm.length - 1], 2)}`
       + (fwd.dates.length > 1 ? ` · recorded since ${fwd.dates[0]}` : ' · history recorded from today'),
   ]] : [];
+  const fiscalRows = history.fiscal_forward ? FF.tableRows(history.fiscal_forward) : [];
   const rows = [
     ...forwardRows,
+    ...fiscalRows,
     ['Earnings basis', (BASIS_NAMES[view.basis] || 'REPORTED').toLowerCase()],
     ...removed,
     ['Current P/E', s.current === null ? 'n/m (loss)' : `${num(s.current, 1)}x`],
@@ -369,7 +498,7 @@ function historyTable(history, view) {
     ['10th–90th · min–max', `${num(s.p10, 1)}–${num(s.p90, 1)}x · ${num(s.min, 1)}–${num(s.max, 1)}x`],
     ['Sessions with positive earnings', `${s.sessions} since ${s.first}`],
   ];
-  return table(['', ''], rows.map(([a, b]) => el('tr', {}, [el('td', { class: 'dim', text: a }), el('td', { text: b })])));
+  return table(['', ''], rows.map(([a, b, wrap]) => el('tr', {}, [el('td', { class: 'dim', text: a }), el('td', { class: wrap ? 'wrap-cell' : '', text: b })])));
 }
 
 function sectorTable(rows, metrics) {
@@ -440,6 +569,9 @@ export async function renderPeHistory(host, symbol, data) {
   let active = views[0];
   const historyNode = el('div', { class: 'chart tall' });
   const epsNode = el('div', { class: 'chart short' });
+  // undefined: an artifact from before this series existed. null: Yahoo has none for this company.
+  const fiscal = history.fiscal_forward;
+  const fiscalNode = fiscal ? el('div', { class: 'chart short' }) : null;
   const tableHost = el('div', {});
   const draw = () => {
     const s = active.stats;
@@ -458,7 +590,14 @@ export async function renderPeHistory(host, symbol, data) {
   host.replaceChildren(
     el('div', { class: 'grid two' }, [
       el('div', {}, [basisSwitch ? el('div', { class: 'tag-row' }, [el('span', { class: 'dim', text: 'EARNINGS' }), basisSwitch]) : null, historyNode]),
-      el('div', {}, [tableHost, el('div', { class: 'card-title', text: 'TTM EPS, TODAY\'S SHARE BASIS, BY FILING DATE' }), epsNode]),
+      el('div', {}, [
+        tableHost,
+        el('div', { class: 'card-title', text: 'TTM EPS, TODAY\'S SHARE BASIS, BY FILING DATE' }), epsNode,
+        ...(fiscal === undefined ? [] : [
+          el('div', { class: 'card-title', text: 'FORWARD P/E · YAHOO\'S OWN HISTORY, FISCAL-YEAR EPS' }),
+          fiscal ? fiscalNode : el('div', { class: 'gap', text: 'Yahoo has no forward P/E history for this company.' }),
+        ]),
+      ]),
     ]),
     el('details', { class: 'method-fold' }, [el('summary', { text: 'ⓘ METHOD & DATA' }), el('div', { class: 'method-copy', text:
       `Each session's P/E is the split-adjusted close (not dividend-adjusted) over the TTM EPS `
@@ -475,10 +614,16 @@ export async function renderPeHistory(host, symbol, data) {
       + `${Math.round(data.pe_history.agreement_tolerance * 100)}% for ${data.pe_history.disagree.length} companies`
       + (data.pe_history.disagree.length ? ` (${data.pe_history.disagree.join(', ')}) — usually a merger or spin-off `
         + 'moving the share count, preferred dividends, or a large minority interest' : '')
-      + `. The axis stops at ${AGGREGATE_AXIS_CAP}x the 90th percentile when a spike (earnings near zero) would flatten the rest; the table keeps the true range.` })]),
+      + `. The axis stops at ${AGGREGATE_AXIS_CAP}x the 90th percentile when a spike (earnings near zero) would flatten the rest; the table keeps the true range. `
+      + `YAHOO'S OWN FORWARD P/E is what Yahoo published at each month end, price over the consensus EPS of a fiscal year as it stood that day `
+      + `(not recomputed with today's estimates). Yahoo moves that EPS to the next fiscal year three months before the year ends, so each point `
+      + `looks 4 to 15 months ahead and the line steps down at the dashed month; it is not the next-twelve-months multiple above and is never joined to it. `
+      + `Compare a point with the same month a year earlier, or with the fiscal year ends, which are always twelve months ahead. `
+      + `That chart's axis stops at ${FF.AXIS_CAP_FACTOR}x the 75th percentile when near-zero earnings send the multiple into the hundreds; the table keeps the true figure.` })]),
   );
   draw();
   epsChart(epsNode, history);
+  if (fiscal) fiscalForwardChart(fiscalNode, fiscal);
   const row = data.rows.find((r) => r.ticker === symbol);
   return `${row?.name || symbol} · weekly, ${history.dates[0]} → ${history.dates[history.dates.length - 1]}`;
 }

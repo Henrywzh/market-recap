@@ -13,6 +13,7 @@ release never changes and is cached as an archive.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 import re
 import shutil
@@ -24,6 +25,10 @@ from bs4 import BeautifulSoup
 from .. import cache
 from .http import get_bytes, get_text
 
+# The ministry's server answers in seconds a page, 8 list pages and up to 13 releases a
+# build, and was waited on one request at a time (190 s on a slow night). A few at a
+# time, not many: it drops the odd request from a cloud runner as it is.
+WORKERS = 3
 BASE = "https://www.motir.go.kr"
 LIST_URL = BASE + "/kor/article/ATCL3f49a5a8c"
 NAMESPACE = "motie"
@@ -118,37 +123,55 @@ def _article(ident: str, use_cache: bool) -> dict:
     return {"id": ident, "url": f"{LIST_URL}/{ident}/view", **parse_text(_pdf_text(pdf))}
 
 
+def _list_page(keyword: str, page: int, use_cache: bool) -> tuple[str | None, str | None]:
+    """(html, None), or (None, why) when the page could not be read."""
+    # The ministry's server drops the odd request from a cloud runner
+    # ("empty reply"); one list page lost costs its releases only.
+    try:
+        html = cache.fetch_text(
+            NAMESPACE, f"list-{keyword.replace(' ', '_')}-{page}",
+            lambda: get_text(f"{LIST_URL}?searchCondition=1&searchKeyword={quote(keyword)}&pageIndex={page}", user_agent=UA, retries=2),
+            kind="daily_file", suffix=".html", use_cache=use_cache)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"list '{keyword}' page {page}: {str(exc)[:80]}"
+    return html, None
+
+
 def fetch(today: date, months: int = 13, *, use_cache: bool = True) -> tuple[list[dict], list[str]]:
     """Monthly releases, oldest first, and the months that could not be read."""
     found: dict[str, str] = {}
     pages_failed: list[str] = []
-    for keyword in ("수출입 동향", "수출입동향"):
-        for page in (1, 2, 3, 4):
-            # The ministry's server drops the odd request from a cloud runner
-            # ("empty reply"); one list page lost costs its releases only.
-            try:
-                html = cache.fetch_text(
-                    NAMESPACE, f"list-{keyword.replace(' ', '_')}-{page}",
-                    lambda: get_text(f"{LIST_URL}?searchCondition=1&searchKeyword={quote(keyword)}&pageIndex={page}", user_agent=UA, retries=2),
-                    kind="daily_file", suffix=".html", use_cache=use_cache)
-            except Exception as exc:  # noqa: BLE001
-                pages_failed.append(f"list '{keyword}' page {page}: {str(exc)[:80]}")
-                continue
-            for month, ident in releases(html):
-                found.setdefault(month, ident)
+    asked = [(keyword, page) for keyword in ("수출입 동향", "수출입동향") for page in (1, 2, 3, 4)]
+    with ThreadPoolExecutor(WORKERS) as pool:
+        pages = list(pool.map(lambda kp: _list_page(kp[0], kp[1], use_cache), asked))
+    # In the order asked, whatever finished first: the first page to name a month decides its release.
+    for html, why in pages:
+        if why:
+            pages_failed.append(why)
+            continue
+        for month, ident in releases(html):
+            found.setdefault(month, ident)
     if not found:
         raise RuntimeError("no list page could be read: " + "; ".join(pages_failed[:2]))
     # Each release states its own y/y change, so a year of releases is enough;
     # the site is slow (seconds a page, a 1.7 MB PDF each), and a published
     # release is cached for good once read.
-    rows, failed = [], list(pages_failed)
-    for month, ident in sorted(found.items())[-months:]:
+    wanted = sorted(found.items())[-months:]
+
+    def read(item: tuple[str, str]) -> tuple[dict | None, str | None]:
+        month, ident = item
         try:
-            row = _article(ident, use_cache)
+            return _article(ident, use_cache), None
         except Exception as exc:  # noqa: BLE001 - one unreadable release must not drop the rest
-            failed.append(f"{month}: {str(exc)[:100]}")
-            continue
-        if "semis_bn" in row:
+            return None, f"{month}: {str(exc)[:100]}"
+
+    with ThreadPoolExecutor(WORKERS) as pool:
+        articles = list(pool.map(read, wanted))
+    rows, failed = [], list(pages_failed)
+    for (month, _), (row, why) in zip(wanted, articles):
+        if why:
+            failed.append(why)
+        elif "semis_bn" in row:
             rows.append({"month": month, **row})
         else:
             failed.append(f"{month}: semiconductor line not found")

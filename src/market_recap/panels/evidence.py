@@ -16,6 +16,7 @@ time budget carries on from the cache next time rather than failing.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 import json
 import time
@@ -82,6 +83,21 @@ def _options(symbol: str, summary_today: pd.DataFrame | None, history: pd.DataFr
     }
 
 
+def prefetch(fetch, symbols: list[str], workers: int = 4) -> dict[str, tuple]:
+    """{symbol: (result, None)} or {symbol: (None, the exception)} for each
+    symbol, asked ``workers`` at a time. An exception is kept to be raised
+    where the answer is used, so a failed name is reported as before."""
+    answers = {}
+    with ThreadPoolExecutor(workers) as pool:
+        futures = {symbol: pool.submit(fetch, symbol) for symbol in symbols}
+    for symbol, future in futures.items():
+        try:
+            answers[symbol] = (future.result(), None)
+        except Exception as exc:  # noqa: BLE001 -- raised later, where it is reported
+            answers[symbol] = (None, exc)
+    return answers
+
+
 def build(ctx) -> dict:
     settings = ctx.config.get("evidence", {})
     as_of = date.fromisoformat(ctx.as_of)
@@ -128,6 +144,19 @@ def build(ctx) -> dict:
             return cached
         index_budget["left"] -= 1
         return sec.accepted_eastern(cik, accession)
+
+    # Short interest is one slow request per name (2 s each, 75 s for the 34 not
+    # yet cached) and independent of everything else in the loop: ask for the
+    # focus names together, then read each name's answer where it was used.
+    shorts = prefetch(nasdaq.fetch_short_interest, sorted(focus & set(symbols)))
+
+    def short_of(symbol: str):
+        if symbol not in shorts:
+            return nasdaq.fetch_short_interest(symbol)
+        rows, error = shorts[symbol]
+        if error is not None:
+            raise error
+        return rows
 
     for symbol in symbols:
         cik = cik_for(symbol, cik_map)
@@ -224,7 +253,7 @@ def build(ctx) -> dict:
                 "complete": recent is not None and form4_read == form4_expected,
             }
             try:
-                entry["short"] = V.short_summary(nasdaq.fetch_short_interest(symbol))
+                entry["short"] = V.short_summary(short_of(symbol))
             except Exception as exc:
                 failed[f"short interest {symbol}"] = describe_error(exc)
             try:

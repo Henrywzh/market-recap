@@ -541,6 +541,67 @@ etf = "ITB"
 bellwethers = ["DHI", "LEN", "PHM", "NVR", "HD", "LOW", "TOL"]
 macro = ["Housing starts", "New home sales", "Construction spending", "FOMC"]
 
+[valuation]
+# MARKET -> SECTORS: a sector is divided into the groups below, by GICS
+# sub-industry (the S&P 500 labels on Wikipedia), so a Financials multiple is
+# not one number over banks, brokers, insurers and payment networks. A group
+# with fewer than this many companies is not drawn.
+subgroup_min_members = 3
+
+[valuation.scenario]
+# MARKET -> SECTORS, "WHAT YOU WOULD NEED TO BELIEVE": the price change implied
+# by moving a group's forward multiple by these many turns and revising its
+# next-twelve-months consensus EPS by these percentages. The axes are choices;
+# the arithmetic (price = multiple x EPS) lives in compute/valuation.py.
+multiple_turns = [-3, -2, -1, 0, 1, 2, 3]
+eps_change_pct = [-10, -5, 0, 5, 10]
+
+# Financials, by what earns the money. Each sub-industry belongs to one group;
+# one no group names (e.g. Multi-Sector Holdings) stays in the sector's total
+# and is listed under SUB-INDUSTRIES IN NO GROUP. A name here that no company
+# carries is reported too, so a renamed GICS label cannot empty a group quietly.
+[[valuation.subgroups]]
+sector = "Financials"
+key = "fin-diversified-banks"
+label = "Diversified banks"
+sub_industries = ["Diversified Banks"]
+
+[[valuation.subgroups]]
+sector = "Financials"
+key = "fin-regional-banks"
+label = "Regional banks"
+sub_industries = ["Regional Banks"]
+
+[[valuation.subgroups]]
+sector = "Financials"
+key = "fin-investment-banks"
+label = "Investment banks & brokers"
+sub_industries = ["Investment Banking & Brokerage"]
+
+[[valuation.subgroups]]
+sector = "Financials"
+key = "fin-asset-managers"
+label = "Asset managers & custody"
+sub_industries = ["Asset Management & Custody Banks"]
+
+[[valuation.subgroups]]
+sector = "Financials"
+key = "fin-insurance"
+label = "Insurance"
+sub_industries = ["Insurance Brokers", "Life & Health Insurance", "Multi-line Insurance", "Property & Casualty Insurance", "Reinsurance"]
+
+[[valuation.subgroups]]
+sector = "Financials"
+key = "fin-payments-consumer"
+label = "Payments & consumer finance"
+sub_industries = ["Transaction & Payment Processing Services", "Consumer Finance"]
+
+[[valuation.subgroups]]
+sector = "Financials"
+key = "fin-exchanges-data"
+label = "Exchanges & data"
+sub_industries = ["Financial Exchanges & Data"]
+
 [positioning]
 # POSITIONING (RISK -> POSITIONING). Short interest covers the index members,
 # the watchlist and these ETFs; ``rounds`` is how many FINRA rounds (two a

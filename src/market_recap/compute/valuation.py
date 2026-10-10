@@ -142,6 +142,102 @@ def return_on_equity(snapshot: dict) -> float | None:
     return _pct(snapshot["ttm"].get("net_income"), average)
 
 
+# --- Tangible book ------------------------------------------------------------------
+def tangible_book(balance: dict) -> dict | None:
+    """Common tangible book value: shareholders' equity less preferred stock,
+    goodwill and other intangibles, as filed.
+
+    A filer that tags neither goodwill, intangibles nor a combined line cannot be
+    told from one that has none, so it has no tangible book here rather than a
+    book passed off as tangible. A combined goodwill-and-intangibles line stands
+    in when neither is tagged on its own. An untagged preferred stock is taken as
+    none, as an untagged debt is (see ``debt``); ``assumed_none`` names what was
+    taken as none so the row can say so. A negative component is a sign error in
+    the filing, not an asset, and leaves the figure blank. Deferred tax on
+    intangibles and mortgage-servicing rights are not adjusted, so a bank's own
+    reported tangible book per share can differ.
+    """
+    equity = balance.get("equity")
+    parts = {"preferred": balance.get("preferred"), "goodwill": balance.get("goodwill"), "intangibles": balance.get("intangibles")}
+    combined = balance.get("goodwill_and_intangibles")
+    if parts["goodwill"] is None and parts["intangibles"] is None and combined is not None:
+        parts = {"preferred": parts["preferred"], "goodwill and intangibles": combined}
+    elif parts["goodwill"] is None and parts["intangibles"] is None:
+        return None
+    if equity is None:
+        return None
+    if any(v is not None and v < 0 for v in parts.values()):
+        return None
+    return {"value": equity - sum(v or 0.0 for v in parts.values()),
+            "assumed_none": sorted(k for k, v in parts.items() if v is None)}
+
+
+def rotce(snapshot: dict) -> float | None:
+    """TTM net income to common holders over average tangible common equity
+    (the ending figure when a year ago has none). Blank unless the filing tags
+    the income to common: net income would overstate a bank with preferred
+    dividends."""
+    now, prior = tangible_book(snapshot["balance"]), tangible_book(snapshot["balance_prior"])
+    if now is None or now["value"] <= 0:
+        return None
+    average = now["value"] if prior is None or prior["value"] <= 0 else (now["value"] + prior["value"]) / 2
+    return _pct(snapshot["ttm"].get("income_to_common"), average)
+
+
+def ptbv(market_cap: float | None, balance: dict) -> float | None:
+    book = tangible_book(balance)
+    return None if book is None else _ratio(market_cap, book["value"])
+
+
+# --- P / tangible book against its own history ---------------------------------------
+# A tangible book per share more than this multiple of the price (or a price
+# below it) cannot be a real figure: a units or sign error in the filing.
+TBV_PRICE_LIMIT = 20.0
+
+
+def tbv_steps(history: Sequence[dict], splits: pd.Series | None) -> list[tuple[str, str, float]]:
+    """(filed, period end, common tangible book per share on today's share
+    basis) for each quarter, from the balance sheet as filed that day.
+
+    The per-share figure divides by the quarter's diluted count (the same one
+    its operating EPS uses), scaled by the splits after its filing. That is a
+    weighted average over the quarter, so it runs a little above the period-end
+    count for a company that buys back stock. A quarter with no tangible book
+    (or a negative one) or no usable count is left out; the figure before it
+    stands until it expires, as for EPS.
+    """
+    splits = _factor(splits)
+    reported = {filed: eps for filed, _, eps in eps_steps(history, splits)}
+    steps = []
+    for quarter in history:
+        book = tangible_book(quarter.get("book") or {})
+        eps = reported.get(quarter["filed"])
+        if book is None or book["value"] <= 0 or eps is None:
+            continue
+        shares = _shares(quarter.get("core") or {}, eps, splits, quarter["filed"])
+        if shares is None:
+            continue
+        steps.append((quarter["filed"], quarter["period_end"], book["value"] / shares))
+    return steps
+
+
+def plausible_tbvps(prices: pd.Series, steps: Sequence[tuple[str, str, float]]) -> pd.Series:
+    """eps_in_force on the price's sessions for tangible book per share, blank
+    where it cannot be a real figure."""
+    book = eps_in_force(prices.index, steps)
+    return book.where((book / prices) <= TBV_PRICE_LIMIT)
+
+
+def ptbv_series(prices: pd.Series, steps: Sequence[tuple[str, str, float]]) -> pd.Series:
+    """Daily P / tangible book: the split-adjusted close over the tangible book
+    per share already public."""
+    prices = prices.dropna()
+    if prices.empty or not steps:
+        return pd.Series(dtype=float)
+    book = plausible_tbvps(prices, steps)
+    return (prices / book.where(book > 0)).rename("ptbv")
+
+
 def _is_prior_year(row: dict, prior: dict) -> bool:
     low, high = ANNUAL_SPAN_DAYS
     return low <= (pd.Timestamp(row["period_end"]) - pd.Timestamp(prior["period_end"])).days <= high
@@ -229,6 +325,8 @@ METRICS: tuple[tuple[Metric, Callable[[Inputs], float | None]], ...] = (
      lambda i: _ratio(i.ev, i.snapshot["ttm"].get("revenue"))),
     (Metric("pb", "P / Book", "x", "valuation", "low"),
      lambda i: _ratio(i.market_cap, i.snapshot["balance"].get("equity"))),
+    (Metric("ptbv", "P / Tangible book", "x", "valuation", "low"),
+     lambda i: ptbv(i.market_cap, i.snapshot["balance"])),
     (Metric("fcf_yield", "FCF yield", "pct", "valuation", "high", banks=False),
      lambda i: None if i.snapshot["ttm"].get("operating_cash_flow") is None or i.snapshot["ttm"].get("capex") is None
      else _yield(i.snapshot["ttm"]["operating_cash_flow"] - i.snapshot["ttm"]["capex"], i.market_cap)),
@@ -238,6 +336,7 @@ METRICS: tuple[tuple[Metric, Callable[[Inputs], float | None]], ...] = (
      lambda i: None if i.snapshot["ttm"].get("dividends_paid") is None and i.snapshot["ttm"].get("buybacks") is None
      else _yield((i.snapshot["ttm"].get("dividends_paid") or 0) + (i.snapshot["ttm"].get("buybacks") or 0), i.market_cap)),
     (Metric("roe", "ROE (TTM, avg equity)", "pct", "quality", "high"), lambda i: return_on_equity(i.snapshot)),
+    (Metric("rotce", "ROTCE (TTM, avg tangible common equity)", "pct", "quality", "high"), lambda i: rotce(i.snapshot)),
     (Metric("roic", "ROIC (TTM)", "pct", "quality", "high", banks=False), lambda i: roic(i.snapshot)),
     (Metric("gross_profitability", "Gross profit / assets", "pct", "quality", "high", banks=False),
      lambda i: _pct(gross_profit(i.snapshot["ttm"]), i.snapshot["balance"].get("total_assets"))),
@@ -571,6 +670,253 @@ def forward_pe(price: float | None, ntm: dict | None) -> float | None:
     if price is None or not ntm or ntm["eps"] <= 0:
         return None
     return price / ntm["eps"]
+
+
+# --- Yahoo's fiscal-year forward P/E history --------------------------------------
+# What Yahoo itself published at each month end: price over the consensus EPS of
+# a *fiscal year*, as of that day (sources.forward_pe_history). It is not the
+# next-twelve-months multiple above, and the two are never drawn as one line.
+# Yahoo moves the EPS on to the next fiscal year this many months before the
+# year ends -- seen as a step in the EPS the multiple implies (close / P/E) at
+# that month for Goldman and JPMorgan (December years), Microsoft (June), Oracle
+# (May), Costco (August) and Apple (September); not published by Yahoo, so a
+# rule read off the data and checked against it by the tests.
+FY_ROLL_MONTHS = 3
+# Above this a forward multiple is reported as extreme. Some are real (a company
+# priced for years of growth) and some are a near-zero EPS (Boeing's 3,333x, Warner
+# Bros. Discovery's 5,000x); the multiple alone cannot tell them apart, so none is
+# removed -- as with the P/E history, the table keeps the true range and the chart's
+# axis stops short of a spike.
+EXTREME_FORWARD_PE = 100.0
+
+
+def _month_index(date: str) -> int:
+    stamp = pd.Timestamp(date)
+    return stamp.year * 12 + stamp.month - 1
+
+
+def fiscal_year_end_month(annual: Sequence[dict]) -> int | None:
+    """The month a company's fiscal year ends: the month of its annual points.
+
+    The annual series is dated at each fiscal year end, so the most common
+    month is the answer; a 52-week year that wanders across a month boundary
+    still has one most common month. None without annual points.
+    """
+    months = [pd.Timestamp(p["date"]).month for p in annual]
+    if not months:
+        return None
+    counts = {m: months.count(m) for m in set(months)}
+    return max(counts, key=lambda m: (counts[m], m))
+
+
+def forward_horizon_months(date: str, year_end_month: int) -> int:
+    """Months from ``date`` to the end of the fiscal year Yahoo's EPS is for.
+
+    Until FY_ROLL_MONTHS before the year ends it is the current year, so the
+    horizon shrinks from 11 months to 4; from then on it is the next year, 15
+    months at the roll and 12 at the year end itself. Always 4 to 15, which is
+    why successive months are not on one footing.
+    """
+    left = (year_end_month - pd.Timestamp(date).month) % 12
+    return left + 12 if left <= FY_ROLL_MONTHS else left
+
+
+def is_roll_month(date: str, year_end_month: int) -> bool:
+    """True at the month the EPS behind the multiple moves to the next fiscal year."""
+    return (year_end_month - pd.Timestamp(date).month) % 12 == FY_ROLL_MONTHS
+
+
+def merge_points(*series: Sequence[dict]) -> list[dict]:
+    """One list of points by date, the first series winning where two overlap.
+
+    Where the monthly and quarterly series share a date they carry the same
+    value (all 2,412 shared points across the S&P 500 universe did); the
+    quarterly series adds the fiscal quarter ends the monthly one lacks."""
+    by_date: dict[str, dict] = {}
+    for name, points in zip(("monthly", "quarterly"), series):
+        for point in points:
+            by_date.setdefault(point["date"], {"date": point["date"], "pe": point["pe"], "series": name})
+    return [by_date[d] for d in sorted(by_date)]
+
+
+def missing_months(dates: Sequence[str]) -> list[str]:
+    """Calendar months between the first and last date that no point covers."""
+    if len(dates) < 2:
+        return []
+    have = {_month_index(d) for d in dates}
+    first, last = min(have), max(have)
+    return [f"{i // 12:04d}-{i % 12 + 1:02d}" for i in range(first, last + 1) if i not in have]
+
+
+def fiscal_forward(found: dict | None) -> dict | None:
+    """One company's Yahoo history, ready to draw; None when it has no points.
+
+    ``points`` are the monthly and quarterly points merged, each with the
+    ``horizon`` of its EPS in months and ``rolled`` at the month the EPS moved
+    to the next fiscal year. ``year_ago`` compares the latest point with the
+    same month a year earlier -- the one comparison that holds the horizon
+    fixed -- and ``annual`` is the fiscal year ends, each exactly twelve months
+    ahead, so comparable across companies and years. Values are as Yahoo
+    published them.
+    """
+    if not found:
+        return None
+    annual = found.get("annual") or []
+    year_end = fiscal_year_end_month(annual)
+    merged = merge_points(found.get("monthly") or [], found.get("quarterly") or [])
+    if not merged and not annual:
+        return None
+
+    points = [{"date": p["date"], "series": p["series"], "pe": p["pe"],
+               "horizon": None if year_end is None else forward_horizon_months(p["date"], year_end),
+               "rolled": year_end is not None and is_roll_month(p["date"], year_end)} for p in merged]
+    latest = points[-1] if points else None
+    year_ago = None
+    if latest:
+        earlier = next((p for p in points if _month_index(p["date"]) == _month_index(latest["date"]) - 12), None)
+        if earlier:
+            change = None
+            if latest["pe"] is not None and earlier["pe"] is not None:
+                change = (latest["pe"] / earlier["pe"] - 1) * 100
+            year_ago = {"date": earlier["date"], "pe": earlier["pe"], "change_pct": change}
+    return {
+        "year_end_month": year_end,
+        "points": points,
+        "annual": [{"date": p["date"], "pe": p["pe"]} for p in annual],
+        "latest": latest,
+        "year_ago": year_ago,
+        "missing_months": missing_months([p["date"] for p in points]),
+        "unread": found.get("unread") or [],
+    }
+
+
+# --- Sub-sector groups ------------------------------------------------------------
+def assign_subgroups(rows: list[dict], specs: list[dict], min_members: int) -> dict:
+    """Split sectors into the groups the config names, by GICS sub-industry.
+
+    ``rows`` carry ``ticker``, ``sector`` and ``sub_sector``; each spec has a
+    ``key``, a ``label``, the ``sector`` it divides and the ``sub_industries``
+    it takes. The config is the only place a sub-industry is assigned, so what
+    the split cannot place is reported instead of guessed:
+
+    - ``unmatched``: a configured sub-industry no row carries (a renamed GICS
+      label would otherwise empty a group without a word);
+    - ``too_small``: a group with some companies, but fewer than ``min_members``;
+    - ``unassigned``: sub-industries of a divided sector that no group claims.
+
+    A sub-industry named by two groups is a config error and raises.
+    """
+    claimed: dict[tuple[str, str], str] = {}
+    for spec in specs:
+        for name in spec["sub_industries"]:
+            other = claimed.setdefault((spec["sector"], name), spec["key"])
+            if other != spec["key"]:
+                raise ValueError(f"sub-industry {name!r} of {spec['sector']} is in both {other!r} and {spec['key']!r}")
+    present: dict[tuple[str, str], list[str]] = {}
+    for row in rows:
+        present.setdefault((row["sector"], row["sub_sector"]), []).append(row["ticker"])
+    groups, unmatched, too_small = [], [], []
+    for spec in specs:
+        tickers = sorted(t for name in spec["sub_industries"] for t in present.get((spec["sector"], name), []))
+        unmatched += [f"{spec['sector']}: {name}" for name in spec["sub_industries"] if (spec["sector"], name) not in present]
+        if not tickers:
+            continue                                                  # ``unmatched`` already says why
+        if len(tickers) < min_members:
+            too_small.append({"key": spec["key"], "label": spec["label"], "companies": len(tickers)})
+            continue
+        groups.append({"key": spec["key"], "label": spec["label"], "parent": spec["sector"], "tickers": tickers})
+    divided = {spec["sector"] for spec in specs}
+    unassigned = [{"sector": sector, "sub_industry": str(name), "tickers": sorted(tickers)}
+                  for (sector, name), tickers in sorted(present.items(), key=lambda kv: (kv[0][0], str(kv[0][1])))
+                  if sector in divided and (sector, name) not in claimed]
+    return {"groups": groups, "unmatched": unmatched, "too_small": too_small, "unassigned": unassigned}
+
+
+def aggregate_book(members: list[dict]) -> dict | None:
+    """A group's P / tangible book and ROTCE as totals: market cap over total
+    tangible book, and total income to common over total average tangible
+    book. Each counts only the members that have both of its inputs, and is
+    drawn when they hold ``AGGREGATE_MIN_COVERAGE`` of the group's market cap.
+    A member with no positive tangible book (most software companies) is out,
+    so a non-financial group usually has no figure at all."""
+    total = sum(r["market_cap"] for r in members if r.get("market_cap"))
+    if not total:
+        return None
+
+    def share(rows):
+        return sum(r["market_cap"] for r in rows) / total
+
+    with_book = [r for r in members if r.get("market_cap") and (r.get("tbv") or 0) > 0]
+    with_return = [r for r in with_book if r.get("tbv_avg") and r.get("income_common") is not None]
+    out = {}
+    if with_book and share(with_book) >= AGGREGATE_MIN_COVERAGE:
+        out["ptbv"] = sum(r["market_cap"] for r in with_book) / sum(r["tbv"] for r in with_book)
+        out["ptbv_coverage"] = share(with_book)
+    if with_return and share(with_return) >= AGGREGATE_MIN_COVERAGE:
+        out["rotce"] = sum(r["income_common"] for r in with_return) / sum(r["tbv_avg"] for r in with_return) * 100
+        out["rotce_coverage"] = share(with_return)
+    return out or None
+
+
+# --- Valuation path ---------------------------------------------------------------
+# One group's multiple at four points on the same analyst-consensus basis: the
+# fiscal year just reported (Yahoo's ``yearAgoEps``, the actual), this fiscal
+# year, the next twelve months, and next fiscal year. Every stage is Yahoo's,
+# so the steps between them are growth, not a change of accounting (a trailing
+# filed-EPS multiple would differ by definition). A "fiscal year" is each
+# company's own, so a sector mixes year-ends.
+PATH_STAGES = ("fy_prev", "fy0", "ntm", "fy1")
+
+
+def fiscal_path(trend: dict | None, ntm: dict | None) -> dict | None:
+    """Per-share EPS at each stage, or None without this year's and next year's
+    consensus. The last fiscal year's actual may be missing; the rest stand."""
+    if not trend or not ntm:
+        return None
+    this, nxt = trend.get("0y") or {}, trend.get("+1y") or {}
+    if this.get("eps") is None or nxt.get("eps") is None:
+        return None
+    return {"fy_prev": this.get("year_ago_eps"), "fy0": this["eps"], "ntm": ntm["eps"], "fy1": nxt["eps"]}
+
+
+def aggregate_path(caps: dict[str, float], stages: dict[str, dict[str, float]]) -> dict | None:
+    """Total cap over total earnings at each stage, for the same companies at
+    every stage, so a step between stages is the earnings path and not a change
+    of who is counted.
+
+    Needs ``AGGREGATE_MIN_COVERAGE`` of the group's cap. If too few companies
+    carry last year's actual, that stage is dropped and the rest are kept,
+    rather than leaving the whole path blank. ``growth`` is the step's change
+    in total earnings from the stage before it; a loss makes the multiple and
+    the growth blank, never zero.
+    """
+    total = sum(caps.values())
+    if not total:
+        return None
+    for wanted in (PATH_STAGES, PATH_STAGES[1:]):
+        common = [s for s in caps if caps[s] and all(s in stages.get(k, {}) for k in wanted)]
+        covered = sum(caps[s] for s in common)
+        if not common or covered < AGGREGATE_MIN_COVERAGE * total:
+            continue
+        out, previous = [], None
+        for key in wanted:
+            profit = sum(stages[key][s] for s in common)
+            out.append({"key": key, "pe": covered / profit if profit > 0 else None,
+                        "growth": (profit / previous - 1) * 100 if profit > 0 and previous and previous > 0 else None})
+            previous = profit
+        return {"stages": out, "companies": len(common), "coverage": covered / total}
+    return None
+
+
+def scenario_grid(pe: float | None, turns: list[float], eps_changes: list[float]) -> list[list[float | None]]:
+    """Price change implied by a forward multiple moved by ``turns`` and NTM
+    consensus EPS revised by ``eps_changes`` percent: price = multiple x EPS,
+    so (pe + turn) / pe x (1 + eps change) - 1, in percent. Arithmetic on
+    today's multiple, not a forecast of either input."""
+    if pe is None or pe <= 0:
+        return [[None] * len(eps_changes) for _ in turns]
+    return [[((pe + turn) / pe * (1 + change / 100) - 1) * 100 if pe + turn > 0 else None
+             for change in eps_changes] for turn in turns]
 
 
 def aggregate_forward(caps: dict[str, float], earnings: dict[str, float]) -> dict | None:

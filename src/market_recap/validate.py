@@ -196,6 +196,33 @@ def _check_valuation(payload: dict | None) -> list[Finding]:
     missing = len(payload.get("without_market_cap") or [])
     if missing > VALUATION_TOLERATED_SHARE * len(rows):
         out.append(Finding("warning", "valuation", f"{missing} of {len(rows)} companies have no market cap"))
+    out += _check_fiscal_forward(payload.get("fiscal_forward"))
+    return out
+
+
+# Share of the companies Yahoo has a forward P/E history for that must have a
+# full year of monthly points. Yahoo's usual is 14-15; one request that asks
+# for several series at once is answered with only the last four, so a low share
+# means the answers were truncated, not that the market thinned out. Measured on
+# the whole S&P 500 universe: 94% have twelve or more.
+FISCAL_FORWARD_FULL_SHARE = 0.80
+
+
+def _check_fiscal_forward(report: dict | None) -> list[Finding]:
+    """Yahoo's forward P/E history is optional, so a gap is named rather than failed."""
+    if not report:
+        return []
+    universe, companies = report.get("universe") or 0, report.get("companies") or 0
+    if not companies:
+        return [Finding("warning", "valuation", "Yahoo's forward P/E history was not read for any company")]
+    out = []
+    failed = len(report.get("failed") or {}) + len(report.get("unread") or {})
+    if failed > VALUATION_TOLERATED_SHARE * universe:
+        out.append(Finding("warning", "valuation", f"Yahoo's forward P/E history could not be read in full for {failed} of {universe} companies"))
+    full = report.get("full_monthly") or 0
+    if full < FISCAL_FORWARD_FULL_SHARE * companies:
+        out.append(Finding("warning", "valuation",
+                           f"only {full} of {companies} companies have {report.get('full_monthly_points')} monthly forward P/E points; Yahoo's answers may be truncated"))
     return out
 
 

@@ -6,8 +6,11 @@ A step a human has to remember is a step that does not happen on a schedule.
 
 from __future__ import annotations
 
+import cProfile
 import json
 import os
+from pathlib import Path
+import pstats
 import time
 
 from . import cache, site
@@ -125,8 +128,18 @@ def run(
                           if os.environ.get("MONITOR_PUBLISHED_STATE") == "1" else None)
     monitor_carried: dict | None = None
 
+    # With MARKET_RECAP_PROFILE_DIR set, each panel's cProfile top functions are
+    # written to that folder (an investigation, off in the nightly build). The
+    # seconds per panel are in the manifest's `timings` and on the build log.
+    profile_dir = Path(os.environ["MARKET_RECAP_PROFILE_DIR"]) if os.environ.get("MARKET_RECAP_PROFILE_DIR") else None
+    if profile_dir:
+        profile_dir.mkdir(parents=True, exist_ok=True)
+
     for name in selected:
         panel_started = time.monotonic()
+        profiler = cProfile.Profile() if profile_dir else None
+        if profiler:
+            profiler.enable()
         try:
             try:
                 if name == "monitor":
@@ -171,7 +184,12 @@ def run(
             built[name] = payload
             written.append(name)
         finally:
+            if profiler:
+                profiler.disable()
+                with (profile_dir / f"{name}.txt").open("w") as handle:
+                    pstats.Stats(profiler, stream=handle).sort_stats("cumulative").print_stats(45)
             timings["panels"][name] = round(time.monotonic() - panel_started, 1)
+            print(f"[build] {name}: {timings['panels'][name]}s", flush=True)
 
     tail_started = time.monotonic()
     check = sec.filing_check()

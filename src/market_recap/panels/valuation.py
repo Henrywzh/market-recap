@@ -21,7 +21,7 @@ import pandas as pd
 
 from ..compute import valuation as V
 from ..config import VALUATION_ARTIFACT_DIR
-from ..sources import estimates, sec, snapshot_store
+from ..sources import estimates, forward_pe_history, sec, snapshot_store
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, prune_stale, write_json
 from .financials import cik_for, universe
 
@@ -45,6 +45,7 @@ HISTORY_METRICS = (
     V.Metric("pe_operating", "P/E operating (TTM)", "x", "valuation", "low"),
     V.Metric("pe_percentile", "P/E percentile, own 10Y", "pct", "valuation", "low"),
     V.Metric("pe_vs_median", "P/E vs own 10Y median", "pct", "valuation", "low"),
+    V.Metric("ptbv_percentile", "P/TBV percentile, own 10Y", "pct", "valuation", "low"),
 )
 
 
@@ -84,7 +85,7 @@ def _forward_series(symbol: str, prices: pd.Series | None, recorded: dict[str, d
 
 
 def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits,
-             sector: str | None, forward: dict | None = None) -> dict | None:
+             sector: str | None, forward: dict | None = None, fiscal: dict | None = None) -> dict | None:
     """P/E against its own ten years, on the operating basis and as reported;
     writes the ticker's chart artifact. Returns {basis, <basis>: stats, ...}."""
     if prices is None or not data.eps_history:
@@ -100,6 +101,9 @@ def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits,
     lead = basis if stats[basis] is not None else V.REPORTED
     first = stats[lead]["first"]
     dates = _weekly(series[lead].iloc[-V.HISTORY_SESSIONS:]).index
+    # P / tangible book on the same footing: the balance sheet as filed that day.
+    ptbv = V.ptbv_series(prices, V.tbv_steps(data.eps_history, splits))
+    ptbv_stats = V.pe_stats(ptbv) if not ptbv.empty else None
     by_filed = {s["filed"]: s for s in operating}
 
     def payload(key: str) -> dict | None:
@@ -119,6 +123,10 @@ def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits,
         **payload(lead),
         "alternate": payload(V.REPORTED if lead != V.REPORTED else basis),
         "forward": forward,
+        # Yahoo's own fiscal-year forward P/E, point in time; a different measure from `forward` (NTM).
+        "fiscal_forward": fiscal,
+        "ptbv": [clean_float(v, 2) for v in ptbv.reindex(dates).to_numpy()] if ptbv_stats else None,
+        "ptbv_stats": _stats_json(ptbv_stats) if ptbv_stats else None,
         # Each quarter's TTM EPS both ways, and what the operating figure took out.
         "eps": [
             {"filed": filed, "period_end": end, "reported": clean_float(eps, 4),
@@ -128,7 +136,7 @@ def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits,
             for filed, end, eps in reported_steps if filed >= first
         ],
     })
-    return {"basis": lead, **stats}
+    return {"basis": lead, **stats, "ptbv": ptbv_stats}
 
 
 def _split_factor(splits, symbol: str, after: str | None) -> float:
@@ -150,8 +158,21 @@ def _split_factor(splits, symbol: str, after: str | None) -> float:
 YAHOO_CAP_BASIS = "Yahoo market cap: the filings count shares class by class, never in total"
 
 
+def _book_fields(snapshot: dict) -> dict:
+    now, prior = V.tangible_book(snapshot["balance"]), V.tangible_book(snapshot["balance_prior"])
+    average = None
+    if now and now["value"] > 0:
+        average = now["value"] if prior is None or prior["value"] <= 0 else (now["value"] + prior["value"]) / 2
+    return {"tbv": clean_float(now["value"], 0) if now else None, "tbv_avg": clean_float(average, 0),
+            "income_common": clean_float(snapshot["ttm"].get("income_to_common"), 0),
+            "tbv_assumed_none": now["assumed_none"] if now else None,
+            # Lines this quarter's balance sheet left out, carried from an earlier period end.
+            "tbv_carried": snapshot.get("balance_carried") or None}
+
+
 def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices: list[str], splits,
-         history: dict | None, ntm: dict | None = None, fallback_cap: float | None = None) -> dict:
+         history: dict | None, ntm: dict | None = None, fallback_cap: float | None = None,
+         path: dict | None = None, fiscal: dict | None = None) -> dict:
     snapshot = data.trailing
     factor = _split_factor(splits, symbol, snapshot["shares_as_of"])
     shares = snapshot["shares"] * factor if snapshot["shares"] else None
@@ -171,6 +192,7 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         "ticker": symbol,
         "name": meta.get("name"),
         "sector": meta.get("sector"),
+        "sub_sector": meta.get("sub_sector"),
         "indices": indices,
         "price": clean_float(price, 2),
         "market_cap": clean_float(market_cap, 0),
@@ -188,8 +210,15 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         # total earnings over its total price, losses included, as for an index.
         "earnings_yield": clean_float(V._pct(snapshot["ttm"].get("net_income"), market_cap), 4),
         "book_yield": clean_float(V._pct(snapshot["balance"].get("equity"), market_cap), 4),
+        # The raw inputs of P / tangible book and ROTCE, for the group totals.
+        **_book_fields(snapshot),
         "pe_forward": clean_float(V.forward_pe(price, ntm), 2),
         "eps_ntm": clean_float(ntm["eps"], 4) if ntm else None,
+        **_fiscal_fields(fiscal),
+        # Per-share consensus at the other stages of the valuation path (VALUATION -> aggregates).
+        "eps_fy_prev": clean_float((path or {}).get("fy_prev"), 4),
+        "eps_fy0": clean_float((path or {}).get("fy0"), 4),
+        "eps_fy1": clean_float((path or {}).get("fy1"), 4),
         "pe_history": has_history,
         # The reported history's latest point checks the table's P/E (both are
         # reported); the percentile is on the history's leading basis.
@@ -198,6 +227,54 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         "pe_basis": basis,
         "pe_percentile": clean_float(lead.get("percentile"), 1),
         "pe_vs_median": clean_float(lead.get("vs_median"), 1),
+        "ptbv_percentile": clean_float((history.get("ptbv") or {}).get("percentile"), 1),
+        # The history's latest point checks the table's P / TBV (market cap / tangible book).
+        "ptbv_history_current": clean_float((history.get("ptbv") or {}).get("current"), 2),
+    }
+
+
+def _fiscal_fields(fiscal: dict | None) -> dict:
+    """Yahoo's latest fiscal-year forward P/E on the row, beside (never in place of) the NTM one.
+
+    The year-over-year change is against the same month a year earlier, the one
+    comparison that keeps the forecast horizon the same."""
+    latest = (fiscal or {}).get("latest") or {}
+    year_ago = (fiscal or {}).get("year_ago") or {}
+    return {
+        "pe_forward_fy": clean_float(latest.get("pe"), 2),
+        "pe_forward_fy_date": latest.get("date"),
+        "pe_forward_fy_horizon": latest.get("horizon"),
+        "pe_forward_fy_yoy": clean_float(year_ago.get("change_pct"), 1),
+    }
+
+
+# A company has "a full year" of monthly points from this many; Yahoo's usual is
+# 14 or 15. A universe where few do means the answers were truncated.
+FULL_MONTHLY_POINTS = 12
+
+
+def _fiscal_report(universe_size: int, fiscal: dict[str, dict], failed: dict[str, str]) -> dict:
+    """What the Yahoo history covers and what it leaves out, named."""
+    monthly = {s: sum(1 for p in f["points"] if p["series"] == "monthly") for s, f in fiscal.items()}
+    gaps: dict[str, int] = {}
+    for f in fiscal.values():
+        for month in f["missing_months"]:
+            gaps[month] = gaps.get(month, 0) + 1
+    return {
+        "universe": universe_size,
+        "companies": len(fiscal),
+        "with_annual": sum(1 for f in fiscal.values() if f["annual"]),
+        "full_monthly": sum(1 for n in monthly.values() if n >= FULL_MONTHLY_POINTS),
+        "full_monthly_points": FULL_MONTHLY_POINTS,
+        # Expected: Yahoo has no history for a new listing. Anything else is a fetch problem.
+        "none": sorted(s for s, why in failed.items() if why == forward_pe_history.NO_HISTORY),
+        "failed": {s: why for s, why in sorted(failed.items()) if why != forward_pe_history.NO_HISTORY},
+        "unread": {s: f["unread"] for s, f in sorted(fiscal.items()) if f["unread"]},
+        # Kept as published, named so a 3,333x is not read as a valuation.
+        "extreme": sorted(s for s, f in fiscal.items() if any(p["pe"] > V.EXTREME_FORWARD_PE for p in f["points"] + f["annual"])),
+        "missing_months": dict(sorted(gaps.items())),
+        "roll_months": V.FY_ROLL_MONTHS,
+        "extreme_above": V.EXTREME_FORWARD_PE,
     }
 
 
@@ -222,8 +299,23 @@ def _forward_aggregate(cap_frame: pd.DataFrame, columns: list[str], forward_earn
     return {"dates": out_days, "pe": out_pe} if out_days else None
 
 
+# Row field holding each valuation-path stage's per-share EPS.
+PATH_FIELDS = {"fy_prev": "eps_fy_prev", "fy0": "eps_fy0", "ntm": "eps_ntm", "fy1": "eps_fy1"}
+
+
+def _path(members: list[dict]) -> dict | None:
+    """The group's multiple at each stage of the valuation path (see
+    V.aggregate_path); per-share EPS become total earnings through the share
+    count the row's market cap implies."""
+    usable = [r for r in members if r.get("price")]
+    stages = {key: {r["ticker"]: r[field] * r["market_cap"] / r["price"] for r in usable if r.get(field) is not None}
+              for key, field in PATH_FIELDS.items()}
+    return V.aggregate_path({r["ticker"]: r["market_cap"] for r in usable}, stages)
+
+
 def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dict[str, dict[str, pd.Series]],
-                forward_earnings: dict[str, dict[str, float]] | None = None) -> dict | None:
+                forward_earnings: dict[str, dict[str, float]] | None = None,
+                book: dict[str, pd.Series] | None = None) -> dict | None:
     """Each index's and each sector's P/E against its own ten years, on
     operating earnings (each company on its own basis) and as reported.
 
@@ -233,25 +325,46 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
     """
     if not caps:
         return None
+    scenario = ctx.config["valuation"]["scenario"]
     cap_frame = pd.DataFrame(caps)
     frames = {key: pd.DataFrame(values) for key, values in earnings.items()}
-    groups = [(spec.key, spec.label, "index", [r["ticker"] for r in rows if spec.key in r["indices"]])
+    groups = [(spec.key, spec.label, "index", None, [r["ticker"] for r in rows if spec.key in r["indices"]])
               for spec in ctx.indices]
     primary = [r for r in rows if ctx.primary.key in r["indices"] and r["sector"]]
     for sector in sorted({r["sector"] for r in primary}):
-        groups.append((sector, sector, "sector", [r["ticker"] for r in primary if r["sector"] == sector]))
+        groups.append((sector, sector, "sector", None, [r["ticker"] for r in primary if r["sector"] == sector]))
+    # A divided sector's parts, by the config's sub-industry assignment. Companies
+    # outside the price/earnings frames drop out below, so the parts can sum to
+    # less than the sector; what no group claims is reported on the artifact.
+    settings = ctx.config["valuation"]
+    split = V.assign_subgroups([r for r in primary if r.get("sub_sector")], settings.get("subgroups") or [],
+                               settings["subgroup_min_members"])
+    for part in split["groups"]:
+        groups.append((part["key"], part["label"], "subsector", part["parent"], part["tickers"]))
     dates, series = None, []
-    for key, label, kind, tickers in groups:
+    for key, label, kind, parent, tickers in groups:
         columns = [t for t in tickers if t in cap_frame.columns]
         if not columns:
             continue
         entry = {"key": key, "label": label, "kind": kind, "companies": len(columns)}
+        if parent:
+            entry["parent"] = parent
         members = [r for r in rows if r["ticker"] in columns and r.get("market_cap")]
         forward = V.aggregate_forward({r["ticker"]: r["market_cap"] for r in members},
                                       {r["ticker"]: r["eps_ntm"] * r["market_cap"] / r["price"]
                                        for r in members if r.get("eps_ntm") is not None and r.get("price")})
         if forward:
             entry["forward_now"] = {"pe": clean_float(forward["pe"], 2), "coverage": clean_float(forward["coverage"], 3)}
+            entry["scenario"] = [[clean_float(v, 1) for v in line] for line in
+                                 V.scenario_grid(forward["pe"], scenario["multiple_turns"], scenario["eps_change_pct"])]
+        book_now = V.aggregate_book(members)
+        if book_now:
+            entry["book"] = {k: clean_float(v, 3 if k.endswith("coverage") else 2) for k, v in book_now.items()}
+        path = _path(members)
+        if path:
+            entry["path"] = {"stages": [{k: clean_float(v, 2) if isinstance(v, float) else v for k, v in st.items()}
+                                        for st in path["stages"]],
+                             "companies": path["companies"], "coverage": clean_float(path["coverage"], 3)}
         recorded = _forward_aggregate(cap_frame, columns, forward_earnings or {})
         if recorded:
             entry["forward_history"] = recorded
@@ -266,6 +379,14 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
                 f"stats{suffix}": _stats_json(stats) if stats else None,
                 f"pe{suffix}": [clean_float(v, 2) for v in weekly["pe"].to_numpy()],
             }
+        if book:
+            # Total market cap over total common tangible book; a member without
+            # a positive book is out of both, as for the snapshot's totals.
+            frame = V.aggregate_pe(cap_frame[columns], pd.DataFrame(book).reindex(columns=columns)).iloc[-V.HISTORY_SESSIONS:]
+            stats = V.pe_stats(frame["pe"])
+            if stats:
+                entry |= {"coverage_ptbv": clean_float(frame["coverage"].iloc[-1], 3), "stats_ptbv": _stats_json(stats),
+                          "ptbv": [clean_float(v, 2) for v in _weekly(frame)["pe"].to_numpy()]}
         series.append(entry)
     return {
         "dates": dates,
@@ -274,6 +395,9 @@ def _aggregates(ctx, rows: list[dict], caps: dict[str, pd.Series], earnings: dic
         "alternate": V.REPORTED,
         "window_sessions": V.HISTORY_SESSIONS,
         "min_coverage": V.AGGREGATE_MIN_COVERAGE,
+        "scenario": {"multiple_turns": scenario["multiple_turns"], "eps_change_pct": scenario["eps_change_pct"]},
+        "subgroups": {"min_members": settings["subgroup_min_members"], "unmatched": split["unmatched"],
+                      "too_small": split["too_small"], "unassigned": split["unassigned"]},
     }
 
 
@@ -316,7 +440,8 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     meta, indices = {}, {}
     for key, frame in ctx.members.items():
         for row in frame.drop_duplicates("yahoo_symbol").itertuples():
-            meta.setdefault(row.yahoo_symbol, {"name": str(row.name).title(), "sector": row.sector})
+            meta.setdefault(row.yahoo_symbol, {"name": str(row.name).title(), "sector": row.sector,
+                                               "sub_sector": getattr(row, "sub_sector", None)})
             indices.setdefault(row.yahoo_symbol, []).append(key)
 
     if use_cache:
@@ -327,6 +452,13 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         trends, _ = estimates.fetch_trends(sorted(symbols))
     except Exception:
         trends = {}
+    # Yahoo's own fiscal-year forward P/E history, for the ticker artifacts and the rows.
+    try:
+        fiscal_found, fiscal_failed = forward_pe_history.fetch_series(sorted(symbols), use_cache=use_cache)
+    except Exception as exc:  # noqa: BLE001 - optional: the page then has the recorded NTM history only
+        ctx.log.fail("valuation:forward_pe_history", exc)
+        fiscal_found, fiscal_failed = {}, {symbol: str(exc)[:ERROR_DETAIL_CHARS] for symbol in symbols}
+    fiscal_by_symbol: dict[str, dict] = {}
     today = pd.Timestamp(ctx.as_of)
     recorded = snapshot_store.consensus_history((today - pd.Timedelta(days=V.HISTORY_SESSIONS * 7 // 5)).date(), today.date())
     rows, skipped = [], {}
@@ -335,6 +467,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     caps, companies = {}, set()
     earnings: dict[str, dict[str, pd.Series]] = {V.OPERATING: {}, V.REPORTED: {}}
     forward_earnings: dict[str, dict[str, float]] = {}
+    book_frames: dict[str, pd.Series] = {}
     for symbol in symbols:
         cik = cik_for(symbol, cik_map)
         if cik is None:
@@ -355,9 +488,13 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         sector = meta.get(symbol, {}).get("sector")
         ntm = V.ntm_eps(trends.get(symbol), today)
         forward = _forward_series(symbol, ctx.prices.get(symbol), recorded, today, ntm)
-        history = _history(symbol, data, ctx.prices.get(symbol), symbol_splits, sector, forward)
+        fiscal = V.fiscal_forward(fiscal_found.get(symbol))
+        if fiscal:
+            fiscal_by_symbol[symbol] = fiscal
+        history = _history(symbol, data, ctx.prices.get(symbol), symbol_splits, sector, forward, fiscal)
         fallback_cap = estimates.market_cap(symbol) if not data.trailing["shares"] and price is not None else None
-        row = _row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history, ntm, fallback_cap)
+        row = _row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history, ntm, fallback_cap,
+                   V.fiscal_path(trends.get(symbol), ntm), fiscal)
         rows.append(row)
         prices = ctx.prices.get(symbol)
         if (prices is not None and data.eps_history and row["market_cap"] and price and row["cik"] not in companies
@@ -371,6 +508,9 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             earnings[V.OPERATING][symbol] = V.plausible_eps(prices, operating) * shares
             if forward:
                 forward_earnings[symbol] = {d: e * shares for d, e in zip(forward["dates"], forward["eps_ntm"]) if e is not None}
+            tbv = V.tbv_steps(data.eps_history, symbol_splits)
+            if tbv:
+                book_frames[symbol] = V.plausible_tbvps(prices, tbv) * shares
 
     primary = ctx.members[ctx.primary.key].drop_duplicates("yahoo_symbol").set_index("yahoo_symbol")["weight"]
     check = _weight_check([r for r in rows if ctx.primary.key in r["indices"]], primary.to_dict())
@@ -382,6 +522,12 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         and abs(r["pe_history_current"] / r["pe"] - 1) > PE_AGREEMENT_TOLERANCE
     )
 
+    ptbv_disagree = sorted(
+        r["ticker"] for r in rows
+        if r.get("ptbv") and r.get("ptbv_history_current")
+        and abs(r["ptbv_history_current"] / r["ptbv"] - 1) > PE_AGREEMENT_TOLERANCE
+    )
+
     ctx.log.add(SourceRecord(
         "sec_trailing", "SEC XBRL company facts (trailing twelve months)",
         "https://data.sec.gov/api/xbrl/companyfacts/",
@@ -390,6 +536,17 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         policy="filings",
         status="ok" if not skipped else "partial",
         error=None if not skipped else f"{len(skipped)} of {len(symbols)} not extracted",
+    ))
+    fiscal_report = _fiscal_report(len(symbols), fiscal_by_symbol, fiscal_failed)
+    problems = len(fiscal_report["failed"]) + len(fiscal_report["unread"])
+    ctx.log.add(SourceRecord(
+        "yahoo_forward_pe_history", "Yahoo Finance fundamentals-timeseries (forward P/E at each month end)",
+        "https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/",
+        observed_date=max((f["latest"]["date"] for f in fiscal_by_symbol.values() if f["latest"]), default=None),
+        rows=len(fiscal_by_symbol),
+        policy="reference_data",
+        status="ok" if not problems else "partial",
+        error=None if not problems else f"{problems} companies not read in full",
     ))
     return {
         "as_of": ctx.as_of,
@@ -409,8 +566,11 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             "agreement_tolerance": PE_AGREEMENT_TOLERANCE,
             "disagree": disagree,
         },
+        "ptbv_history": {"companies": sum(1 for r in rows if r.get("ptbv_percentile") is not None),
+                         "agreement_tolerance": PE_AGREEMENT_TOLERANCE, "disagree": ptbv_disagree},
         "weight_check": check,
-        "aggregates": _aggregates(ctx, rows, caps, earnings, forward_earnings),
+        "fiscal_forward": fiscal_report,
+        "aggregates": _aggregates(ctx, rows, caps, earnings, forward_earnings, book_frames),
         "financials_sector": V.FINANCIALS_SECTOR,
         "note": (
             "Market cap is the closing price times a filed share count: the latest cover-page count "
