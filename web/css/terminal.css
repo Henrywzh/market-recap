@@ -1030,3 +1030,35 @@ table.industries tr.clickable { cursor: pointer; }
 table.industries tr.clickable:hover td { background: var(--panel-alt); }
 table.industries td .dim { font-size: 10.5px; }
 table.industries-members { font-size: 11px; }
+
+/* SCENARIOS: what past releases did to rates and stocks. Dim = not detected. */
+.sc-table .sc-row { cursor: pointer; }
+.sc-table .sc-row:hover td, .sc-table .sc-row:focus td { background: var(--panel-alt); }
+.sc-table .sc-selected td { background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+.sc-name { font-weight: 600; }
+.sc-sub { font-size: 11px; }
+.sc-counts { white-space: nowrap; }
+.sc-cell { min-width: 130px; }
+.sc-dim { opacity: 0.5; }
+.sc-track { position: relative; height: 8px; background: color-mix(in srgb, var(--border) 60%, transparent); border-radius: 2px; }
+.sc-track::after { content: ""; position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px; background: var(--text-faint); }
+.sc-bar { position: absolute; top: 1px; bottom: 1px; border-radius: 1px; }
+.sc-bar.rate-pos { background: var(--accent); }
+.sc-bar.rate-neg { background: var(--blue); }
+.sc-bar.stock-pos { background: var(--up); }
+.sc-bar.stock-neg { background: var(--down); }
+.sc-val { font-size: 12px; margin-top: 2px; white-space: nowrap; }
+.sc-t { font-size: 10px; color: var(--text-dim); }
+.sc-eras { white-space: nowrap; }
+.sc-era { display: inline-flex; flex-direction: column; align-items: center; min-width: 46px; padding: 1px 4px; margin-right: 3px; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; line-height: 1.25; }
+.sc-era-name { font-size: 9px; color: var(--text-dim); }
+.sc-se { font-size: 10px; }
+.sc-sectors { display: grid; gap: 3px; }
+.sc-sector { display: grid; grid-template-columns: 44px 1fr 48px; align-items: center; gap: 8px; font-size: 12px; }
+.sc-sector-val { text-align: right; }
+.sc-track-wide { height: 12px; }
+.sc-axis { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--text-faint); }
+.sc-whisker { position: absolute; top: 5px; height: 2px; background: color-mix(in srgb, var(--text) 55%, transparent); }
+.sc-fomc-line { margin-bottom: 6px; }
+.sc-fomc-line b { margin: 0 6px; }
+.sc-r2 { width: 90px; display: inline-block; vertical-align: middle; margin-right: 6px; }

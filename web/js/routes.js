@@ -22,6 +22,7 @@ export const VIEWS = [
   { id: 'catalysts', label: 'CALENDAR', group: 'catalysts', artifact: 'catalysts', module: 'catalysts' },
   { id: 'earnings', label: 'EARNINGS', group: 'catalysts', artifact: 'earnings', module: 'earnings' },
   { id: 'themes', label: 'THEMES', group: 'catalysts', artifact: 'themes', module: 'themes', takesArg: true },
+  { id: 'scenarios', label: 'SCENARIOS', group: 'scenarios', artifact: 'scenarios', module: 'scenarios', takesArg: true },
   { id: 'chain', label: 'AI CHAIN', group: 'catalysts', artifact: 'chain', module: 'chain', takesArg: true },
   { id: 'technicals', label: 'TECHNICALS', group: 'tools', artifact: 'technicals', module: 'technicals', takesArg: true },
   { id: 'trade', label: 'TRADE DESK', group: 'tools', artifact: 'technicals', module: 'trade', takesArg: true },
@@ -35,6 +36,8 @@ export const GROUPS = [
   { id: 'risk', label: 'RISK' },
   { id: 'names', label: 'NAMES' },
   { id: 'catalysts', label: 'CATALYSTS' },
+  // CATALYSTS holds its four views; what the releases have done to rates and stocks is its own mode.
+  { id: 'scenarios', label: 'SCENARIOS' },
   { id: 'tools', label: 'TOOLS' },
 ];
 
