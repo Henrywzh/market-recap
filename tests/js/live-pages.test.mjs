@@ -93,3 +93,16 @@ test('the yield board asks CNBC once for the whole curve', async () => {
     globalThis.fetch = real;
   }
 });
+
+test('a risk chart is weekly for the long history and daily for the last year', async () => {
+  const { chartHistory } = await import('../../web/js/tabs/risk.js');
+  const tile = {
+    history: { dates: ['2025-09-05', '2025-09-12', '2025-10-10', '2026-10-09'], values: [1, 2, 3, 9] },
+    recent: { dates: ['2025-10-10', '2025-10-13', '2026-10-09'], values: [3, 4, 9] },
+  };
+  assert.deepEqual(chartHistory(tile), {
+    dates: ['2025-09-05', '2025-09-12', '2025-10-10', '2025-10-13', '2026-10-09'], values: [1, 2, 3, 4, 9],
+  });
+  // A weekly source has no daily year: its history is the chart.
+  assert.deepEqual(chartHistory({ history: tile.history, recent: null }), tile.history);
+});

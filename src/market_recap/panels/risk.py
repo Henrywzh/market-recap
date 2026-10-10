@@ -326,7 +326,7 @@ def build(ctx) -> dict:
             try:
                 series = builder() if builder else pd.Series(dtype=float)
                 reading = R.tile(series, risk_when=spec["risk_when"], threshold=spec.get("threshold"),
-                                 digits=DIGITS.get(spec.get("unit"), 2))
+                                 digits=DIGITS.get(spec.get("unit"), 2), daily=key not in WEEKLY_TILES)
                 error = None if reading.get("value") is not None else "no observations"
             except Exception as exc:
                 reading, error = {"value": None, "date": None}, describe_error(exc)

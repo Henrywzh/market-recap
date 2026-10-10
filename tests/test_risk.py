@@ -117,3 +117,14 @@ def test_kalshi_meeting_expectation_uses_mids_and_counts_more_than_25_as_50():
     assert k["date"] == "2026-10-28"
     assert k["p_hike"] == pytest.approx(0.635 / (0.005 + 0.355 + 0.635), abs=1e-3)
     assert k["expected_bp"] == pytest.approx((-50 * 0.005 + 25 * 0.635) / (0.005 + 0.355 + 0.635), abs=0.1)
+
+
+def test_a_daily_tile_has_a_one_session_change_and_a_daily_last_year():
+    s = _series([float(v) for v in range(1, 301)])
+    t = R.tile(s, risk_when="high", threshold=250, digits=0)
+    assert t["change_1d"] == 1 and t["previous_date"] == s.index[-2].strftime("%Y-%m-%d")
+    assert t["recent"]["dates"][-1] == t["date"]
+    # The last year day by day; the long history stays weekly.
+    assert len(t["recent"]["dates"]) > len([d for d in t["history"]["dates"] if d >= t["recent"]["dates"][0]])
+    weekly = R.tile(_series([1.0, 2.0, 3.0], freq="W-FRI"), risk_when="high", threshold=5, daily=False)
+    assert weekly["change_1d"] is None and weekly["recent"] is None

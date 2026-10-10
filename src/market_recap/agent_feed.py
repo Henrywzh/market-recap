@@ -147,6 +147,12 @@ def _risk_budget(f: _Feed) -> dict:
         out["risk_dashboard"] = {
             "core_tiles": len(core), "core_in_breach": sum(1 for t in core if t.get("breach")),
             "breaches": risk.get("breaches") or [], "crossed_this_session": risk.get("crossed") or [],
+            # Every tile, compact: a daily one's 1D is since its own previous
+            # observation, and its date can be a session behind the build.
+            "tiles": [{**_pick(t, "key", "label", "section", "core", "unit", "frequency", "value", "date",
+                               "change_1d", "change_1w", "change_1m", "pct_1y", "pct_long", "risk_when",
+                               "threshold", "breach", "crossed"), "section": s.get("key")}
+                      for s in risk["sections"] for t in s["tiles"]],
             "source": f.url("risk"),
         }
         out["sentiment"] = {**_pick(risk.get("sentiment"), "score", "rating", "date", "week_ago", "month_ago", "year_ago"),

@@ -731,6 +731,9 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .risk-tile-head { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; }
 .risk-tile-label { font-size: 9.5px; letter-spacing: 0.08em; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .risk-flag { font-size: 8px; letter-spacing: 0.05em; white-space: nowrap; }
+.risk-freq { font-size: 8px; letter-spacing: 0.05em; white-space: nowrap; color: var(--text-dim); border: 1px solid var(--border); padding: 0 3px; }
+.risk-behind { color: var(--accent); }
+.risk-tags { display: inline-flex; gap: 4px; align-items: baseline; }
 .risk-flag.into { color: var(--down); }
 .risk-flag.out { color: var(--up); }
 .risk-tile-value { font-size: 17px; font-weight: 600; margin: 1px 0 2px; }

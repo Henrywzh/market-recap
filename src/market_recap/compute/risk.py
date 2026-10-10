@@ -27,6 +27,9 @@ LIQUIDITY_CHANGE_WEEKS = 13
 PUT_CALL_SMOOTHING = 5
 # A weekly history is drawn for charts; ten years of it.
 HISTORY_YEARS = 10
+# The chart's last year is drawn from daily observations; ``history`` stays
+# weekly, as the MOVE/VIX ratio's percentile on OVERVIEW is taken over it.
+RECENT_DAYS = 365
 SPARK_POINTS = 130
 EXTREME_DEFAULT_PCT = 5.0
 
@@ -176,8 +179,14 @@ def _weekly(series: pd.Series, years: int) -> pd.Series:
     return recent.groupby(recent.index.to_period("W-FRI")).last()
 
 
-def tile(series: pd.Series, *, risk_when: str, threshold: float | None, digits: int = 2) -> dict:
-    """Level, percentiles, changes and threshold state of one series."""
+def tile(series: pd.Series, *, risk_when: str, threshold: float | None, digits: int = 2,
+         daily: bool = True) -> dict:
+    """Level, percentiles, changes and threshold state of one series.
+
+    ``daily``: the source publishes every session, so the change since the
+    previous observation is a one-session change and the last year is kept
+    day by day. A weekly series gets neither.
+    """
     clean = _clean(series)
     if clean.empty:
         return {"value": None, "date": None}
@@ -201,6 +210,8 @@ def tile(series: pd.Series, *, risk_when: str, threshold: float | None, digits: 
     spark = year.iloc[::-step][::-1] if step > 1 else year
     weekly = _weekly(clean, HISTORY_YEARS)
     round_ = lambda v: None if v is None or not np.isfinite(v) else round(float(v), digits)
+    previous = clean.iloc[-2] if daily and len(clean) > 1 else None
+    recent = clean[clean.index > last_date - timedelta(days=RECENT_DAYS)] if daily else None
     return {
         "value": round_(value),
         "date": last_date.strftime("%Y-%m-%d"),
@@ -208,6 +219,8 @@ def tile(series: pd.Series, *, risk_when: str, threshold: float | None, digits: 
         "pct_long": None if pct_long is None else round(pct_long),
         "since": clean.index[0].strftime("%Y-%m-%d"),
         "observations": int(len(clean)),
+        "change_1d": round_(value - float(previous)) if previous is not None else None,
+        "previous_date": clean.index[-2].strftime("%Y-%m-%d") if previous is not None else None,
         "change_1w": round_(value - week_ago) if week_ago is not None else None,
         "change_1m": round_(value - month_ago) if month_ago is not None else None,
         "breach": now,
@@ -216,6 +229,10 @@ def tile(series: pd.Series, *, risk_when: str, threshold: float | None, digits: 
         "history": {
             "dates": [p.end_time.strftime("%Y-%m-%d") for p in weekly.index],
             "values": [round_(v) for v in weekly.to_numpy()],
+        },
+        "recent": None if recent is None else {
+            "dates": [d.strftime("%Y-%m-%d") for d in recent.index],
+            "values": [round_(v) for v in recent.to_numpy()],
         },
     }
 

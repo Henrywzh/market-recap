@@ -59,7 +59,10 @@ function thresholdText(tile) {
 export function tileNode(tile, { asOf, onPick = null, selected = false, compact = false } = {}) {
   const state = tile.breach === true ? 'breach' : tile.breach === false ? 'clear' : 'unknown';
   const crossed = tile.crossed === 'into' ? 'NEW' : tile.crossed === 'out' ? 'CLEARED' : null;
-  const stale = tile.date && asOf && tile.date !== asOf;
+  const weekly = tile.frequency === 'weekly';
+  // A daily source a session behind the page (Cboe's and FRED's files land a
+  // day late) is marked, so its 1D is not read as the page's session.
+  const behind = !weekly && tile.date && asOf && tile.date < asOf;
   const node = el('div', {
     class: `risk-tile ${state}${selected ? ' selected' : ''}${onPick ? ' pickable' : ''}`,
     title: [tile.note, ...(tile.sources || []).map((s) => `source: ${s}`), tile.backcalc, tile.error].filter(Boolean).join('\n'),
@@ -67,7 +70,10 @@ export function tileNode(tile, { asOf, onPick = null, selected = false, compact 
   }, [
     el('div', { class: 'risk-tile-head' }, [
       el('span', { class: 'risk-tile-label', text: tile.label }),
-      crossed ? el('span', { class: `risk-flag ${tile.crossed}`, text: crossed }) : null,
+      el('span', { class: 'risk-tags' }, [
+        weekly ? el('span', { class: 'risk-freq', title: 'Published weekly: no one-session change', text: 'WEEKLY' }) : null,
+        crossed ? el('span', { class: `risk-flag ${tile.crossed}`, text: crossed }) : null,
+      ]),
     ]),
     el('div', { class: 'risk-tile-value', text: tile.error && !present(tile.value) ? DASH : formatValue(tile.value, tile.unit) }),
     compact ? null : spark(tile.spark, {
@@ -77,27 +83,52 @@ export function tileNode(tile, { asOf, onPick = null, selected = false, compact 
     el('div', { class: 'risk-tile-meta', title: 'Percentile over the last year, and over all the history the source serves' }, [
       el('span', { text: `1Y ${ordinal(tile.pct_1y)} · ${sinceLabel(tile)} ${ordinal(tile.pct_long)}` }),
     ]),
-    el('div', { class: 'risk-tile-meta dim' }, [el('span', { text: `1W ${formatChange(tile.change_1w, tile.unit)}` })]),
+    el('div', { class: 'risk-tile-meta dim' }, [el('span', {
+      title: weekly ? null : `1D: since ${tile.previous_date || 'the previous observation'}`,
+      text: weekly ? `1W ${formatChange(tile.change_1w, tile.unit)}`
+        : `1D ${formatChange(tile.change_1d, tile.unit)} · 1W ${formatChange(tile.change_1w, tile.unit)}`,
+    })]),
     compact ? null : el('div', { class: 'risk-tile-foot dim' }, [
       thresholdText(tile),
-      stale ? ` · ${tile.frequency === 'weekly' ? 'week of ' : ''}${tile.date}` : '',
-      tile.error && !present(tile.value) ? ` · ${tile.error}` : '',
-    ].join('')),
+      // Month and day only: the foot is one line, and the year is the page's.
+      weekly && tile.date ? el('span', { title: tile.date, text: ` · week of ${tile.date.slice(5)}` }) : null,
+      behind ? el('span', { class: 'risk-behind', title: `The source's latest observation is ${tile.date}; the page is ${asOf}`, text: ` · data ${tile.date.slice(5)}` }) : null,
+      tile.error && !present(tile.value) ? ` · ${tile.error}` : null,
+    ]),
   ]);
   return node;
 }
 
+// Weekly points for the long history, then the last year day by day where
+// the source is daily.
+export function chartHistory(tile) {
+  const weekly = tile.history || { dates: [], values: [] };
+  const recent = tile.recent;
+  if (!recent?.dates?.length) return weekly;
+  const keep = weekly.dates.findIndex((d) => d >= recent.dates[0]);
+  const cut = keep === -1 ? weekly.dates.length : keep;
+  return { dates: [...weekly.dates.slice(0, cut), ...recent.dates], values: [...weekly.values.slice(0, cut), ...recent.values] };
+}
+
 export function historyChart(node, tile, range = 'MAX') {
-  const full = tile.history || { dates: [], values: [] };
+  const full = chartHistory(tile);
   const h = sliceRange(full.dates, { values: full.values }, range);
   render(node, (option, p) => ({
     ...option,
     grid: { ...option.grid, left: 56, right: 16, top: 14 },
-    tooltip: { ...option.tooltip, valueFormatter: (v) => formatValue(v, tile.unit) },
-    xAxis: { ...option.xAxis, data: h.dates },
+    // A time axis: weekly points then daily ones, each at its own date, so
+    // the daily last year is not stretched across more of the width.
+    tooltip: {
+      ...option.tooltip,
+      formatter: (items) => {
+        const it = [].concat(items)[0];
+        return it ? `${it.value[0]}<br>${it.marker}${tile.label} <b>${formatValue(it.value[1], tile.unit)}</b>` : '';
+      },
+    },
+    xAxis: { ...option.xAxis, type: 'time', boundaryGap: false, data: undefined },
     yAxis: { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 10, formatter: (v) => formatValue(v, tile.unit) } },
     series: [{
-      name: tile.label, type: 'line', data: h.values, showSymbol: false,
+      name: tile.label, type: 'line', data: h.dates.map((d, i) => [d, h.values[i]]), showSymbol: false,
       lineStyle: { width: 1.3, color: tile.breach ? p.down : p.text },
       markLine: tile.risk_when !== 'extreme' && present(tile.threshold) ? {
         silent: true, symbol: 'none', data: [{ yAxis: tile.threshold }],
@@ -155,7 +186,7 @@ function sectionCard(section, data, { charts = 1 } = {}) {
   const grid = el('div', { class: 'risk-grid' });
   const slots = selected.map(() => ({ node: el('div', { class: 'chart' }), title: el('span', { class: 'dim' }) }));
   // One range for the card's charts; offered as far as its longest history.
-  const longest = tiles.map((t) => t.history?.dates || []).reduce((a, b) => (b.length > a.length ? b : a), []);
+  const longest = tiles.map((t) => chartHistory(t).dates).reduce((a, b) => (b.length > a.length ? b : a), []);
   let range = initialRange(longest, 'MAX');
   const switcher = rangeSwitch(longest, range, (label) => { range = label; draw(); });
   const pick = (key) => {
@@ -168,7 +199,7 @@ function sectionCard(section, data, { charts = 1 } = {}) {
     selected.forEach((key, i) => {
       const tile = tiles.find((t) => t.key === key);
       if (!tile) return;
-      slots[i].title.textContent = `${tile.label} · weekly · 10 years or since ${tile.since}`;
+      slots[i].title.textContent = `${tile.label} · ${tile.recent?.dates?.length ? 'daily for the last year, weekly before' : 'weekly'} · 10 years or since ${tile.since}`;
       historyChart(slots[i].node, tile, range);
     });
   };
