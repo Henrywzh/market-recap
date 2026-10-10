@@ -101,6 +101,10 @@ def main(argv: list[str] | None = None) -> int:
         _print(report)
         if report["errors"]:
             return 1
+        # After validation, so the feed carries its findings. Optional: a feed
+        # that cannot be built is removed, never left over from an older build.
+        from . import agent_feed
+        _print({"agent_feed": agent_feed.write(validation=report)})
         return 1 if args.strict and report["warnings"] else 0
 
     if args.command == "site":

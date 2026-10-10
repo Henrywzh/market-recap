@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Not found</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; padding: 48px 16px; font: 14px/1.5 ui-monospace, Menlo, monospace; background: #0b0d10; color: #c9d1d9; }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+<!-- Its presence makes Cloudflare Pages answer a missing path with 404 instead
+     of the dashboard's index page (status 200), so a reader of a missing
+     artifact is told it is missing. The dashboard routes by #hash, so no
+     view depends on the index being served at other paths. -->
+<p>404 &middot; not found. <a href="/">Market Recap</a></p>
+</body>
+</html>

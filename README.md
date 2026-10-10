@@ -535,6 +535,32 @@ and never fetch on their own:
   404 and the heat map stays on the close; `make serve-live` runs the same
   tree under `wrangler pages dev` with it.
 
+## Agent feed
+
+Two files for an outside research agent, written by every `refresh` right
+after validation and published with the site:
+
+| File | Size | What it is |
+|---|---|---|
+| [`artifacts/agent-index.json`](https://market-recap-b5p.pages.dev/artifacts/agent-index.json) | ≤ 16 KB | The entry point: the market's state in a few numbers, the research candidates in a fixed order, the next seven days and every data-quality alert. |
+| [`artifacts/agent-brief.json`](https://market-recap-b5p.pages.dev/artifacts/agent-brief.json) | ≤ 150 KB | The detail, along the page's chain: risk budget, market, sectors, names (full cards for changes, one line per exit), timing (seven days in full, thirty as one line each), review (the last session's reports against what was expected), every candidate, and the candidate ledger. |
+
+Both are condensed from the artifacts the same build published
+(`agent_feed.py`): nothing is recomputed, nothing new becomes public, and
+each section names the artifact behind it. A **research candidate** is raised
+by a fixed rule (`agent_feed.RULES`) and carries a neutral question, never a
+verdict. Conditions -- a risk tile past its threshold, MOVE against VIX, a
+sector event -- are tracked against the previous published feed: `new`,
+`continuing`, `resolved` only when a valid new reading shows the condition
+ended, `unknown` when this build had no valid reading. A rerun of a session
+compares with the session before it. The overlay's exposure is labelled as the
+model's suggestion, not a position.
+
+A feed that cannot be built or fails its own checks (size, schema, every
+candidate pointing at an artifact this build wrote) is deleted, never left
+from an older build; the site answers a missing file with **404**
+(`web/404.html`), not with the dashboard page.
+
 ## Design rules this repo follows
 
 - **Absence is rendered as an em dash, never as zero.** "No data" and "no
