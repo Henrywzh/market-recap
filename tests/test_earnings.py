@@ -90,3 +90,58 @@ def test_factset_row_drops_an_implausible_pe_average():
     row = factset._row({"report_date": "2025-10-10", "forward_12m_pe": "22.8", "forward_12m_pe_10y_avg": "39.0"})
     assert row["forward_12m_pe"] == 22.8
     assert row["forward_12m_pe_10y_avg"] is None
+
+
+def test_factset_article_growth_is_the_current_figure_not_the_june_30_comparison():
+    text = ("As of today, the S&P 500 is expected to report (year-over-year) earnings growth of 29.5%, compared to the "
+            "estimated (year-over-year) earnings growth rate of 26.7% on June 30. In terms of revenues, the S&P 500 is "
+            "expected to report (year-over-year) revenue growth of 12.3%, compared to the estimated (year-over-year) "
+            "revenue growth rate of 10.9% on June 30.")
+    obs = factset.Parser.parse_summary_metrics(text, "2026-10-02", "2026Q3", source_url="https://x")
+    assert obs.blended_earnings_growth_yoy == 29.5
+    assert obs.blended_revenue_growth_yoy == 12.3
+    # Only the comparison in the text: nothing is stored rather than the old figure.
+    only = factset.Parser.parse_summary_metrics(
+        "compared to the estimated (year-over-year) earnings growth rate of 26.7% on June 30.", "2026-10-02", "2026Q3", source_url="https://x")
+    assert only.blended_earnings_growth_yoy is None
+    # An in-season article that states the rate directly still reads.
+    older = factset.Parser.parse_summary_metrics(
+        "the blended earnings growth rate for the index is 12.4% for the quarter", "2026-08-07", "2026Q2", source_url="https://x")
+    assert older.blended_earnings_growth_yoy == 12.4
+
+
+PDF_TEXT = """Key Metrics
+  Earnings Growth: For Q3 2026, the estimated (year-over-year) earnings growth rate for the S&P 500 is 29.6%. If
+  Earnings Revisions: On June 30, the estimated (year-over-year) earnings growth rate for the S&P 500 for Q3
+  2026 was 26.7%. Four sectors are expected to report higher earnings today.
+  Earnings Guidance: For Q3 2026, 44 S&P 500 companies have issued negative EPS guidance and 72 S&P 500
+  companies have issued positive EPS guidance.
+Of the 19 S&P 500 companies that have reported actual earnings for Q3 2026 through October 9, 84% have reported
+actual EPS above the mean EPS estimate. In aggregate, actual earnings reported by these 19 companies have
+exceeded estimated earnings by 4.9%.
+As of today, the S&P 500 is expected to report (year-over-year) revenue growth of 12.4%, compared to 10.9% on June 30."""
+
+
+def test_factset_pdf_season_figures_skip_the_june_30_comparison():
+    got = factset.parse_insight_season(PDF_TEXT)
+    assert got == {
+        "reference_quarter": "2026Q3", "blended_earnings_growth_yoy": 29.6, "blended_revenue_growth_yoy": 12.4,
+        "companies_reported": 19, "eps_beat_rate": 84.0, "eps_surprise_pct": 4.9,
+        "negative_eps_guidance_count": 44, "positive_eps_guidance_count": 72,
+    }
+    assert factset.parse_insight_season("nothing about the quarter") == {}
+
+
+def test_snapshot_takes_the_newer_pdf_quarter_figures_only_for_the_same_quarter():
+    from market_recap.panels import earnings as P
+
+    snapshot = {"report_date": "2026-10-02", "reference_quarter": "2026Q3", "source_url": "blog",
+                "blended_earnings_growth_yoy": 29.5, "blended_revenue_growth_yoy": None, "eps_beat_rate": None, "eps_surprise_pct": None}
+    pdf = {"report_date": "2026-10-09", "source_url": "pdf", **factset.parse_insight_season(PDF_TEXT)}
+    got = P._with_pdf_season(snapshot, [pdf])
+    assert got["blended_earnings_growth_yoy"] == 29.6 and got["eps_beat_rate"] == 84.0
+    assert got["season_date"] == "2026-10-09" and got["positive_eps_guidance_count"] == 72
+    assert got["report_date"] == "2026-10-02"                       # still the article's own date
+    assert P._with_pdf_season(snapshot, [{**pdf, "report_date": "2026-09-25"}]) == snapshot   # older PDF: unchanged
+    assert P._with_pdf_season(snapshot, [{**pdf, "reference_quarter": "2026Q4"}]) == snapshot  # another quarter: unchanged
+    assert P._with_pdf_season(None, [pdf]) is None

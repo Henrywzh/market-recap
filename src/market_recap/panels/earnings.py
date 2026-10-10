@@ -159,6 +159,29 @@ def _forward_pe(rows: list[dict], insight: list[dict]) -> list[dict]:
     return [points[d] for d in sorted(points)]
 
 
+# What the weekly PDF states about the quarter and the blog's snapshot carries.
+PDF_SEASON_FIELDS = ("blended_earnings_growth_yoy", "blended_revenue_growth_yoy", "eps_beat_rate", "eps_surprise_pct")
+
+
+def _with_pdf_season(picked: dict | None, insight: list[dict]) -> dict | None:
+    """The snapshot with the newest weekly PDF's quarter figures where that PDF
+    is newer than the article the snapshot came from and is about the same
+    quarter. A figure the PDF does not state keeps the article's."""
+    if not picked or not insight:
+        return picked
+    newest = max((r for r in insight if r.get("blended_earnings_growth_yoy") is not None), key=lambda r: r["report_date"], default=None)
+    if newest is None or newest["report_date"] <= (picked.get("report_date") or ""):
+        return picked
+    if newest.get("reference_quarter") != picked.get("reference_quarter"):
+        return picked
+    return picked | {f: newest[f] for f in PDF_SEASON_FIELDS if newest.get(f) is not None} | {
+        "season_date": newest["report_date"], "season_source_url": newest.get("source_url"),
+        "companies_reported": newest.get("companies_reported"),
+        "positive_eps_guidance_count": newest.get("positive_eps_guidance_count"),
+        "negative_eps_guidance_count": newest.get("negative_eps_guidance_count"),
+    }
+
+
 def _factset(rows: list[dict], insight: list[dict] = ()) -> dict:
     def latest(fields: tuple[str, ...]) -> dict | None:
         found = [r for r in rows if any(r.get(f) is not None for f in fields)]
@@ -217,6 +240,7 @@ def _factset(rows: list[dict], insight: list[dict] = ()) -> dict:
     if picked and pe and pe[-1]["date"] > (picked.get("report_date") or ""):
         picked |= {"forward_12m_pe": pe[-1]["forward_12m_pe"], "forward_12m_pe_10y_avg": pe[-1].get("ten_year_average"),
                    "forward_pe_date": pe[-1]["date"]}
+    picked = _with_pdf_season(picked, list(insight))
     return {
         "articles": len(rows),
         "first_date": rows[0]["report_date"] if rows else None,

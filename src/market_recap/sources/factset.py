@@ -81,6 +81,8 @@ FACTSET_REVISION_NUMERIC_FIELDS = (
 
 FACTSET_NUMERIC_FIELDS = FACTSET_BASE_NUMERIC_FIELDS + FACTSET_REVISION_NUMERIC_FIELDS
 FACTSET_PAYLOAD_FIELDS = FACTSET_NUMERIC_FIELDS + ("sector_revision_json",)
+# Not followed by a date ("... 26.7% on June 30"): such a rate is the comparison.
+_NOT_DATED = r"(?!\s+(?:on|at|as of)\s+[A-Z][a-z]+\s+\d)"
 
 
 @dataclass(frozen=True)
@@ -627,12 +629,18 @@ class Parser:
         return FactsetEarningsObservation(
             report_date=report_date,
             reference_quarter=ref_quarter,
+            # The current figure comes first: "expected to report (year-over-year)
+            # earnings growth of 29.5%, compared to the estimated ... growth rate
+            # of 26.7% on June 30". A rate dated "on <Month> <day>" is that
+            # comparison, not the current one, and is never taken.
             blended_earnings_growth_yoy=find_first([
-                r"(?:blended\s+)?earnings growth rate (?:of|for the index (?:of|is))\s*([+-]?\d+(?:\.\d+)?)%",
+                r"expected to report \((?:year-over-year|y/y)\) earnings growth of\s*([+-]?\d+(?:\.\d+)?)%",
+                rf"(?:blended\s+)?earnings growth rate (?:of|for the index (?:of|is))\s*([+-]?\d+(?:\.\d+)?)%{_NOT_DATED}",
                 r"blended earnings growth (?:rate )?of\s*([+-]?\d+(?:\.\d+)?)%",
             ]),
             blended_revenue_growth_yoy=find_first([
-                r"(?:blended\s+)?revenue growth rate (?:of|for the index (?:of|is))\s*([+-]?\d+(?:\.\d+)?)%",
+                r"expected to report \((?:year-over-year|y/y)\) revenue growth of\s*([+-]?\d+(?:\.\d+)?)%",
+                rf"(?:blended\s+)?revenue growth rate (?:of|for the index (?:of|is))\s*([+-]?\d+(?:\.\d+)?)%{_NOT_DATED}",
                 r"blended revenue growth (?:rate )?of\s*([+-]?\d+(?:\.\d+)?)%",
             ]),
             eps_beat_rate=find_first([
@@ -930,6 +938,43 @@ def parse_insight_text(text: str) -> dict | None:
     return out if 5.0 <= out["forward_12m_pe"] <= 40.0 else None
 
 
+_PDF_QUARTER = re.compile(r"For (Q[1-4]) (20\d{2}), the estimated \(year-over-year\) earnings growth rate for the S&P 500 is (-?\d+(?:\.\d+)?)%", re.I)
+_PDF_REV_GROWTH = re.compile(r"expected to report \(year-over-year\) revenue growth of (-?\d+(?:\.\d+)?)%", re.I)
+_PDF_SCORE = re.compile(r"Of the (\d+) S&P 500 companies that have reported actual earnings for (Q[1-4]) (20\d{2}) through [A-Za-z]+ \d+, "
+                        r"(\d+(?:\.\d+)?)% have reported actual EPS above the mean EPS estimate", re.I)
+_PDF_SURPRISE = re.compile(r"actual earnings reported by these (\d+) companies have exceeded estimated earnings by (-?\d+(?:\.\d+)?)%", re.I)
+_PDF_GUIDE = re.compile(r"(\d+) S&P 500 companies have issued negative EPS guidance and (\d+) S&P 500\s+companies have issued positive EPS guidance", re.I)
+
+
+def parse_insight_season(text: str) -> dict:
+    """The quarter's figures from the Key Metrics and the "Topic of the Week"
+    paragraph of one Earnings Insight: the current growth rate (the revision
+    sentence's June 30 figure is the comparison and is not read), the
+    scorecard and the guidance counts. A figure the text does not state is
+    absent, so a week without a scorecard adds none."""
+    text = re.sub(r"\s+", " ", text)
+    out: dict = {}
+    growth = _PDF_QUARTER.search(text)
+    if growth:
+        out["reference_quarter"] = f"{growth.group(2)}{growth.group(1).upper()}"
+        out["blended_earnings_growth_yoy"] = float(growth.group(3))
+    revenue = _PDF_REV_GROWTH.search(text)
+    if revenue:
+        out["blended_revenue_growth_yoy"] = float(revenue.group(1))
+    score = _PDF_SCORE.search(text)
+    if score:
+        out["companies_reported"] = int(score.group(1))
+        out["eps_beat_rate"] = float(score.group(4))
+    surprise = _PDF_SURPRISE.search(text)
+    if surprise:
+        out["eps_surprise_pct"] = float(surprise.group(2))
+    guide = _PDF_GUIDE.search(text)
+    if guide:
+        out["negative_eps_guidance_count"] = int(guide.group(1))
+        out["positive_eps_guidance_count"] = int(guide.group(2))
+    return out
+
+
 def _pdf_text(day: date) -> str | None:
     """The PDF's text for one publication day; None when there is none. A day
     without a PDF is remembered, so it is asked once."""
@@ -987,7 +1032,8 @@ def insight_observations(since: date, until: date, *, budget: int = 12) -> tuple
                 continue
             figures = parse_insight_text(text)
             if figures:
-                out.append({"report_date": day.isoformat(), "source_url": PDF_URL.format(stamp=stamp), **figures})
+                out.append({"report_date": day.isoformat(), "source_url": PDF_URL.format(stamp=stamp),
+                            **figures, **parse_insight_season(text)})
             else:
                 failed.append(f"{day}: no forward P/E in the text")
             break
