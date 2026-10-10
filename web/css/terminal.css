@@ -1062,3 +1062,22 @@ table.industries-members { font-size: 11px; }
 .sc-fomc-line { margin-bottom: 6px; }
 .sc-fomc-line b { margin: 0 6px; }
 .sc-r2 { width: 90px; display: inline-block; vertical-align: middle; margin-right: 6px; }
+
+/* THEMES status board */
+.tb-row { cursor: pointer; }
+.tb-table .tb-row:hover td, .tb-table .tb-row:focus td { background: var(--panel-alt); }
+.tb-table .tb-active td { background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+.tb-name { font-weight: 600; letter-spacing: 0.04em; }
+.tb-sub { font-size: 11px; max-width: 150px; white-space: normal; line-height: 1.25; }
+.tb-rs { white-space: nowrap; }
+.tb-rs svg { vertical-align: middle; width: 100px; height: 28px; color: var(--accent); }
+.tb-quad { margin-left: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+.tb-track { height: 6px; width: 90px; background: color-mix(in srgb, var(--border) 70%, transparent); border-radius: 2px; margin: 3px 0; }
+.tb-fill { display: block; height: 100%; border-radius: 2px; }
+.tb-fill.up { background: var(--up); }
+.tb-fill.down { background: var(--down); }
+.tb-fill.accent { background: var(--accent); }
+.tb-split { display: flex; height: 6px; width: 90px; margin: 3px 0; border-radius: 2px; overflow: hidden; background: var(--border); }
+.tb-split .up { background: var(--up); }
+.tb-split .down { background: var(--down); }
+.tb-split .mid { background: color-mix(in srgb, var(--text-faint) 60%, transparent); }

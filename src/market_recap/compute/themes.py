@@ -231,3 +231,67 @@ def tv_surprises(rows: list[dict], title: str, mode: str) -> pd.DataFrame:
         out.append({"released": day, "actual": float(actual), "forecast": float(forecast), "surprise": surprise})
     frame = pd.DataFrame(out, columns=["released", "actual", "forecast", "surprise"])
     return frame.drop_duplicates("released", keep="last").sort_values("released").reset_index(drop=True)
+
+
+# --- The board: where a theme stands, from what is already measured ---------------
+# Price against the S&P 500, how many of its names are above their average,
+# where analysts' estimates moved, where its names sit against their own P/E
+# history. A label names the combination by rules written in the config; it
+# describes, it forecasts nothing.
+
+def rs_history(proxy: pd.Series, market: pd.Series, sessions: int) -> dict | None:
+    """The proxy over the market, rebased to 100 at the start of the last
+    ``sessions``: {dates, values}; None under half a window of history."""
+    ratio = (proxy / market.reindex(proxy.index)).dropna().iloc[-sessions:]
+    if len(ratio) < sessions // 2:
+        return None
+    return {"dates": [d.date().isoformat() for d in ratio.index], "values": [round(float(v), 2) for v in 100 * ratio / ratio.iloc[0]]}
+
+
+def breadth(closes: pd.DataFrame, symbols: list[str], ma_sessions: int, month: int) -> dict:
+    """How many of the priced names close above their ``ma_sessions``-day
+    average and how many are up over ``month`` sessions."""
+    names = [s for s in dict.fromkeys(symbols) if s in closes.columns and closes[s].dropna().shape[0] > max(ma_sessions, month)]
+    above, up = [], []
+    for s in names:
+        c = closes[s].dropna()
+        if c.iloc[-1] > c.iloc[-ma_sessions:].mean():
+            above.append(s)
+        if c.iloc[-1] > c.iloc[-1 - month]:
+            up.append(s)
+    return {"of": len(names), "above_ma": len(above), "up_month": len(up), "above": above}
+
+
+def revision(trends: dict[str, dict], symbols: list[str], period: str, window: str, move_pct: float) -> dict:
+    """The median change of the ``period`` EPS estimate over ``window`` across
+    the names that have both readings (positive, so a percentage means
+    something), and how many rose and fell by more than ``move_pct``."""
+    changes = []
+    for s in dict.fromkeys(symbols):
+        p = (trends.get(s) or {}).get(period) or {}
+        now, then = p.get("eps"), p.get(f"eps_{window}")
+        if now is not None and then is not None and now > 0 and then > 0:
+            changes.append(100 * (now / then - 1))
+    if not changes:
+        return {"of": 0, "median_pct": None, "rising": 0, "falling": 0}
+    return {"of": len(changes), "median_pct": round(float(statistics.median(changes)), 2),
+            "rising": sum(c >= move_pct for c in changes), "falling": sum(c <= -move_pct for c in changes)}
+
+
+def valuation_position(rows: dict[str, dict], symbols: list[str], minimum: int = 3) -> dict:
+    """The median own-history P/E percentile of the names that have one; None
+    under ``minimum`` names."""
+    values = [rows[s]["pe_percentile"] for s in dict.fromkeys(symbols) if (rows.get(s) or {}).get("pe_percentile") is not None]
+    return {"of": len(values), "median_percentile": round(float(statistics.median(values)), 1) if len(values) >= minimum else None}
+
+
+def state(relative_3m: float | None, revision_pct: float | None, *, relative_pp: float, revision_move_pct: float) -> str | None:
+    """The key of a theme's state: price against the market ('strong' beyond
+    ``relative_pp`` over three months, 'weak' beyond minus it) crossed with
+    the median estimate revision ('rising' / 'falling' beyond
+    ``revision_move_pct``). None when either is unknown."""
+    if relative_3m is None or revision_pct is None:
+        return None
+    price = "strong" if relative_3m >= relative_pp else "weak" if relative_3m <= -relative_pp else "flat"
+    est = "rising" if revision_pct >= revision_move_pct else "falling" if revision_pct <= -revision_move_pct else "steady"
+    return f"{price}_{est}"

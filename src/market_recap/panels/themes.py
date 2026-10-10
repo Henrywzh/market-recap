@@ -34,14 +34,16 @@ import pandas as pd
 
 from ..compute import capex as X
 from ..compute import events as E
+from ..compute import rotation as R
 from ..compute import themes as T
 from .. import cache
-from ..sources import adata, alfred, altdata, dart, eia, fred, korea_customs, mops, motie, pcpartpicker, releases, sec, yahoo
+from ..sources import adata, alfred, altdata, dart, eia, estimates, fred, korea_customs, mops, motie, pcpartpicker, releases, sec, yahoo
 from ..sources import expectations as expectations_source
+from ..config import PERIOD_TRADING_DAYS
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, describe_error, history_payload
 from .financials import cik_for
 
-INPUTS = ("catalysts", "evidence")
+INPUTS = ("catalysts", "evidence", "valuation")
 BN = 1e9
 
 
@@ -112,8 +114,37 @@ def _korean(settings: dict, key: str, proxy: pd.Series, krx: pd.DataFrame, as_of
     return out
 
 
+def _board(ctx, settings: dict, proxy_price: pd.Series, market: pd.Series, symbols: list[str], run_in: dict,
+           trends: dict[str, dict], valuation_rows: dict[str, dict]) -> dict:
+    """Where the theme stands: its proxy against the market over the last
+    ``rs_period``, the weekly RS-Ratio / Momentum quadrant (as SECTORS draws
+    it), how many bellwethers close above their average, the median estimate
+    revision, where their P/E sits in its own history, and the label the
+    configured rules give that combination. Absent inputs stay None."""
+    cfg = settings["board"]
+    month = PERIOD_TRADING_DAYS["1M"]
+    rrg = R.rrg(proxy_price, market) if not proxy_price.empty else pd.DataFrame()
+    last = rrg.iloc[-1] if len(rrg) else None
+    br = T.breadth(ctx.closes, symbols, int(cfg["ma_sessions"]), month)
+    rev = T.revision(trends, symbols, cfg["revision_period"], cfg["revision_window"], float(cfg["revision_move_pct"]))
+    val = T.valuation_position(valuation_rows, symbols, int(cfg["min_valuation_names"]))
+    key = T.state(run_in.get("vs_spx_3m"), rev["median_pct"], relative_pp=float(cfg["relative_pp"]),
+                  revision_move_pct=float(cfg["revision_move_pct"]))
+    return {
+        "rs": T.rs_history(proxy_price, market, PERIOD_TRADING_DAYS[cfg["rs_period"]]) if not proxy_price.empty else None,
+        "rrg": {"ratio": clean_float(last["ratio"], 2), "momentum": clean_float(last["momentum"], 2),
+                "quadrant": R.quadrant(float(last["ratio"]), float(last["momentum"]))} if last is not None else None,
+        "breadth": {**br, "ma_sessions": int(cfg["ma_sessions"])},
+        "revision": {**rev, "period": cfg["revision_period"], "window": cfg["revision_window"], "move_pct": float(cfg["revision_move_pct"])},
+        "valuation": val,
+        "state": {"key": key, "label": cfg["labels"].get(key) if key else None,
+                  "relative_3m": run_in.get("vs_spx_3m"), "relative_pp": float(cfg["relative_pp"])},
+    }
+
+
 def _group(ctx, spec: dict, settings: dict, catalysts: dict, evidence: dict, excess: pd.DataFrame,
-           market: pd.Series, as_of: date, krx: pd.DataFrame | None = None) -> dict:
+           market: pd.Series, as_of: date, krx: pd.DataFrame | None = None,
+           trends: dict[str, dict] | None = None, valuation_rows: dict[str, dict] | None = None) -> dict:
     names = evidence.get("names") or {}
     etf = spec.get("etf")
     basket = list(spec.get("basket") or [])
@@ -172,6 +203,7 @@ def _group(ctx, spec: dict, settings: dict, catalysts: dict, evidence: dict, exc
         if e.get("lane") == "macro" and as_of.isoformat() < e["date"] <= end and any(p.search(e["title"]) for p in patterns):
             calendar.append({"date": e["date"], "kind": "macro", "title": e["title"], "time": e.get("time"),
                              "importance": e.get("importance")})
+    run_in = T.run_in(proxy_price, market) if not proxy_price.empty else {}
     relative = {}
     for key, symbol in (("SPX", ctx.primary.symbol), ("NDX", "^NDX")):
         if proxy_price.empty or symbol not in ctx.index_closes.columns:
@@ -181,7 +213,9 @@ def _group(ctx, spec: dict, settings: dict, catalysts: dict, evidence: dict, exc
             relative[key] = history_payload(ratio, years=10, digits=6)
     return {
         "key": spec["key"], "label": spec["label"], "proxy": proxy_label, "proxy_is_etf": bool(etf),
-        "run_in": T.run_in(proxy_price, market) if not proxy_price.empty else {},
+        "run_in": run_in,
+        "board": _board(ctx, settings, proxy_price, market, [b["symbol"] for b in bellwethers if b.get("in_universe")],
+                        run_in, trends or {}, valuation_rows or {}),
         # Proxy / index, unscaled: the page rebases it to 100 at the start of
         # whichever range is shown.
         "relative": relative,
@@ -1009,7 +1043,14 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         krx = _krx_closes(settings) if settings.get("korean") else None
     except Exception:
         krx = None
-    groups = [_group(ctx, spec, settings, catalysts, evidence, excess, market, as_of, krx) for spec in settings["groups"]]
+    valuation_rows = {r["ticker"]: r for r in (inputs.get("valuation") or {}).get("rows", []) if r.get("ticker")}
+    members = sorted({s for spec in settings["groups"] for s in spec.get("bellwethers") or []} & set(ctx.closes.columns))
+    try:
+        trends, _missing = estimates.fetch_trends(members)
+    except Exception:  # noqa: BLE001 -- the board's revision column is absent, the page still builds
+        trends = {}
+    groups = [_group(ctx, spec, settings, catalysts, evidence, excess, market, as_of, krx, trends, valuation_rows)
+              for spec in settings["groups"]]
 
     cloud = {
         "capex": _section(lambda: _capex(ctx, settings)),

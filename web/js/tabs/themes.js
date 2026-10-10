@@ -9,6 +9,8 @@ import { viewChart, VIEWS } from '../viewchart.js';
 import { availableRanges, sliceRange } from '../range.js';
 import { render } from '../charts.js';
 import { tickerHref } from '../routes.js';
+import { spark } from '../spark.js';
+import { stateTone, stateWhy, breadthText, revisionText, valuationText, quadrantTone, splitWidths } from '../themes-board.js';
 
 const KIND_TONE = { earnings: 'warn', macro: 'info', data: 'up' };
 const KIND_LABEL = { earnings: 'EARN', macro: 'MACRO', data: 'DATA' };
@@ -63,6 +65,48 @@ function overviewStrip(data, active, pick) {
       el('div', { class: 'stat-note', text: `${g.calendar.length} dated items · proxy ${g.proxy_is_etf ? g.proxy : 'basket'}` }),
     ]);
   }));
+}
+
+// --- the board: where each theme stands -----------------------------------------
+
+function nextOf(g) {
+  const n = g.calendar.find((c) => c.kind === 'earnings' && !c.projected) || g.calendar.find((c) => c.kind === 'earnings');
+  return n ? `${n.symbol} ${n.date.slice(5)}${n.projected ? ' (proj.)' : ''}` : null;
+}
+
+function shareBar(share, tone) {
+  return el('div', { class: 'tb-track' }, [el('span', { class: `tb-fill ${tone}`, style: `width:${Math.max(0, Math.min(1, share)) * 100}%` })]);
+}
+
+function boardRow(g, active, pick) {
+  const b = g.board || {};
+  const st = b.state || {};
+  const br = breadthText(b.breadth);
+  const rv = revisionText(b.revision);
+  const vl = valuationText(b.valuation);
+  const w = splitWidths(b.revision);
+  const rs = b.rs?.values?.length ? spark(b.rs.values, { threshold: 100, width: 100, height: 28, color: 'var(--accent)' }) : null;
+  const row = el('tr', { class: `tb-row${g.key === active ? ' tb-active' : ''}`, tabindex: '0', role: 'button', onclick: () => pick(g.key) }, []);
+  row.append(el('td', {}, [el('div', { class: 'tb-name', text: g.label }), el('div', { class: 'dim tb-sub', text: `proxy ${g.proxy_is_etf ? g.proxy : 'basket'}` })]));
+  row.append(el('td', {}, [st.label ? tag(st.label, stateTone(st.key), stateWhy(b)) : el('span', { class: 'dim', text: DASH, title: stateWhy(b) })]));
+  row.append(el('td', { class: 'tb-rs' }, [rs, b.rrg?.quadrant ? el('span', { class: `tb-quad ${quadrantTone(b.rrg.quadrant)}`, text: b.rrg.quadrant, title: `RS-Ratio ${num(b.rrg.ratio, 1)} · RS-Momentum ${num(b.rrg.momentum, 1)}` }) : null]));
+  row.append(el('td', {}, [runInTags(g)]));
+  row.append(el('td', {}, br ? [el('b', { text: br.main }), shareBar(br.share, br.share >= 0.5 ? 'up' : 'down'), el('div', { class: 'dim tb-sub', text: br.note })] : [DASH]));
+  row.append(el('td', {}, rv ? [el('b', { class: rv.main.startsWith('-') ? 'down' : rv.main.startsWith('+') && rv.main !== '+0.00%' ? 'up' : '', text: rv.main }),
+    el('div', { class: 'tb-split' }, [el('span', { class: 'up', style: `width:${w.up}%` }), el('span', { class: 'mid', style: `width:${w.flat}%` }), el('span', { class: 'down', style: `width:${w.down}%` })]),
+    el('div', { class: 'dim tb-sub', text: `${rv.note} · ${b.revision.window}` })] : [DASH]));
+  row.append(el('td', {}, vl ? [el('b', { text: vl.main }), shareBar(vl.share, 'accent'), el('div', { class: 'dim tb-sub', text: vl.note })] : [DASH]));
+  const next = nextOf(g);
+  row.append(el('td', { class: next ? '' : 'dim', text: next || 'none in six weeks' }));
+  return row;
+}
+
+function boardCard(data, active, pick) {
+  const rows = data.groups.map((g) => boardRow(g, active, pick));
+  return card('STATUS BOARD · WHERE EACH THEME STANDS', el('span', { class: 'dim', text: 'click a row for its detail · a label describes, it forecasts nothing' }), [
+    table(['THEME', 'STATE', 'RELATIVE STRENGTH · 6M', 'VS S&P 500', 'BREADTH', 'ESTIMATES', 'VALUATION', 'NEXT REPORT'], rows, { class: 'tb-table' }),
+    el('div', { class: 'field-note', text: 'RELATIVE STRENGTH: the proxy over the S&P 500 (= 100 at the start; the line is the dashed 100) and its weekly RS-Ratio / Momentum quadrant, as SECTORS draws it. BREADTH: bellwethers closing above their 50-day average. ESTIMATES: the median change of this fiscal year\'s EPS estimate (Yahoo) over 30 days across the bellwethers, with how many rose (↑), held (=) and fell (↓) by more than 0.5%. VALUATION: the median percentile of their forward P/E against their own 10-year history (a bar to 100). STATE: 3 months against the S&P 500 beyond ±2 pp (strong / weak) crossed with the median estimate change; hover a label for the numbers. A bellwether set of 7-12 names is a small sample.' }),
+  ]);
 }
 
 function calendarCard(g, asOf, days) {
@@ -849,21 +893,24 @@ export default async function renderThemes(root, data, _manifest, ctx = {}) {
     'Bellwether reports: scheduled on the Nasdaq calendar, or projected from the company\'s own report rhythm (median gap between past reports) and marked so.',
     'Data dates: when each monthly series is due -- Taiwan revenue by the 10th, Korea\'s confirmed customs figures around the 15th; a series past due is marked late.',
   ]));
+  const boardHost = el('div', {});
   const heat = heatmapCard(data.heatmap);
-  if (heat) root.append(heat);
   const host = el('div', {});
   // The hash argument is upper-cased like a ticker (#themes/SEMIS).
   const wanted = String(ctx.arg || '').toLowerCase();
   let active = data.groups.some((g) => g.key === wanted) ? wanted : data.groups[0].key;
+  const pick = (key) => { active = key; ctx.setArg?.(key); draw(); };
   const draw = () => {
+    boardHost.replaceChildren(data.groups.every((g) => g.board) ? boardCard(data, active, pick) : overviewStrip(data, active, pick));
     host.replaceChildren();
     const g = data.groups.find((x) => x.key === active);
-    host.append(overviewStrip(data, active, (key) => { active = key; ctx.setArg?.(key); draw(); }));
     host.append(el('h2', { class: 'section-title' }, [g.label, el('span', { class: 'muted', text: ` proxy ${g.proxy}` })]));
     host.append(el('div', { class: 'grid two' }, [calendarCard(g, data.as_of, data.calendar_days), relativeCard(g)]));
     host.append(bellwetherCard(g));
     themeCards(g.key, data).forEach((node) => host.append(node));
   };
+  root.append(boardHost);
+  if (heat) root.append(heat);
   root.append(host);
   draw();
 }

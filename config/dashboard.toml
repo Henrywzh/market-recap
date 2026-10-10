@@ -555,6 +555,31 @@ yahoo = "000660.KS"
 dart = "SK하이닉스"
 group = "semis"
 
+[themes.board]
+# The status board: price against the S&P 500, breadth, estimate revisions and
+# valuation of each theme's bellwethers, and a label naming the combination.
+# A description of where it stands, not a forecast. "Strong" / "weak" is three
+# months against the S&P 500 beyond relative_pp; "rising" / "falling" is the
+# median change of the revision_period EPS estimate (Yahoo: 0y = this fiscal
+# year) over revision_window beyond revision_move_pct.
+ma_sessions = 50
+rs_period = "6M"
+relative_pp = 2.0
+revision_period = "0y"
+revision_window = "30d"
+revision_move_pct = 0.5
+min_valuation_names = 3
+[themes.board.labels]
+strong_rising = "STRONG · ESTIMATES RISING"
+strong_steady = "STRONG · ESTIMATES NOT RISING"
+strong_falling = "STRONG · ESTIMATES FALLING"
+flat_rising = "ESTIMATES RISING"
+flat_steady = "NO CLEAR SIGNAL"
+flat_falling = "ESTIMATES FALLING"
+weak_rising = "WEAK · ESTIMATES RISING"
+weak_steady = "WEAK · ESTIMATES HOLDING"
+weak_falling = "WEAK · ESTIMATES FALLING"
+
 [[themes.groups]]
 key = "cloud"
 label = "CLOUD & AI CAPEX"
