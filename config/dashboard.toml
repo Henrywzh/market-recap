@@ -409,6 +409,62 @@ symbols = ["GOOGL", "GOOG"]
 url = "https://www.googlecloudevents.com/next-vegas/faq"
 source = "Google Cloud"
 
+[scenarios]
+# CATALYSTS -> SCENARIOS. What each data release has done to rates and stocks,
+# measured over its past releases with the sample size shown. Surprise = actual
+# less TradingView's forecast; a release is "above" or "below" when it misses
+# by more than class_threshold_sd robust standard deviations of its own
+# surprises (surprise_clip_sd caps the outliers). A line published to one
+# decimal sets miss_threshold (half a tick, in its unit): any miss counts. Releases from history_start
+# (where TradingView's forecasts begin); the excluded windows are months whose
+# surprises are in the millions and would set the scale. Nothing is forecast.
+history_start = "2016-01-01"
+exclude = [{ label = "COVID", start = "2020-03-01", end = "2020-08-31" }]
+class_threshold_sd = 0.7
+surprise_clip_sd = 4
+# A class or era with fewer releases than this shows its count and no figure.
+min_class_releases = 5
+min_era_releases = 8
+# Eras for the stock-market response (the first break starts the second era).
+era_breaks = ["2020-01-01", "2022-01-01", "2024-01-01"]
+# Windows are named in config.PERIOD_TRADING_DAYS; the regime window is the
+# correlation of SPY with the 10-year yield's daily change.
+beta_period = "1Y"
+regime_sessions = 60
+# The sector ordering after a release: found before the split, checked after
+# it, with a permutation test (the sectors are not independent samples).
+persistence_split = "2022-01-01"
+permutations = 2000
+permutation_seed = 20260101
+upcoming_days = 14
+fomc_title = "Fed Interest Rate Decision"
+# 2-year yield move that makes an FOMC day hawkish or dovish (bp). A measure
+# of what the day did, not a surprise known beforehand.
+fomc_bucket_bp = 3
+# Extra series beside the market proxy and the sector ETFs. Oil's daily move
+# is clipped (a futures roll is a jump, not a shock).
+credit = ["HYG", "LQD"]
+oil = "CL=F"
+oil_clip_pct = 8
+dollar = "UUP"
+relative = ["IWM", "KRE"]
+fred_10y = "DGS10"
+fred_2y = "DGS2"
+# TradingView line, exactly as its calendar titles it.
+drivers = [
+  { key = "core_cpi", label = "Core CPI m/m", title = "Core Inflation Rate MoM", unit = "pp" , miss_threshold = 0.05 },
+  { key = "cpi", label = "CPI m/m", title = "Inflation Rate MoM", unit = "pp" , miss_threshold = 0.05 },
+  { key = "ppi", label = "PPI m/m", title = "PPI MoM", unit = "pp" , miss_threshold = 0.05 },
+  { key = "core_pce", label = "Core PCE m/m", title = "Core PCE Price Index MoM", unit = "pp" , miss_threshold = 0.05 },
+  { key = "payrolls", label = "Nonfarm payrolls", title = "Non Farm Payrolls", unit = "k" },
+  { key = "unemployment", label = "Unemployment rate", title = "Unemployment Rate", unit = "pp" , miss_threshold = 0.05 },
+  { key = "hourly_earnings", label = "Average hourly earnings m/m", title = "Average Hourly Earnings MoM", unit = "pp" , miss_threshold = 0.05 },
+  { key = "claims", label = "Initial jobless claims", title = "Initial Jobless Claims", unit = "k" },
+  { key = "jolts", label = "JOLTs job openings", title = "JOLTs Job Openings", unit = "k" },
+  { key = "retail_sales", label = "Retail sales m/m", title = "Retail Sales MoM", unit = "pp" , miss_threshold = 0.05 },
+  { key = "ism_manufacturing", label = "ISM manufacturing PMI", title = "ISM Manufacturing PMI", unit = "pts" },
+]
+
 [themes]
 # CATALYSTS -> THEMES. Groups of names that move together, not GICS sectors.
 # Each group: a proxy (an ETF, or an equal-weight basket of members when no

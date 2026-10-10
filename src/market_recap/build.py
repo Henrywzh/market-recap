@@ -16,7 +16,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, evidence, financials, fixed_income, heatmaps, industries, macro, markets, monitor, overview, positioning, priced, risk, rotation, themes, valuation, xray
+from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, evidence, financials, fixed_income, heatmaps, industries, macro, markets, monitor, overview, positioning, priced, risk, rotation, scenarios, themes, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -27,6 +27,8 @@ PANELS = {
     "markets": markets.build,
     "catalysts": catalysts.build,
     "priced": priced.build,
+    # Measures past data releases against rates and stocks; reads no other panel.
+    "scenarios": scenarios.build,
     "earnings": earnings.build,
     "heatmaps": heatmaps.build,
     "rotation": rotation.build,
