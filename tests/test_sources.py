@@ -123,6 +123,17 @@ def test_missing_observation_date_is_unknown_not_current():
     assert freshness_status(pd.Timestamp.today(), "daily_close") == "current"
 
 
+def test_every_source_policy_has_a_freshness_window():
+    # An unlisted policy silently falls back to seven days: Yahoo's monthly
+    # forward P/E history, tagged with a cache kind, failed --strict that way.
+    import re
+    from market_recap.config import FRESHNESS
+    src = Path(__file__).resolve().parents[1] / "src" / "market_recap"
+    used = {m for path in src.rglob("*.py")
+            for m in re.findall(r'^\s*policy="([a-z_]+)"', path.read_text(), re.M)}
+    assert used and used <= set(FRESHNESS), used - set(FRESHNESS)
+
+
 def test_sec_index_freshness_uses_the_fetch_date_for_a_quiet_filer(monkeypatch):
     from datetime import datetime, timezone
     checked = datetime(2026, 10, 4, tzinfo=timezone.utc)

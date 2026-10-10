@@ -544,7 +544,10 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         "https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/",
         observed_date=max((f["latest"]["date"] for f in fiscal_by_symbol.values() if f["latest"]), default=None),
         rows=len(fiscal_by_symbol),
-        policy="reference_data",
+        # Dated by the month end it describes, and Yahoo posts a month end
+        # more than five weeks later (August 31 was still the newest point on
+        # October 10), so the window has to carry that lag.
+        policy="monthly_release",
         status="ok" if not problems else "partial",
         error=None if not problems else f"{problems} companies not read in full",
     ))
