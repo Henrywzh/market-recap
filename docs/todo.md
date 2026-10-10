@@ -271,3 +271,31 @@ premium = short expiry IV less the next-month IV, from the snapshots' multi-
 expiry `atm_iv`; (4) IV level and percentile once the snapshots hold 2-3
 months. Open: whether to put the Alpaca key in GitHub secrets so the nightly
 build can use it; otherwise it stays a local script. Futu OpenD untested.
+
+## 9. THEMES data signals: do they lead price? (2026-10-10)
+
+The THEMES status board (60108f2) reads price (50-day line, relative
+strength), estimate revisions and own-history valuation. It has no row for
+the data behind a theme: capex, exports, inventories, orders, the series that
+would say a theme's demand is improving before the price shows it.
+
+Do not build the row first. Test whether it carries information:
+
+- **Pick series per theme** from `config/dashboard.toml` ids only (FRED or
+  TradingView): e.g. semis -- billings/shipments, ISM new orders; housing --
+  permits, starts, new-home sales, mortgage applications; banks -- loan
+  growth, deposit costs, the yield curve; energy -- inventories, rig count.
+  A series with a hard-coded id in a builder is a bug.
+- **Direction, not level.** Improving / deteriorating from the latest change
+  against its own noise (robust scale, as `compute/scenarios.robust_scale`),
+  with the release date and n shown. "Not detected" is a result.
+- **The test, before any signal ships.** Does the direction of the series
+  today predict the theme's excess return over the next 1-3 months, out of
+  sample (fix a split, as `scenarios.persistence`)? Revisions and releases
+  overlap in time and themes are not independent, so use a permutation test,
+  not a p-value from the regression. Report per theme with n; a theme whose
+  series do not lead price shows no data signal rather than a weak one.
+- **Rollup**: count of improving / deteriorating series per theme on the
+  board, only for themes whose series passed. Release lag matters: use the
+  value known on the date, not the revised one (FRED vintages / ALFRED where
+  the series is revised).
