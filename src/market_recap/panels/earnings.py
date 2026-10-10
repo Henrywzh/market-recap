@@ -83,12 +83,14 @@ def _previous(ctx) -> tuple[dict | None, str | None]:
         return None, None
 
 
-def _calendar(dates: list[date], today: date, use_cache: bool) -> tuple[list[dict], list[str]]:
+def _calendar(dates: list[date], today: date, use_cache: bool,
+              tracked=None) -> tuple[list[dict], list[str]]:
     rows, failed = [], []
     for day in dates:
         kind = "archive" if (today - day).days > SETTLED_AFTER_DAYS else "daily_file"
         try:
-            rows += [{**row, "date": day.isoformat()} for row in nasdaq.fetch_earnings(day.isoformat(), use_cache=use_cache, kind=kind)]
+            rows += [{**row, "date": day.isoformat()} for row in nasdaq.fetch_reported(
+                day.isoformat(), today.isoformat(), tracked=tracked, use_cache=use_cache, kind=kind)]
         except Exception:
             failed.append(day.isoformat())
     return rows, failed
@@ -100,9 +102,9 @@ def _season(ctx, universe: dict, trends: dict, previous: dict | None, today: dat
     start = date(quarter[0], 3 * quarter[1] - 2, 1) + timedelta(days=31)
     past = C.sessions(start - timedelta(days=1), today)
     ahead = C.sessions(today + timedelta(days=1), today + timedelta(days=CAPTURE_AHEAD_DAYS))
-    rows, failed = _calendar(past + ahead, today, use_cache)
     # Nasdaq writes class shares BRK.B, Yahoo BRK-B: match without separators.
     own = {ticker_key(symbol): symbol for symbol in universe}
+    rows, failed = _calendar(past + ahead, today, use_cache, tracked=lambda symbol: ticker_key(symbol) in own)
     rows = [{**row, "symbol": own.get(ticker_key(row["symbol"]), row["symbol"])} for row in rows]
 
     # Year-ago EPS, captured while it is still published. Nasdaq first (the
@@ -125,6 +127,16 @@ def _season(ctx, universe: dict, trends: dict, previous: dict | None, today: dat
             continue
         reports.append({**row, "year_ago_eps": (captured.get(row["symbol"]) or {}).get("year_ago_eps")})
     out = E.season(reports, universe, quarter)
+    # Reported by the calendar's date with no actual posted yet: listed, never
+    # counted as a beat or a miss, and never silently left out.
+    done = {r["symbol"] for r in reports if E.nasdaq_quarter(r.get("fiscal_quarter")) == quarter}
+    pending: dict[str, dict] = {}
+    for row in rows:
+        if row["symbol"] in universe and row["symbol"] not in done and row.get("eps") is None \
+                and nasdaq.result_due(row, row["date"], today.isoformat()) \
+                and E.nasdaq_quarter(row.get("fiscal_quarter")) == quarter:
+            pending[row["symbol"]] = {k: row.get(k) for k in ("symbol", "date", "timing", "eps_forecast")}
+    out["pending"] = sorted(pending.values(), key=lambda r: (r["date"], r["symbol"]), reverse=True)
     upcoming = [r for r in rows if r["symbol"] in universe and r["date"] > today.isoformat()
                 and E.nasdaq_quarter(r.get("fiscal_quarter")) == quarter]
     next_week = set(C.next_sessions(today, 5))
@@ -287,8 +299,11 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     ctx.log.add(SourceRecord(
         "earnings_season_nasdaq", "Nasdaq earnings calendar, season to date", nasdaq.PAGE_URL,
         rows=season["reported"], observed_date=ctx.as_of, policy="daily_close",
-        status="ok" if not failed else "partial",
-        error=f"dates not fetched: {', '.join(failed)}" if failed else None,
+        status="ok" if not (failed or season["pending"]) else "partial",
+        error="; ".join(
+            ([f"dates not fetched: {', '.join(failed)}"] if failed else [])
+            + ([f"results not posted yet: {', '.join(r['symbol'] for r in season['pending'])}"] if season["pending"] else [])
+        ) or None,
     ))
 
     try:

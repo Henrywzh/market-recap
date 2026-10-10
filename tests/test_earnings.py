@@ -145,3 +145,62 @@ def test_snapshot_takes_the_newer_pdf_quarter_figures_only_for_the_same_quarter(
     assert P._with_pdf_season(snapshot, [{**pdf, "report_date": "2026-09-25"}]) == snapshot   # older PDF: unchanged
     assert P._with_pdf_season(snapshot, [{**pdf, "reference_quarter": "2026Q4"}]) == snapshot  # another quarter: unchanged
     assert P._with_pdf_season(None, [pdf]) is None
+
+
+def _calendar_text(eps):
+    import json
+    return json.dumps({"data": {"rows": [
+        {"symbol": "DAL", "name": "Delta", "time": "time-pre-market", "epsForecast": "$1.80", "noOfEsts": "7",
+         "lastYearEPS": "$1.71", "fiscalQuarterEnding": "Sep/2026", "eps": eps, "surprise": ""},
+        {"symbol": "LATE", "name": "Late", "time": "time-after-hours", "epsForecast": "$1.00", "noOfEsts": "3",
+         "lastYearEPS": "", "fiscalQuarterEnding": "Sep/2026", "eps": "", "surprise": ""},
+    ]}})
+
+
+def test_a_missing_actual_is_asked_for_again_once_per_build(monkeypatch, tmp_path):
+    from market_recap import cache
+    from market_recap.sources import nasdaq
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(nasdaq, "_asked", set())
+    served = iter(["", "", "$1.72"])
+    calls = []
+    monkeypatch.setattr(nasdaq, "get_text", lambda url, **kw: calls.append(url) or _calendar_text(next(served)))
+
+    first = nasdaq.fetch_reported("2026-10-09", "2026-10-09")
+    assert [r["eps"] for r in first if r["symbol"] == "DAL"] == [None] and len(calls) == 1
+    # Before the open is due on the day itself; after the close is not yet.
+    assert [r["symbol"] for r in nasdaq.awaiting(first, "2026-10-09", "2026-10-09")] == ["DAL"]
+    # The same build does not ask twice.
+    nasdaq.fetch_reported("2026-10-09", "2026-10-09")
+    assert len(calls) == 1
+
+    monkeypatch.setattr(nasdaq, "_asked", set())  # the next build
+    assert [r["eps"] for r in nasdaq.fetch_reported("2026-10-09", "2026-10-10") if r["symbol"] == "DAL"] == [None]
+    monkeypatch.setattr(nasdaq, "_asked", set())
+    later = nasdaq.fetch_reported("2026-10-09", "2026-10-12")
+    assert [r["eps"] for r in later if r["symbol"] == "DAL"] == [1.72] and len(calls) == 3
+
+    # Only the names asked about count, and a day past the window is left alone.
+    monkeypatch.setattr(nasdaq, "_asked", set())
+    nasdaq.fetch_reported("2026-10-09", "2026-10-12", tracked=lambda s: s == "DAL")
+    assert len(calls) == 3  # DAL is in; LATE is not tracked
+    monkeypatch.setattr(nasdaq, "_asked", set())
+    nasdaq.fetch_reported("2026-10-09", "2026-10-30")
+    assert len(calls) == 3
+
+
+def test_the_season_lists_a_result_not_posted_yet_and_does_not_count_it(monkeypatch):
+    from market_recap.panels import earnings as P
+    rows = [
+        {"symbol": "PEP", "date": "2026-10-08", "timing": "bmo", "eps": 2.34, "eps_forecast": 2.29,
+         "surprise_pct": 2.2, "fiscal_quarter": "Sep/2026", "last_year_eps": None},
+        {"symbol": "DAL", "date": "2026-10-09", "timing": "bmo", "eps": None, "eps_forecast": 1.8,
+         "surprise_pct": None, "fiscal_quarter": "Sep/2026", "last_year_eps": 1.71},
+        {"symbol": "JPM", "date": "2026-10-13", "timing": "bmo", "eps": None, "eps_forecast": 5.9,
+         "surprise_pct": None, "fiscal_quarter": "Sep/2026", "last_year_eps": 4.9},
+    ]
+    monkeypatch.setattr(P, "_calendar", lambda dates, today, use_cache, tracked=None: (rows, []))
+    universe = {s: {"sector": "X", "shares": 1.0} for s in ("PEP", "DAL", "JPM")}
+    out, failed = P._season(None, universe, {}, None, date(2026, 10, 9), True)
+    assert (out["reported"], out["beat"], out["miss"]) == (1, 1, 0)
+    assert out["pending"] == [{"symbol": "DAL", "date": "2026-10-09", "timing": "bmo", "eps_forecast": 1.8}]

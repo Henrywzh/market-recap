@@ -242,7 +242,8 @@ def _earnings(ctx, settings: dict, dates: list[date], use_cache: bool) -> tuple[
             failed.append(day.isoformat())
             continue
         try:
-            rows = nasdaq.fetch_earnings(day.isoformat(), use_cache=use_cache)
+            rows = nasdaq.fetch_reported(day.isoformat(), ctx.as_of, use_cache=use_cache,
+                                         tracked=lambda symbol: ticker_key(symbol) in names)
             misses = 0
         except Exception:
             failed.append(day.isoformat())
@@ -296,7 +297,8 @@ def _recent(ctx, macro: list[dict], earnings: list[dict], session: date, previou
     reacted, after_close = [], []
     for event in earnings:
         if (event["date"] == today and event["timing"] != "amc") or (event["date"] == prior and event["timing"] == "amc"):
-            reacted.append({**event, "return_1d": one_day(event["symbol"])})
+            reacted.append({**event, "return_1d": one_day(event["symbol"]),
+                            "result_pending": event["eps"] is None})
         elif event["date"] == today and event["timing"] == "amc":
             after_close.append(event)
     spx = ctx.index_closes["^GSPC"] if "^GSPC" in ctx.index_closes.columns else None
@@ -344,11 +346,15 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     macro, failed, expected_missing = _macro(ctx, settings, session, end, use_cache)
     earnings_dates = [previous] + C.sessions(session, end)
     earnings, earnings_failed = _earnings(ctx, settings, earnings_dates, use_cache)
+    # Reported by the calendar's date, but Nasdaq has not posted the actual yet.
+    pending = [e for e in earnings if e["eps"] is None and nasdaq.result_due(e, e["date"], ctx.as_of)]
+    problems = ([f"dates not fetched: {', '.join(earnings_failed)}"] if earnings_failed else []) + (
+        ["results not posted yet: " + ", ".join(f"{e['symbol']} ({e['date']})" for e in pending)] if pending else [])
     ctx.log.add(SourceRecord(
         "catalysts_nasdaq_earnings", "Nasdaq earnings calendar (unofficial)", nasdaq.PAGE_URL,
         rows=len(earnings), observed_date=ctx.as_of, policy="daily_close",
-        status="ok" if not earnings_failed else ("error" if len(earnings_failed) == len(earnings_dates) else "partial"),
-        error=f"dates not fetched: {', '.join(earnings_failed)}" if earnings_failed else None,
+        status="ok" if not problems else ("error" if len(earnings_failed) == len(earnings_dates) else "partial"),
+        error="; ".join(problems) or None,
     ))
 
     upcoming = sorted(

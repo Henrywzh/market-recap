@@ -11,6 +11,8 @@ is company-confirmed or its own estimate.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import date
 import json
 import re
 
@@ -76,6 +78,51 @@ def fetch_earnings(date: str, *, use_cache: bool = True, kind: str = "daily_file
         kind=kind, suffix=".json", use_cache=use_cache,
     )
     return parse_earnings(text)
+
+
+# Nasdaq posts a reporter's actual hours after the release: Delta's EPS from
+# the morning of 2026-10-09 was still blank at 18:35 that evening. A cached
+# day that still lacks a result is asked for again, once per build, while it
+# is this many days old; one never filled after that stays visibly pending.
+RECHECK_DAYS = 7
+_asked: set[str] = set()
+
+
+def result_due(row: dict, day: str, as_of: str) -> bool:
+    """Whether the calendar says this company had reported by ``as_of``'s close.
+
+    A past date has; on ``as_of`` itself only a before-the-open report has, as
+    an after-the-close or unstated time may still be ahead of the build.
+    """
+    return day < as_of or (day == as_of and row.get("timing") == "bmo")
+
+
+def awaiting(rows: list[dict], day: str, as_of: str,
+             tracked: Callable[[str], bool] | None = None) -> list[dict]:
+    """Rows that should carry an actual by now and do not."""
+    return [r for r in rows if r.get("eps") is None and result_due(r, day, as_of)
+            and (tracked is None or tracked(r["symbol"]))]
+
+
+def fetch_reported(day: str, as_of: str, *, tracked: Callable[[str], bool] | None = None,
+                   use_cache: bool = True, kind: str = "daily_file") -> list[dict]:
+    """:func:`fetch_earnings`, asked again when the cached copy of a recent day
+    is still missing a (tracked) reporter's actual. A failed re-ask keeps the
+    cached rows."""
+    path = cache.path_for(NAMESPACE, f"earnings-{day}", ".json")
+    from_cache = use_cache and cache.is_fresh(path, kind)
+    rows = fetch_earnings(day, use_cache=use_cache, kind=kind)
+    if not from_cache or day in _asked:
+        _asked.add(day)
+        return rows
+    recent = (date.fromisoformat(as_of) - date.fromisoformat(day)).days <= RECHECK_DAYS
+    if not recent or not awaiting(rows, day, as_of, tracked):
+        return rows
+    _asked.add(day)
+    try:
+        return fetch_earnings(day, use_cache=False, kind=kind)
+    except Exception:  # noqa: BLE001 - the cached day stands; the result stays pending
+        return rows
 
 
 def parse_history(text: str) -> dict[str, float]:

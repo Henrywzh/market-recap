@@ -237,10 +237,12 @@ def _timeline(entry: dict, history: pd.DataFrame, symbol: str) -> list[dict]:
 
 def _calendars(dates: set[str], as_of: date, budget: int) -> tuple[dict[str, dict[str, dict]], int]:
     """{report date: {symbol: Nasdaq row}} for past report dates, and how many
-    dates were left for a later build. A past day's calendar never changes and
-    is kept for good; one saved before the results were in (no EPS on any row)
-    is read again. At most ``budget`` days are fetched per build, so a cold
-    cache fills over a few nights instead of in one burst."""
+    dates were left for a later build. A past day's calendar settles and is
+    kept for good; one saved before the results were in (no EPS on any row)
+    is read again, and a recent one still missing any reporter's actual is
+    asked for again (:func:`nasdaq.fetch_reported`). At most ``budget`` days
+    are fetched per build, so a cold cache fills over a few nights instead of
+    in one burst."""
     out, fetched, left = {}, 0, 0
     for day in sorted(dates, reverse=True):
         if day >= as_of.isoformat():
@@ -249,7 +251,7 @@ def _calendars(dates: set[str], as_of: date, budget: int) -> tuple[dict[str, dic
         rows = None
         if cached:
             try:
-                rows = nasdaq.fetch_earnings(day, kind="archive")
+                rows = nasdaq.fetch_reported(day, as_of.isoformat(), kind="archive")
             except Exception:
                 rows = None
             if rows is not None and not any(r.get("eps") is not None for r in rows):

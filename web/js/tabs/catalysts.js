@@ -379,7 +379,7 @@ function lastSession(recent, labels) {
   });
   const reportRow = (e, reacted) => el('tr', {}, [
     el('td', { text: e.symbol }),
-    el('td', { text: e.eps === null ? DASH : `$${num(e.eps, 2)}` }),
+    el('td', { class: e.result_pending ? 'dim' : '', text: e.result_pending ? 'not posted' : e.eps === null ? DASH : `$${num(e.eps, 2)}` }),
     el('td', { class: 'dim', text: e.eps_forecast === null ? DASH : `$${num(e.eps_forecast, 2)}` }),
     el('td', { class: dirClass(e.surprise_pct), text: e.surprise_pct === null ? DASH : pct(e.surprise_pct, 1) }),
     el('td', { class: reacted ? dirClass(e.return_1d) : 'dim', text: reacted ? pct(e.return_1d) : 'next session' }),

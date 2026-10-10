@@ -246,6 +246,7 @@ function seasonCard(s) {
       el('span', { class: 'earn-progress-fill', style: `width:${Math.min(100, share)}%` }),
       el('span', { class: 'earn-progress-text', text: `${s.reported} of ${s.universe} reported (${num(share, 0)}%) · ${s.upcoming_next_5_sessions} due in the next 5 sessions` }),
     ]),
+    s.pending?.length ? el('div', { class: 'dim', text: `Result not posted yet, so not counted: ${s.pending.map((r) => `${r.symbol} (${r.date})`).join(', ')}` }) : null,
     el('div', { class: 'stat-strip' }, [
       stat('BEAT EPS CONSENSUS', s.beat_share == null ? DASH : `${num(s.beat_share, 0)}%`, `${s.beat} beat · ${s.in_line} in line · ${s.miss} missed`),
       stat('MEDIAN SURPRISE', pct(s.median_surprise_pct, 1), `aggregate ${pct(s.aggregate_surprise_pct, 1)}`, dirCls(s.median_surprise_pct)),
