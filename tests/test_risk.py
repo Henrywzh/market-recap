@@ -128,3 +128,23 @@ def test_a_daily_tile_has_a_one_session_change_and_a_daily_last_year():
     assert len(t["recent"]["dates"]) > len([d for d in t["history"]["dates"] if d >= t["recent"]["dates"][0]])
     weekly = R.tile(_series([1.0, 2.0, 3.0], freq="W-FRI"), risk_when="high", threshold=5, daily=False)
     assert weekly["change_1d"] is None and weekly["recent"] is None
+
+
+def test_a_cboe_file_behind_the_session_is_asked_for_again_once_per_build(monkeypatch, tmp_path):
+    from market_recap import cache
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(cboe, "_asked", set())
+    files = iter(["DATE,CLOSE\n10/08/2026,15.41\n", "DATE,CLOSE\n10/08/2026,15.41\n10/09/2026,14.84\n"])
+    calls = []
+    monkeypatch.setattr(cboe, "get_text", lambda url, **kw: calls.append(url) or next(files))
+
+    first = cboe.fetch_index("VIX", session=date(2026, 10, 9))
+    assert first.index[-1] == pd.Timestamp("2026-10-08") and len(calls) == 1   # fetched, not re-asked
+    monkeypatch.setattr(cboe, "_asked", set())  # the next build reads the cached copy, a session behind
+    later = cboe.fetch_index("VIX", session=date(2026, 10, 9))
+    assert later.iloc[-1] == 14.84 and len(calls) == 2
+    # Up to date, or already asked this build: no further request.
+    cboe.fetch_index("VIX", session=date(2026, 10, 9))
+    monkeypatch.setattr(cboe, "_asked", set())
+    cboe.fetch_index("VIX", session=date(2026, 10, 9))
+    assert len(calls) == 2

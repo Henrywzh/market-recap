@@ -62,9 +62,10 @@ class _Inputs:
 
     def load(self, settings: dict) -> None:
         ctx = self.ctx
+        session = date.fromisoformat(ctx.as_of) if ctx.as_of else None
         for symbol in CBOE_INDICES:
             try:
-                self.cboe[symbol] = cboe.fetch_index(symbol)
+                self.cboe[symbol] = cboe.fetch_index(symbol, session=session)
             except Exception as exc:
                 self.failed[f"cboe {symbol}"] = describe_error(exc)
         self._log("cboe_indices", "Cboe index histories (VIX family, VVIX, SKEW, COR1M)", cboe.HOME_URL,
@@ -112,16 +113,16 @@ class _Inputs:
                   [self.cftc["date"].max()] if not self.cftc.empty else [], 1 if not self.cftc.empty else 0, 1,
                   policy="weekly_release")
 
-        self._load_vx(int(settings.get("vx_contracts", 8)))
+        self._load_vx(int(settings.get("vx_contracts", 8)), session)
         self._load_put_call(int(settings.get("put_call_sessions", 260)))
 
-    def _load_vx(self, count: int) -> None:
+    def _load_vx(self, count: int, session: date | None = None) -> None:
         today = date.today()
         expiries = cboe.vx_expiries(today - timedelta(days=31 * VX_HISTORY_MONTHS), count + VX_HISTORY_MONTHS)
         frames, missing = [], []
         for expiry in expiries:
             try:
-                frames.append(cboe.fetch_vx(expiry))
+                frames.append(cboe.fetch_vx(expiry, session=session))
             except Exception:
                 missing.append(expiry.isoformat())
         self.vx = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()

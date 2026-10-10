@@ -10,6 +10,7 @@ then, and the risk panel labels it so.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date, timedelta
 from io import StringIO
 import json
@@ -26,16 +27,49 @@ PUT_CALL_URL = "https://cdn.cboe.com/data/us/options/market_statistics/daily/{da
 HOME_URL = "https://www.cboe.com/us/indices/"
 
 
-def fetch_index(symbol: str, *, use_cache: bool = True) -> pd.Series:
+# Cboe adds a session to these files some hours after it ends -- after the
+# 18:35 evening build on 2026-10-09 -- and a daily file is otherwise kept until
+# the next rollover, so VIX stood a session behind all weekend. A cached file
+# that ends before the build's session is asked for again, once per build.
+_asked: set[str] = set()
+
+
+def _daily_text(name: str, url: str, *, session: date | None, ends: Callable[[str], date | None],
+                use_cache: bool, **http) -> str:
+    path = cache.path_for(NAMESPACE, name, ".csv")
+    from_cache = use_cache and cache.is_fresh(path, "daily_file")
+    fetch = lambda: get_text(url, **http)  # noqa: E731
+    text = cache.fetch_text(NAMESPACE, name, fetch, kind="daily_file", suffix=".csv", use_cache=use_cache)
+    if not from_cache or session is None or name in _asked:
+        _asked.add(name)
+        return text
+    _asked.add(name)
+    last = ends(text)
+    if last is not None and last >= session:
+        return text
+    try:
+        return cache.fetch_text(NAMESPACE, name, fetch, kind="daily_file", suffix=".csv", use_cache=False)
+    except Exception:  # noqa: BLE001 - the cached file stands, and the tile shows its date
+        return text
+
+
+def _last(index) -> date | None:
+    return None if len(index) == 0 else pd.Timestamp(index.max()).date()
+
+
+def fetch_index(symbol: str, *, use_cache: bool = True, session: date | None = None) -> pd.Series:
     """Daily closes of one Cboe index, oldest first.
 
     Most files are DATE,OPEN,HIGH,LOW,CLOSE; a few (VVIX, SKEW) are DATE,VALUE.
+    ``session``: the build's session; a cached file ending before it is asked
+    for again (once per build).
     """
-    text = cache.fetch_text(
-        NAMESPACE, f"index-{symbol}",
-        lambda: get_text(INDEX_URL.format(symbol=symbol), timeout=45.0),
-        kind="daily_file", suffix=".csv", use_cache=use_cache,
-    )
+    text = _daily_text(f"index-{symbol}", INDEX_URL.format(symbol=symbol), session=session,
+                       ends=lambda t: _last(_parse_index(t, symbol).index), use_cache=use_cache, timeout=45.0)
+    return _parse_index(text, symbol)
+
+
+def _parse_index(text: str, symbol: str) -> pd.Series:
     frame = pd.read_csv(StringIO(text))
     frame.columns = [str(c).strip().upper() for c in frame.columns]
     value = "CLOSE" if "CLOSE" in frame.columns else frame.columns[-1]
@@ -73,33 +107,39 @@ def vx_expiries(today: date, count: int) -> list[date]:
     return out
 
 
-def fetch_vx(expiry: date, *, use_cache: bool = True) -> pd.DataFrame:
+def fetch_vx(expiry: date, *, use_cache: bool = True, session: date | None = None) -> pd.DataFrame:
     """Daily settlements of one monthly VIX future (trade_date, settle, open_interest).
 
     An exchange holiday moves an expiry a day earlier; the day before is tried
-    when the scheduled date has no file.
+    when the scheduled date has no file. ``session`` as for
+    :func:`fetch_index`, for a contract still trading.
     """
     last_error: Exception | None = None
     for candidate in (expiry, expiry - timedelta(days=1)):
         try:
-            text = cache.fetch_text(
-                NAMESPACE, f"vx-{candidate.isoformat()}",
-                lambda c=candidate: get_text(VX_URL.format(expiry=c.isoformat()), timeout=30.0, retries=1),
-                kind="daily_file", suffix=".csv", use_cache=use_cache,
+            text = _daily_text(
+                f"vx-{candidate.isoformat()}", VX_URL.format(expiry=candidate.isoformat()),
+                session=session if session and candidate >= session else None,
+                ends=lambda t, c=candidate: _last(_parse_vx(t, c)["trade_date"]),
+                use_cache=use_cache, timeout=30.0, retries=1,
             )
         except FetchError as exc:
             last_error = exc
             continue
-        frame = pd.read_csv(StringIO(text))
-        frame = frame.rename(columns={"Trade Date": "trade_date", "Settle": "settle", "Open Interest": "open_interest"})
-        frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce")
-        frame["settle"] = pd.to_numeric(frame["settle"], errors="coerce")
-        frame["open_interest"] = pd.to_numeric(frame.get("open_interest"), errors="coerce")
-        frame = frame.dropna(subset=["trade_date", "settle"])
-        frame = frame[frame["settle"] > 0]
-        frame["expiry"] = candidate.isoformat()
-        return frame[["trade_date", "expiry", "settle", "open_interest"]].sort_values("trade_date")
+        return _parse_vx(text, candidate)
     raise last_error or FetchError(f"no VX file for {expiry}")
+
+
+def _parse_vx(text: str, candidate: date) -> pd.DataFrame:
+    frame = pd.read_csv(StringIO(text))
+    frame = frame.rename(columns={"Trade Date": "trade_date", "Settle": "settle", "Open Interest": "open_interest"})
+    frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce")
+    frame["settle"] = pd.to_numeric(frame["settle"], errors="coerce")
+    frame["open_interest"] = pd.to_numeric(frame.get("open_interest"), errors="coerce")
+    frame = frame.dropna(subset=["trade_date", "settle"])
+    frame = frame[frame["settle"] > 0]
+    frame["expiry"] = candidate.isoformat()
+    return frame[["trade_date", "expiry", "settle", "open_interest"]].sort_values("trade_date")
 
 
 def fetch_put_call(day: date, *, today: date, use_cache: bool = True) -> dict[str, float] | None:
