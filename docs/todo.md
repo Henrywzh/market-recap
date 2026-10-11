@@ -48,45 +48,8 @@ To decide:
 
 ## 2. Real-time news by theme
 
-Short-term moves follow headlines (US–Iran talks, tariffs, Fed speakers).
-Goal: per theme, a headline timeline beside the linked assets' intraday
-moves and the matching Polymarket/Kalshi probability.
-
-Sources measured 2026-09-28, 17:30 UTC, US session open:
-
-| Source | Newest item | Last 2 hours | Notes |
-|---|---:|---:|---|
-| Google News RSS search, "Iran" | 4 min | 34 | No key; unofficial endpoint, so poll gently. Aggregates Reuters, Axios, Bloomberg |
-| Google News RSS, "stock market" | 5 min | 26 | |
-| CNBC top news RSS | 11 min | 8 | Sends `Access-Control-Allow-Origin: *` |
-| BBC Middle East RSS | 21 min | 1 | |
-| Finnhub `news?category=general` | 92 min | 0 | About 30 items a day, Reuters/CNBC/Bloomberg. Curated, not real-time; nothing new in a 70 s re-poll |
-| Finnhub `company-news` | 1–4 h | | Mostly Yahoo syndication; NVDA 248 items in two days |
-| Alpaca (Benzinga) | not tested | | Needs an account. Real-time WebSocket, 600–900 headlines a day, from 2015. Launched as a free beta in 2022; the current pricing page does not mention news. Stock-centric, weaker on geopolitics |
-
-Finnhub `quote` works free and real time; `stock/candle` and
-`news-sentiment` return 403. Intraday bars can come from the Yahoo chart
-endpoint the live strip already uses.
-
-Proposed build:
-
-- Themes in `config/dashboard.toml`: keywords, linked symbols, and optional
-  Polymarket/Kalshi market ids. The user edits the list.
-- A `/api/news` Pages Function beside `/api/quotes`, with the same live-tier
-  rules: allow-listed theme queries from a deploy-time contract, one
-  upstream fetch per theme per 5 minutes, per-source failure, and no
-  substitution.
-- Google News RSS for the theme timelines. Finnhub general news as "top
-  market news". Headline, source, time and link only; no article text.
-- Later: Alpaca, if an account confirms free news and bars, for per-stock
-  "why is it moving" headlines.
-
-To decide:
-
-- The first themes.
-- Placement: a NEWS page, or a "themes today" strip on OVERVIEW.
-- Whether headlines are also stored (snapshot tier) so that news can later
-  be lined up against price moves, or only displayed like live quotes.
+Dropped 2026-10-12: not wanted. The number stays so that the other items keep
+theirs.
 
 ## 3. Trading layer
 
@@ -566,3 +529,49 @@ of the last four.
   JPM 237, BofA 167, Jefferies 17; second half of 2025 data, published
   2026-04-29; JPM has the most funds above $10bn) stay unusable as a signal: one
   snapshot a year, a count and not a balance.
+
+Result of the data-signal test (2026-10-12, scratch; nothing built):
+
+- **Method.** Four themes whose series have long free histories: housing (ITB;
+  7 FRED series), consumer (XRT; 8), banks (KRE; 8; the HY spread has only 3
+  years and was left out) and energy (XLE; EIA stocks of crude, gasoline and
+  distillate against their 5-year same-week average, and refinery utilization).
+  Cloud and semis rest on short custom series (hyperscaler capex, TSMC and Korean
+  export lines) and could not be tested. Each series: its change over three
+  months (energy: the deviation from the 5-year average, and its 13-week change),
+  scaled by the robust spread of the changes known so far (at least four
+  horizons of history), signed by what is good for the proxy (mortgage rate,
+  months' supply, delinquencies, claims, saving rate: down is good), known only
+  after its release (the lag read from the build's own `available` dates, e.g.
+  starts 47 days after the label date, retail sales 45, delinquencies 142, EIA 5).
+  Month-end signal = mean of the oriented z-scores (clipped at 3); outcome = the
+  proxy's excess return over SPY for the next 21 and 63 sessions; Spearman
+  correlation, p from 1,500 circular shifts of the signal (keeps its serial
+  dependence), halves, and a control for the proxy's own past 3-month excess
+  return. Revised FRED values were used, so the test is slightly kinder than
+  real time (ALFRED vintages would fix that).
+- **Composite signals do not lead price.** 2009-2026, 210 months. Spearman and p:
+  housing 1M -0.09 (0.18), 3M -0.11 (0.23); consumer -0.06 (0.40), -0.06 (0.52);
+  banks +0.13 (0.030), +0.01 (0.91); energy level +0.08 (0.21), +0.08 (0.57),
+  energy 13-week change +0.07 (0.36), +0.22 (0.025). Twelve tests, two nominal
+  hits, none near a 0.004 line; the two hits sit in one half of the history
+  (banks 1M: halves +0.15 / +0.09 hold; energy 3M: +0.07 / +0.35 do not).
+  Housing's sign is the wrong way in both horizons.
+- **Per series (46 tests, banks, consumer, housing).** Three nominal at 0.05,
+  2.3 expected by chance; one survives a Benjamini-Hochberg 5%: credit-card
+  delinquency (down is good), 1 month ahead, rho +0.15. It has 66 distinct
+  values (quarterly), and by period -0.05 (2009-13), 0.00 (2014-18), +0.31
+  (2019-22), +0.19 (2023-26): it exists in the last eight years only.
+- **The data lag the price more than they lead it.** The composite signal
+  correlates with the proxy's past 3-month excess return at +0.23 (housing),
+  +0.27 (banks), -0.04 (consumer); what price did, the data then agree with.
+  Controlling for that momentum: banks 1M +1.2 pp per z (p 0.035), consumer 1M
+  -0.8 pp (p 0.004, the wrong sign for a signal and not there without the
+  control), housing 3M -2.5 pp (p 0.10).
+- **Decision.** Do not add a data-signal row to the THEMES board: no theme's
+  data direction has been shown to lead its price. The board keeps price,
+  revisions, valuation. The series stay on the theme pages as context, with
+  their release dates. If revisited: ALFRED vintages for real-time values, and
+  a test per theme of "data surprise on release day against the proxy's move"
+  (the board's RELEASE DAYS card already does it) rather than of a monthly
+  direction.

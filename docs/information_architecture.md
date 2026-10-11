@@ -596,7 +596,7 @@ The phased build put too much in front of the reader. After looking at it:
 
 ## Deferred
 
-Open decisions with their evidence (RISK anchor model, real-time news) are
+Open decisions with their evidence (the RISK anchor model, among others) are
 in `docs/todo.md`.
 
 ## Positioning (added 2026-09-29)
