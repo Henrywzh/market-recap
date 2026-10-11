@@ -19,3 +19,13 @@ data/snapshots/
 
 # DRAMeXchange homepage archive. Local only; the terms forbid publishing it.
 data/private/
+
+# Forward P/E history audit helpers (2026-10-09 probe): local, not part of the build
+scripts/audit_yahoo_recent_fwd_pe.py
+scripts/inspect_audit_details.py
+docs/forward_pe_history_probe.md
+docs/forward_pe_history_quality.md
+scripts/audit_forward_pe_provenance.py
+scripts/probe_forward_pe_history.py
+tests/test_forward_pe_probe.py
+tests/test_forward_pe_provenance.py
