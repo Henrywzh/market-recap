@@ -156,8 +156,11 @@ LINE_ITEMS: tuple[LineItem, ...] = (
     LineItem("sbc", "Stock-based compensation", ("ShareBasedCompensation",), "cash_flow"),
     LineItem("nwc_change", "Change in NWC", ("IncreaseDecreaseInOperatingCapital",), "cash_flow"),
     LineItem("buybacks", "Share repurchases", ("PaymentsForRepurchaseOfCommonStock",), "cash_flow"),
+    # PaymentsOfOrdinaryDividends is the same total (common and preferred)
+    # under the name many filers moved to: Bank of America, J&J, Pfizer,
+    # Qualcomm and 17 more of the index report nothing else since 2014-ish.
     LineItem("dividends_paid", "Dividends paid", (
-        "PaymentsOfDividends", "PaymentsOfDividendsCommonStock",
+        "PaymentsOfDividends", "PaymentsOfOrdinaryDividends", "PaymentsOfDividendsCommonStock",
     ), "cash_flow"),
 )
 ITEMS_BY_KEY = {item.key: item for item in LINE_ITEMS}

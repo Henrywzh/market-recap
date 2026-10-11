@@ -33,6 +33,19 @@ def _facts(**tags):
     }}}
 
 
+def test_dividends_read_the_ordinary_dividends_tag_a_filer_moved_to():
+    """Bank of America's dividends are under PaymentsOfDividends to 2013 and
+    PaymentsOfOrdinaryDividends since; both are the common-and-preferred total."""
+    dividends = sec.ITEMS_BY_KEY["dividends_paid"]
+    facts = _facts(
+        PaymentsOfDividends={"USD": [_row("2013-01-01", "2013-12-31", 1677, "2014-02-25", 2013)]},
+        PaymentsOfOrdinaryDividends={"USD": [_row("2025-01-01", "2025-12-31", 9563, "2026-02-25", 2025)]},
+        PaymentsOfDividendsCommonStock={"USD": [_row("2025-01-01", "2025-12-31", 8083, "2026-02-25", 2025)]},
+    )
+    picked = {end: v["value"] for end, v in sec._annual_series(facts, dividends).items()}
+    assert picked == {"2013-12-31": 1677, "2025-12-31": 9563}
+
+
 def test_annual_values_fall_back_per_year_not_per_company():
     """A filer that switches revenue tags mid-history must keep both years."""
     facts = _facts(
