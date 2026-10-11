@@ -143,6 +143,9 @@ const RAW_FIELDS = [
   ['pe', 'P/E'],
   ['pe_percentile', 'P/E PERCENTILE'],
   ['pe_vs_median', 'P/E VS MEDIAN'],
+  ['ptbv', 'P/TBV (FINANCIALS)'],
+  ['ptbv_percentile', 'P/TBV PERCENTILE'],
+  ['rotce', 'ROTCE %'],
   ['fcf_positive', 'FCF POSITIVE'],
   ['revenue_growth_pct', 'REVENUE GROWTH %'],
   ['filed', 'FILED'],
@@ -177,8 +180,22 @@ function formatPp(value, digits = 1) {
   return unknown(value, (number) => `${number >= 0 ? '+' : ''}${num(number, digits)} pp`);
 }
 
+// Financials only (the build leaves it empty elsewhere): the multiple, its
+// place in the company's own ten years, and what it earns on that book.
+function ptbvCell(row) {
+  if (!present(row.ptbv)) return el('td', { class: 'dim', text: DASH });
+  return el('td', {
+    title: `P/TBV ${num(row.ptbv, 2)}x · ${formatPercentile(row.ptbv_percentile)} of own 10Y · ROTCE ${present(row.rotce) ? `${num(row.rotce, 1)}%` : UNKNOWN}`,
+    text: present(row.ptbv_percentile) ? `${num(row.ptbv, 2)}x · ${formatPercentile(row.ptbv_percentile)}` : `${num(row.ptbv, 2)}x`,
+  });
+}
+
 function formatPercentile(value) {
-  return unknown(value, (number) => `${num(number, 0)}th`);
+  return unknown(value, (number) => {
+    const r = Math.round(number);
+    const t = r % 100;
+    return `${r}${t >= 11 && t <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[r % 10] || 'th')}`;
+  });
 }
 
 function directionClass(value) {
@@ -792,6 +809,7 @@ export default function renderMonitor(root, data, manifest) {
         class: 'monitor-sort',
         text: `${column.label}${arrow}`,
         'aria-label': `Sort by ${column.label}`,
+        title: column.title || null,
       });
       button.addEventListener('click', () => {
         state.sort = state.sort.key === column.key
@@ -858,6 +876,7 @@ export default function renderMonitor(root, data, manifest) {
       el('td', { class: `monitor-price-${row.price_state || 'unknown'}`, text: (row.price_state || UNKNOWN).toUpperCase() }),
       el('td', { class: `monitor-evidence-${row.evidence_state || 'unknown'}`, title: `${(row.evidence_for || []).length} for · ${(row.evidence_against || []).length} against`, text: (row.evidence_state || UNKNOWN).toUpperCase() }),
       el('td', { text: formatPercentile(row.pe_percentile) }),
+      ptbvCell(row),
       el('td', { class: row.earnings_date ? '' : 'dim', title: row.earnings_status || '', text: row.earnings_date || DASH }),
       el('td', { class: directionClass(row.since_first_seen_pct), title: row.first_seen ? `since ${row.first_seen.date}` : '', text: present(row.since_first_seen_pct) ? pct(row.since_first_seen_pct, 1) : DASH }),
       el('td', { class: 'monitor-follow-cell' }, [followButton(ticker)]),
@@ -875,6 +894,7 @@ export default function renderMonitor(root, data, manifest) {
     { key: 'price_state', label: 'PRICE' },
     { key: 'evidence_state', label: 'EVIDENCE' },
     { key: 'pe_percentile', label: 'P/E PCTL' },
+    { key: 'ptbv_percentile', label: 'P/TBV', title: 'Financials only: price over tangible book, and its percentile in the company\'s own 10 years' },
     { key: 'earnings_date', label: 'EARNINGS' },
     { key: 'since_first_seen_pct', label: 'SINCE SEEN' },
     { key: 'followed', label: '' },
@@ -1146,6 +1166,7 @@ export default function renderMonitor(root, data, manifest) {
       stat(`VS MARKET ${relativePeriod}`, formatPp(row.market_excess_pct), `${row.sector_benchmark || 'sector ETF'} ${formatPp(row.sector_excess_pct)}`, directionClass(row.market_excess_pct)),
       stat('PRICE', (row.price_state || UNKNOWN).toUpperCase(), `RS ${row.rs_improving === true ? 'improving' : row.rs_improving === false ? 'not improving' : UNKNOWN} · ${row.above_ma === true ? 'above' : row.above_ma === false ? 'below' : '?'} MA${maSessions}`, `monitor-price-${row.price_state || 'unknown'}`),
       stat('P/E', present(row.pe) ? num(row.pe, 1) : UNKNOWN, `${formatPercentile(row.pe_percentile)} of own 10Y`),
+      present(row.ptbv) ? stat('P/TBV', `${num(row.ptbv, 2)}x`, `${formatPercentile(row.ptbv_percentile)} of own 10Y · ROTCE ${present(row.rotce) ? `${num(row.rotce, 1)}%` : UNKNOWN}`) : null,
       stat('NEXT EARNINGS', row.earnings_date || DASH, row.earnings_status === 'not_scheduled'
         ? `none in the next ${configValue(artifact, 'earnings_days', '?')} days` : (row.earnings_status || '').replaceAll('_', ' ')),
     ]);

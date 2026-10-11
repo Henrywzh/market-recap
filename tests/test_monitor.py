@@ -277,3 +277,21 @@ def test_first_observation_rerun_rollback_and_removed_rows_preserve_only_ledger_
 
     with pytest.raises(ValueError, match="rollback rejected"):
         monitor.build(first_ctx, previous=advanced)
+
+
+def test_book_multiples_are_carried_for_financials_only():
+    dates = _dates(count=252)
+    values = np.full(252, 100.0)
+    valuation = {
+        "as_of": AS_OF,
+        "rows": [{"ticker": t, "price": 100.0, "pe": 12.0, "pe_history_current": 12.0, "ptbv": 1.86,
+                  "ptbv_percentile": 84.9, "rotce": 15.74} for t in ("AAA", "BBB")],
+        "weight_check": {"flagged": []}, "pe_history": {"disagree": []},
+    }
+    ctx = _ctx(members=("AAA", "BBB"), close_dates=dates, close_values={"AAA": values, "BBB": values})
+    ctx.members["SPX"].loc[ctx.members["SPX"]["yahoo_symbol"] == "AAA", "sector"] = "Financials"
+    payload = monitor.build(ctx, valuation=valuation, catalysts=None)
+    bank, other = _row(payload, "AAA"), _row(payload, "BBB")
+    assert (bank["ptbv"], bank["ptbv_percentile"], bank["rotce"]) == (1.86, 84.9, 15.7)
+    # A non-financial's tangible book is not what it earns on.
+    assert (other["ptbv"], other["ptbv_percentile"], other["rotce"]) == (None, None, None)

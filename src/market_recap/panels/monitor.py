@@ -19,6 +19,7 @@ from typing import Any
 import pandas as pd
 
 from ..compute import monitor as M
+from ..compute.valuation import FINANCIALS_SECTOR
 from ..config import REPO_ROOT, period_sessions
 from ..util import SourceRecord
 
@@ -304,6 +305,9 @@ def _blank_row(
         "pe": None,
         "pe_percentile": None,
         "pe_vs_median": None,
+        "ptbv": None,
+        "ptbv_percentile": None,
+        "rotce": None,
         "fcf_positive": None,
         "revenue_growth_pct": None,
         "filed": None,
@@ -487,6 +491,8 @@ def _valuation_metrics(
     valuation_mismatched: bool,
     current_close: float | None,
     gaps: list[str],
+    *,
+    book: bool = False,
 ) -> dict[str, Any]:
     if valuation_row is None:
         _append_gap(gaps, "valuation row unavailable")
@@ -522,6 +528,16 @@ def _valuation_metrics(
             "pe": operating if operating is not None else _number(valuation_row.get("pe"), 2),
             "pe_percentile": _number(valuation_row.get("pe_percentile"), 1),
             "pe_vs_median": _number(valuation_row.get("pe_vs_median"), 1),
+        })
+
+    # Book multiples only where book is what the business earns on (banks,
+    # brokers, insurers): Apple's P/TBV of 60 at its 98th percentile says
+    # nothing. Beside it, what the company earns on that tangible book.
+    if book and price_valid and not valuation_flagged:
+        values.update({
+            "ptbv": _number(valuation_row.get("ptbv"), 2),
+            "ptbv_percentile": _number(valuation_row.get("ptbv_percentile"), 1),
+            "rotce": _number(valuation_row.get("rotce"), 1),
         })
 
     # Existing VALUATION exposes FCF as a price-derived yield.  Offline tests
@@ -710,6 +726,7 @@ def _current_row(
             ticker in valuation_mismatched,
             split_only_close,
             values["gaps"],
+            book=sector == FINANCIALS_SECTOR,
         ))
 
     if catalysts_payload is None:

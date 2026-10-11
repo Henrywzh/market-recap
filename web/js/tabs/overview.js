@@ -299,6 +299,22 @@ function crossCard(rows, vol) {
     [grid(['', 'LAST', '1D', '1W', '1M', 'YTD', '6M'], body), volLine(vol)].filter(Boolean));
 }
 
+// Banks are valued on tangible book, and only beside what they earn on it:
+// each bank group's P/TBV against its own ten years, with its ROTCE. Only
+// the groups VALUATION can draw it for (not insurers or payments).
+function bankBookCard(rows) {
+  if (!rows?.length) return null;
+  const body = rows.map((r) => el('tr', {}, [
+    el('td', { class: 'ov-name', title: `${r.companies} index members, cap-weighted; 10Y since ${r.since}`, text: r.label }),
+    el('td', { text: `${num(r.ptbv, 2)}x` }),
+    el('td', { class: r.percentile >= 80 ? 'down' : r.percentile <= 20 ? 'up' : 'dim', text: ordinal(r.percentile) }),
+    el('td', { class: 'dim', text: `${num(r.median, 2)}x` }),
+    el('td', { text: present(r.rotce) ? `${num(r.rotce, 1)}%` : DASH }),
+  ]));
+  return card('BANKS · PRICE / TANGIBLE BOOK', el('a', { href: '#valuation', class: 'dim', text: 'valuation ↗' }),
+    grid(['', 'P/TBV', '10Y PCTL', 'MEDIAN', 'ROTCE'], body));
+}
+
 function printsCard(rows) {
   const value = (v, unit) => (!present(v) ? DASH : unit.startsWith('k') ? `${v > 0 ? '+' : ''}${num(v, 0)}k` : `${num(v, unit.includes('y/y') ? 2 : 1)}%`);
   const body = rows.map((r) => el('tr', {}, [
@@ -370,6 +386,7 @@ export default function renderOverview(root, data) {
     el('div', { class: 'ov-col' }, [
       stocksCard(data.stocks, data.contributions),
       sectorHeatCard(data.sectors),
+      bankBookCard(data.bank_book),
       ratesCard(data.rates, data.fed, data.rates_history),
       printsCard(data.prints),
     ].filter(Boolean)),

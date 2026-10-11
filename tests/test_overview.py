@@ -22,3 +22,20 @@ def test_bond_and_equity_volatility_are_read_from_risks_own_tiles():
     risk["sections"][1]["tiles"][0]["pct_1y"] = 50
     assert bond_equity_vol(risk)["reading"] == "in_line"
     assert bond_equity_vol(None) is None
+
+
+def test_bank_book_lists_only_the_bank_groups_valuation_could_draw():
+    from market_recap.panels.overview import bank_book
+    valuation = {"aggregates": {"series": [
+        {"key": "fin-diversified-banks", "label": "Diversified banks", "kind": "subsector", "companies": 7,
+         "book": {"ptbv": 2.08, "rotce": 16.56},
+         "stats_ptbv": {"current": 2.13, "percentile": 93.87, "median": 1.69, "first": "2016-10-10"}},
+        # Tangible book too thin a share of the group's cap: no history drawn.
+        {"key": "fin-insurance", "label": "Insurance", "kind": "subsector", "companies": 22, "book": None},
+        # A non-financial sector's P/TBV is not a valuation.
+        {"key": "Utilities", "label": "Utilities", "kind": "sector", "stats_ptbv": {"current": 2.4}},
+    ]}}
+    assert bank_book(valuation) == [{"key": "fin-diversified-banks", "label": "Diversified banks", "companies": 7,
+                                     "ptbv": 2.13, "percentile": 93.87, "median": 1.69, "since": "2016-10-10",
+                                     "rotce": 16.56}]
+    assert bank_book(None) == []

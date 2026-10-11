@@ -28,7 +28,7 @@ from ..sources import fred, treasury, yahoo
 from ..util import SourceRecord, clean_float, describe_error, to_iso_date
 
 # Panels OVERVIEW reads, all required to be from this session.
-INPUTS = ("priced", "catalysts", "risk")
+INPUTS = ("priced", "catalysts", "risk", "valuation")
 PERIODS = ["1D", "1W", "1M", "YTD"]
 SPARK_SESSIONS = 126
 SPARK_POINTS = 60
@@ -407,6 +407,28 @@ def bond_equity_vol(risk: dict | None) -> dict | None:
     }
 
 
+def bank_book(valuation: dict | None) -> list[dict]:
+    """Price over tangible book for the bank groups VALUATION can draw it for.
+
+    Book multiples are where a bank's value is measured, and only beside what
+    it earns on that book (ROTCE). A group is listed only where VALUATION drew
+    its ten-year P/TBV, i.e. its members' tangible book covers enough of its
+    cap -- the bank groups do; insurers, payments and most non-financial
+    sectors do not, and a sector P/TBV there would mean nothing.
+    """
+    out = []
+    for s in ((valuation or {}).get("aggregates") or {}).get("series") or []:
+        stats, book = s.get("stats_ptbv") or {}, s.get("book") or {}
+        if s.get("kind") != "subsector" or stats.get("current") is None:
+            continue
+        out.append({
+            "key": s["key"], "label": s.get("label"), "companies": s.get("companies"),
+            "ptbv": stats.get("current"), "percentile": stats.get("percentile"), "median": stats.get("median"),
+            "since": stats.get("first"), "rotce": book.get("rotce"),
+        })
+    return out
+
+
 def build(ctx, *, inputs: dict[str, dict | None]) -> dict:
     settings = ctx.config.get("overview", {})
     as_of = pd.Timestamp(ctx.as_of)
@@ -512,5 +534,6 @@ def build(ctx, *, inputs: dict[str, dict | None]) -> dict:
         "ahead": ahead(inputs.get("catalysts"), top, ctx.as_of),
         "risk": risk_line(inputs.get("risk")),
         "vol": bond_equity_vol(inputs.get("risk")),
+        "bank_book": bank_book(inputs.get("valuation")),
         "failed": failed,
     }

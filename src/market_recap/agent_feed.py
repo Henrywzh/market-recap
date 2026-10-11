@@ -194,6 +194,8 @@ def _market(f: _Feed) -> dict:
                         for r in o.get("cross_asset") or []],
         "latest_prints": o.get("prints") or [],
         "index_contribution": o.get("contributions"),
+        # Bank groups on tangible book, against their own ten years, with ROTCE.
+        "bank_book": o.get("bank_book") or [],
         "source": f.url("overview"),
     }
 
@@ -239,6 +241,8 @@ def _name_card(row: dict, changes: list[dict]) -> dict:
         "peers_since_first_seen_pct": row.get("peers_since_first_seen_pct"),
         "fy1_eps_change_30d_pct": exp.get("change_30d_pct"), "fy1_eps_change_90d_pct": exp.get("change_90d_pct"),
         "forward_pe": row.get("pe"), "pe_percentile_own_history": row.get("pe_percentile"),
+        # Financials only (empty elsewhere): price over tangible book and what it earns on it.
+        "ptbv": row.get("ptbv"), "ptbv_percentile_own_history": row.get("ptbv_percentile"), "rotce_pct": row.get("rotce"),
         "earnings_date": row.get("earnings_date"),
         "evidence_for": row.get("evidence_for") or [], "evidence_against": row.get("evidence_against") or [],
         "gaps": row.get("gaps") or [],
