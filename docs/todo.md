@@ -402,3 +402,127 @@ cannot be told apart from "the 2022-onward period". Twelve tried: only p under
 0.004 would count. HY spread could not be tested (FRED serves about 3 years of
 it). Conclusion: keep the one regime variable; more would split 1,128 days
 (roughly 200 separate stretches) into cells too small to read.
+
+Window check for the stock-yield correlation (2026-10-11, same 1,128-ish release
+days, windows of 20 to 250 sessions, 500 shuffles each): the rates-driven minus
+growth-driven difference is negative at every window (-0.03 to -0.17 per sd) but
+its strength is not stable: permutation p 0.006 (20d), 0.020 (30d), 0.110 (40d),
+0.052 (60d, the page), 0.020 (90d), 0.132 (120d), 0.614 (180d), 0.008 (250d).
+From 2022 on it is -0.24 to -0.29 at 20-90 and 250 sessions, -0.08 to -0.12 at
+120-180. The fit-before-2022, scored-after R-squared of the regime lines is
+-0.15 to +0.01 at every window. Today reads rates-driven at every window
+(correlation -0.31 to -0.56). Reading: the sign is robust, the size is not;
+choosing the best window would be picking a result, so the page keeps 60.
+
+## 13. Investment-banking revenue and market activity (researched 2026-10-11, not built)
+
+Question: can IPO, volume and spread data tell how GS, MS and JPM's investment
+banking fees will come out, and move the stock? Scratch scripts only.
+
+- **Data that exists.** Quarterly `InvestmentBankingRevenue` from SEC company
+  facts (first-filed value; Q4 = year less nine months): GS 2012Q3 on, MS 2008,
+  JPM 2008; the 2025-26 values match the press releases. Priced IPOs by month
+  from Nasdaq's calendar (`api.nasdaq.com/api/ipo/calendar?date=YYYY-MM`, back to
+  2011 at least; 4,643 deals). SPACs are a third of the rows and must be
+  flagged (name and a 10.00 unit price); direct listings (Coinbase, Spotify,
+  Roblox) carry a reference value, not proceeds, so each deal is capped at $5bn.
+  Not free: M&A announcements (advisory fees lag them by 2-3 quarters), bond
+  issuance by quarter. HY spread history on FRED is only about 3 years; Baa-10Y
+  was used instead.
+- **Explains revenue, 2013Q1-2026Q2, average of the three banks' year-on-year log
+  change (54 quarters, Newey-West t).** IPO proceeds ex-SPAC R-squared 0.59
+  (t 6.1); IPO count 0.49; SPY 4-quarter return 0.53; 10-year yield volatility
+  0.39 (negative); SPY quarter return 0.15; VIX level 0.05, SPY dollar volume 0.00.
+  Without 2020Q1-2022Q4: 0.28, 0.16, 0.35, 0.16. Not stable by period: IPO proceeds
+  0.50 in 2013-19 and 0.02 in 2023-26 (14 quarters); SPAC proceeds 0.03 then
+  0.53; only the SPY 4-quarter return is positive and similar throughout
+  (0.27 / 0.35 / 0.37).
+- **Nowcast of the quarter, expanding window from 2018Q1 (34 quarters).**
+  IPO proceeds plus last quarter's year-on-year: RMSE 0.184 against 0.233 for
+  "same as last quarter" and 0.338 for the mean (Diebold-Mariano t 1.77: not
+  significant); 2023 on 0.125 against 0.182; the direction of the change in the
+  growth rate is right in 71% of quarters. A better guess about the level, not a
+  large one: the error is still about 18%.
+- **Does it move the stock or the EPS surprise? No.** Report-day move against the
+  financials fund, 53 quarters with the banks averaged: IB-fee acceleration
+  r +0.08 (t 0.6), proxy-predicted acceleration +0.17 (t 1.0, n 37), IB fees
+  against the proxy model -0.07. EPS surprise: IB acceleration +0.25 (t 1.9),
+  proxy-predicted acceleration -0.21 (t -1.2); IB fees above the proxy model
+  go with a larger EPS surprise (+0.51, t 3.5) but that is only the revenue
+  line showing up in EPS, known at the report, not before it.
+- **Live case, Q3 2026 (reports next week), proxies: IPO proceeds flat on a
+  year ago, 26 IPOs against 65.** Model: GS fees about $3.3bn (+22% on Q3 2025,
+  Q2 was +44% at $3.4bn), MS $2.8bn, JPM $3.0bn (Q2 $3.2bn). No consensus for IB
+  fees is available here, so no beat or miss is implied.
+- **Reading.** The proxies describe the revenue a quarter before it is reported;
+  the market and the consensus already use them, and nothing here predicts the
+  surprise or the reaction. If built: show the nowcast and the proxies on the
+  bank themes' card as context with the error range, never as a beat/miss
+  call. Management's mid-quarter remarks (June and September conferences)
+  are the stronger signal and are not data. Extending to C and BAC is
+  cheap (same XBRL tag); M&A and debt issuance would need a paid source.
+
+Buy-side activity against the banks' trading and commission lines (2026-10-11,
+scratch; same method as above, year-on-year log changes, Newey-West t):
+
+- **Targets in SEC XBRL.** `BrokerageCommissionsRevenue` (client execution
+  commissions: GS 2009 on, JPM 2009 on, MS 2017 on); `PrincipalTransactionsRevenue`
+  (JPM) and `TradingGainsLosses` (MS) as trading revenue. GS's market-making line
+  is not in XBRL (its trading tag stops in 2019); segment lines (FICC, equities,
+  JPM "Markets") are in the press releases only. Both trading tags include
+  hedges, financing offsets and, for JPM, treasury items: a contaminated target.
+- **Proxies tried.** Dollar volume of 13 equity ETFs and of 5 bond ETFs;
+  leveraged-fund gross positions (long + short, CFTC TFF) in S&P and Nasdaq
+  futures and the 10-year note, and their open interest; VIX level and change;
+  10-year yield volatility; SPY 4-quarter return.
+- **Commissions (GS and JPM average, 65 quarters).** Equity ETF volume R-squared
+  0.23 (t 3.3), 0.41 in 2010-19 and 0.01 from 2023; VIX year-on-year change 0.18
+  (t 3.9), steady at 0.12-0.16; leveraged-fund positions and bond volume: nothing.
+  Out of sample from 2018 (34 quarters) the volume model's error is 0.124 against
+  0.136 for the mean and 0.178 for last quarter's change: a small gain.
+- **Trading revenue (MS and JPM average, 66 quarters).** Nothing: R-squared 0.00-0.06
+  for every proxy, signs flip between periods (bond volume 0.56 from 2023, 0.01
+  before); out of sample no proxy beats the mean (0.25 against 0.25-0.29).
+- **Reading.** "Buy-side activity helps" is not shown by these proxies. Either the
+  proxies are not buy-side flows (ETF volume is mostly not institutional client
+  flow; leveraged funds in futures are a sliver of hedge fund activity), or the
+  target is too noisy. Next, if pursued: FINRA margin debt (monthly, the financing
+  side), the NY Fed's primary dealer transaction volumes, TRACE corporate-bond
+  volume, OCC options volume, FINRA ATS block volumes; and parse segment revenue
+  (equities, FICC) from the earnings releases for a cleaner target.
+
+Financing, dealer volume and margin debt (2026-10-11, scratch; 50 quarters from
+2014Q1, year-on-year log changes, Newey-West t). Sources: FINRA margin
+statistics (monthly, 1997 on; `finra.org/sites/default/files/2021-03/margin-statistics.xlsx`,
+the page's table shows only the last 13 months), NY Fed primary dealer
+statistics (weekly, from 2013-04; `markets.newyorkfed.org/api/pd/get/{keyid}.json`:
+PDTRCS-TOT corporate, PDTRCSIND-G13 / -BELG13 investment-grade and high-yield
+bonds, PDTRGSC-* Treasury coupons by maturity, PDTRGST-TOT bills and TIPS,
+PDSORA / PDSIRRA-UTSETTOT Treasury repo and reverse repo). FINRA's TRACE
+corporate-bond volume is not on a free API we could find; the NY Fed's dealer
+corporate transactions stand in for it.
+
+- **Commissions (GS, JPM) and trading revenue (MS, JPM): nothing holds.**
+  Dealer corporate volume 0.02 and 0.01, Treasury coupons 0.07 / 0.07 (wrong
+  sign for trading), Treasury repo 0.01 / 0.03, margin debt 0.04 / 0.02. High-yield
+  dealer volume explains trading revenue at 0.32 (t 3.3) but is 0.25 in 2014-19
+  and 0.02 from 2023. Out of sample from 2018 no model beats the expanding mean
+  for either line (trading: 0.258-0.265 against 0.249; commissions 0.128-0.129
+  against 0.127).
+- **Margin debt explains investment-banking fees, not trading.** R-squared 0.65
+  (t 5.9) on the three banks' average IB-fee growth, and stable: 0.72 without
+  2020-22, 0.55 in 2014-19, 0.79 from 2023. But it moves with the market (0.77
+  correlation with the S&P's 4-quarter return) and with IPOs (0.65): it is a
+  leverage-appetite version of the market level. Together with IPO proceeds
+  R-squared 0.76 against 0.61 (IPO alone), 0.70 (IPO and S&P return). Out of
+  sample from 2018, IPO plus margin debt has error 0.179 against 0.183 (IPO and
+  last quarter's change), 0.202 (IPO and S&P return), 0.233 (last quarter's
+  change): a small gain; Diebold-Mariano t 0.94 against the IPO model.
+- **Now.** Margin debt July-August 2026 averaged $1.44tn against $1.04tn a year
+  earlier (+32% log; +42% in Q2). September's figure comes out in mid-October.
+- **Reading.** Buy-side leverage and activity, as measured here, tells where the
+  deal market is (it is the same cycle), not what trading desks earned. The
+  financing proxies (repo, margin) do not explain trading either. Nothing here
+  clears the bar to put on a page; the IB-fee nowcast could use margin debt in
+  place of the S&P return. Next, if pursued: segment revenue from earnings
+  releases as a cleaner target.
