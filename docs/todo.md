@@ -526,3 +526,43 @@ corporate transactions stand in for it.
   clears the bar to put on a page; the IB-fee nowcast could use margin debt in
   place of the S&P return. Next, if pursued: segment revenue from earnings
   releases as a cleaner target.
+
+SCOOS, the Fed's Senior Credit Officer Opinion Survey on Dealer Financing Terms
+(2026-10-11, scratch). Quarterly since 2010Q2, 17-23 dealers answering; the
+whole history is one csv from the Data Download Program
+(`federalreserve.gov/datadownload/Output.aspx?rel=SCOOS&series=d7ddcd636ef03b879c632a42477a0535&filetype=csv&label=include&layout=seriescolumn&type=package`,
+needs the Choose.aspx page as referer; the DDP's "Build Your Package" goes in
+November but this csv is a preformatted package, so check it survives).
+Columns are counts per answer; net percentage = (increased or tightened less
+decreased or eased) / respondents. Questions used: 8 (hedge funds' use of
+leverage), 9 (unused leverage available), 4 and 5 (price and non-price terms to
+hedge funds), 53 / 57 / 61 (client demand for funding of high-grade bonds,
+high-yield bonds, equities). The 2026 September survey is already in the file.
+Each answer is a change over three months, so the page-level quantity is the sum
+of the last four.
+
+- **Trading revenue (MS, JPM): nothing.** Hedge-fund leverage 4-quarter sum
+  R-squared 0.01; unused leverage 0.01; price terms 0.04; non-price terms 0.06;
+  high-grade funding demand 0.11 (t 3.7) but 0.07 / 0.09 / 0.05 across periods.
+  Out of sample from 2018: 0.254-0.290 against 0.248 for the mean.
+- **Commissions (GS, JPM): equity funding demand 0.13 (t 3.5),** 0.03 in 2011-19
+  and 0.28 from 2023; out of sample 0.122 against 0.130 for the mean: a small
+  gain. Hedge-fund leverage 0.06; worse than the mean out of sample.
+- **Investment-banking fees: client equity-funding demand 0.34 (t 3.8), high-grade
+  bond demand 0.33.** But equity-funding demand correlates 0.79 with margin
+  debt: with IPO proceeds and margin debt already in, adding it leaves R-squared
+  at 0.76 and the out-of-sample error at 0.181 against 0.179. It is the same
+  market-cycle signal.
+- **Now (2026 September survey, 4-quarter sums of net %):** client demand for
+  equity funding +171, high-grade bonds +55, high-yield +41; hedge-fund leverage
+  used +15, unused leverage +5, price terms +5 (tightened), non-price terms +21.
+  Strong funding demand, a year of modest hedge-fund leverage growth, and terms
+  tightening a little. None of it has predicted a revenue line beyond what the
+  market level already says.
+- **Verdict.** The dealers' own read of hedge-fund leverage and terms does not
+  explain the banks' trading or commission revenue (n 62; the lines are noisy and
+  contaminated, see above). Funding demand tells the cycle, as margin debt does.
+  The With Intelligence prime-broker client counts (GS 320 of 579 funds, MS 288,
+  JPM 237, BofA 167, Jefferies 17; second half of 2025 data, published
+  2026-04-29; JPM has the most funds above $10bn) stay unusable as a signal: one
+  snapshot a year, a count and not a balance.
