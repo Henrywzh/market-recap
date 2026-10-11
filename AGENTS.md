@@ -1,6 +1,8 @@
 # Agent notes
 
 Read `README.md` first; it holds the data contract and the design rules.
+An outside research agent reads the published site; what it may rely on, and
+how it asks for more, is `docs/research_agent.md`.
 
 Keep these invariants:
 

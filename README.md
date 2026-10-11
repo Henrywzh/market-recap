@@ -556,6 +556,9 @@ ended, `unknown` when this build had no valid reading. A rerun of a session
 compares with the session before it. The overlay's exposure is labelled as the
 model's suggestion, not a position.
 
+The interface for the agent -- per-company files, update times, known gaps
+and how to request data -- is [`docs/research_agent.md`](docs/research_agent.md).
+
 A feed that cannot be built or fails its own checks (size, schema, every
 candidate pointing at an artifact this build wrote) is deleted, never left
 from an older build; the site answers a missing file with **404**
