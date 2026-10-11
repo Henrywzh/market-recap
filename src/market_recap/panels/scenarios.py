@@ -6,7 +6,7 @@ far the 2-year and 10-year yields, SPY and each sector moved on those days
 (with standard errors and counts), whether the sector ordering held out of
 sample, and the next release with its forecast. Beside them: the rolling
 stock-versus-yield correlation (is the market driven by rates or by growth),
-and the FOMC days against other days.
+the FOMC days against other days, and how the stock reaction to a surprise depends on what was driving the market.
 
 The measurements are the point, not a forecast: most effects on stocks are not
 detectable at these sample sizes and the panel says so (see compute.scenarios).
@@ -40,6 +40,21 @@ NOTES = (
 
 def _num(value, digits: int = 3):
     return clean_float(value, digits)
+
+
+def _clean(value, digits: int = 3):
+    """A nested result with every float rounded and every NaN or infinity an absence."""
+    if isinstance(value, dict):
+        return {k: _clean(v, digits) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_clean(v, digits) for v in value]
+    if isinstance(value, (float, np.floating)):
+        return _num(float(value), digits)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    return value
 
 
 def _slope(entry: dict, digits: int = 3) -> dict:
@@ -120,6 +135,12 @@ def assemble(*, as_of: date, closes: pd.DataFrame, y10: pd.Series, y2: pd.Series
     min_class, min_era = cfg["min_class_releases"], cfg["min_era_releases"]
     outcomes = pd.concat([frame[["dY2", "dY10", "SPY"]], relative.add_suffix("-SPY"), excess], axis=1)
 
+    # Windows left out of the release tables are left out of the comparison days too.
+    keep = pd.Series(True, index=days)
+    for lo, hi in exclude:
+        keep[(days >= pd.Timestamp(lo)) & (days <= pd.Timestamp(hi))] = False
+    spy_kept, dy2_kept = spy.where(keep), dy2.where(keep)
+    tables: dict[str, pd.DataFrame] = {}
     drivers = []
     for d in cfg["drivers"]:
         table, scale = S.release_table(rows, d["title"], start=cfg["history_start"], exclude=exclude, days=days,
@@ -134,6 +155,9 @@ def assemble(*, as_of: date, closes: pd.DataFrame, y10: pd.Series, y2: pd.Series
             drivers.append(entry)
             continue
         entry["status"] = "ok"
+        tables[d["key"]] = table
+        size = S.event_size(table.index, spy_kept, dy2_kept, start=cfg["history_start"])
+        entry["event_size"] = {k: (_num(v, 2) if isinstance(v, float) else v) for k, v in size.items()}
         z = table["z"]
         j = outcomes.reindex(table.index)
         entry["rates_per_sd"] = {"dY2": _slope(S.slope_t(z, j["dY2"], min_n=min_era), 2),
@@ -155,6 +179,14 @@ def assemble(*, as_of: date, closes: pd.DataFrame, y10: pd.Series, y2: pd.Series
 
     sector_list = [{"sector": sector, "etf": etf} for sector, etf in sectors.items() if etf in excess.columns]
 
+    hawkish = {d["key"]: int(d.get("hawkish", 1)) for d in cfg["drivers"]}
+    release = S.release_days(tables, hawkish, spy_kept, dy2_kept, rolling_corr)
+    comparison = pd.DataFrame({"spy": spy_kept, "dy2": dy2_kept, "corr": rolling_corr}).loc[pd.Timestamp(cfg["history_start"]):]
+    comparison = comparison[~comparison.index.isin(release.index)].dropna()
+    comparison["rates"] = comparison["corr"] < 0
+    regime_response = S.regime_response(release, comparison, split=cfg["persistence_split"], min_n=min_era,
+                                        permutations=cfg["permutations"], seed=cfg["permutation_seed"])
+
     return {
         "as_of": as_of.isoformat(),
         "settings": {k: cfg[k] for k in ("history_start", "class_threshold_sd", "surprise_clip_sd", "min_class_releases",
@@ -163,6 +195,7 @@ def assemble(*, as_of: date, closes: pd.DataFrame, y10: pd.Series, y2: pd.Series
         "inputs": {"prices_through": to_iso_date(closes.index[-1]), "yields_through": to_iso_date(last_yield)},
         "regime": {k: (_num(v, 3) if isinstance(v, float) else v) for k, v in corr_now.items()},
         "drivers": drivers,
+        "regime_response": _clean(regime_response),
         "fomc": _fomc(rows, cfg, days, frame),
         "sectors": sector_list,
         "notes": list(NOTES),

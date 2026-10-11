@@ -73,3 +73,50 @@ export function persistenceView(p) {
     + `p from ${p.permutations} label shuffles`;
   return { text, tone: p.p_perm < 0.05 ? 'info' : 'dim', title };
 }
+
+// How the stock reaction to a surprise depends on what was driving the market.
+// Rows are the two regimes; each cell is a slope with its t and n, dim unless
+// |t| of 2 or more (the build measured them; this only arranges them).
+export function regimeRows(rr) {
+  if (!rr || rr.status !== 'ok') return [];
+  const s = rr.surprise, m = rr.after_the_move;
+  return ['rates', 'growth'].map((key) => ({
+    key,
+    label: key === 'rates' ? 'RATES-DRIVEN' : 'GROWTH-DRIVEN',
+    surprise: s.all.by_regime[key],
+    sinceSplit: s.since_split.by_regime[key],
+    onRelease: m.release_days[key],
+    onOther: m.other_days[key],
+  }));
+}
+
+// The difference between the regimes, and whether it was detected: the
+// interaction's t, the permutation p over the whole history, the same after the
+// split. Tone info only when the permutation p is under 0.05.
+export function regimeVerdict(rr) {
+  const all = rr?.surprise?.all;
+  if (!all || !all.interaction) return { text: 'no measurement', tone: 'dim', title: 'too few release days' };
+  const i = all.interaction;
+  const since = rr.surprise.since_split?.interaction;
+  const text = `difference ${i.coef > 0 ? '+' : ''}${num(i.coef, 2)}% per sd (t ${num(i.t, 1)}${finite(all.p_perm) ? `, permutation p ${num(all.p_perm, 3)}` : ''})`
+    + (since ? `; from ${rr.out_of_sample?.split || 'the split'} on ${since.coef > 0 ? '+' : ''}${num(since.coef, 2)} (t ${num(since.t, 1)})` : '');
+  const hit = finite(all.p_perm) && all.p_perm < 0.05;
+  return { text, tone: hit ? 'info' : 'dim', title: `${all.n} release days, ${all.rates_days} of them in a rates-driven market; p from ${all.permutations ?? 0} shuffles of the regime label` };
+}
+
+// What the out-of-sample score says: R-squared against saying zero; a
+// negative figure is worse than saying nothing.
+export function oosText(oos) {
+  if (!oos || !finite(oos.by_regime)) return null;
+  const f = (v) => (finite(v) ? num(v, 2) : DASH);
+  return `Fitted on release days before ${oos.split} (${oos.train_days}) and scored on those after (${oos.test_days}): one line for all days R² ${f(oos.pooled)}, a line per regime R² ${f(oos.by_regime)}. Zero is saying nothing.${oos.by_regime < 0.05 ? ' Below 0.05 the regime tells which way stocks lean, not by how much.' : ''}`;
+}
+
+// A line's release days against the others: the 2-year yield and SPY.
+export function eventSizeText(e) {
+  if (!e || !finite(e.dy2_release) || !finite(e.dy2_other)) return null;
+  const stock = finite(e.spy_release) && finite(e.spy_other)
+    ? `SPY moved ${num(e.spy_release, 2)}× its recent typical day against ${num(e.spy_other, 2)}× on other days`
+    : null;
+  return [`2-year yield: ${num(e.dy2_release, 1)} bp on its release days against ${num(e.dy2_other, 1)} bp on others (n ${e.n})`, stock].filter(Boolean).join(' · ');
+}

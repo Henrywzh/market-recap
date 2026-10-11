@@ -5,7 +5,7 @@
 // their n: not detected is not zero. Nothing here forecasts.
 
 import { el, card, table, num, metaRow, tag, gap, DASH } from '../fmt.js';
-import { detected, diffWithSe, sectorDiffs, barSpan, columnScale, nextText, persistenceView } from '../scenarios-model.js';
+import { detected, diffWithSe, sectorDiffs, barSpan, columnScale, nextText, persistenceView, regimeRows, regimeVerdict, oosText, eventSizeText } from '../scenarios-model.js';
 
 const present = (v) => v !== null && v !== undefined && Number.isFinite(v);
 const signed = (v, digits, unit = '') => (present(v) ? `${v > 0 ? '+' : ''}${num(v, digits)}${unit}` : DASH);
@@ -148,8 +148,33 @@ function detailCard(data, d) {
       el('div', {}, [el('div', { class: 'card-title', text: 'SECTOR EXCESS VS SPY · ABOVE MINUS BELOW · 95% RANGE' }), sectorBars(d, data.sectors)]),
     ]),
     el('div', { class: 'field-note', text: `${order} A sector bar whose range crosses zero is dim: its difference is within the noise. SPY when rates drive the market (60-day correlation below zero): ${signed(d.spy_when_rates_drive.slope, 2)}% per standard deviation, t ${num(d.spy_when_rates_drive.t, 1)}, n ${d.spy_when_rates_drive.n}.` }),
+    eventSizeText(d.event_size) ? el('div', { class: 'field-note', text: eventSizeText(d.event_size) }) : null,
     tag(pv.text, pv.tone, pv.title),
   ]);
+}
+
+// --- regime ------------------------------------------------------------------
+
+function regimeCard(data) {
+  const rr = data.regime_response;
+  const rows = regimeRows(rr);
+  if (!rows.length) return card('WHAT DRIVES THE MARKET CHANGES HOW STOCKS READ A SURPRISE', null, [gap('Too few release days to measure.')]);
+  const now = data.regime?.label;
+  const cell = (e, digits, unit) => (e && present(e.slope)
+    ? el('td', { class: detected(e) ? '' : 'dim', title: `n ${e.n} · t ${num(e.t, 1)}${detected(e) ? '' : ' · not detected (|t| < 2)'}` }, [signed(e.slope, digits, unit), el('span', { class: 'sc-t', text: ` t ${num(e.t, 1)} · n ${e.n}` })])
+    : el('td', { class: 'dim', text: DASH }));
+  const verdict = regimeVerdict(rr);
+  const split = rr.out_of_sample?.split || data.settings.persistence_split;
+  const oos = oosText(rr.out_of_sample);
+  return card('WHAT DRIVES THE MARKET CHANGES HOW STOCKS READ A SURPRISE',
+    el('span', { class: 'dim', text: `${rr.days} release days since ${data.settings.history_start} · regime from the 60 sessions before each day` }), [
+      table(['', 'SPY PER HAWKISH SD', `FROM ${split}`, 'SPY PER +1BP OF 2Y · RELEASE DAYS', 'OTHER DAYS'], rows.map((r) => el('tr', { class: r.key === now ? 'sc-now' : '' }, [
+        el('td', {}, [el('span', { class: 'ms-name', text: r.label }), r.key === now ? tag('NOW', 'info') : null]),
+        cell(r.surprise, 3, '%'), cell(r.sinceSplit, 3, '%'), cell(r.onRelease, 3, '%'), cell(r.onOther, 3, '%'),
+      ]))),
+      el('div', { class: 'sc-fomc-line' }, [tag(verdict.tone === 'info' ? 'DETECTED' : 'NOT DETECTED', verdict.tone, verdict.title), ` ${verdict.text}`]),
+      el('div', { class: 'field-note', text: `Hawkish means higher yields: a hot CPI, strong payrolls, a fall in jobless claims or unemployment. A rates-driven day is one whose preceding 60 sessions had SPY moving against the 10-year yield; growth-driven, with it. Days with several releases are averaged. ${oos || ''}` }),
+    ]);
 }
 
 // --- FOMC days ---------------------------------------------------------------
@@ -206,5 +231,5 @@ export default function renderScenarios(root, data, _manifest, ctx = {}) {
     detailHost.replaceChildren(detailCard(data, data.drivers.find((d) => d.key === state.key)));
   };
   draw();
-  root.append(tableHost, detailHost, fomcCard(data.fomc));
+  root.append(tableHost, detailHost, regimeCard(data), fomcCard(data.fomc));
 }

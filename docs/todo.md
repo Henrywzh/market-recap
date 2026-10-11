@@ -334,7 +334,7 @@ Scratch tests on 28 industry ETFs plus the 11 sector funds, 2008-2026
   and sector bars, payrolls and core CPI orderings only, labelled as marginal.
   No new classification of releases.
 
-## 11. Weak-market / breadth module (researched 2026-10-11, not built)
+## 11. Weak-market / breadth module (researched and built 2026-10-11: MARKET STATE on INDICES)
 
 Breadth from price series with no survivorship (RSP/SPY, IWM/SPY, the share of
 the 11 sector funds above their 200-day line), 2009-2026, forward 63-session
@@ -364,7 +364,7 @@ outcomes, 95% intervals from a moving-block bootstrap (63-day blocks):
   (`breadth_by_sector`); it has survivorship in any backtest, so it stays
   descriptive.
 
-## 12. Pre-release and post-release features per driver (researched 2026-10-11, not built)
+## 12. Pre-release and post-release features per driver (researched and built 2026-10-11: SCENARIOS regime card and release-day size)
 
 Per-day SPY, 2016-2026, one observation per release day (drivers released
 together averaged):
@@ -388,3 +388,17 @@ together averaged):
 - **Proposed**: show the regime and the two conditional slopes with their n on
   each driver's detail; for the next release: the typical 2Y move, not a stock
   forecast. Do not show a stock-direction call for any driver.
+
+Other regime variables tried for the same split (2026-10-11, 1,128 release days,
+hawkish surprise x flag on SPY, HC1 t and a 500-shuffle permutation p; all known
+the day before): VIX above 20 (p 0.78), VIX above its 1-year median (0.72),
+realised volatility above its median (0.55), market 5% off its high (0.16), core
+CPI over 3% / 2.5% year on year (0.91 / 0.75), Fed hiking / cutting over 6
+months (0.45 / 0.51), 2-year yield rising over 6 months (0.35): none. Only the
+rate level does something: 10-year above 4% (interaction -0.19, t -2.4, p 0.002)
+and an inverted curve (-0.15, p 0.028), but both hold almost only from 2022 on
+(no days before it), agree with the rates-driven flag at correlation 0.5, and
+cannot be told apart from "the 2022-onward period". Twelve tried: only p under
+0.004 would count. HY spread could not be tested (FRED serves about 3 years of
+it). Conclusion: keep the one regime variable; more would split 1,128 days
+(roughly 200 separate stretches) into cells too small to read.

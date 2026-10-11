@@ -1,7 +1,9 @@
-import { el, card, table, num, pct, dirClass, periodSwitch, sectionTitle, notice, DASH } from '../fmt.js';
+import { el, card, table, tag, num, pct, dirClass, periodSwitch, sectionTitle, notice, DASH } from '../fmt.js';
 import { areaLine, zeroLine, multiLine } from '../charts.js';
 import { mountLive } from '../live.js';
 import { mountIndexCharts } from '../live-indices.js';
+import { spark } from '../spark.js';
+import { readingText, readingNote, outcomeCell, stateSummary, daysNow, sectorFlag } from '../market-state-model.js';
 
 function drawdownStat(entry) {
   return el('div', { class: 'stat' }, [
@@ -117,7 +119,70 @@ function actionsNotice(manifest) {
       + `${a.ratio} share per share held; the feed does not adjust for spin-offs.`)).join(' '));
 }
 
-export default function renderMarkets(root, data, manifest) {
+// --- market state --------------------------------------------------------------
+
+function marketStateSection(state) {
+  const horizon = state.settings.horizon_period;
+  const strip = el('div', { class: 'stat-strip ms-strip' }, state.readings.map((r) => el('div', { class: 'stat' }, [
+    el('div', { class: 'stat-label', text: r.label }),
+    el('div', { class: 'stat-value', text: readingText(r) }),
+    el('div', { class: 'ms-spark' }, [spark(r.spark, { width: 120, height: 22 })]),
+    el('div', { class: 'stat-note', text: readingNote(r) || (r.unit === 'pp' ? `OVER ${state.settings.relative_period}` : r.key === 'spy_drawdown' ? `FROM ${state.settings.high_period} HIGH` : '') }),
+  ])));
+
+  const funds = el('div', { class: 'ms-funds' }, state.sectors.map((row) => {
+    const flag = sectorFlag(row);
+    return el('span', { class: `ms-fund ${flag.tone}`, title: `${row.sector}: ${row.above_50 === null ? DASH : row.above_50 ? 'above' : 'below'} its ${state.settings.short_ma}-day line` }, [
+      el('b', { text: row.etf }), ` ${flag.text}`,
+    ]);
+  }));
+
+  const summary = stateSummary(state.states, state.settings.drawdown_floor_pct);
+  const total = state.states.length;
+  const sentence = summary.holding.length
+    ? `${summary.holding.length} of ${total} states hold today. ${summary.detected.length
+      ? `After such days a difference is detected for ${summary.detected.map((d) => `${d.label} (${d.parts.join(', ')})`).join('; ')}. `
+      : 'None of them has a detected difference in what followed. '}${summary.undetected.length
+      ? `No difference is detected for the other ${summary.undetected.length}: ${summary.undetected.map((d) => d.label).join(', ')}.` : ''}`
+    : 'No state holds today.';
+
+  const unit = { ret: 'pp', worst_dd: 'pp', hit: '%' };
+  const rows = state.states.map((st) => {
+    const cells = ['ret', 'worst_dd', 'hit'].map((key) => {
+      const c = outcomeCell(key, st.outcomes?.[key], unit[key]);
+      return el('td', { class: c.tone === 'dim' ? 'dim' : c.tone, title: c.title, text: c.text });
+    });
+    const now = daysNow(st);
+    return el('tr', { class: st.active_now ? 'ms-active' : '' }, [
+      el('td', {}, [el('span', { class: 'ms-name', text: st.label }), el('span', { class: 'sub', text: st.rule })]),
+      el('td', {}, now ? [tag(now, 'info')] : [el('span', { class: 'dim', text: DASH })]),
+      el('td', { class: st.status === 'ok' ? '' : 'dim', title: `${st.days} scored days in ${st.episodes} separate episodes, ${st.first || DASH} to ${st.last || DASH}`, text: `${st.days} / ${st.episodes}` }),
+      ...cells,
+    ]);
+  });
+  return [
+    sectionTitle('MARKET STATE', `BREADTH AND STRESS FROM FUND PRICES · THROUGH ${state.inputs.prices_through}`),
+    strip,
+    funds,
+    el('div', { class: 'field-note ms-sentence', text: sentence }),
+    card(`WHAT THE MARKET DID NEXT · ${horizon} AFTER A DAY IN THE STATE, LESS THE OTHER DAYS · 95% RANGE`, null, [
+      table(['STATE', 'NOW', 'DAYS / EPISODES', `${horizon} RETURN, PP`, 'WORST FALL, PP', `${state.settings.drawdown_floor_pct}%+ FALL CHANCE, PP`], rows),
+      el('div', { class: 'field-note', text: `Scored over ${state.inputs.scored_days} sessions from ${state.settings.history_start} to ${state.inputs.scored_through}. ${state.notes.join(' ')}` }),
+    ]),
+  ];
+}
+
+async function mountMarketState(host, ctx) {
+  try {
+    const state = await ctx.loadArtifact('market_state');
+    if (!state || state.unavailable || !Array.isArray(state.states)) throw new Error('no market-state measurements in this build');
+    host.replaceChildren(...marketStateSection(state));
+  } catch (error) {
+    host.replaceChildren(sectionTitle('MARKET STATE', 'BREADTH AND STRESS'), el('div', { class: 'gap', text: `Market state is unavailable: ${error.message}.` }));
+  }
+}
+
+export default function renderMarkets(root, data, manifest, ctx = {}) {
   // Indices are read in the order the contract declares them, so adding one is
   // a config change here too -- nothing on this tab names an index.
   const order = data.index_order || Object.keys(data.indices || {});
@@ -145,6 +210,14 @@ export default function renderMarkets(root, data, manifest) {
     ...blocks.map((block) => drawdownStat({ label: block.key, ...block.drawdown })),
     ...blocks.map((block) => adStat(block.key, block.advance_decline)),
   ]));
+
+  // How narrow or stressed the market is; built on its own, so a failure of
+  // that panel leaves a named gap here and nothing else on the page.
+  if (ctx.loadArtifact) {
+    const stateHost = el('div', {});
+    root.append(stateHost);
+    mountMarketState(stateHost, ctx);
+  }
 
   // One section per index, rendered by the same function so the two read
   // identically and a reader can compare them without re-learning the layout.

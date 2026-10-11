@@ -16,7 +16,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, evidence, financials, fixed_income, heatmaps, industries, macro, markets, monitor, overview, positioning, priced, risk, rotation, scenarios, themes, valuation, xray
+from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, evidence, financials, fixed_income, heatmaps, industries, macro, market_state, markets, monitor, overview, positioning, priced, risk, rotation, scenarios, themes, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -25,6 +25,8 @@ from .util import SourceRecord, describe_error, utc_now_iso, write_json
 # MONITOR consumes same-session valuation and calendar outputs, and runs last.
 PANELS = {
     "markets": markets.build,
+    # Breadth and stress readings from fund prices; reads no other panel.
+    "market_state": market_state.build,
     "catalysts": catalysts.build,
     "priced": priced.build,
     # Measures past data releases against rates and stocks; reads no other panel.

@@ -60,3 +60,40 @@ test('the ordering test reads its rho and p, or says there are too few releases'
   assert.equal(M.persistenceView({ status: 'insufficient' }).text, 'too few releases');
   assert.equal(M.persistenceView(null).text, 'too few releases');
 });
+
+test('regime rows put each regime\'s slopes in a row, and the verdict is info only when the permutation p is under 0.05', () => {
+  const slope = (v, t, n) => ({ slope: v, t, n });
+  const rr = {
+    status: 'ok', days: 1162,
+    surprise: {
+      all: { n: 1162, rates_days: 399, permutations: 2000, p_perm: 0.04, interaction: { coef: -0.121, t: -1.87 },
+        by_regime: { rates: slope(-0.07, -1.5, 399), growth: slope(0.051, 1.6, 763) } },
+      since_split: { interaction: { coef: -0.261, t: -2.3 }, by_regime: { rates: slope(-0.113, -1.8, 334), growth: slope(0.148, 1.7, 197) } },
+    },
+    after_the_move: { release_days: { rates: slope(-0.028, -4.1, 399), growth: slope(0.039, 5.6, 763) }, other_days: { rates: slope(-0.007, -1, 465), growth: slope(0.056, 8, 949) } },
+    out_of_sample: { split: '2022-01-01', pooled: -0.269, by_regime: -0.007, train_days: 631, test_days: 531 },
+  };
+  const rows = M.regimeRows(rr);
+  assert.deepEqual(rows.map((r) => r.key), ['rates', 'growth']);
+  assert.equal(rows[0].onRelease.n, 399);
+  const v = M.regimeVerdict(rr);
+  assert.equal(v.tone, 'info');
+  assert.match(v.text, /difference -0\.12% per sd \(t -1\.9, permutation p 0\.040\)/);
+  assert.match(v.text, /from 2022-01-01 on -0\.26/);
+  rr.surprise.all.p_perm = 0.2;
+  assert.equal(M.regimeVerdict(rr).tone, 'dim');
+  assert.deepEqual(M.regimeRows({ status: 'insufficient' }), []);
+  assert.equal(M.regimeVerdict(null).text, 'no measurement');
+  assert.match(M.oosText(rr.out_of_sample), /R² -0\.27, a line per regime R² -0\.01/);
+  assert.match(M.oosText(rr.out_of_sample), /not by how much/);
+  assert.doesNotMatch(M.oosText({ ...rr.out_of_sample, by_regime: 0.2 }), /not by how much/);
+  assert.equal(M.oosText(null), null);
+});
+
+test('event size reads the 2-year yield and SPY, and is absent when the build has no figure', () => {
+  const text = M.eventSizeText({ n: 120, dy2_release: 5.37, dy2_other: 3.47, spy_release: 0.85, spy_other: 0.82 });
+  assert.match(text, /5\.4 bp on its release days against 3\.5 bp on others \(n 120\)/);
+  assert.match(text, /SPY moved 0\.85× its recent typical day against 0\.82×/);
+  assert.equal(M.eventSizeText({ n: 0, dy2_release: null, dy2_other: 3 }), null);
+  assert.doesNotMatch(M.eventSizeText({ n: 5, dy2_release: 4, dy2_other: 3, spy_release: null, spy_other: 1 }), /SPY/);
+});

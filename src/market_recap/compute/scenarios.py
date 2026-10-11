@@ -224,3 +224,122 @@ def regime(spy: pd.Series, dy10: pd.Series, *, sessions: int) -> dict:
     now = float(valid.iloc[-1])
     return {"corr": now, "share_negative": float((valid < 0).mean()), "since": valid.index[0].date().isoformat(),
             "label": "rates" if now < 0 else "growth", "sessions": sessions}
+
+
+def _ols_hc1(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    """Least squares with heteroskedasticity-robust (HC1) t-statistics; None
+    when the design is singular or too short."""
+    n, k = x.shape
+    if n <= k + 5:
+        return None
+    try:
+        xtx_inv = np.linalg.inv(x.T @ x)
+    except np.linalg.LinAlgError:
+        return None
+    coef = xtx_inv @ x.T @ y
+    resid = y - x @ coef
+    meat = (x * resid[:, None]).T @ (x * resid[:, None]) * n / (n - k)
+    se = np.sqrt(np.diag(xtx_inv @ meat @ xtx_inv))
+    return coef, np.where(se > 0, coef / se, np.nan)
+
+
+def release_days(tables: dict[str, pd.DataFrame], hawkish: dict[str, int], spy: pd.Series, dy2: pd.Series,
+                 regime_corr: pd.Series) -> pd.DataFrame:
+    """One row per day any line was released: the mean hawkish surprise
+    (``z``: the robust-scaled surprise, signed so that up is the 'higher
+    yields' direction -- a rise in unemployment is dovish), SPY's return, the
+    2-year yield's change in bp and whether the day opened in a rates-driven
+    market (the stock-yield correlation of the 60 sessions before it,
+    negative). Days without a regime reading or a stock return are left out."""
+    parts = [(t["z"] * hawkish.get(key, 1)).rename(key) for key, t in tables.items() if "z" in t]
+    if not parts:
+        return pd.DataFrame(columns=["z", "spy", "dy2", "rates"])
+    z = pd.concat(parts, axis=1).mean(axis=1)
+    out = pd.DataFrame({"z": z, "spy": spy.reindex(z.index), "dy2": dy2.reindex(z.index), "corr": regime_corr.reindex(z.index)})
+    out = out.dropna(subset=["z", "spy", "corr"])
+    out["rates"] = out["corr"] < 0
+    return out.drop(columns="corr")
+
+
+def _by_regime(days: pd.DataFrame, x: str, *, min_n: int) -> dict:
+    return {name: slope_t(g[x], g["spy"], min_n=min_n) for name, g in (("rates", days[days["rates"]]), ("growth", days[~days["rates"]]))}
+
+
+def regime_response(days: pd.DataFrame, other_days: pd.DataFrame, *, split: str, min_n: int, permutations: int, seed: int) -> dict:
+    """How the stock reaction to a release depends on what was driving the
+    market, from the stock-yield correlation known before the day.
+
+    - ``surprise``: SPY's return per standard deviation of hawkish surprise, in
+      the rates-driven and the growth-driven days, and the interaction (the
+      difference between them) with its HC1 t and a permutation p-value over
+      the regime labels; also for the days from ``split`` on.
+    - ``after_the_move``: SPY's return per bp of the 2-year yield's change on
+      release days, by regime, against the same on other days.
+    - ``out_of_sample``: lines fitted on release days before ``split`` and
+      scored (R-squared against saying zero) on those after it, one line
+      pooled and one per regime.
+    Each figure carries its n; a slice too short for a figure is absent."""
+    out: dict = {"days": int(len(days))}
+    if len(days) < 2 * min_n:
+        return {**out, "status": "insufficient"}
+
+    def interaction(frame: pd.DataFrame, shuffle: np.random.Generator | None = None) -> dict | None:
+        r = frame["rates"].to_numpy(dtype=float)
+        if shuffle is not None:
+            r = shuffle.permutation(r)
+        z = frame["z"].to_numpy()
+        fit = _ols_hc1(np.column_stack([np.ones(len(frame)), z, r, z * r]), frame["spy"].to_numpy())
+        return None if fit is None else {"coef": float(fit[0][3]), "t": float(fit[1][3])}
+
+    def block(frame: pd.DataFrame) -> dict:
+        both = interaction(frame)
+        return {"n": int(len(frame)), "rates_days": int(frame["rates"].sum()), "by_regime": _by_regime(frame, "z", min_n=min_n),
+                "interaction": both}
+
+    out["surprise"] = {"all": block(days), "since_split": block(days[days.index >= pd.Timestamp(split)]),
+                       "before_split": block(days[days.index < pd.Timestamp(split)])}
+    actual = out["surprise"]["all"]["interaction"]
+    if actual is not None:
+        rng = np.random.default_rng(seed)
+        null = [i["coef"] for i in (interaction(days, rng) for _ in range(permutations)) if i is not None]
+        out["surprise"]["all"]["p_perm"] = float((np.abs(null) >= abs(actual["coef"])).mean()) if null else None
+        out["surprise"]["all"]["permutations"] = len(null)
+    moved = days.dropna(subset=["dy2"])
+    out["after_the_move"] = {"release_days": _by_regime(moved, "dy2", min_n=min_n),
+                             "other_days": _by_regime(other_days, "dy2", min_n=min_n)}
+    train, test = moved[moved.index < pd.Timestamp(split)], moved[moved.index >= pd.Timestamp(split)]
+    if len(train) >= min_n and len(test) >= min_n and train["rates"].nunique() == 2 and test["rates"].nunique() >= 1:
+        def fitted(frame: pd.DataFrame, per_regime: bool) -> np.ndarray:
+            line = {flag: np.polyfit(g["dy2"], g["spy"], 1) for flag, g in train.groupby("rates")} if per_regime else None
+            pooled = np.polyfit(train["dy2"], train["spy"], 1)
+            return np.array([np.polyval(line[bool(r)] if line else pooled, x) for r, x in zip(frame["rates"], frame["dy2"])])
+        denom = float((test["spy"] ** 2).sum())
+
+        def score(pred: np.ndarray) -> float | None:
+            return 1 - float(((test["spy"].to_numpy() - pred) ** 2).sum()) / denom if denom > 0 else None
+
+        out["out_of_sample"] = {"pooled": score(fitted(test, False)), "by_regime": score(fitted(test, True)),
+                                "train_days": int(len(train)), "test_days": int(len(test)), "split": split}
+    out["status"] = "ok"
+    return out
+
+
+def event_size(release_days_index: pd.Index, spy: pd.Series, dy2: pd.Series, *, start: str, vol_sessions: int = 20) -> dict:
+    """How big a line's release days are against the other days since ``start``:
+    the 2-year yield's average absolute move in bp, and SPY's average absolute
+    move in units of its own volatility over the ``vol_sessions`` before the
+    day (so a stormy month does not make every release look large). Releases
+    only count where both are known; None where a side has no days."""
+    vol = spy.rolling(vol_sessions).std().shift(1)
+    frame = pd.DataFrame({"dy2": dy2.abs(), "spy": spy.abs() / vol}).loc[pd.Timestamp(start):]
+    is_release = frame.index.isin(release_days_index)
+    rel, other = frame[is_release], frame[~is_release]
+
+    def mean(series: pd.Series) -> float | None:
+        v = series.dropna()
+        return float(v.mean()) if len(v) else None
+
+    return {"n": int(len(rel.dropna(subset=["dy2"]))), "n_stock": int(len(rel["spy"].dropna())),
+            "dy2_release": mean(rel["dy2"]), "dy2_other": mean(other["dy2"]),
+            "spy_release": mean(rel["spy"]), "spy_other": mean(other["spy"])}
+

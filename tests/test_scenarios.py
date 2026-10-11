@@ -116,6 +116,58 @@ def test_walk_forward_scores_loadings_that_hold_and_not_ones_that_do_not():
     assert S.walk_forward_r2(steady.iloc[:300], f.iloc[:300], window=252, step=21) is None   # too few days to score
 
 
+def _days(n=900, seed=0, flip=True, effect=0.5):
+    """Release days where a hawkish surprise lifts stocks in a growth-driven market
+    and (when ``flip``) drops them in a rates-driven one."""
+    rng = np.random.default_rng(seed)
+    idx = pd.bdate_range("2018-01-02", periods=n)
+    z = pd.Series(rng.normal(size=n), index=idx)
+    rates = pd.Series(rng.random(n) < 0.4, index=idx)
+    sign = np.where(rates, -1.0 if flip else 1.0, 1.0)
+    spy = pd.Series(effect * sign * z + rng.normal(0, 0.8, n), index=idx)
+    dy2 = pd.Series(2 * z + rng.normal(0, 1, n), index=idx)
+    return pd.DataFrame({"z": z, "spy": spy, "dy2": dy2, "rates": rates})
+
+
+def test_release_days_sign_a_dovish_line_and_flag_the_regime_known_before_the_day():
+    idx = pd.bdate_range("2020-01-01", periods=6)
+    hot = pd.DataFrame({"z": [1.0, 2.0, np.nan]}, index=idx[:3])
+    jobless = pd.DataFrame({"z": [1.0, -1.0, 1.0]}, index=idx[1:4])
+    spy = pd.Series(range(6), index=idx, dtype=float)
+    corr = pd.Series([-0.5, -0.5, 0.3, 0.3, np.nan, -0.1], index=idx)
+    d = S.release_days({"cpi": hot, "claims": jobless}, {"cpi": 1, "claims": -1}, spy, spy * 2, corr)
+    # day 1: cpi +2 and claims +1 read as -1 -> mean 0.5; day 2: claims -1 reads as +1 (corr 0.3: growth)
+    assert d["z"].loc[idx[1]] == pytest.approx(0.5) and d["z"].loc[idx[2]] == pytest.approx(1.0)
+    assert d["rates"].loc[idx[1]] and not d["rates"].loc[idx[2]]
+    assert idx[4] not in d.index and idx[0] in d.index                      # a day without a regime reading is left out
+
+
+def test_regime_response_finds_a_sign_flip_and_not_one_that_is_absent():
+    flipped = S.regime_response(_days(flip=True), _days(seed=5), split="2021-01-01", min_n=8, permutations=300, seed=1)
+    allrow = flipped["surprise"]["all"]
+    assert allrow["by_regime"]["rates"]["slope"] < -0.3 and allrow["by_regime"]["growth"]["slope"] > 0.3
+    assert allrow["interaction"]["coef"] < -0.6 and allrow["interaction"]["t"] < -5 and allrow["p_perm"] < 0.02
+    same = S.regime_response(_days(flip=False), _days(seed=5), split="2021-01-01", min_n=8, permutations=300, seed=1)
+    assert abs(same["surprise"]["all"]["interaction"]["t"]) < 2.5 and same["surprise"]["all"]["p_perm"] > 0.05
+    assert flipped["out_of_sample"]["by_regime"] > flipped["out_of_sample"]["pooled"]   # the regime-specific line scores better
+    assert flipped["after_the_move"]["release_days"]["rates"]["n"] > 100 and flipped["status"] == "ok"
+    thin = S.regime_response(_days(n=10), _days(seed=5), split="2018-01-10", min_n=8, permutations=50, seed=1)
+    assert thin["status"] == "insufficient"
+
+
+def test_event_size_compares_release_days_with_the_others_in_the_stock_s_own_volatility():
+    rng = np.random.default_rng(2)
+    idx = pd.bdate_range("2019-01-01", periods=600)
+    spy = pd.Series(rng.normal(0, 1, 600), index=idx)
+    dy2 = pd.Series(rng.normal(0, 3, 600), index=idx)
+    release = idx[100::20]
+    spy[release] *= 3
+    dy2[release] *= 2
+    e = S.event_size(release, spy, dy2, start="2019-06-01")
+    assert e["dy2_release"] > 1.6 * e["dy2_other"] and e["spy_release"] > 2 * e["spy_other"] and e["n"] > 15
+    assert S.event_size(idx[:0], spy, dy2, start="2019-06-01")["dy2_release"] is None
+
+
 def _release_frames(pattern_after=1.0, seed=0, late_sector=False):
     """Releases before and after a split whose sector response to 'above' minus
     'below' is the same pattern (scaled by ``pattern_after``) plus noise."""
@@ -204,6 +256,8 @@ def test_panel_assembles_measurements_without_inventing_any():
     assert "XLE" not in {s["etf"] for s in payload["sectors"]}   # a sector with no prices is absent, not zero
     assert "nowcast" not in payload
     assert payload["fomc"]["decisions"] > 50 and payload["fomc"]["decisions_with_surprise"] >= 1
+    assert nfp["event_size"]["n"] >= 100 and nfp["event_size"]["dy2_other"] > 0
+    assert payload["regime_response"]["status"] in ("ok", "insufficient") and "event_size" not in by_key["missing"]
 
 
 def test_a_session_after_the_last_yield_is_reported_as_one_the_yields_do_not_reach():

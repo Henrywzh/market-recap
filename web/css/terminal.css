@@ -1083,3 +1083,13 @@ table.industries-members { font-size: 11px; }
 .tb-split .up { background: var(--up); }
 .tb-split .down { background: var(--down); }
 .tb-split .mid { background: color-mix(in srgb, var(--text-faint) 60%, transparent); }
+
+/* ---------- MARKET STATE ---------- */
+.ms-strip { grid-template-columns: repeat(auto-fit, minmax(122px, 1fr)); margin-top: 6px; }
+.ms-spark .spark { display: block; width: 120px; height: 22px; color: var(--text-dim); margin: 2px 0; }
+.ms-funds { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 6px 0 2px; font-size: 11px; }
+.ms-fund b { font-weight: 600; letter-spacing: 0.04em; margin-right: 2px; color: var(--text-dim); }
+.ms-sentence { margin: 6px 0 10px; }
+.ms-name { font-weight: 600; letter-spacing: 0.04em; }
+.ms-active td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.sc-now td { background: color-mix(in srgb, var(--accent) 8%, transparent); }

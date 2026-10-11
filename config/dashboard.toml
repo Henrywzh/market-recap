@@ -444,20 +444,93 @@ fomc_bucket_bp = 3
 relative = ["IWM", "KRE"]
 fred_10y = "DGS10"
 fred_2y = "DGS2"
-# TradingView line, exactly as its calendar titles it.
+# TradingView line, exactly as its calendar titles it. hawkish = -1 marks a
+# line whose higher print is the dovish one (unemployment, claims).
 drivers = [
   { key = "core_cpi", label = "Core CPI m/m", title = "Core Inflation Rate MoM", unit = "pp" , miss_threshold = 0.05 },
   { key = "cpi", label = "CPI m/m", title = "Inflation Rate MoM", unit = "pp" , miss_threshold = 0.05 },
   { key = "ppi", label = "PPI m/m", title = "PPI MoM", unit = "pp" , miss_threshold = 0.05 },
   { key = "core_pce", label = "Core PCE m/m", title = "Core PCE Price Index MoM", unit = "pp" , miss_threshold = 0.05 },
   { key = "payrolls", label = "Nonfarm payrolls", title = "Non Farm Payrolls", unit = "k" },
-  { key = "unemployment", label = "Unemployment rate", title = "Unemployment Rate", unit = "pp" , miss_threshold = 0.05 },
+  { key = "unemployment", label = "Unemployment rate", title = "Unemployment Rate", unit = "pp" , miss_threshold = 0.05, hawkish = -1 },
   { key = "hourly_earnings", label = "Average hourly earnings m/m", title = "Average Hourly Earnings MoM", unit = "pp" , miss_threshold = 0.05 },
-  { key = "claims", label = "Initial jobless claims", title = "Initial Jobless Claims", unit = "k" },
+  { key = "claims", label = "Initial jobless claims", title = "Initial Jobless Claims", unit = "k", hawkish = -1 },
   { key = "jolts", label = "JOLTs job openings", title = "JOLTs Job Openings", unit = "k" },
   { key = "retail_sales", label = "Retail sales m/m", title = "Retail Sales MoM", unit = "pp" , miss_threshold = 0.05 },
   { key = "ism_manufacturing", label = "ISM manufacturing PMI", title = "ISM Manufacturing PMI", unit = "pts" },
 ]
+
+[market_state]
+# MARKETS -> MARKET STATE. How narrow or stressed the market is, from price
+# series with no survivorship (the equal-weight and small-cap funds against the
+# cap-weighted market, the sector funds against their moving averages, the
+# distance from the high, the VIX), and what the market did next on the days
+# a rule like it held. Windows are named in config.PERIOD_TRADING_DAYS. History
+# starts after the crisis lows; the forward window is horizon_period and the
+# 95% ranges come from a moving-block bootstrap with blocks as long as it.
+history_years = 18
+history_start = "2009-06-01"
+equal_weight = "RSP"
+small_caps = "IWM"
+vix = "^VIX"
+relative_period = "3M"
+high_period = "1Y"
+horizon_period = "3M"
+long_ma = 200
+short_ma = 50
+chart_period = "1Y"
+drawdown_floor_pct = 5
+resamples = 1000
+seed = 20260101
+# A state with fewer scored days than this shows its count and no figure.
+min_days = 20
+
+[market_state.labels]
+rsp_spy = "EQUAL WEIGHT VS CAP WEIGHT"
+iwm_spy = "SMALL CAPS VS MARKET"
+sector_above_200 = "SECTOR FUNDS ABOVE 200D"
+sector_above_50 = "SECTOR FUNDS ABOVE 50D"
+spy_drawdown = "MARKET FROM 1Y HIGH"
+vix = "VIX"
+
+# Each state is a rule: every condition must hold. Readings: rsp_spy and
+# iwm_spy (relative return, percentage points over relative_period),
+# sector_above_200 / sector_above_50 (percent of the sector funds),
+# spy_drawdown (percent from the high), vix.
+[[market_state.states]]
+key = "narrow"
+label = "NARROW LEADERSHIP"
+conditions = [{ reading = "rsp_spy", op = "lt", value = -2 }]
+
+[[market_state.states]]
+key = "narrow_at_high"
+label = "NARROW, NEAR THE HIGH"
+conditions = [{ reading = "rsp_spy", op = "lt", value = -2 }, { reading = "spy_drawdown", op = "gt", value = -5 }]
+
+[[market_state.states]]
+key = "small_caps_lag"
+label = "SMALL CAPS LAGGING"
+conditions = [{ reading = "iwm_spy", op = "lt", value = -3 }]
+
+[[market_state.states]]
+key = "thin_sectors"
+label = "FEW SECTORS ABOVE 200D"
+conditions = [{ reading = "sector_above_200", op = "lt", value = 50 }]
+
+[[market_state.states]]
+key = "thin_at_high"
+label = "FEW SECTORS ABOVE 200D, NEAR THE HIGH"
+conditions = [{ reading = "sector_above_200", op = "lt", value = 50 }, { reading = "spy_drawdown", op = "gt", value = -5 }]
+
+[[market_state.states]]
+key = "stress"
+label = "VIX ABOVE 25"
+conditions = [{ reading = "vix", op = "gt", value = 25 }]
+
+[[market_state.states]]
+key = "deep_drawdown"
+label = "MARKET 10% BELOW ITS HIGH"
+conditions = [{ reading = "spy_drawdown", op = "lt", value = -10 }]
 
 [themes]
 # CATALYSTS -> THEMES. Groups of names that move together, not GICS sectors.
