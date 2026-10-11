@@ -6,9 +6,7 @@ far the 2-year and 10-year yields, SPY and each sector moved on those days
 (with standard errors and counts), whether the sector ordering held out of
 sample, and the next release with its forecast. Beside them: the rolling
 stock-versus-yield correlation (is the market driven by rates or by growth),
-the FOMC days against other days, and a nowcast -- the loadings of each
-sector's excess return on the day's rates, credit, oil and dollar moves over
-the last year, with what the last session's moves imply.
+and the FOMC days against other days.
 
 The measurements are the point, not a forecast: most effects on stocks are not
 detectable at these sample sizes and the panel says so (see compute.scenarios).
@@ -23,25 +21,20 @@ import numpy as np
 import pandas as pd
 
 from ..compute import scenarios as S
-from ..config import PERIOD_TRADING_DAYS
 from ..context import YAHOO_URL
 from ..sources import expectations as X
 from ..sources import fred, yahoo
 from ..util import SourceRecord, clean_float, describe_error, to_iso_date
 
-FACTORS = ("dY10", "dSlope", "credit", "oil", "usd")
-FACTOR_LABELS = {
-    "dY10": "10-year yield, bp", "dSlope": "10Y less 2Y yield, bp", "credit": "HYG less LQD, %",
-    "oil": "WTI, %", "usd": "dollar (UUP), %",
-}
 NOTES = (
     "Surprise = actual less TradingView's forecast; classes use the robust spread of each series' own surprises.",
     "A class with too few releases shows its count and no figure; an effect under about 0.3 percentage points on "
     "a day cannot be told from noise at 20-60 releases a class.",
     "Rates respond to surprises reliably; stocks and sectors mostly do not detectably. Sector 'persistence' is a "
     "permutation test of whether the ordering found before the split held after it.",
-    "The nowcast is the last year's loadings applied to moves that already happened. It explains a day after the "
-    "fact; it does not forecast the surprise.",
+    "Not shown: a nowcast of each sector from the day's rates, credit, oil and dollar moves. Tested out of sample "
+    "(loadings fitted on a year, scored on the next month, 2012-2026, 40 sector and industry funds) the median fund "
+    "scored 0.03; only energy, metals, staples, utilities and REITs reached 0.1 or more.",
 )
 
 
@@ -115,23 +108,15 @@ def assemble(*, as_of: date, closes: pd.DataFrame, y10: pd.Series, y2: pd.Series
     last_yield = min(y10.dropna().index.max(), y2.dropna().index.max())
     yields = pd.DataFrame({"y10": y10, "y2": y2}).reindex(closes.index).ffill()
     yields[yields.index > last_yield] = np.nan
-    credit_long, credit_short = cfg["credit"]
-    factors = pd.DataFrame({
-        "dY10": yields["y10"].diff() * 100,
-        "dSlope": (yields["y10"].diff() - yields["y2"].diff()) * 100,
-        "credit": ret[credit_long] - ret[credit_short],
-        "oil": ret[cfg["oil"]].clip(-cfg["oil_clip_pct"], cfg["oil_clip_pct"]),
-        "usd": ret[cfg["dollar"]],
-    })[list(FACTORS)]
-    dy2 = factors["dY10"] - factors["dSlope"]
+    dy10, dy2 = yields["y10"].diff() * 100, yields["y2"].diff() * 100
     spy = ret[market]
     excess = pd.DataFrame({etf: ret[etf] - spy for etf in sectors.values() if etf in ret.columns})
     relative = pd.DataFrame({sym: ret[sym] - spy for sym in cfg["relative"] if sym in ret.columns})
-    frame = pd.DataFrame({"SPY": spy, "dY2": dy2, "dY10": factors["dY10"]})
+    frame = pd.DataFrame({"SPY": spy, "dY2": dy2, "dY10": dy10})
     days = closes.index
     exclude = [(w["start"], w["end"]) for w in cfg["exclude"]]
-    corr_now = S.regime(spy, factors["dY10"], sessions=cfg["regime_sessions"])
-    rolling_corr = spy.rolling(cfg["regime_sessions"]).corr(factors["dY10"]).shift(1)
+    corr_now = S.regime(spy, dy10, sessions=cfg["regime_sessions"])
+    rolling_corr = spy.rolling(cfg["regime_sessions"]).corr(dy10).shift(1)
     min_class, min_era = cfg["min_class_releases"], cfg["min_era_releases"]
     outcomes = pd.concat([frame[["dY2", "dY10", "SPY"]], relative.add_suffix("-SPY"), excess], axis=1)
 
@@ -168,34 +153,18 @@ def assemble(*, as_of: date, closes: pd.DataFrame, y10: pd.Series, y2: pd.Series
         entry["persistence"] = {k: (_num(v, 3) if isinstance(v, float) else v) for k, v in entry["persistence"].items()}
         drivers.append(entry)
 
-    window = PERIOD_TRADING_DAYS[cfg["beta_period"]]
-    last_day = factors.dropna().index[-1] if factors.dropna().shape[0] else None
-    nowcast = []
-    for sector, etf in sectors.items():
-        if etf not in excess.columns:
-            continue
-        fit = S.rolling_betas(excess[etf], factors, window=window)
-        row = {"sector": sector, "etf": etf, "betas": None, "r2": None, "n": 0, "implied_last_session": None, "actual_last_session": None}
-        if fit:
-            implied = float(sum(fit["betas"][f] * factors.loc[last_day, f] for f in FACTORS)) if last_day is not None else None
-            row.update(betas={k: _num(v, 4) for k, v in fit["betas"].items()}, r2=_num(fit["r2"], 3), n=fit["n"],
-                       implied_last_session=_num(implied, 3),
-                       actual_last_session=_num(excess[etf].get(last_day), 3) if last_day is not None else None)
-        nowcast.append(row)
+    sector_list = [{"sector": sector, "etf": etf} for sector, etf in sectors.items() if etf in excess.columns]
 
     return {
         "as_of": as_of.isoformat(),
         "settings": {k: cfg[k] for k in ("history_start", "class_threshold_sd", "surprise_clip_sd", "min_class_releases",
-                                         "min_era_releases", "era_breaks", "beta_period", "regime_sessions",
+                                         "min_era_releases", "era_breaks", "regime_sessions",
                                          "persistence_split", "permutations")} | {"exclude": cfg["exclude"]},
         "inputs": {"prices_through": to_iso_date(closes.index[-1]), "yields_through": to_iso_date(last_yield)},
         "regime": {k: (_num(v, 3) if isinstance(v, float) else v) for k, v in corr_now.items()},
         "drivers": drivers,
         "fomc": _fomc(rows, cfg, days, frame),
-        "nowcast": {"window_sessions": window, "factors": FACTOR_LABELS,
-                    "last_session": last_day.date().isoformat() if last_day is not None else None,
-                    "factor_moves": {f: _num(factors.loc[last_day, f], 3) for f in FACTORS} if last_day is not None else None,
-                    "sectors": nowcast},
+        "sectors": sector_list,
         "notes": list(NOTES),
     }
 
@@ -205,10 +174,10 @@ def build(ctx) -> dict:
     as_of = date.fromisoformat(ctx.as_of)
     market = ctx.config["universe"]["market_proxy"]
     sectors = ctx.sector_etfs
-    symbols = sorted({market, *sectors.values(), *cfg["relative"], *cfg["credit"], cfg["oil"], cfg["dollar"]})
+    symbols = sorted({market, *sectors.values(), *cfg["relative"]})
     years = int(ctx.config["universe"]["history_years"])
     closes = yahoo.fetch_closes(symbols, period=f"{years}y")
-    ctx.log.add(SourceRecord("scenarios_prices", "Daily closes for the sector ETFs, credit, oil and dollar proxies", YAHOO_URL,
+    ctx.log.add(SourceRecord("scenarios_prices", "Daily closes for the market proxy, the sector ETFs and the relative-strength funds", YAHOO_URL,
                              to_iso_date(closes.index[-1]) if not closes.empty else None, rows=int(closes.shape[1]),
                              status="ok" if set(symbols) <= set(closes.columns) else "partial",
                              error=None if set(symbols) <= set(closes.columns) else f"no data: {', '.join(sorted(set(symbols) - set(closes.columns)))}"))

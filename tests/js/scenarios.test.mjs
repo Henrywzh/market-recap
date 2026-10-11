@@ -60,13 +60,3 @@ test('the ordering test reads its rho and p, or says there are too few releases'
   assert.equal(M.persistenceView({ status: 'insufficient' }).text, 'too few releases');
   assert.equal(M.persistenceView(null).text, 'too few releases');
 });
-
-test('nowcast rows put the best-explained sector first and drop a sector with no fit', () => {
-  const rows = M.nowcastRows({ sectors: [
-    { sector: 'a', etf: 'A', betas: { x: 1 }, r2: 0.05, implied_last_session: 0.1, actual_last_session: 0.2 },
-    { sector: 'b', etf: 'B', betas: null, r2: null },
-    { sector: 'e', etf: 'E', betas: { x: 2 }, r2: 0.48, implied_last_session: 0.8, actual_last_session: 3.4 },
-  ] });
-  assert.deepEqual(rows.map((r) => r.etf), ['E', 'A']);
-  assert.deepEqual(M.nowcastRows(null), []);
-});

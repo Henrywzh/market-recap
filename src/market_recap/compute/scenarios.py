@@ -133,6 +133,32 @@ def rolling_betas(y: pd.Series, factors: pd.DataFrame, *, window: int, min_n: in
     return {"betas": dict(zip(factors.columns, (float(b) for b in coef[1:]))), "intercept": float(coef[0]), "r2": r2, "n": int(len(both))}
 
 
+def walk_forward_r2(y: pd.Series, factors: pd.DataFrame, *, window: int, step: int, min_scored: int = 250) -> dict | None:
+    """Out-of-sample skill of the nowcast: loadings fitted on the ``window``
+    sessions before a block of ``step`` sessions, applied to that block's
+    factor moves, then rolled forward block by block. The score is
+    1 - (squared error / sum of squares of the actual) over every scored day,
+    against predicting zero (an excess return has no drift worth predicting).
+    Negative means the loadings did worse than saying nothing. None when fewer
+    than ``min_scored`` days could be scored."""
+    both = pd.concat([y.rename("y"), factors], axis=1).dropna()
+    cols = list(factors.columns)
+    values, target = both[cols].to_numpy(), both["y"].to_numpy()
+    sse = sst = 0.0
+    scored = 0
+    for t in range(window, len(both), step):
+        x = np.column_stack([np.ones(window), values[t - window:t]])
+        coef = np.linalg.lstsq(x, target[t - window:t], rcond=None)[0]
+        block = slice(t, min(t + step, len(both)))
+        predicted = np.column_stack([np.ones(block.stop - block.start), values[block]]) @ coef
+        sse += float(((target[block] - predicted) ** 2).sum())
+        sst += float((target[block] ** 2).sum())
+        scored += block.stop - block.start
+    if scored < min_scored or sst <= 0:
+        return None
+    return {"r2": 1 - sse / sst, "n": scored}
+
+
 def _spearman(a: np.ndarray, b: np.ndarray) -> float:
     ra, rb = pd.Series(a).rank().to_numpy(), pd.Series(b).rank().to_numpy()
     if ra.std() == 0 or rb.std() == 0:

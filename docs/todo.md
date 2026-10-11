@@ -299,3 +299,92 @@ Do not build the row first. Test whether it carries information:
   board, only for themes whose series passed. Release lag matters: use the
   value known on the date, not the revised one (FRED vintages / ALFRED where
   the series is revised).
+
+## 10. SCENARIOS to sub-industries (researched 2026-10-11, not built)
+
+Scratch tests on 28 industry ETFs plus the 11 sector funds, 2008-2026
+(scripts were in the session scratchpad). What held and what did not:
+
+- **The page's nowcast R-squared is in sample.** Fitted on the prior year and
+  scored on the next month, month after month since 2012, the median ETF
+  scores 0.03. Only the commodity- and rate-linked ones carry real skill:
+  XOP 0.32, XLE 0.31, OIH 0.29, GDX 0.20, XLP 0.16, XLU 0.12, XME 0.11,
+  REITs 0.08-0.09; banks (KRE/KBE) about 0.06; XLK 0.03, XLF 0.03, XLI -0.01,
+  XRT -0.03. **Done 2026-10-11**: the page showed an in-sample R-squared; an
+  out-of-sample version was tried (rows under 0.03 muted) and judged not
+  useful, so the nowcast card was removed. `compute/scenarios.walk_forward_r2`
+  and `rolling_betas` stay, tested, unused by the page.
+- **Shrinking an industry's betas toward its parent sector's does not help**
+  (mean 0.050 unshrunk, 0.046-0.051 shrunk). The earlier plan to use shrinkage
+  is dropped.
+- **Against its parent sector** an industry's nowcast skill is smaller still
+  (mean 0.03): real only for OIH 0.13, XOP 0.08, GDX 0.19, XME 0.08, REITs.
+  Semis, software, biotech, retail, transports, defence: nothing beyond the
+  sector.
+- **Surprise ordering, 41 series, split 2022-01-01, 2000 permutations**:
+  payrolls rho 0.64 (p 0.004; 23 hot / 8 cool releases after the split),
+  core CPI 0.46 (p 0.036), hourly earnings 0.42 (p 0.07); the other eight
+  drivers show nothing or reverse. Eleven drivers tested, so only payrolls
+  clears a Bonferroni line (0.0045), narrowly. The payrolls ordering is
+  largely the funds' oil and credit loadings (rank correlation with those
+  0.50-0.51), and core CPI's is high-beta funds doing worse (-0.33 with market
+  beta): an industry adds nothing the factor loadings do not already say.
+- **Proposed scope**: the nowcast card is gone, so there is no row to extend.
+  What remains of this item: sub-industry columns in the release-class tables
+  and sector bars, payrolls and core CPI orderings only, labelled as marginal.
+  No new classification of releases.
+
+## 11. Weak-market / breadth module (researched 2026-10-11, not built)
+
+Breadth from price series with no survivorship (RSP/SPY, IWM/SPY, the share of
+the 11 sector funds above their 200-day line), 2009-2026, forward 63-session
+outcomes, 95% intervals from a moving-block bootstrap (63-day blocks):
+
+- **Narrowness alone does not predict.** RSP lagging SPY by over 2 points
+  in 3 months: forward 63-day return +1.0 points vs other days (interval -1.4
+  to +3.8), forward worst drawdown 1.5 points deeper (-4.0 to +0.5). IWM
+  lagging by over 3 points: nothing.
+- **Narrow and at the high** (RSP lagging, SPY within 5% of its high; 550
+  days): return -2.1 points (-4.8 to +0.3), drawdown 1.5 deeper (-4.6 to +0.7).
+  Suggestive; not detected. By period: 2009-16 60 days (-0.4 return), 2017-26
+  490 days (+2.1 vs +4.1 elsewhere).
+- **What does carry information is volatility**: VIX above 25, sector breadth
+  below half, or SPY 10% off its high all go with *higher* 63-day returns
+  (+4 to +5 points, intervals above zero) and a *deeper* worst drawdown
+  (-1.6 to -1.9) and more drawdowns of 5% or worse (+0.23 to +0.30 in
+  probability). That is a risk state, not a direction call.
+- Sector breadth below half *and* SPY near its high: 45 days in 17 years.
+- **Now (2026-10-09)**: SPY 0.1% from its 252-day high; 5 of 11 sector funds
+  above the 200-day line, 3 above the 50-day; RSP-SPY -4.2 points over 3
+  months; IWM-SPY -8.5; VIX 14.8.
+- **Proposed module**: a state card (the numbers above, each with how many days
+  in history looked like it), a plain count of such days and what followed with
+  the interval, and the statement that no direction is detected. Constituent
+  breadth (advancing share, new highs) is already partly in MARKETS
+  (`breadth_by_sector`); it has survivorship in any backtest, so it stays
+  descriptive.
+
+## 12. Pre-release and post-release features per driver (researched 2026-10-11, not built)
+
+Per-day SPY, 2016-2026, one observation per release day (drivers released
+together averaged):
+
+- **Release days are not much noisier for stocks.** |SPY| scaled by the
+  prior 20 days' volatility: 0.76-1.00 on release days vs 0.80 on others; only
+  payrolls reaches 1.00 (about +25%, 2.9 standard errors). Rates are:
+  |2Y move| 5.8 bp on payrolls days and 5.4 bp on CPI days vs 3.4 other days.
+  So a "pre-release expected move" belongs on yields, not stocks.
+- **The sign of the stock reaction depends on the regime**, as you suspected.
+  The pre-day 60-session correlation of SPY with the 10Y yield is negative now
+  (-0.40, "rates drive stocks"). Per sd of hawkish surprise: growth regime
+  +0.05 points (t 1.6), rates regime -0.06 (t -1.3); the difference -0.116
+  (t -1.74, permutation p 0.066). Since 2022 -0.25 (t -2.1, 494 release days);
+  before 2022 -0.04 (t -0.5). Borderline, concentrated after 2022.
+- **Post-release (rates already moved)**: SPY per bp of 2Y move on release
+  days is -0.024 in the rates regime (t -3.4, 360 days) and +0.039 in the
+  growth regime (t 5.7, 768 days). Fit before 2022 and scored on 2022 onward,
+  the regime-specific line scores R-squared -0.02 (pooled -0.27): the sign is
+  right, the size is too small to forecast a day.
+- **Proposed**: show the regime and the two conditional slopes with their n on
+  each driver's detail; for the next release: the typical 2Y move, not a stock
+  forecast. Do not show a stock-direction call for any driver.

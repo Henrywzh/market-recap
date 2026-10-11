@@ -427,9 +427,7 @@ min_class_releases = 5
 min_era_releases = 8
 # Eras for the stock-market response (the first break starts the second era).
 era_breaks = ["2020-01-01", "2022-01-01", "2024-01-01"]
-# Windows are named in config.PERIOD_TRADING_DAYS; the regime window is the
-# correlation of SPY with the 10-year yield's daily change.
-beta_period = "1Y"
+# The regime window: the correlation of SPY with the 10-year yield's daily change.
 regime_sessions = 60
 # The sector ordering after a release: found before the split, checked after
 # it, with a permutation test (the sectors are not independent samples).
@@ -443,10 +441,6 @@ fomc_title = "Fed Interest Rate Decision"
 fomc_bucket_bp = 3
 # Extra series beside the market proxy and the sector ETFs. Oil's daily move
 # is clipped (a futures roll is a jump, not a shock).
-credit = ["HYG", "LQD"]
-oil = "CL=F"
-oil_clip_pct = 8
-dollar = "UUP"
 relative = ["IWM", "KRE"]
 fred_10y = "DGS10"
 fred_2y = "DGS2"

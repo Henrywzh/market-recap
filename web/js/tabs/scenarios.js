@@ -2,11 +2,10 @@
 // The build counts past releases above / in line with / below the forecast and
 // reads the day's move in the 2-year and 10-year yield, SPY, small caps,
 // regional banks and each sector. Figures under |t| of 2 are drawn dim with
-// their n: not detected is not zero. Nothing here forecasts; the nowcast
-// applies the last year's loadings to moves that have already happened.
+// their n: not detected is not zero. Nothing here forecasts.
 
 import { el, card, table, num, metaRow, tag, gap, DASH } from '../fmt.js';
-import { detected, diffWithSe, sectorDiffs, barSpan, columnScale, nextText, persistenceView, nowcastRows } from '../scenarios-model.js';
+import { detected, diffWithSe, sectorDiffs, barSpan, columnScale, nextText, persistenceView } from '../scenarios-model.js';
 
 const present = (v) => v !== null && v !== undefined && Number.isFinite(v);
 const signed = (v, digits, unit = '') => (present(v) ? `${v > 0 ? '+' : ''}${num(v, digits)}${unit}` : DASH);
@@ -146,7 +145,7 @@ function detailCard(data, d) {
   return card(`${d.label.toUpperCase()} · PAST RELEASES`, el('span', { class: 'dim', text: `${d.first} to ${d.last} · surprise spread ${num(d.scale, 2)} ${d.unit}` }), [
     el('div', { class: 'grid two' }, [
       el('div', {}, [el('div', { class: 'card-title', text: 'WHAT THE DAY DID, BY SURPRISE CLASS · MEAN ± STANDARD ERROR' }), classTable(d)]),
-      el('div', {}, [el('div', { class: 'card-title', text: 'SECTOR EXCESS VS SPY · ABOVE MINUS BELOW · 95% RANGE' }), sectorBars(d, data.nowcast.sectors)]),
+      el('div', {}, [el('div', { class: 'card-title', text: 'SECTOR EXCESS VS SPY · ABOVE MINUS BELOW · 95% RANGE' }), sectorBars(d, data.sectors)]),
     ]),
     el('div', { class: 'field-note', text: `${order} A sector bar whose range crosses zero is dim: its difference is within the noise. SPY when rates drive the market (60-day correlation below zero): ${signed(d.spy_when_rates_drive.slope, 2)}% per standard deviation, t ${num(d.spy_when_rates_drive.t, 1)}, n ${d.spy_when_rates_drive.n}.` }),
     tag(pv.text, pv.tone, pv.title),
@@ -184,26 +183,6 @@ function fomcCard(f) {
   ]);
 }
 
-// --- the nowcast -------------------------------------------------------------
-
-function nowcastCard(n) {
-  const rows = nowcastRows(n);
-  const moves = n.factor_moves;
-  const head = moves
-    ? Object.entries(n.factors).map(([k, label]) => `${label} ${signed(moves[k], k.startsWith('d') ? 0 : 2)}`).join(' · ')
-    : 'no complete session';
-  return card(`NOWCAST · SECTORS FROM THE DAY'S MOVES · ${n.last_session || DASH}`, el('span', { class: 'dim', text: head }), [
-    table(['SECTOR', '10Y /bp', 'CURVE /bp', 'CREDIT /%', 'OIL /%', 'USD /%', `FIT (${n.window_sessions}D R²)`, 'IMPLIED', 'ACTUAL'], rows.map((r) => el('tr', {}, [
-      el('td', { text: `${r.etf} · ${r.sector}` }),
-      ...['dY10', 'dSlope', 'credit', 'oil', 'usd'].map((k) => el('td', { class: Math.abs(r.betas[k]) < 0.05 ? 'dim' : '', text: signed(r.betas[k], 2) })),
-      el('td', { class: r.r2 >= 0.2 ? '' : 'dim' }, [el('div', { class: 'sc-track sc-r2' }, [el('span', { class: 'sc-bar stock-pos', style: `left:0;width:${Math.min(100, (r.r2 || 0) * 100)}%` })]), el('span', { class: 'sc-t', text: num(r.r2, 2) })]),
-      el('td', { text: signed(r.implied, 2, '%') }),
-      el('td', { class: r.actual > 0 ? 'up' : r.actual < 0 ? 'down' : '', text: signed(r.actual, 2, '%') }),
-    ]))),
-    el('div', { class: 'field-note', text: 'Each sector\'s daily excess return over SPY regressed on the day\'s 10-year yield change, curve change, credit (HYG less LQD), oil and dollar over the last year. IMPLIED applies those loadings to the session\'s moves; ACTUAL is the sector\'s excess return that day. Only the best-fitting sectors (energy, through oil) are explained at all; a low fit means the day\'s moves say little about that sector. It explains a day after the fact; it forecasts nothing.' }),
-  ]);
-}
-
 // --- the view ----------------------------------------------------------------
 
 export default function renderScenarios(root, data, _manifest, ctx = {}) {
@@ -227,5 +206,5 @@ export default function renderScenarios(root, data, _manifest, ctx = {}) {
     detailHost.replaceChildren(detailCard(data, data.drivers.find((d) => d.key === state.key)));
   };
   draw();
-  root.append(tableHost, detailHost, fomcCard(data.fomc), nowcastCard(data.nowcast));
+  root.append(tableHost, detailHost, fomcCard(data.fomc));
 }

@@ -25,7 +25,7 @@ export function diffWithSe(a, b) {
   return { diff, se, t: se ? diff / se : null, within: se === null ? true : Math.abs(diff) < NORMAL_95 * se };
 }
 
-// Above-minus-below for each sector, largest first. `sectors` is the nowcast's
+// Above-minus-below for each sector, largest first. `sectors` is the panel's
 // {sector, etf} list: the ETF names the class means' keys.
 export function sectorDiffs(classes, sectors) {
   const rows = [];
@@ -72,10 +72,4 @@ export function persistenceView(p) {
     + `${p.train_above}/${p.train_below} releases before, ${p.test_above}/${p.test_below} after (above/below); `
     + `p from ${p.permutations} label shuffles`;
   return { text, tone: p.p_perm < 0.05 ? 'info' : 'dim', title };
-}
-
-export function nowcastRows(nowcast) {
-  return (nowcast?.sectors || []).filter((s) => s.betas).map((s) => ({
-    sector: s.sector, etf: s.etf, betas: s.betas, r2: s.r2, implied: s.implied_last_session, actual: s.actual_last_session,
-  })).sort((a, b) => (b.r2 ?? -1) - (a.r2 ?? -1));
 }

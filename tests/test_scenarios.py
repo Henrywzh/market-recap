@@ -100,6 +100,22 @@ def test_rolling_betas_recover_loadings_from_the_last_window_only():
     assert S.rolling_betas(y.iloc[:100], f.iloc[:100], window=252) is None   # too few days
 
 
+def test_walk_forward_scores_loadings_that_hold_and_not_ones_that_do_not():
+    rng = np.random.default_rng(11)
+    idx = pd.bdate_range("2018-01-01", periods=1200)
+    f = pd.DataFrame(rng.normal(size=(1200, 2)), index=idx, columns=["a", "b"])
+    steady = pd.Series(1.5 * f["a"] - 0.5 * f["b"] + rng.normal(0, 0.5, 1200), index=idx)
+    held = S.walk_forward_r2(steady, f, window=252, step=21)
+    assert held["r2"] > 0.8 and held["n"] == 1200 - 252
+    noise = pd.Series(rng.normal(size=1200), index=idx)
+    assert S.walk_forward_r2(noise, f, window=252, step=21)["r2"] < 0.02       # nothing to find, nothing claimed
+    # loadings that flip sign every year fit the past year perfectly and score badly after it
+    sign = np.where((np.arange(1200) // 252) % 2 == 0, 1.0, -1.0)
+    flipping = pd.Series(sign * f["a"] + rng.normal(0, 0.1, 1200), index=idx)
+    assert S.walk_forward_r2(flipping, f, window=252, step=21)["r2"] < 0
+    assert S.walk_forward_r2(steady.iloc[:300], f.iloc[:300], window=252, step=21) is None   # too few days to score
+
+
 def _release_frames(pattern_after=1.0, seed=0, late_sector=False):
     """Releases before and after a split whose sector response to 'above' minus
     'below' is the same pattern (scaled by ``pattern_after``) plus noise."""
@@ -185,18 +201,18 @@ def test_panel_assembles_measurements_without_inventing_any():
     assert nfp["status"] == "ok" and nfp["n"] >= 100 and set(nfp["classes"]) == {"above", "inline", "below"}
     assert nfp["next"] == {"date": "2026-10-16", "time": "08:30", "forecast": 120.0, "previous": 90.0, "unit": "k"}
     assert by_key["missing"]["status"] == "insufficient" and by_key["missing"]["n"] == 0 and "classes" not in by_key["missing"]
-    assert "XLE" not in {s["etf"] for s in payload["nowcast"]["sectors"]}   # a sector with no prices is absent, not zero
+    assert "XLE" not in {s["etf"] for s in payload["sectors"]}   # a sector with no prices is absent, not zero
+    assert "nowcast" not in payload
     assert payload["fomc"]["decisions"] > 50 and payload["fomc"]["decisions_with_surprise"] >= 1
 
 
-def test_a_session_after_the_last_yield_has_no_yield_move_not_a_zero_one():
+def test_a_session_after_the_last_yield_is_reported_as_one_the_yields_do_not_reach():
     cfg = _config(drivers=[])
     idx, closes, y10, y2 = _market()
     y10, y2 = y10.iloc[:-1], y2.iloc[:-1]                      # FRED has not published the last session
     payload = P.assemble(as_of=date(2026, 10, 9), closes=closes, y10=y10, y2=y2, rows=[], upcoming=[],
                          sectors={"Information Technology": "XLK"}, market="SPY", cfg=cfg)
     assert payload["inputs"]["yields_through"] == idx[-2].date().isoformat()
-    assert payload["nowcast"]["last_session"] == idx[-2].date().isoformat()
     assert payload["inputs"]["prices_through"] == idx[-1].date().isoformat()
 
 

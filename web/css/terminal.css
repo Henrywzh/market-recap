@@ -1064,7 +1064,6 @@ table.industries-members { font-size: 11px; }
 .sc-whisker { position: absolute; top: 5px; height: 2px; background: color-mix(in srgb, var(--text) 55%, transparent); }
 .sc-fomc-line { margin-bottom: 6px; }
 .sc-fomc-line b { margin: 0 6px; }
-.sc-r2 { width: 90px; display: inline-block; vertical-align: middle; margin-right: 6px; }
 
 /* THEMES status board */
 .tb-row { cursor: pointer; }
