@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import date, datetime, timezone
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -39,13 +40,18 @@ NAME_WORDS = {
     "EBAY": "eBay", "NETAPP": "NetApp", "HCA": "HCA", "AES": "AES", "CME": "CME",
     "ICE": "ICE", "MSCI": "MSCI", "KLA": "KLA", "NRG": "NRG", "PPG": "PPG",
     "PPL": "PPL", "DTE": "DTE", "CMS": "CMS", "CSX": "CSX", "EOG": "EOG",
-    "APA": "APA", "HP": "HP", "LKQ": "LKQ", "NXP": "NXP", "ON": "ON", "TJX": "TJX",
+    "APA": "APA", "HP": "HP", "LKQ": "LKQ", "NXP": "NXP", "TJX": "TJX",
     "WEC": "WEC", "AIG": "AIG", "II": "II", "III": "III", "FMC": "FMC",
     "IDEXX": "IDEXX", "ADR": "ADR", "REIT": "REIT", "ETF": "ETF", "SPDR": "SPDR",
     "LLC": "LLC", "PLC": "PLC", "NV": "NV", "SA": "SA", "AG": "AG", "SE": "SE",
     "ASML": "ASML", "SAP": "SAP", "TSMC": "TSMC", "ABBVIE": "AbbVie",
-    "FEDEX": "FedEx", "DEXCOM": "DexCom",
+    "FEDEX": "FedEx", "DEXCOM": "DexCom", "GE": "GE", "CBRE": "CBRE", "NY": "NY", "TE": "TE",
 }
+
+
+LOWER_WORDS = {"OF", "AND", "THE", "FOR"}
+# Vowel-less words that are abbreviations to read as words, not initials.
+PLAIN_WORDS = {"LTD", "CL", "SHS", "SHRS", "HLDGS", "GRP", "GP", "CTR", "MFG", "BK", "TR", "PRTNRS", "SYS", "SVCS", "VTG", "DR"}
 
 
 def company_name(raw: Any) -> str:
@@ -54,14 +60,24 @@ def company_name(raw: Any) -> str:
         return ""
     if any(ch.islower() for ch in raw):
         return raw.strip()
+    # Holdings files drop the apostrophe ("MCDONALD S") and write & as +
+    # ("AT+T", "JPMORGAN CHASE + CO").
+    tokens = []
+    for word in re.sub(r"/[A-Z]{2,3}$", "", raw.strip()).replace("+", "&").split():   # CDW CORP/DE
+        if word == "S" and tokens:
+            tokens[-1] += "'S"
+        else:
+            tokens.append(word)
     words = []
-    for word in raw.split():
-        if word == "+":
-            words.append("&")
-        elif "&" in word or any(ch.isdigit() for ch in word):
+    for word in tokens:
+        if word == "&" or "&" in word or any(ch.isdigit() for ch in word):
             words.append(word)   # AT&T, S&P, 3M
         elif word.upper() in NAME_WORDS:
             words.append(NAME_WORDS[word.upper()])
+        elif words and word in LOWER_WORDS:
+            words.append(word.lower())   # Bank of America, Becton Dickinson and Co
+        elif word.strip("()").isalpha() and not set(word) & set("AEIOUY") and word not in PLAIN_WORDS:
+            words.append(word)   # BXP, CDW, RTX, WR Berkley: initials, not words
         else:
             words.append(word[:1].upper() + word[1:].lower())
     return " ".join(words)
