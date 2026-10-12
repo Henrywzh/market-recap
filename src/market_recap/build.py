@@ -16,7 +16,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, evidence, financials, fixed_income, heatmaps, industries, macro, market_state, markets, monitor, overview, positioning, priced, risk, rotation, scenarios, themes, valuation, xray
+from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, overview, positioning, priced, risk, rotation, scenarios, themes, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -25,6 +25,8 @@ from .util import SourceRecord, describe_error, utc_now_iso, write_json
 # MONITOR consumes same-session valuation and calendar outputs, and runs last.
 PANELS = {
     "markets": markets.build,
+    # European indices, supersector funds and members from Yahoo; reads no other panel.
+    "europe": europe.build,
     # Breadth and stress readings from fund prices; reads no other panel.
     "market_state": market_state.build,
     "catalysts": catalysts.build,
@@ -46,6 +48,8 @@ PANELS = {
     "valuation": valuation.build,
     "dcf": dcf.build,
     "evidence": evidence.build,
+    # Reads this session's VALUATION (per-company P/E and EPS histories), so after it.
+    "kshape": kshape.build,
     # Reads this session's catalysts and evidence (report dates), so after them.
     "positioning": positioning.build,
     # Themes first: the event cards read its industry series ("since the
@@ -167,6 +171,8 @@ def run(
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in positioning.INPUTS})
                 elif name == "events":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in events.INPUTS})
+                elif name == "kshape":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in kshape.INPUTS})
                 elif name == "themes":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in themes.INPUTS})
                 elif name == "chain":

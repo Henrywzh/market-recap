@@ -1093,3 +1093,11 @@ table.industries-members { font-size: 11px; }
 .ms-name { font-weight: 600; letter-spacing: 0.04em; }
 .ms-active td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .sc-now td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+
+/* ---------- K-SHAPE ---------- */
+.ks-top td { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+
+/* ---------- EUROPE ---------- */
+.eu-spark .spark { display: block; width: 80px; height: 20px; color: var(--text-dim); }
+.eu-sortable { cursor: pointer; }
+.eu-sortable:hover { color: var(--text); }

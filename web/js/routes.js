@@ -24,6 +24,9 @@ export const VIEWS = [
   { id: 'themes', label: 'THEMES', group: 'catalysts', artifact: 'themes', module: 'themes', takesArg: true },
   { id: 'scenarios', label: 'SCENARIOS', group: 'scenarios', artifact: 'scenarios', module: 'scenarios', takesArg: true },
   { id: 'chain', label: 'AI CHAIN', group: 'catalysts', artifact: 'chain', module: 'chain', takesArg: true },
+  { id: 'europe', label: 'INDICES', group: 'europe', artifact: 'europe', module: 'europe' },
+  { id: 'europe-names', label: 'NAMES', group: 'europe', artifact: 'europe', module: 'europe-names', takesArg: true },
+  { id: 'kshape', label: 'K-SHAPE', group: 'relative', artifact: 'kshape', module: 'kshape', takesArg: true },
   { id: 'technicals', label: 'TECHNICALS', group: 'tools', artifact: 'technicals', module: 'technicals', takesArg: true },
   { id: 'trade', label: 'TRADE DESK', group: 'tools', artifact: 'technicals', module: 'trade', takesArg: true },
   { id: 'xray', label: 'ETF X-RAY', group: 'tools', artifact: 'xray', module: 'xray' },
@@ -38,6 +41,10 @@ export const GROUPS = [
   { id: 'catalysts', label: 'CATALYSTS' },
   // CATALYSTS holds its four views; what the releases have done to rates and stocks is its own mode.
   { id: 'scenarios', label: 'SCENARIOS' },
+  // The European markets: index levels and supersectors, and the members of the FTSE 100 and EURO STOXX 50.
+  { id: 'europe', label: 'EUROPE' },
+  // What has been paid for a divergence between two groups of names: its own mode, with room for more pairs.
+  { id: 'relative', label: 'RELATIVE VALUE' },
   { id: 'tools', label: 'TOOLS' },
 ];
 

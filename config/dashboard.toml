@@ -532,6 +532,206 @@ key = "deep_drawdown"
 label = "MARKET 10% BELOW ITS HIGH"
 conditions = [{ reading = "spy_drawdown", op = "lt", value = -10 }]
 
+[kshape]
+# RELATIVE VALUE -> K-SHAPE. A high-income leg against a low-income leg, within an
+# industry: what each leg's price, trailing P/E and earnings growth have done, as
+# ratios (top over bottom) with where today's ratio sits in its own history. The
+# legs are a judgment, named here by hand: top = customers mostly wealthy
+# (luxury, premium cabins, premium resorts), bottom = mostly low-income
+# households. The squeezed middle (LULU, RL, TPR, WSM) is left out of the
+# spreads. Windows are named in config.PERIOD_TRADING_DAYS. A name with no
+# history in the index data (VIK, TOL, CZR, ALLY) has its prices fetched here
+# and no valuation history.
+history_years = 10
+price_periods = ["1M", "3M", "6M", "1Y", "3Y", "5Y"]
+# A trailing P/E counts when it is positive and at most pe_cap; a date counts
+# when at least pe_min_share of the names with a history that day are meaningful.
+pe_cap = 60
+pe_min_share = 0.5
+# Year-on-year EPS growth beyond this size (off a profit near zero) is not drawn.
+eps_growth_cap = 150
+# Names in the bottom leg of the overall view with no listed top-leg counterpart.
+bottom_only = ["MCD", "YUM", "DPZ", "DG", "DLTR"]
+overall_label = "ALL PAIRS"
+
+[[kshape.pairs]]
+key = "cruise"
+label = "CRUISE"
+top = ["VIK"]
+bottom = ["RCL", "CCL", "NCLH"]
+note = "Viking sells river and ocean cruises to older, wealthier travellers and listed in May 2024, so its history starts there and it has no valuation history. The mass-market lines are the comparison."
+
+[[kshape.pairs]]
+key = "airlines"
+label = "AIRLINES"
+top = ["DAL", "UAL"]
+bottom = ["LUV"]
+note = "Delta and United earn a large share of revenue from premium cabins and corporate travel; Southwest is the mass-market comparison (it has been adding premium seating, so the line is blurring)."
+
+[[kshape.pairs]]
+key = "homebuilders"
+label = "HOMEBUILDERS"
+top = ["TOL"]
+bottom = ["DHI", "LEN"]
+note = "Toll Brothers builds luxury homes for buyers who do not need a mortgage to the same degree; D.R. Horton and Lennar sell mostly entry-level and move-up homes, which depend on mortgage rates and incentives."
+
+[[kshape.pairs]]
+key = "casinos"
+label = "CASINOS"
+top = ["WYNN", "LVS"]
+bottom = ["MGM", "CZR"]
+note = "Wynn and Las Vegas Sands run premium resorts (Macau, the Strip's top end); MGM and Caesars lean on mass-market Strip and regional gamblers."
+
+[[kshape.pairs]]
+key = "cards"
+label = "CARDS & LENDING"
+top = ["AXP"]
+bottom = ["COF", "SYF", "ALLY"]
+note = "American Express's cardholders skew affluent; Capital One, Synchrony and Ally lend more to near-prime and subprime households, where delinquencies show stress first."
+
+[europe]
+# EUROPE. Index levels, the STOXX 600 supersector funds, the FTSE 100 and EURO
+# STOXX 50 members, and named groups of other names (luxury, UK financials),
+# priced and measured from Yahoo; multiples are Yahoo's own, recorded daily by
+# the snapshot job so that a forward P/E gets a history. Returns are in local
+# currency, and in dollars for the indices and funds (the series compounded
+# with the currency's move). Windows are named in config.PERIOD_TRADING_DAYS.
+history_years = 6
+benchmark = "SPY"
+rotation_benchmark = "EXSA.DE"
+periods = ["1D", "1W", "1M", "3M", "6M", "YTD", "1Y", "3Y"]
+chart_years = 3
+above_sessions = [50, 200]
+# Year-on-year EPS growth beyond this size (off a profit near zero) is shown as not meaningful.
+eps_growth_cap = 200
+fx = [
+  { currency = "GBP", symbol = "GBPUSD=X" },
+  { currency = "EUR", symbol = "EURUSD=X" },
+  { currency = "CHF", symbol = "CHFUSD=X" },
+]
+indices = [
+  { key = "ftse100", label = "FTSE 100", symbol = "^FTSE", currency = "GBP" },
+  { key = "ftse250", label = "FTSE 250", symbol = "^FTMC", currency = "GBP" },
+  { key = "stoxx600", label = "STOXX EUROPE 600", symbol = "^STOXX", currency = "EUR" },
+  { key = "eurostoxx50", label = "EURO STOXX 50", symbol = "^STOXX50E", currency = "EUR" },
+  { key = "dax", label = "DAX", symbol = "^GDAXI", currency = "EUR" },
+  { key = "cac40", label = "CAC 40", symbol = "^FCHI", currency = "EUR" },
+  { key = "aex", label = "AEX", symbol = "^AEX", currency = "EUR" },
+  { key = "ibex", label = "IBEX 35", symbol = "^IBEX", currency = "EUR" },
+  { key = "ftsemib", label = "FTSE MIB", symbol = "FTSEMIB.MI", currency = "EUR" },
+  { key = "smi", label = "SMI", symbol = "^SSMI", currency = "CHF" },
+]
+# The iShares STOXX Europe 600 supersector funds (Xetra, euro): the Europe
+# analogue of the SPDR sector funds. Sectors are measured against the STOXX 600 fund.
+sectors = [
+  { key = "banks", label = "Banks", symbol = "EXV1.DE" },
+  { key = "insurance", label = "Insurance", symbol = "EXH5.DE" },
+  { key = "financial_services", label = "Financial Services", symbol = "EXH2.DE" },
+  { key = "real_estate", label = "Real Estate", symbol = "EXI5.DE" },
+  { key = "health_care", label = "Health Care", symbol = "EXV4.DE" },
+  { key = "technology", label = "Technology", symbol = "EXV3.DE" },
+  { key = "telecom", label = "Telecommunications", symbol = "EXV2.DE" },
+  { key = "media", label = "Media", symbol = "EXH6.DE" },
+  { key = "industrials", label = "Industrial Goods & Services", symbol = "EXH4.DE" },
+  { key = "construction", label = "Construction & Materials", symbol = "EXV8.DE" },
+  { key = "autos", label = "Automobiles & Parts", symbol = "EXV5.DE" },
+  { key = "personal_household", label = "Personal & Household Goods", symbol = "EXH7.DE" },
+  { key = "retail", label = "Retail", symbol = "EXH8.DE" },
+  { key = "travel", label = "Travel & Leisure", symbol = "EXV9.DE" },
+  { key = "food_beverage", label = "Food & Beverage", symbol = "EXH3.DE" },
+  { key = "oil_gas", label = "Oil & Gas", symbol = "EXH1.DE" },
+  { key = "basic_resources", label = "Basic Resources", symbol = "EXV6.DE" },
+  { key = "chemicals", label = "Chemicals", symbol = "EXV7.DE" },
+  { key = "utilities", label = "Utilities", symbol = "EXH9.DE" },
+]
+# Wikipedia's current tables; each source label (any case) maps to a broad sector.
+universes = [
+  { key = "ftse100", label = "FTSE 100", source = "ftse100" },
+  { key = "eurostoxx50", label = "EURO STOXX 50", source = "eurostoxx50" },
+]
+
+# Named groups of names, beyond the index tables. A group lists symbols (with a
+# display name) and/or takes every member of a universe in one broad sector.
+[[europe.groups]]
+key = "luxury"
+label = "LUXURY"
+note = "The top-end names: Hermes and Brunello Cucinelli sell to the very wealthy, LVMH, Richemont and Ferrari mix wealthy and aspirational buyers, Kering, Burberry and Moncler lean aspirational. Prices are in local currency; the multiples are Yahoo's."
+members = [
+  { symbol = "RMS.PA", name = "Hermes", sector = "Consumer Discretionary" },
+  { symbol = "MC.PA", name = "LVMH", sector = "Consumer Discretionary" },
+  { symbol = "CFR.SW", name = "Richemont", sector = "Consumer Discretionary" },
+  { symbol = "RACE.MI", name = "Ferrari", sector = "Consumer Discretionary" },
+  { symbol = "BC.MI", name = "Brunello Cucinelli", sector = "Consumer Discretionary" },
+  { symbol = "MONC.MI", name = "Moncler", sector = "Consumer Discretionary" },
+  { symbol = "KER.PA", name = "Kering", sector = "Consumer Discretionary" },
+  { symbol = "BRBY.L", name = "Burberry", sector = "Consumer Discretionary" },
+  { symbol = "UHR.SW", name = "Swatch Group", sector = "Consumer Discretionary" },
+]
+
+[[europe.groups]]
+key = "uk_financials"
+label = "UK FINANCIALS"
+note = "Every FTSE 100 member in the financial sector (banks, insurers, asset managers, exchanges, investment trusts), by Wikipedia's industry label."
+from_universe = "ftse100"
+sector = "Financials"
+
+# Source industry label (lower case) -> broad sector. The FTSE table uses the
+# ICB names, the EURO STOXX table GICS-like ones.
+[europe.sector_map]
+"banks" = "Financials"
+"banking services" = "Financials"
+"financial services" = "Financials"
+"insurance" = "Financials"
+"life insurance" = "Financials"
+"non-life insurance" = "Financials"
+"investment trusts" = "Financials"
+"collective investments" = "Financials"
+"financials" = "Financials"
+"real estate investment trusts" = "Real Estate"
+"real estate" = "Real Estate"
+"oil & gas producers" = "Energy"
+"energy" = "Energy"
+"mining" = "Materials"
+"chemicals" = "Materials"
+"materials" = "Materials"
+"pharmaceuticals & biotechnology" = "Health Care"
+"health care equipment & supplies" = "Health Care"
+"health care" = "Health Care"
+"food & tobacco" = "Consumer Staples"
+"tobacco" = "Consumer Staples"
+"beverages" = "Consumer Staples"
+"food & drug retailing" = "Consumer Staples"
+"consumer staples" = "Consumer Staples"
+"household goods & home construction" = "Consumer Discretionary"
+"homebuilding & construction supplies" = "Consumer Discretionary"
+"general retailers" = "Consumer Discretionary"
+"retailers" = "Consumer Discretionary"
+"retail hospitality" = "Consumer Discretionary"
+"travel & leisure" = "Consumer Discretionary"
+"travel and leisure" = "Consumer Discretionary"
+"personal goods" = "Consumer Discretionary"
+"leisure goods" = "Consumer Discretionary"
+"consumer discretionary" = "Consumer Discretionary"
+"media" = "Communication Services"
+"telecommunications services" = "Communication Services"
+"mobile telecommunications" = "Communication Services"
+"communication" = "Communication Services"
+"communication services" = "Communication Services"
+"multiline utilities" = "Utilities"
+"electrical utilities & independent power producers" = "Utilities"
+"utilities" = "Utilities"
+"support services" = "Industrials"
+"industrial support services" = "Industrials"
+"industrial engineering" = "Industrials"
+"general industrials" = "Industrials"
+"industrial goods and services" = "Industrials"
+"aerospace & defence" = "Industrials"
+"construction & materials" = "Industrials"
+"industrials" = "Industrials"
+"software & computer services" = "Information Technology"
+"electronic equipment & parts" = "Information Technology"
+"information technology" = "Information Technology"
+
 [themes]
 # CATALYSTS -> THEMES. Groups of names that move together, not GICS sectors.
 # Each group: a proxy (an ETF, or an equal-weight basket of members when no

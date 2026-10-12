@@ -55,8 +55,8 @@ def main(argv: list[str] | None = None) -> int:
     auctions.add_argument("--days", type=int, default=90, help="Bounded recent window (1..365 calendar days).")
     auctions.add_argument("--query", action="store_true", help="Read the local latest snapshot without network access.")
 
-    snapshot = sub.add_parser("snapshot", help="Record option chains, market expectations, risk inputs or consensus as published (see snapshots/).")
-    snapshot.add_argument("kind", choices=("options", "expectations", "risk", "consensus"))
+    snapshot = sub.add_parser("snapshot", help="Record option chains, market expectations, risk inputs, consensus or the European multiples as published (see snapshots/).")
+    snapshot.add_argument("kind", choices=("options", "expectations", "risk", "consensus", "europe"))
     snapshot.add_argument("--root", help="Directory to write under (default: [snapshots] root).")
     snapshot.add_argument(
         "--force", action="store_true",
@@ -125,6 +125,9 @@ def main(argv: list[str] | None = None) -> int:
             result = snap.run(root=args.root, baseline=True if args.baseline else None)
         elif args.kind == "consensus":
             from .snapshots import consensus as snap
+            result = snap.run(root=args.root)
+        elif args.kind == "europe":
+            from .snapshots import europe as snap
             result = snap.run(root=args.root)
         else:
             from .snapshots import expectations as snap

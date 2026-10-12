@@ -24,12 +24,15 @@ on:
     # Consensus EPS for every valued company, each weekday evening: the only
     # way a forward P/E gets a history.
     - cron: "47 23 * * 1-5"
+    # The European names' multiples and consensus (Yahoo's own forward and
+    # trailing P/E), the same evening: the only way they get a history.
+    - cron: "57 23 * * 1-5"
   workflow_dispatch:
     inputs:
       kind:
         description: "What to record"
         type: choice
-        options: [options, expectations, risk, consensus]
+        options: [options, expectations, risk, consensus, europe]
         default: expectations
       force:
         description: "options: record even outside the New York window"
@@ -63,6 +66,8 @@ jobs:
             echo "kind=risk" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event.schedule }}" = "47 23 * * 1-5" ]; then
             echo "kind=consensus" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "57 23 * * 1-5" ]; then
+            echo "kind=europe" >> "$GITHUB_OUTPUT"
           else
             echo "kind=options" >> "$GITHUB_OUTPUT"
           fi

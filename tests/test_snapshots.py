@@ -270,3 +270,28 @@ def test_consensus_second_run_keeps_what_the_first_recorded(monkeypatch, tmp_pat
     with gzip.open(path, "rt") as handle:
         eps = {r["symbol"]: r["eps"] for r in csv.DictReader(handle)}
     assert eps == {"A": "1.0", "B": "2.5", "C": "3.0"}                       # B refreshed, A kept
+
+
+def test_europe_snapshot_records_multiples_and_consensus_and_keeps_an_earlier_row(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    import csv
+    import gzip
+    from market_recap.snapshots import europe
+
+    multiples = [{"HSBA.L": {"forward_pe": 9.9, "trailing_pe": 11.0, "currency": "GBp", "price": 1000.0, "market_cap": 1.5e11}},
+                 {"RMS.PA": {"forward_pe": 26.0, "currency": "EUR", "price": 1283.0}}]
+    trends = [{"HSBA.L": {"0y": {"eps": 1.1, "end": "2026-12-31", "year_ago_eps": 1.0, "analysts": 20.0}, "+1y": {"eps": 1.2}}}, {}]
+    monkeypatch.setattr(europe.source, "fetch_multiples", lambda symbols, use_cache=False: (multiples.pop(0), {}))
+    monkeypatch.setattr(europe.estimates, "fetch_trends", lambda symbols, use_cache=False: (trends.pop(0), {}))
+    now = datetime(2026, 10, 1, 23, 58, tzinfo=timezone.utc)                      # a Thursday evening in New York
+    universe = ["HSBA.L", "RMS.PA", "X.L"]
+    first = europe.run(root=tmp_path, now=now, symbols=universe)
+    second = europe.run(root=tmp_path, now=now, symbols=universe)
+    assert first["companies"] == 1 and second["companies"] == 2 and second["kept_from_earlier"] == 1
+    path = next(tmp_path.rglob("*.csv.gz"))
+    with gzip.open(path, "rt") as handle:
+        rows = {r["symbol"]: r for r in csv.DictReader(handle)}
+    assert rows["HSBA.L"]["forward_pe"] == "9.9" and rows["HSBA.L"]["eps_0y"] == "1.1" and rows["HSBA.L"]["eps_1y"] == "1.2"
+    assert rows["RMS.PA"]["forward_pe"] == "26.0" and rows["RMS.PA"]["eps_0y"] == ""                # no consensus: blank, not zero
+    assert europe.row_for("t", "Z", None, None) is None
+    assert europe.run(root=tmp_path, now=datetime(2026, 10, 3, 23, 58, tzinfo=timezone.utc), symbols=universe)["status"] == "skipped"   # a Saturday

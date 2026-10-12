@@ -171,7 +171,7 @@ To decide, after reading the paper:
   a RES-style signal and scored forward, which needs archived daily history.
 - Whether a wider universe than the S&P 500 is available for a fair replication.
 
-## 7. FTSE 100 as a second index (2026-10-08)
+## 7. FTSE 100 as a second index (2026-10-08) -- partly done 2026-10-12 as EUROPE
 
 Idea: price, sector rotation and breadth for the 100 UK names, as NDX is
 handled (`[[universe.indices]]`). Nothing built; nothing has been tested yet
@@ -613,3 +613,36 @@ What the tests that shaped it showed (scratch, 2010-2026 unless noted):
 - **Open.** A defense data block (backlog in years of sales, obligations by
   prime) as context, labelled as not leading; a cruise block on fuel and the
   consumer. Neither earns a signal.
+
+## 15. K-SHAPE (income K) (2026-10-12)
+
+Built as RELATIVE VALUE -> K-SHAPE: five pairs (cruise, airlines, homebuilders,
+casinos, cards and lending) and all together; legs named in `[kshape]`. Ideas not
+yet done: the AI K (infrastructure beneficiaries against the businesses AI
+replaces: IT services, staffing, parts of software) and the size K (the ten
+largest S&P 500 names against the rest, on forward P/E); luxury goods
+(Hermes, LVMH, Richemont, Ferrari: prices and consensus only, no filings
+history); a test of whether a pair's valuation spread mean-reverts (trailing
+P/E ratio percentile against the next 12 months' relative return, a handful of
+pairs, expected to be underpowered). Known limits: the split into legs is a
+judgment; a cruise, airline or casino P/E history is blank where earnings
+vanished (2020-22); medians over two or three names jump when one moves; revenue
+growth carries mergers (Capital One and Discover).
+
+## 16. EUROPE coverage (2026-10-12)
+
+Phase A built: EUROPE mode with INDICES (ten indices, currencies, the 19 iShares
+STOXX Europe 600 supersector funds) and NAMES (FTSE 100, EURO STOXX 50, luxury,
+UK financials), prices and Yahoo's multiples; the `europe` snapshot job records
+Yahoo's forward and trailing P/E and consensus EPS each evening. Not done:
+- **Reading the snapshots**: a forward P/E history on the names table once
+  there are weeks of it (the file layout is `europe/YYYY/YYYY-MM-DD.csv.gz`).
+- **Breadth and the equal-weight against cap-weight pair for the UK and Europe**:
+  there is no verified equal-weight index or fund on Yahoo; FTSE 100 against FTSE
+  250 and STOXX 600 against EURO STOXX 50 are the near substitutes.
+- **Filing history**: ESEF filings (annual, from 2021) are on filings.xbrl.org for
+  GB, FR, NL, SE, IT, ES but not DE or CH; ESAP opens to the public in July 2027.
+- **Report dates and the event cards** for European names: no free calendar.
+- **More groups**: European defense (Rheinmetall, BAE, Saab, Leonardo, Thales),
+  the DAX and CAC 40 members.
+
