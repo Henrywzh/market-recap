@@ -145,7 +145,7 @@ function createController({ asOf } = {}) {
     rest.hidden = !more;
     if (title) title.textContent = `LIVE · ${newYorkDayLabel(now)}`;
     const minutes = Math.round((body?.refresh_seconds ?? 60) / 60);
-    foot.textContent = 'Live, intraday, unofficial (Yahoo; Treasury yields CNBC), '
+    foot.textContent = 'Live, intraday, unofficial (Yahoo; Treasury yields are Cboe\'s yield indexes through Yahoo), '
       + `every ${minutes === 1 ? 'minute' : `${minutes} minutes`} while the session is open. `
       + 'Change vs the previous close. '
       + (asOf ? `Everything below is the build's close of ${asOf}.` : 'Everything below is the build\'s close.');

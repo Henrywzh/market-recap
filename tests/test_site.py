@@ -45,7 +45,7 @@ def test_live_contract_is_the_dashboard_universe_and_nothing_else():
     # The strip is the config's own list, a name once; the ETFs and the
     # watchlist are not on it.
     assert [(e["symbol"], e["kind"]) for e in contract["strip"]] == [("^GSPC", "index"), ("^VIX", "macro"), ("NVDA", "watch")]
-    assert contract["rates"] == [{"symbol": "US10Y", "label": "UST 10Y", "kind": "rate"}]
+    assert contract["rates"] == [{"symbol": "US10Y", "label": "UST 10Y", "kind": "rate", "source": "cnbc"}]
     assert contract["refresh_seconds"] == 60
     assert contract["boards"]["indices"]["symbols"] == ["^GSPC"] and contract["boards"]["indices"]["series"]
     assert contract["boards"]["indices"]["refresh_seconds"] == 300

@@ -98,7 +98,8 @@ def live_contract(config: dict | None = None, *, weighted_names: list[str] | Non
         "overnight": [{"symbol": r["symbol"], "label": r["label"], "kind": "overnight", "region": r["region"]}
                       for r in live.get("overnight", [])],
         "premarket_movers": [{"symbol": symbol, "label": symbol, "kind": "premarket"} for symbol in candidates],
-        "rates": [{"symbol": r["symbol"], "label": r["label"], "kind": "rate"} for r in live.get("rates", [])],
+        "rates": [{"symbol": r["symbol"], "label": r["label"], "kind": "rate", "source": r.get("source", "cnbc")}
+                  for r in live.get("rates", [])],
     }
 
 

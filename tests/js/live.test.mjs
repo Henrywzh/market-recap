@@ -119,6 +119,32 @@ test('a failed source leaves its own rows as errors and the rest priced', async 
   }
 });
 
+test('a Yahoo yield index is a rate row: the yield with its change in basis points', async () => {
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('yahoo')) {
+      return new Response(JSON.stringify(spark({ '^GSPC': { t: [10], c: [5], prev: 4 }, '^TNX': { t: [10], c: [5.24], prev: 5.244 } })), { status: 200 });
+    }
+    return new Response('nope', { status: 403 });
+  };
+  try {
+    const body = await buildBody({
+      refresh_seconds: 60,
+      strip: [{ symbol: '^GSPC', label: 'SPX', kind: 'index' }],
+      rates: [{ symbol: '^TNX', label: 'UST 10Y', kind: 'rate', source: 'yahoo' }, { symbol: 'US2Y', label: 'UST 2Y', kind: 'rate', source: 'cnbc' }],
+    }, 50_000);
+    const [ten, two] = body.quotes.slice(1);
+    assert.equal(ten.label, 'UST 10Y');
+    assert.equal(ten.price, 5.24);
+    assert.equal(ten.change_bp, -0.4);
+    assert.equal(ten.source, 'Yahoo');
+    assert.equal(ten.session, undefined);
+    assert.equal(two.error, 'HTTP 403');
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
 test('a board returns its own symbols, with the day\'s series only where it asks', async () => {
   const real = globalThis.fetch;
   const seen = [];

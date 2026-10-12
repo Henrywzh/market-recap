@@ -489,12 +489,13 @@ under `data/snapshots/` locally. The plan they serve is
 
 Three things on the page change on their own during the session, each labelled live with
 its age: the **strip** at the top of MARKETS and OVERVIEW (SPX, NDX, RUT, Dow,
-VIX, the 2Y/10Y/30Y yields, the dollar index, WTI and gold, then a row of
+VIX, the 5Y/10Y/30Y yields, the dollar index, WTI and gold, then a row of
 names to watch: `[live] strip` and `strip_names`), the **intraday index
 charts** on INDICES (five-minute closes against the previous close), and the
 **S&P 500 heat map's LIVE window** (each tile coloured by today's move so far).
-Prices are Yahoo's spark (indices, VIX, the dollar, futures, stocks) and
-CNBC's quote service (yields). Each price shows its source and age; one older
+Prices are Yahoo's spark (indices, VIX, the dollar, futures, stocks, and
+Cboe's Treasury yield indexes ^FVX/^TNX/^TYX for the strip's yields; Yahoo has
+no 2-year). Each price shows its source and age; one older
 than `stale_after_seconds` during the session is marked STALE, and one that
 did not arrive is a dash, never a number from elsewhere. Everything else on
 the page is the nightly build's close; LIVE is the heat map's default only
@@ -513,6 +514,8 @@ and never fetch on their own:
 - **MACRO commodities.** PRICE and 1D from Yahoo (`[macro.commodities]`);
   1W and longer stay on the build's closes.
 - **Treasury yields.** CNBC's on-the-run yields for all 13 tenors in one call
+  (since 2026-10-12 CNBC answers Cloudflare's servers with HTTP 403, so the
+  live columns show its error until that changes)
   (`[live] yield_board`), as LIVE and TODAY columns, live 10Y-2Y and 10Y-3M,
   and a dashed live curve on the chart. These are market yields, not
   Treasury's fitted par curve: the two differ by a few bp on coupons and
@@ -541,7 +544,8 @@ and never fetch on their own:
   dollar index about 10; their ages say so.
 - **Sources were chosen by measurement** from Cloudflare's edge (2026-09-24
   after the close, 2026-09-25 mid-session): Yahoo ~45 ms with prices a few
-  seconds old, CNBC ~120 ms and ~15 s behind. Nasdaq (2-3 s per call) and
+  seconds old, CNBC ~120 ms and ~15 s behind (CNBC refuses Cloudflare since
+  2026-10-12; the strip's yields moved to Yahoo). Nasdaq (2-3 s per call) and
   Cboe (15-minute delay, up to 0.3% off) were not used.
 - **Locally**, `make serve` has no function, so the live blocks report HTTP
   404 and the heat map stays on the close; `make serve-live` runs the same

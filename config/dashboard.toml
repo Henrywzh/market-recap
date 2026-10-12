@@ -168,10 +168,13 @@ overnight = [
 # unavailable during a partial build. Not a full-US-market mover screen.
 premarket_top_weight_names = 30
 premarket_movers = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "TSLA", "JPM", "LLY"]
+# The strip's yields: Cboe's Treasury yield indexes through Yahoo (5, 10 and
+# 30 years; there is no 2-year). CNBC refuses Cloudflare's servers (HTTP 403
+# since 2026-10-12), so `source = "cnbc"` is kept only for the REFRESH board.
 rates = [
-  { symbol = "US2Y", label = "UST 2Y" },
-  { symbol = "US10Y", label = "UST 10Y" },
-  { symbol = "US30Y", label = "UST 30Y" },
+  { symbol = "^FVX", label = "UST 5Y", source = "yahoo" },
+  { symbol = "^TNX", label = "UST 10Y", source = "yahoo" },
+  { symbol = "^TYX", label = "UST 30Y", source = "yahoo" },
 ]
 # Pages that take live prices only when the reader presses REFRESH: SECTORS
 # (the heat-map board for its baskets, plus the SPDR sector funds beside them),

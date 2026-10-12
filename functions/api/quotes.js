@@ -10,7 +10,9 @@
 // Sources were chosen by measurement (2026-09-24/25, from Cloudflare's edge):
 // Yahoo's v8 chart answered every call in ~45 ms with prices a few seconds
 // old; CNBC's quote service carried the Treasury yields ~15 s behind. Nasdaq
-// (2-3 s per call) and Cboe (15-minute delay) were not used. A source that
+// (2-3 s per call) and Cboe (15-minute delay) were not used. CNBC began
+// refusing Cloudflare's servers on 2026-10-12 (HTTP 403), so the strip's yields
+// are Cboe's yield indexes (^FVX, ^TNX, ^TYX) through Yahoo. A source that
 // fails leaves its rows null with the reason: the page shows a dash, never a
 // number from somewhere else.
 
@@ -130,6 +132,23 @@ async function cnbcRates(entries) {
   }
 }
 
+// A Cboe yield index through Yahoo (^TNX is the 10-year yield in percent) as
+// a rate row: the yield with its change in basis points.
+export function yahooRate(quote) {
+  if (quote.error) return { symbol: quote.symbol, label: quote.label, kind: quote.kind, source: quote.source, error: quote.error };
+  return { symbol: quote.symbol, label: quote.label, kind: quote.kind, source: quote.source, price: quote.price,
+    change_bp: Number.isFinite(quote.change) ? Math.round(quote.change * 1000) / 10 : null, time: quote.time };
+}
+
+// The strip's yields, each from the source its entry names, in the contract's order.
+async function rateRows(entries) {
+  const yahoo = entries.filter((e) => e.source === 'yahoo');
+  const cnbc = entries.filter((e) => e.source !== 'yahoo');
+  const [fromYahoo, fromCnbc] = await Promise.all([yahoo.length ? yahooSpark(yahoo) : [], cnbcRates(cnbc)]);
+  const bySymbol = new Map([...fromYahoo.map(yahooRate), ...fromCnbc].map((q) => [q.symbol, q]));
+  return entries.map((e) => bySymbol.get(e.symbol));
+}
+
 // Yahoo's spark answers up to SPARK_BATCH symbols in one call, with each
 // one's day of 5-minute closes, its previous close and its session. One call
 // per batch keeps a 500-name heat map inside the 50 sub-requests a Pages
@@ -212,7 +231,7 @@ export async function buildBody(contract, nowMs = Date.now(), scope = 'default')
       refresh_seconds: board.refresh_seconds, closed_refresh_seconds: board.closed_refresh_seconds,
       stale_after_seconds: contract.stale_after_seconds, quotes };
   }
-  const [equities, rates] = await Promise.all([yahooSpark(contract.strip || []), cnbcRates(contract.rates || [])]);
+  const [equities, rates] = await Promise.all([yahooSpark(contract.strip || []), rateRows(contract.rates || [])]);
   const session = sessionOf(equities.filter((q) => q.kind === 'index'), nowMs);
   equities.forEach((q) => { delete q.session; });
   return {
