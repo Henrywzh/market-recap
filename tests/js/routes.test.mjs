@@ -62,16 +62,22 @@ test('every ticker link opens the ticker page', () => {
   assert.deepEqual(R.parseHash(R.tickerHref('brk-b')), { id: 'ticker', arg: 'BRK-B' });
 });
 
-test('#sectors opens the rotation view, which now carries sector valuation', () => {
-  assert.deepEqual(R.parseHash('#sectors'), { id: 'rotation', arg: null });
-  assert.equal(R.viewById('rotation').label, 'SECTORS');
+test('#sectors opens the hub, a sector or a sub-industry; the old #rotation lands there too', () => {
+  assert.deepEqual(R.parseHash('#sectors'), { id: 'sectors', arg: null });
+  assert.deepEqual(R.parseHash('#sectors/xlp-sdnb'), { id: 'sectors', arg: 'XLP-SDNB' });
+  assert.deepEqual(R.parseHash('#rotation'), { id: 'sectors', arg: null });
 });
 
-test('the overview is the landing page, and MARKET comes before RISK', () => {
+test('the overview is the landing page; MARKET, then SECTORS, then RISK', () => {
   assert.equal(R.DEFAULT_VIEW, 'overview');
-  assert.deepEqual(R.GROUPS.map((g) => g.id).slice(0, 2), ['market', 'risk']);
+  assert.deepEqual(R.GROUPS.map((g) => g.id).slice(0, 3), ['market', 'sectors', 'risk']);
   assert.deepEqual(R.parseHash('#brief'), { id: 'overview', arg: null });
   assert.deepEqual(R.parseHash('#journal'), { id: 'overview', arg: null });
+});
+
+test('the screen is out of the menu but its links still open it', () => {
+  assert.ok(!R.viewsIn('sectors').some((v) => v.id === 'valuation'));
+  assert.deepEqual(R.parseHash('#valuation/MSFT'), { id: 'valuation', arg: 'MSFT' });
 });
 
 test('a dotted share class resolves to the build\'s dashed symbol, nothing else does', () => {

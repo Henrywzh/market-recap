@@ -10,51 +10,50 @@ export const VIEWS = [
   { id: 'overview', label: 'OVERVIEW', group: 'market', artifact: 'overview', module: 'overview' },
   { id: 'markets', label: 'INDICES', group: 'market', artifact: 'markets', module: 'markets' },
   { id: 'heatmaps', label: 'HEAT MAPS', group: 'market', artifact: 'heatmaps', module: 'heatmaps' },
-  { id: 'rotation', label: 'SECTORS', group: 'market', artifact: 'rotation', module: 'rotation' },
+  { id: 'europe', label: 'EUROPE', group: 'market', artifact: 'europe', module: 'europe' },
+  // One hub for every sector, sub-industry and its names; the cross-sector themes beside it.
+  { id: 'sectors', label: 'SECTORS', group: 'sectors', artifact: 'sectors', module: 'sectors', takesArg: true },
+  { id: 'themes', label: 'THEMES', group: 'sectors', artifact: 'themes', module: 'themes', takesArg: true },
+  { id: 'kshape', label: 'K-SHAPE', group: 'sectors', artifact: 'kshape', module: 'kshape', takesArg: true },
+  { id: 'sizek', label: 'SIZE & STYLE', group: 'sectors', artifact: 'sizek', module: 'sizek', takesArg: true },
+  // Every company's multiples in one table: reached from links (a ticker's P/E), not the menu.
+  { id: 'valuation', label: 'SCREEN', group: 'sectors', artifact: 'valuation', module: 'valuation', takesArg: true, hidden: true },
   { id: 'risk', label: 'RISK', group: 'risk', artifact: ['risk', 'anchor'], module: 'risk' },
   { id: 'rates', label: 'RATES & MACRO', group: 'risk', artifact: ['fixed_income', 'macro'], module: 'rates' },
   { id: 'priced', label: 'PRICED PATH', group: 'risk', artifact: 'priced', module: 'priced' },
   { id: 'positioning', label: 'POSITIONING', group: 'risk', artifact: 'positioning', module: 'positioning' },
   { id: 'monitor', label: 'MONITOR', group: 'names', artifact: 'monitor', module: 'monitor' },
-  { id: 'valuation', label: 'SCREEN', group: 'names', artifact: 'valuation', module: 'valuation', takesArg: true },
   { id: 'ticker', label: 'TICKER', group: 'names', artifact: 'valuation', module: 'ticker', takesArg: true },
+  { id: 'europe-names', label: 'EUROPE NAMES', group: 'names', artifact: 'europe', module: 'europe-names', takesArg: true },
   { id: 'cross-listing', label: 'CROSS-LISTING', group: 'names', artifact: 'cross_listing', module: 'cross-listing' },
-  { id: 'catalysts', label: 'CALENDAR', group: 'catalysts', artifact: 'catalysts', module: 'catalysts' },
-  { id: 'earnings', label: 'EARNINGS', group: 'catalysts', artifact: 'earnings', module: 'earnings' },
-  { id: 'themes', label: 'THEMES', group: 'catalysts', artifact: 'themes', module: 'themes', takesArg: true },
-  { id: 'scenarios', label: 'SCENARIOS', group: 'scenarios', artifact: 'scenarios', module: 'scenarios', takesArg: true },
-  { id: 'chain', label: 'AI CHAIN', group: 'catalysts', artifact: 'chain', module: 'chain', takesArg: true },
-  { id: 'europe', label: 'INDICES', group: 'europe', artifact: 'europe', module: 'europe' },
-  { id: 'europe-names', label: 'NAMES', group: 'europe', artifact: 'europe', module: 'europe-names', takesArg: true },
-  { id: 'kshape', label: 'K-SHAPE', group: 'relative', artifact: 'kshape', module: 'kshape', takesArg: true },
-  { id: 'sizek', label: 'SIZE K', group: 'relative', artifact: 'sizek', module: 'sizek', takesArg: true },
+  { id: 'catalysts', label: 'CALENDAR', group: 'calendar', artifact: 'catalysts', module: 'catalysts' },
+  { id: 'earnings', label: 'EARNINGS', group: 'calendar', artifact: 'earnings', module: 'earnings' },
+  { id: 'scenarios', label: 'SCENARIOS', group: 'calendar', artifact: 'scenarios', module: 'scenarios', takesArg: true },
+  { id: 'chain', label: 'AI CHAIN', group: 'calendar', artifact: 'chain', module: 'chain', takesArg: true },
   { id: 'technicals', label: 'TECHNICALS', group: 'tools', artifact: 'technicals', module: 'technicals', takesArg: true },
   { id: 'trade', label: 'TRADE DESK', group: 'tools', artifact: 'technicals', module: 'trade', takesArg: true },
   { id: 'xray', label: 'ETF X-RAY', group: 'tools', artifact: 'xray', module: 'xray' },
   { id: 'dcf', label: 'DCF', group: 'tools', artifact: 'dcf', module: 'dcf', takesArg: true },
 ];
 
-// The market first, then how much risk it carries, then names and dates.
+// The market first, then its sectors and what they hold, how much risk it
+// carries, single names, what is coming, and the tools.
 export const GROUPS = [
   { id: 'market', label: 'MARKET' },
+  { id: 'sectors', label: 'SECTORS' },
   { id: 'risk', label: 'RISK' },
   { id: 'names', label: 'NAMES' },
-  { id: 'catalysts', label: 'CATALYSTS' },
-  // CATALYSTS holds its four views; what the releases have done to rates and stocks is its own mode.
-  { id: 'scenarios', label: 'SCENARIOS' },
-  // The European markets: index levels and supersectors, and the members of the FTSE 100 and EURO STOXX 50.
-  { id: 'europe', label: 'EUROPE' },
-  // What has been paid for a divergence between two groups of names: its own mode, with room for more pairs.
-  { id: 'relative', label: 'RELATIVE VALUE' },
+  { id: 'calendar', label: 'CALENDAR' },
   { id: 'tools', label: 'TOOLS' },
 ];
 
-// Hashes from before the regrouping, and where each now lives.
+// Hashes from before a regrouping, and where each now lives.
 export const ALIASES = {
   'fixed-income': 'rates',
   macro: 'rates',
   financials: 'ticker',
-  sectors: 'rotation',
+  // The rotation graph and the sector scorecard open the SECTORS hub, which draws them.
+  rotation: 'sectors',
   brief: 'overview',
   journal: 'overview',
 };
@@ -107,5 +106,5 @@ export function viewById(id) {
 }
 
 export function viewsIn(group) {
-  return VIEWS.filter((v) => v.group === group);
+  return VIEWS.filter((v) => v.group === group && !v.hidden);
 }

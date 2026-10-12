@@ -119,6 +119,14 @@ cheap_percentile = 50.0
 # operations): neither the forward P/E nor its percentile is shown.
 no_pe_sectors = ["Real Estate"]
 
+[sectors]
+# SECTORS hub. Which THEMES group's industry data appears on a sector's or a
+# sub-industry's page; a THEMES group mapped to neither is listed as cross-sector.
+sector_themes = { "Energy" = "energy", "Consumer Staples" = "staples", "Consumer Discretionary" = "consumer" }
+sub_industry_themes = { "Semiconductors" = "semis", "Diversified Banks" = "banks", "Regional Banks" = "banks", "Homebuilding" = "housing", "Hotels, Resorts & Cruise Lines" = "cruise", "Aerospace & Defense" = "defense" }
+# VALUATION's subsector bands (P/E and P/TBV against ten years) shown on these sub-industries' pages.
+sub_industry_valuation = { "Diversified Banks" = "fin-diversified-banks", "Regional Banks" = "fin-regional-banks", "Investment Banking & Brokerage" = "fin-investment-banks" }
+
 # Intraday prices, fetched in the reader's browser through
 # functions/api/quotes.js (Yahoo's spark, 20 symbols a call; CNBC for the
 # yields). Beside the recap, never inside it: every other figure on the page
@@ -616,6 +624,11 @@ funds = [
 # big-less-small return. ``big_name`` / ``small_name`` default to the symbol.
 # ``big_arm`` / ``small_arm`` are the labels the page prints for the two arms
 # (default LARGE / SMALL; a style pair names its own, e.g. VALUE / GROWTH).
+# ``source = "french"`` takes a pair's two arms from Kenneth French's daily size
+# and book-to-market portfolios (sources.french), not from Yahoo: factor series
+# built as price indexes from the portfolios' returns, before fees and trading
+# costs. The file is monthly and runs a month or more behind; history_years cuts
+# it to the same window as the other pairs.
 history_years = 25
 price_periods = ["1M", "3M", "6M", "1Y", "3Y", "5Y", "10Y"]
 gap_period = "1Y"
@@ -668,6 +681,30 @@ small_arm = "GROWTH"
 big_name = "IWD"
 small_name = "IWF"
 note = "The Russell 1000's value half (IWD) against its growth half (IWF): the same large and mid-sized companies, split by price against book value, earnings and growth. Value holds more banks, energy and health care; growth more technology."
+
+[[sizek.pairs]]
+key = "ff_hml"
+label = "VALUE vs GROWTH · FAMA-FRENCH (HML)"
+big = "FF_VALUE"
+small = "FF_GROWTH"
+big_arm = "VALUE"
+small_arm = "GROWTH"
+big_name = "FF value"
+small_name = "FF growth"
+source = "french"
+note = "Kenneth French's value factor: the cheapest 30% of US stocks by book-to-market against the dearest 30%, each half of small and large companies, value-weighted, every listed US common stock (NYSE, AMEX, Nasdaq). The ratio follows cumulative HML. Monthly updates with a lag of about a month."
+
+[[sizek.pairs]]
+key = "ff_big_hml"
+label = "LARGE VALUE vs LARGE GROWTH · FAMA-FRENCH"
+big = "FF_BIG_VALUE"
+small = "FF_BIG_GROWTH"
+big_arm = "VALUE"
+small_arm = "GROWTH"
+big_name = "FF large value"
+small_name = "FF large growth"
+source = "french"
+note = "The large-company half of HML: the cheapest 30% of the big stocks against the dearest 30%, value-weighted. Not the same split as IWD/IWF: Russell scores growth forecasts too and splits names between its halves, while this sorts on book-to-market alone, so the two can diverge (in the three years to August 2026 this value leg rose about 136%, IWD about 71%)."
 
 [[sizek.pairs]]
 key = "staples_market"

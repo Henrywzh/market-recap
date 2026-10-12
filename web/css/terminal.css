@@ -1127,3 +1127,37 @@ table.industries-members { font-size: 11px; }
 .eu-spark .spark { display: block; width: 80px; height: 20px; color: var(--text-dim); }
 .eu-sortable { cursor: pointer; }
 .eu-sortable:hover { color: var(--text); }
+
+/* ---------- SECTORS hub: market, sector, sub-industry, names ---------- */
+.sx-row { cursor: pointer; }
+.sx-row:hover td { background: var(--panel-alt); }
+.sx-row:focus-within td { background: var(--panel-alt); }
+.sx-name { font-weight: 600; letter-spacing: 0.04em; }
+.sx-ticker { font-weight: 600; letter-spacing: 0.02em; }
+.sx-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0 6px; }
+.sx-crumbs { font-size: 11px; letter-spacing: 0.08em; color: var(--text-dim); margin: 6px 2px 0; }
+.sx-crumbs a { color: var(--text-dim); }
+.sx-crumbs a:hover { color: var(--accent); }
+.sx-sep { margin: 0 6px; color: var(--text-faint); }
+.sx-here { color: var(--text); }
+.sx-stats { margin-bottom: 8px; }
+.sx-flags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 10px; font-size: 11px; }
+.sx-extreme { white-space: nowrap; }
+.sx-sort {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+.sx-sort:hover { color: var(--text); }
+th[aria-sort] .sx-sort { color: var(--accent); }
+.sx-theme { border-top: 1px solid var(--border); padding: 8px 0 10px; }
+.sx-theme-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.sx-theme-name { font-weight: 600; letter-spacing: 0.04em; }
+.sx-theme .tag-row { margin-top: 6px; }
+.sx-theme-line { font-size: 11.5px; line-height: 1.9; margin: 2px 0 10px; }
+.sx-industry { margin-top: 6px; }

@@ -114,7 +114,7 @@ function sectorHeatCard(rows) {
       const v = r[period];
       const share = present(v) ? Math.round(Math.min(1, Math.abs(v) / scale) * 70) + 8 : 0;
       const colour = present(v) ? `color-mix(in srgb, var(${v >= 0 ? '--up' : '--down'}) ${share}%, var(--panel))` : 'var(--panel)';
-      return el('a', { class: 'ov-heat-tile', href: '#rotation', style: `background:${colour}`, title: `${r.sector} (${r.etf}) · ${num(r.weight_pct, 1)}% of the S&P 500` }, [
+      return el('a', { class: 'ov-heat-tile', href: `#sectors/${r.etf}`, style: `background:${colour}`, title: `${r.sector} (${r.etf}) · ${num(r.weight_pct, 1)}% of the S&P 500` }, [
         el('span', { class: 'ov-heat-name', text: r.etf }),
         el('span', { class: 'ov-heat-value', text: pct(v, 1) }),
         el('span', { class: 'ov-heat-sector', text: r.sector.replace('Information Technology', 'Info Tech').replace('Communication Services', 'Comm Services').replace('Consumer Discretionary', 'Cons Discretionary') }),
@@ -123,7 +123,7 @@ function sectorHeatCard(rows) {
   };
   draw('1D');
   return card('SECTORS', periodSwitch(['1D', '1W', '1M', 'YTD'], '1D', draw), [grid,
-    el('div', { class: 'ov-note dim', text: 'Sector SPDR ETFs, ordered by index weight; colour scaled to the period\'s largest move. Click for SECTORS.' })]);
+    el('div', { class: 'ov-note dim', text: 'Sector SPDR ETFs, ordered by index weight; colour scaled to the period\'s largest move. Click a sector for its page.' })]);
 }
 
 function breadthChart(h) {
@@ -323,7 +323,7 @@ function bankBookCard(rows) {
     el('td', { class: 'dim', text: `${num(r.median, 2)}x` }),
     el('td', { text: present(r.rotce) ? `${num(r.rotce, 1)}%` : DASH }),
   ]));
-  return card('BANKS · PRICE / TANGIBLE BOOK', el('a', { href: '#valuation', class: 'dim', text: 'valuation ↗' }),
+  return card('BANKS · PRICE / TANGIBLE BOOK', el('a', { href: '#sectors/XLF', class: 'dim', text: 'financials ↗' }),
     grid(['', 'P/TBV', '10Y PCTL', 'MEDIAN', 'ROTCE'], body));
 }
 

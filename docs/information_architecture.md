@@ -56,6 +56,29 @@ no record of **decisions** to review against outcomes.
 
 ## Navigation
 
+**As built (2026-10-13).** Six groups, at most four views each:
+
+```
+MARKET     Overview · Indices · Heat maps · Europe
+SECTORS    Sectors (hub) · Themes · K-shape · Size & style
+RISK       Risk · Rates & macro · Priced path · Positioning
+NAMES      Monitor · Ticker · Europe names · Cross-listing
+CALENDAR   Calendar · Earnings · Scenarios · AI chain
+TOOLS      Technicals · Trade desk · ETF X-Ray · DCF
+```
+
+Sector information had been spread over five places (rotation, heat map,
+screen, themes, relative value). The SECTORS hub (`sectors.json`, built from
+this session's heat map, industries, rotation, valuation, monitor and themes)
+gives every sector and sub-industry one page with the same blocks: summary,
+sub-industries, members, reports ahead, and the industry data of the THEMES
+group mapped to it in `[sectors]` (staples, energy and consumer on their
+sectors; semis, banks, housing, cruise and defense on their sub-industries).
+THEMES keeps every group; only cloud & AI capex spans sectors. Screen leaves
+the menu (reached from a ticker's P/E link); `#rotation` opens the hub.
+
+The plan below is the original one, kept for the record.
+
 Four top-level modes plus a tools menu. Each mode has at most four views.
 
 ```

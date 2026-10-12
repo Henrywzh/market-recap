@@ -16,7 +16,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, overnight, overview, positioning, priced, risk, rotation, scenarios, sizek, themes, valuation, xray
+from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, sizek, themes, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -65,6 +65,8 @@ PANELS = {
     "monitor": monitor.build,
     # Reads this session's MONITOR (drawdowns, EPS revisions) and VALUATION.
     "industries": industries.build,
+    # SECTORS reads this session's INDUSTRIES and MONITOR (names, sectors, the fund returns), so after them.
+    "sectors": sectors.build,
     # OVERVIEW reads this session's other panels and so runs last.
     "overview": overview.build,
 }
@@ -116,8 +118,9 @@ def run(
     if skip_sec:
         selected = [name for name in selected if name not in SEC_PANELS]
     # Also honor dependency order when the user passes --panels monitor valuation:
-    # monitor after what it reads, industries after monitor, overview last.
-    for late in ("monitor", "industries", "overview"):
+    # monitor after what it reads, industries after monitor, sectors after
+    # industries, overview last.
+    for late in ("monitor", "industries", "sectors", "overview"):
         if late in selected:
             selected = [name for name in selected if name != late] + [late]
 
@@ -170,6 +173,8 @@ def run(
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in overview.INPUTS})
                 elif name == "industries":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in industries.INPUTS})
+                elif name == "sectors":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in sectors.INPUTS})
                 elif name == "positioning":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in positioning.INPUTS})
                 elif name == "events":

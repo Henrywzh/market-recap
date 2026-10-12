@@ -367,6 +367,19 @@ def _check_industries(payload: dict | None) -> list[Finding]:
     return out
 
 
+def _check_sectors(payload: dict | None) -> list[Finding]:
+    """The SECTORS hub: empty means no sector was read; missing inputs are named."""
+    if not payload:
+        return []
+    out = []
+    if not payload.get("sectors"):
+        out.append(Finding("warning", "sectors", "no sector was read: the hub is empty"))
+    if payload.get("missing"):
+        out.append(Finding("notice", "sectors",
+                           f"{', '.join(payload['missing'])} did not build this session; the fields that read it are empty"))
+    return out
+
+
 def _check_sec_filings(manifest: dict) -> list[Finding]:
     """Filers whose latest 10-K / 10-Q company facts did not carry.
 
@@ -441,6 +454,7 @@ def run() -> dict:
         + _check_cross_listing(config, panels.get("cross_listing"))
         + _check_flow_attribution(panels.get("heatmaps"))
         + _check_industries(panels.get("industries"))
+        + _check_sectors(panels.get("sectors"))
         + _check_sec_filings(manifest)
         + _check_price_actions(manifest)
         + _check_sources(manifest)

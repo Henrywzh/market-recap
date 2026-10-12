@@ -924,6 +924,20 @@ function themeCards(key, data) {
   return [...industry(key, data), studyCard(failed ? null : data.studies?.[key], failed)].filter(Boolean);
 }
 
+// The SECTORS hub draws a mapped theme's blocks on the sector or sub-industry
+// page through this function, so both pages show the same cards in the same order.
+export function themeBlocks(key, data, { title = true } = {}) {
+  const g = data.groups?.find((x) => x.key === key);
+  if (!g) return [];
+  const blocks = [];
+  if (title) blocks.push(el('h2', { class: 'section-title' }, [g.label, el('span', { class: 'muted', text: ` proxy ${g.proxy}` })]));
+  blocks.push(el('div', { class: 'grid two' }, [calendarCard(g, data.as_of, data.calendar_days), relativeCard(g)]));
+  blocks.push(bellwetherCard(g));
+  (g.pairs || []).forEach((pair) => blocks.push(pairCard(pair)));
+  themeCards(g.key, data).forEach((node) => blocks.push(node));
+  return blocks;
+}
+
 export default async function renderThemes(root, data, _manifest, ctx = {}) {
   root.append(sectionTitle('THEMES', 'WHAT IS COMING, BY WHAT TRADES TOGETHER'));
   if (!data.groups?.length) {
@@ -944,13 +958,7 @@ export default async function renderThemes(root, data, _manifest, ctx = {}) {
   const pick = (key) => { active = key; ctx.setArg?.(key); draw(); };
   const draw = () => {
     boardHost.replaceChildren(data.groups.every((g) => g.board) ? boardCard(data, active, pick) : overviewStrip(data, active, pick));
-    host.replaceChildren();
-    const g = data.groups.find((x) => x.key === active);
-    host.append(el('h2', { class: 'section-title' }, [g.label, el('span', { class: 'muted', text: ` proxy ${g.proxy}` })]));
-    host.append(el('div', { class: 'grid two' }, [calendarCard(g, data.as_of, data.calendar_days), relativeCard(g)]));
-    host.append(bellwetherCard(g));
-    (g.pairs || []).forEach((pair) => host.append(pairCard(pair)));
-    themeCards(g.key, data).forEach((node) => host.append(node));
+    host.replaceChildren(...themeBlocks(active, data));
   };
   root.append(boardHost);
   if (heat) root.append(heat);
