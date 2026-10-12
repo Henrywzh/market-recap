@@ -75,8 +75,10 @@ def build(ctx) -> dict:
     if not opens.empty:
         opens.index = pd.to_datetime(opens.index).tz_localize(None)
     missing = [s for s in wanted if any(s not in f.columns for f in (adjusted, prices, opens))]
+    # Dated by the last session the split uses, not a bar of the session in progress.
+    used = adjusted.index[adjusted.index <= pd.Timestamp(ctx.as_of)]
     ctx.log.add(SourceRecord("overnight_prices", "Opens and closes since inception for the overnight / intraday split", YAHOO_URL,
-                             to_iso_date(adjusted.index[-1]) if not adjusted.empty else None, rows=len(wanted) - len(missing),
+                             to_iso_date(used[-1]) if len(used) else None, rows=len(wanted) - len(missing),
                              status="ok" if not missing else "partial", error=f"no opens or closes: {', '.join(missing)}" if missing else None))
     views = [_view(s, adjusted, prices, opens, ctx.as_of, cfg["windows"]) for s in specs]
     if not any(v["available"] for v in views):

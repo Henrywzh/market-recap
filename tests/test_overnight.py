@@ -73,12 +73,14 @@ def test_the_panel_splits_each_fund_and_names_one_without_opens(monkeypatch):
     monkeypatch.setattr(P.yahoo, "fetch_closes", lambda *a, **k: frame(close))
     monkeypatch.setattr(P.yahoo, "fetch_prices", lambda *a, **k: frame(close))
     monkeypatch.setattr(P.yahoo, "fetch_ohlcv_cache", lambda *a, **k: {"open": pd.DataFrame({"SPY": open_})})
-    ctx = types.SimpleNamespace(config=load_config(), log=BuildLog(), as_of=str(idx[-1].date()))
+    # The feed carries a bar of the session in progress (the last row); the split stops at as_of.
+    ctx = types.SimpleNamespace(config=load_config(), log=BuildLog(), as_of=str(idx[-2].date()))
     out = P.build(ctx)
+    assert ctx.log.sources[-1].observed_date == str(idx[-2].date())
     spy, qqq = out["views"][0], out["views"][1]
     assert spy["available"] and not qqq["available"]
-    assert spy["sessions"] == len(idx) - 1 and spy["through"] == str(idx[-1].date())
+    assert spy["sessions"] == len(idx) - 2 and spy["through"] == str(idx[-2].date())
     assert [w["period"] for w in spy["windows"]] == ["1M", "3M", "1Y", "MAX"]
     last = spy["last"][0]
     assert (1 + last["overnight"] / 100) * (1 + last["intraday"] / 100) - 1 == pytest.approx(last["total"] / 100, abs=1e-4)
-    assert spy["weekly"]["total"][-1] == pytest.approx(close.iloc[-1] / close.iloc[0], rel=1e-3)
+    assert spy["weekly"]["total"][-1] == pytest.approx(close.iloc[-2] / close.iloc[0], rel=1e-3)
