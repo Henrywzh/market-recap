@@ -53,7 +53,7 @@ function render(data, host, key) {
   }
   const ratioNode = chart();
   const armsNode = chart();
-  const ratioCard = card(`RATIO · ${v.big_name} ÷ ${v.small_name} · SINCE ${p.since}`, el('span', { class: 'dim', text: `${p.sessions} sessions · ${percentileView(p.ratio_percentile).text} of its own weeks` }), [
+  const ratioCard = card(`RATIO · ${v.big_name} ÷ ${v.small_name} · SINCE ${p.since}`, el('span', { class: 'dim', text: `${p.sessions} sessions through ${p.through} · ${percentileView(p.ratio_percentile).text} of its own weeks` }), [
     ratioNode, p.extremes ? el('div', { class: 'field-note', text: extremesText(p.extremes) }) : null]);
   const armsCard = card('EACH ARM · =100 WHEN BOTH FIRST TRADED', null, [armsNode]);
   queueMicrotask(() => {
