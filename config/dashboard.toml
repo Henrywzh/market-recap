@@ -589,6 +589,56 @@ top = ["AXP"]
 bottom = ["COF", "SYF", "ALLY"]
 note = "American Express's cardholders skew affluent; Capital One, Synchrony and Ally lend more to near-prime and subprime households, where delinquencies show stress first."
 
+[sizek]
+# RELATIVE VALUE -> SIZE K. The large, cap-weighted arm against the equal-weight
+# or smaller arm of much the same market: how far the biggest companies have run
+# ahead of the rest, as a ratio (big over small) with where today's ratio sits in
+# its own history. ETF pairs use adjusted closes (dividends included); the UK pair
+# is two price indexes (no dividends), in pounds. Windows are named in
+# config.PERIOD_TRADING_DAYS; ``gap_period`` is the rolling window of the
+# big-less-small return. ``big_name`` / ``small_name`` default to the symbol.
+history_years = 25
+price_periods = ["1M", "3M", "6M", "1Y", "3Y", "5Y", "10Y"]
+gap_period = "1Y"
+
+[[sizek.pairs]]
+key = "sp500"
+label = "S&P 500: CAP vs EQUAL"
+big = "SPY"
+small = "RSP"
+note = "The same 500 companies: SPY weights them by market value, RSP gives each the same weight and rebalances quarterly. The gap is the return of the largest names against the typical one."
+
+[[sizek.pairs]]
+key = "nasdaq100"
+label = "NASDAQ-100: CAP vs EQUAL"
+big = "QQQ"
+small = "QQEW"
+note = "The same 100 companies, cap-weighted (QQQ, whose index caps its largest weights) against equal-weight (QQEW, from 2006)."
+
+[[sizek.pairs]]
+key = "large_small"
+label = "LARGE vs SMALL"
+big = "SPY"
+small = "IWM"
+note = "The S&P 500 against the Russell 2000. Different companies, not a re-weighting; the small-cap index holds many with no earnings."
+
+[[sizek.pairs]]
+key = "large_mid"
+label = "LARGE vs MID"
+big = "SPY"
+small = "MDY"
+note = "The S&P 500 against the S&P MidCap 400."
+
+[[sizek.pairs]]
+key = "uk"
+label = "UK: FTSE 100 vs 250"
+big = "^FTSE"
+small = "^FTMC"
+big_name = "FTSE 100"
+small_name = "FTSE 250"
+price_index = true
+note = "The 100 largest UK listings (many of them global exporters) against the next 250, which sell mostly in the UK. Price indexes in pounds, dividends excluded."
+
 [europe]
 # EUROPE. Index levels, the STOXX 600 supersector funds, the FTSE 100 and EURO
 # STOXX 50 members, and named groups of other names (luxury, UK financials),

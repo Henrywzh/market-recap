@@ -62,7 +62,7 @@ async function routes() {
     .sort((a, b) => (b.weight || 0) - (a.weight || 0)).slice(0, 6).map((r) => r.ticker);
   const tickers = [...new Set([...top, 'BRK.B', 'SPY', '^GSPC'])];
   const out = VIEWS.filter((v) => !v.takesArg).map((v) => v.id);
-  out.push('valuation', 'technicals/SPY', 'trade/SPY', 'dcf', 'chain/NVDA', 'chain/000660.KS', 'chain/8035.T');
+  out.push('kshape', 'kshape/cruise', 'sizek', 'sizek/uk', 'valuation', 'technicals/SPY', 'trade/SPY', 'dcf', 'chain/NVDA', 'chain/000660.KS', 'chain/8035.T');
   tickers.forEach((t) => out.push(`ticker/${encodeURIComponent(t)}`));
   (themes?.groups || []).forEach((g) => out.push(`themes/${g.key.toUpperCase()}`));
   return out;

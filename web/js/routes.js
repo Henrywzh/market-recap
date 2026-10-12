@@ -27,6 +27,7 @@ export const VIEWS = [
   { id: 'europe', label: 'INDICES', group: 'europe', artifact: 'europe', module: 'europe' },
   { id: 'europe-names', label: 'NAMES', group: 'europe', artifact: 'europe', module: 'europe-names', takesArg: true },
   { id: 'kshape', label: 'K-SHAPE', group: 'relative', artifact: 'kshape', module: 'kshape', takesArg: true },
+  { id: 'sizek', label: 'SIZE K', group: 'relative', artifact: 'sizek', module: 'sizek', takesArg: true },
   { id: 'technicals', label: 'TECHNICALS', group: 'tools', artifact: 'technicals', module: 'technicals', takesArg: true },
   { id: 'trade', label: 'TRADE DESK', group: 'tools', artifact: 'technicals', module: 'trade', takesArg: true },
   { id: 'xray', label: 'ETF X-RAY', group: 'tools', artifact: 'xray', module: 'xray' },

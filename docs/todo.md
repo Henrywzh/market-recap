@@ -619,8 +619,11 @@ What the tests that shaped it showed (scratch, 2010-2026 unless noted):
 Built as RELATIVE VALUE -> K-SHAPE: five pairs (cruise, airlines, homebuilders,
 casinos, cards and lending) and all together; legs named in `[kshape]`. Ideas not
 yet done: the AI K (infrastructure beneficiaries against the businesses AI
-replaces: IT services, staffing, parts of software) and the size K (the ten
-largest S&P 500 names against the rest, on forward P/E); luxury goods
+replaces: IT services, staffing, parts of software; dropped 2026-10-12) and the
+valuation side of the size K (the size K page, built 2026-10-12 as RELATIVE
+VALUE -> SIZE K, is prices only: SPY/RSP, QQQ/QQEW, SPY/IWM, SPY/MDY, FTSE 100/250;
+the ten largest S&P 500 names against the rest on forward P/E would need the
+index's weights over time); luxury goods
 (Hermes, LVMH, Richemont, Ferrari: prices and consensus only, no filings
 history); a test of whether a pair's valuation spread mean-reverts (trailing
 P/E ratio percentile against the next 12 months' relative return, a handful of

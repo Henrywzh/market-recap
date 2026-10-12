@@ -16,7 +16,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, overview, positioning, priced, risk, rotation, scenarios, themes, valuation, xray
+from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, overview, positioning, priced, risk, rotation, scenarios, sizek, themes, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -50,6 +50,7 @@ PANELS = {
     "evidence": evidence.build,
     # Reads this session's VALUATION (per-company P/E and EPS histories), so after it.
     "kshape": kshape.build,
+    "sizek": sizek.build,
     # Reads this session's catalysts and evidence (report dates), so after them.
     "positioning": positioning.build,
     # Themes first: the event cards read its industry series ("since the

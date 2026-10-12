@@ -31,7 +31,7 @@ DAILY_DAYS = 365
 
 
 def _thin(frame: pd.DataFrame, years: int) -> pd.DataFrame:
-    """The last ``DAILY_DAYS`` daily, older weeks' last observation, within ``years``."""
+    """The last ``DAILY_DAYS`` daily, older weeks' last observation (and the first row), within ``years``."""
     frame = frame.sort_index()
     if frame.empty:
         return frame
@@ -39,8 +39,9 @@ def _thin(frame: pd.DataFrame, years: int) -> pd.DataFrame:
     frame = frame[frame.index > last - pd.DateOffset(years=years)]
     cut = last - pd.Timedelta(days=DAILY_DAYS)
     older = frame[frame.index <= cut]
+    first = older.iloc[:1]                  # the series' own start survives the thinning: a ratio rebased there begins at 1
     older = older.groupby(older.index.to_period("W-FRI")).tail(1)
-    return pd.concat([older, frame[frame.index > cut]])
+    return pd.concat([first[~first.index.isin(older.index)], older, frame[frame.index > cut]]).sort_index()
 
 
 def _series_payload(frame: pd.DataFrame, years: int, digits: int = 2) -> dict:
