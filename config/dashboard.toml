@@ -592,6 +592,19 @@ top = ["AXP"]
 bottom = ["COF", "SYF", "ALLY"]
 note = "American Express's cardholders skew affluent; Capital One, Synchrony and Ally lend more to near-prime and subprime households, where delinquencies show stress first."
 
+[overnight]
+# INDICES -> OVERNIGHT VS INTRADAY. Each fund's daily return split into the
+# move from the previous close to the open and the move from the open to the
+# close, since its first day (Yahoo's split-adjusted opens and closes, the
+# dividend in the overnight leg). Windows are named in config.PERIOD_TRADING_DAYS;
+# MAX is since inception.
+windows = ["1M", "3M", "1Y", "3Y", "5Y", "10Y", "MAX"]
+funds = [
+  { symbol = "SPY", label = "S&P 500 (SPY)" },
+  { symbol = "QQQ", label = "Nasdaq-100 (QQQ)" },
+  { symbol = "IWM", label = "Russell 2000 (IWM)" },
+]
+
 [sizek]
 # RELATIVE VALUE -> SIZE K. The large, cap-weighted arm against the equal-weight
 # or smaller arm of much the same market: how far the biggest companies have run

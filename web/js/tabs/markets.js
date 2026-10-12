@@ -2,6 +2,7 @@ import { el, card, table, tag, num, pct, dirClass, periodSwitch, sectionTitle, n
 import { areaLine, zeroLine, multiLine } from '../charts.js';
 import { mountLive } from '../live.js';
 import { mountIndexCharts } from '../live-indices.js';
+import { overnightCard } from '../overnight-card.js';
 import { spark } from '../spark.js';
 import { readingText, readingNote, outcomeCell, stateSummary, daysNow, sectorFlag } from '../market-state-model.js';
 
@@ -201,7 +202,7 @@ export default function renderMarkets(root, data, manifest, ctx = {}) {
 
   // Intraday prices first, the recap's closes beneath: the live strip is
   // labelled as such and nothing below it changes during the session.
-  root.append(mountLive());
+  root.append(mountLive({ asOf: data.as_of }));
   root.append(mountIndexCharts());
 
   root.append(el('div', { class: 'stat-strip' }, [
@@ -217,6 +218,14 @@ export default function renderMarkets(root, data, manifest, ctx = {}) {
     const stateHost = el('div', {});
     root.append(stateHost);
     mountMarketState(stateHost, ctx);
+    // Where the funds' return was made: its own artifact, so a failure there
+    // is a note here and nothing else.
+    const nightHost = el('div', {});
+    root.append(nightHost);
+    ctx.loadArtifact('overnight').then((night) => {
+      const node = overnightCard(night);
+      nightHost.replaceChildren(node || el('div', { class: 'gap', text: 'Overnight vs intraday is unavailable in this build.' }));
+    }).catch((error) => nightHost.replaceChildren(el('div', { class: 'gap', text: `Overnight vs intraday is unavailable: ${error.message}.` })));
   }
 
   // One section per index, rendered by the same function so the two read
