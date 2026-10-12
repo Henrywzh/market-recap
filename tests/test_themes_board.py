@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from market_recap.compute import themes as T
 
@@ -104,3 +105,45 @@ def test_board_assembles_from_closes_trends_and_valuation_without_inventing_a_re
     bare = P._board(ctx, settings, proxy, market, ["A"], {}, {}, {})
     assert bare["state"]["key"] is None and bare["state"]["label"] is None
     assert bare["revision"]["median_pct"] is None and bare["valuation"]["median_percentile"] is None
+
+
+# --- groups with configured drivers ---------------------------------------------------
+
+
+def _driver_world():
+    idx = pd.bdate_range("2024-01-02", periods=400)
+    rng = np.random.default_rng(1)
+    vix = pd.Series(15 + np.cumsum(rng.normal(0, 0.5, 400)), index=idx)
+    closes = pd.DataFrame({"^VIX": vix, "CL=F": 70 * np.exp(np.cumsum(rng.normal(0, 0.01, 400))),
+                           "HYG": 80 * np.exp(np.cumsum(rng.normal(0, 0.002, 400))), "LQD": 110 * np.exp(np.cumsum(rng.normal(0, 0.002, 400)))}, index=idx)
+    # AAA moves with the VIX (+0.2 per point), BBB is noise
+    excess = pd.DataFrame({"AAA": 0.2 * vix.diff() + rng.normal(0, 0.1, 400), "BBB": rng.normal(0, 1, 400)}, index=idx)
+    return idx, closes, excess
+
+
+def test_driver_kinds_are_the_daily_changes_they_name():
+    from market_recap.panels import themes as P
+    idx, closes, _ = _driver_world()
+    assert P._driver_series({"kind": "diff", "symbol": "^VIX"}, closes).iloc[5] == pytest.approx(closes["^VIX"].diff().iloc[5])
+    assert P._driver_series({"kind": "pct", "symbol": "CL=F"}, closes).iloc[5] == pytest.approx(closes["CL=F"].pct_change().iloc[5] * 100)
+    pair = P._driver_series({"kind": "pair_pct", "symbols": ["HYG", "LQD"]}, closes).iloc[5]
+    assert pair == pytest.approx((closes["HYG"].pct_change().iloc[5] - closes["LQD"].pct_change().iloc[5]) * 100)
+    assert P._driver_series({"kind": "pct", "symbol": "NOPE"}, closes).empty          # no prices: empty, never zero
+    with pytest.raises(ValueError):
+        P._driver_series({"kind": "spread", "symbol": "X"}, closes)
+
+
+def test_driver_block_measures_each_name_and_the_basket_and_leaves_a_missing_driver_blank():
+    from market_recap.panels import themes as P
+    _, closes, excess = _driver_world()
+    spec = {"label": "TEST", "basket": ["AAA", "BBB"], "bellwethers": ["AAA", "BBB"], "drivers_note": "n",
+            "drivers": [{"key": "vix", "label": "VIX, per point", "kind": "diff", "symbol": "^VIX"},
+                        {"key": "gone", "label": "not priced", "kind": "pct", "symbol": "NOPE"}]}
+    out = P._driver_block(spec, excess, closes)["sensitivity"]
+    rows = {r["symbol"]: r for r in out["rows"]}
+    assert set(rows) == {"TEST BASKET", "AAA", "BBB"} and out["note"] == "n"
+    assert rows["AAA"]["vix"]["beta"] == pytest.approx(0.2, abs=0.03) and rows["AAA"]["vix"]["corr"] > 0.6
+    assert abs(rows["BBB"]["vix"]["corr"]) < 0.25
+    assert rows["AAA"]["gone"] is None and out["drivers"] == {"vix": "VIX, per point", "gone": "not priced"}
+    with pytest.raises(RuntimeError, match="no prices"):
+        P._driver_block(spec, excess, "no prices")                                    # a failed fetch is the gap's reason

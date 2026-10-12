@@ -689,6 +689,50 @@ etf = "ITB"
 bellwethers = ["DHI", "LEN", "PHM", "NVR", "HD", "LOW", "TOL"]
 macro = ["Housing starts", "New home sales", "Construction spending", "FOMC"]
 
+# Cruise lines: no ETF isolates them, so the proxy is an equal-weight basket of
+# the three in the S&P 500. Viking is left out (listed 2024, in no tracked
+# index). Fuel, rates and credit (the lines are heavily indebted) and the
+# consumer are what bear on them; bookings and yield guidance, the real driver,
+# come with the reports.
+# drivers: what the names' daily excess return is regressed on (the last 252
+# sessions). kind: pct (a symbol's daily % change), diff (its daily change in
+# points), pair_pct (the first symbol's % change less the second's), fred_bp (a
+# FRED series' daily change in basis points).
+[[themes.groups]]
+key = "cruise"
+label = "CRUISE"
+basket = ["CCL", "RCL", "NCLH"]
+bellwethers = ["CCL", "RCL", "NCLH"]
+macro = ["petroleum", "Consumer Sentiment|Michigan", "Retail sales", "CPI", "jobless claims", "FOMC"]
+drivers_note = "Correlation and beta of each name's daily return beyond the S&P 500 with the day's move in each driver. Over 2010-2026 the cruise basket fell on the days the VIX and the dollar rose, and, in the last three years, with oil and the 10-year yield; the same beta measured in consecutive years correlated only 0.3 to 0.4, so read a beta as a tendency of the last year. History, not a forecast."
+drivers = [
+  { key = "vix", label = "VIX, per point", kind = "diff", symbol = "^VIX" },
+  { key = "oil", label = "WTI, per 1%", kind = "pct", symbol = "CL=F" },
+  { key = "ten_year", label = "10-year yield, per 1bp", kind = "fred_bp", series = "DGS10" },
+  { key = "credit", label = "HYG less LQD, per 1%", kind = "pair_pct", symbols = ["HYG", "LQD"] },
+  { key = "usd", label = "dollar (UUP), per 1%", kind = "pct", symbol = "UUP" },
+]
+
+# Defense primes, as an equal-weight basket: the iShares US Aerospace & Defense
+# fund (ITA) also holds Boeing, GE Aerospace and suppliers, and its daily
+# excess return moved with none of the market drivers (R-squared 0.006 against
+# 0.058 for the primes). Backlog growth (XBRL) and DoD contract obligations
+# (USAspending) were tested against later excess returns and did not lead them.
+[[themes.groups]]
+key = "defense"
+label = "DEFENSE"
+basket = ["LMT", "RTX", "NOC", "GD", "LHX", "HII"]
+bellwethers = ["LMT", "RTX", "NOC", "GD", "LHX", "HII"]
+macro = ["FOMC", "Durable Goods", "Factory Orders"]
+drivers_note = "Correlation and beta of each name's daily return beyond the S&P 500 with the day's move in each driver. The primes have been defensive: since 2017 they outperformed on days the VIX rose (a rising beta to it, strongest in the last three years) and, in the last three years, on days credit sold off and oil and gold rose. The VIX beta persisted from one year to the next (correlation 0.6); the others did less. History, not a forecast."
+drivers = [
+  { key = "vix", label = "VIX, per point", kind = "diff", symbol = "^VIX" },
+  { key = "oil", label = "WTI, per 1%", kind = "pct", symbol = "CL=F" },
+  { key = "gold", label = "gold (GLD), per 1%", kind = "pct", symbol = "GLD" },
+  { key = "ten_year", label = "10-year yield, per 1bp", kind = "fred_bp", series = "DGS10" },
+  { key = "credit", label = "HYG less LQD, per 1%", kind = "pair_pct", symbols = ["HYG", "LQD"] },
+]
+
 [valuation]
 # MARKET -> SECTORS: a sector is divided into the groups below, by GICS
 # sub-industry (the S&P 500 labels on Wikipedia), so a Financials multiple is

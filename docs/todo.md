@@ -575,3 +575,41 @@ Result of the data-signal test (2026-10-12, scratch; nothing built):
   a test per theme of "data surprise on release day against the proxy's move"
   (the board's RELEASE DAYS card already does it) rather than of a monthly
   direction.
+
+## 14. CRUISE and DEFENSE themes (2026-10-12)
+
+Added to THEMES: CRUISE (equal-weight CCL, RCL, NCLH; Viking is in no tracked
+index) and DEFENSE (equal-weight LMT, RTX, NOC, GD, LHX, HII). Each has the
+status board, run-in, report calendar and macro dates, and a sensitivity table
+from the group's `drivers` in the config (no theme-specific code).
+
+What the tests that shaped it showed (scratch, 2010-2026 unless noted):
+
+- **ITA is a poor proxy for the primes.** Daily excess return on the day's
+  moves in VIX, oil, gold, 10-year yield, credit and dollar: ITA R-squared 0.006,
+  the six primes' average 0.058 (VIX +0.12 per point, t 7.4; since 2023 R-squared
+  0.17, credit -0.70 per 1%). ITA also holds Boeing, GE Aerospace and
+  suppliers. The proxy is the basket.
+- **The primes are defensive.** The beta to the VIX is positive in every
+  period (+0.01 in 2010-16, +0.11 in 2017-22, +0.24 in 2023-26) and persisted
+  from one year to the next (correlation 0.63 between a year's beta and the
+  next year's); oil 0.55; gold, 10-year, credit, dollar 0.0-0.2.
+- **Cruise** (basket, R-squared 0.07): VIX -0.29 per point (t -4.7), dollar
+  -0.60 per 1% (t -4.0), oil -0.07 (t -2.0) but -0.13 / +0.05 / -0.20 by period;
+  credit +0.34 / -0.25 / +1.8: the sign of the credit beta is not stable.
+  Year-to-year persistence of the betas is 0.3 to 0.4.
+- **Defense data do not lead price.** XBRL backlog growth (LMT, RTX, NOC, GD,
+  LHX; 107 firm-quarters from 2018, taken at the filing date): next-3-month
+  excess return rho -0.22 (permutation p 0.025, the wrong way), within a quarter
+  across firms -0.02. USAspending DoD contract obligations (trailing 12 months
+  against the 12 before, usable 100 days after the month, DoD data publish with a
+  delay): by firm rho -0.24 to +0.17 with no consistent sign (RTX +0.17,
+  p 0.02; GD -0.24, p 0.05; the rest nothing), and total DoD obligations
+  against ITA +/-0.05 to -0.07 (p 0.4, 0.5). Not shown as signals.
+- **Not usable.** TSA passenger volumes, the Defense/War Department daily
+  contract announcements and the CDC cruise outbreak page answer 403 to a
+  scripted client; they would need a browser-looking client, which the project
+  does not use.
+- **Open.** A defense data block (backlog in years of sales, obligations by
+  prime) as context, labelled as not leading; a cruise block on fuel and the
+  consumer. Neither earns a signal.

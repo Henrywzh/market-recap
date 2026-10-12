@@ -794,6 +794,54 @@ def _consumer(spec: dict, excess: pd.DataFrame, as_of: date) -> dict:
     return out
 
 
+# --- Groups with configured drivers ---------------------------------------------------
+# A group that lists `drivers` in the config gets a sensitivity table: each
+# name's daily excess return against the day's move in each driver, over the
+# last 252 sessions. No theme-specific code: the kinds are in the config.
+
+def _driver_series(driver: dict, closes: pd.DataFrame) -> pd.Series:
+    """One driver's daily change: ``pct`` (a symbol's % change), ``diff`` (its
+    change in points), ``pair_pct`` (the first symbol's % change less the
+    second's), ``fred_bp`` (a FRED series' change in basis points). A symbol with
+    no prices gives an empty series, which the table shows as a dash."""
+    kind = driver["kind"]
+    if kind == "fred_bp":
+        return _fred_daily_change(driver["series"])
+    if kind == "pct":
+        symbol = driver["symbol"]
+        return closes[symbol].pct_change(fill_method=None) * 100 if symbol in closes.columns else pd.Series(dtype=float)
+    if kind == "diff":
+        symbol = driver["symbol"]
+        return closes[symbol].diff() if symbol in closes.columns else pd.Series(dtype=float)
+    if kind == "pair_pct":
+        a, b = driver["symbols"]
+        if a not in closes.columns or b not in closes.columns:
+            return pd.Series(dtype=float)
+        return (closes[a].pct_change(fill_method=None) - closes[b].pct_change(fill_method=None)) * 100
+    raise ValueError(f"unknown driver kind {kind!r}")
+
+
+def _driver_block(spec: dict, excess: pd.DataFrame, closes: pd.DataFrame | str) -> dict:
+    if not isinstance(closes, pd.DataFrame):
+        raise RuntimeError(closes)                  # the shared price fetch failed; its reason is the gap
+    drivers = {d["key"]: _driver_series(d, closes) for d in spec["drivers"]}
+    names = list(spec.get("bellwethers") or [])
+    frame = excess.copy()
+    proxy = spec.get("etf")
+    if not proxy and spec.get("basket"):
+        proxy = f"{spec['label']} BASKET"
+        frame[proxy] = T.basket_excess(excess, list(spec["basket"]))
+    rows = _sensitivities(frame, ([proxy] if proxy else []) + names, drivers)
+    return {"sensitivity": {"drivers": {d["key"]: d["label"] for d in spec["drivers"]}, "rows": rows,
+                            "note": spec.get("drivers_note")}}
+
+
+def _driver_closes(specs: list[dict]) -> pd.DataFrame:
+    symbols = sorted({sym for spec in specs for d in spec["drivers"]
+                      for sym in ([d["symbol"]] if "symbol" in d else list(d.get("symbols") or []))})
+    return yahoo.fetch_closes(symbols, period="3y") if symbols else pd.DataFrame()
+
+
 # --- Release-day studies ---------------------------------------------------------
 # How each theme's ETF moved beyond the S&P 500 on the session of each release
 # of the series that bear on it. Release days and first prints from ALFRED
@@ -1085,6 +1133,12 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     for g in groups:
         g["calendar"].sort(key=lambda e: (e["date"], {"data": 0, "macro": 1, "earnings": 2}[e["kind"]]))
     drivers = _section(lambda: _drivers(cloud, semis, energy, housing, banks, consumer))
+    driven_specs = [g for g in settings["groups"] if g.get("drivers")]
+    try:
+        driver_closes: pd.DataFrame | str = _driver_closes(driven_specs)
+    except Exception as exc:  # noqa: BLE001 -- each group's table is then a named gap
+        driver_closes = describe_error(exc)
+    driven = {g["key"]: _section(lambda g=g: _driver_block(g, excess, driver_closes)) for g in driven_specs}
     # The first prints live on in the drivers; the charts read the current vintage.
     for section in (housing, banks, consumer):
         for series in (section.get("series") or {}).values():
@@ -1094,7 +1148,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
             "membership": _membership(ctx, settings, excess),
             "member_corr": float(settings.get("member_corr", 0.55)),
             "cloud": cloud, "semis": semis, "energy": energy, "housing": housing, "banks": banks, "consumer": consumer, "studies": studies,
-            "drivers": drivers}
+            "drivers": drivers, **driven}
 
 
 def _heatmap(catalysts: dict, as_of: date, days: int) -> dict:

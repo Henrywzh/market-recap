@@ -874,6 +874,10 @@ function industry(key, data) {
     return [...consumerCards(data.consumer), sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', data.consumer.sensitivity,
       'Correlation and beta of each name\'s daily return beyond the S&P 500 with the daily change in the 10-year yield (per 1bp), RBOB gasoline futures (per 1%) and the high-yield spread (per 1bp). History, not a forecast.')].filter(Boolean);
   }
+  // A group whose drivers are in the config: the table the build made, with its own note.
+  const driven = data[key]?.sensitivity;
+  if (driven) return [sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', driven, driven.note || 'History, not a forecast.')];
+  if (data[key]?.unavailable) return [card('WHAT MOVES THE NAMES', null, [gap(`Unavailable: ${data[key].unavailable}`)])];
   return [];
 }
 
