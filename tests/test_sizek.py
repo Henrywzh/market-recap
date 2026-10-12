@@ -84,3 +84,13 @@ def test_panel_builds_a_view_per_pair_and_names_a_pair_with_a_missing_series(mon
     assert p["inputs"]["no_prices"] == ["GONE"]
     assert ctx.log.records[0].status == "partial"
     assert len(p["notes"]) >= 2
+
+
+def test_a_pair_names_its_arms_and_one_without_names_defaults_to_large_and_small(monkeypatch):
+    ctx, _ = _ctx(monkeypatch, ["BIG", "SMALL"])
+    ctx.config["sizek"]["pairs"] = [
+        {"key": "v", "label": "V", "big": "BIG", "small": "SMALL", "big_arm": "VALUE", "small_arm": "GROWTH"},
+        {"key": "s", "label": "S", "big": "BIG", "small": "SMALL"}]
+    styled, sized = P.build(ctx)["views"]
+    assert (styled["big_arm"], styled["small_arm"]) == ("VALUE", "GROWTH")
+    assert (sized["big_arm"], sized["small_arm"]) == ("LARGE", "SMALL")

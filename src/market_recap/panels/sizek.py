@@ -1,10 +1,13 @@
-"""RELATIVE VALUE -> SIZE K: the large, cap-weighted arm against the equal-weight or smaller arm.
+"""RELATIVE VALUE -> SIZE K: one arm of a pair against the other.
 
 For each configured pair (the S&P 500 and Nasdaq-100 cap-weighted against
 equal-weight, large against small and mid caps, the FTSE 100 against the
-FTSE 250): the two arms' price series and their ratio with where today's ratio
-sits among its own weeks, returns by window, the rolling one-year return gap
-and how often and how long the large arm led, and each calendar year's gap.
+FTSE 250, and style pairs such as value against growth, staples against the
+market, low volatility against the market): the two arms' price series and
+their ratio with where today's ratio sits among its own weeks, returns by
+window, the rolling one-year return gap and how often and how long the first
+arm led, and each calendar year's gap. Each pair names its arms (``big_arm`` /
+``small_arm``, default LARGE / SMALL).
 Prices only: a fund's own P/E is not a measured figure here (no look-through
 to its holdings is kept), and the page says so. See compute.sizek.
 """
@@ -22,19 +25,21 @@ from ..util import SourceRecord, clean_float, to_iso_date
 from .kshape import _series_payload
 
 NOTES = (
-    "Prices only. Whether the large arm is dearer than the rest on earnings is not measured here: a fund's reported P/E is a snapshot "
+    "Prices only. Whether either arm is dearer than the other on earnings is not measured here: a fund's reported P/E is a snapshot "
     "of its holdings today, not a history, and none is kept.",
     "A ratio's percentile is where today's value sits among its own past weeks. A ratio that has risen for years says only that "
-    "the large arm has led, not that it must turn.",
-    "The equal-weight funds rebalance on a schedule and hold more small and mid-sized names than the cap-weighted ones: part of the gap is size, "
-    "part is how often each arm sells its winners.",
+    "the first arm has led, not that it must turn.",
+    "Some pairs differ in how they are built: the equal-weight funds rebalance on a schedule and hold more small and mid-sized names than "
+    "the cap-weighted ones, so part of such a gap is construction, not only the names.",
 )
 
 
 def _view(pair: dict, closes: pd.DataFrame, cfg: dict, periods: dict[str, int], gap_sessions: int) -> dict:
     big, small = pair["big"], pair["small"]
     out: dict = {"key": pair["key"], "label": pair["label"], "note": pair.get("note"), "big": big, "small": small,
-                 "big_name": pair.get("big_name", big), "small_name": pair.get("small_name", small), "price_index": bool(pair.get("price_index")), "price": None}
+                 "big_name": pair.get("big_name", big), "small_name": pair.get("small_name", small),
+                 "big_arm": pair.get("big_arm", "LARGE"), "small_arm": pair.get("small_arm", "SMALL"),
+                 "price_index": bool(pair.get("price_index")), "price": None}
     missing = [s for s in (big, small) if s not in closes.columns or closes[s].dropna().empty]
     out["no_prices"] = missing
     if missing:
@@ -84,7 +89,7 @@ def build(ctx) -> dict:
     wanted = sorted({s for p in pairs for s in (p["big"], p["small"])})
     closes = yahoo.fetch_closes(wanted, period=f"{int(cfg['history_years'])}y")
     missing = sorted(set(wanted) - set(closes.columns))
-    ctx.log.add(SourceRecord("sizek_prices", "Closes for the size-K pairs: cap-weighted and equal-weight funds, size indexes", YAHOO_URL,
+    ctx.log.add(SourceRecord("sizek_prices", "Closes for the SIZE K pairs: cap-weighted and equal-weight funds, size, style and index pairs", YAHOO_URL,
                              to_iso_date(closes.index[-1]) if not closes.empty else None, rows=int(closes.shape[1]),
                              status="ok" if not missing else "partial", error=f"no data: {', '.join(missing)}" if missing else None))
     if closes.empty:
