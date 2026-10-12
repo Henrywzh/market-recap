@@ -221,7 +221,41 @@ def _group(ctx, spec: dict, settings: dict, catalysts: dict, evidence: dict, exc
         "relative": relative,
         "bellwethers": bellwethers,
         "calendar": calendar,
+        "pairs": [_pair(p, ctx.closes) for p in spec.get("pairs") or []],
     }
+
+
+PAIR_WINDOWS = ["1M", "3M", "6M", "1Y", "3Y", "5Y"]
+
+
+def _pair(spec: dict, closes: pd.DataFrame) -> dict:
+    """Two names of the theme side by side: each one's return by window and
+    the gap, their daily correlation over the last year, and the ratio of their
+    adjusted closes (a over b; the page rebases it) with where today's ratio
+    sits among its own weeks of the last ten years."""
+    a, b = spec["a"], spec["b"]
+    out = {"a": a, "b": b, "note": spec.get("note"), "available": False}
+    if a not in closes.columns or b not in closes.columns:
+        return out
+    both = closes[[a, b]].dropna()
+    if len(both) < 2:
+        return out
+    ratio = both[a] / both[b]
+    weekly = ratio[ratio.index > ratio.index[-1] - pd.DateOffset(years=10)]
+    weekly = weekly.groupby(weekly.index.to_period("W-FRI")).tail(1)
+    rows = []
+    for label in PAIR_WINDOWS:
+        n = PERIOD_TRADING_DAYS[label]
+        if len(both) <= n:
+            continue
+        ra, rb = (both.iloc[-1] / both.iloc[-1 - n] - 1) * 100
+        rows.append({"period": label, "a": clean_float(ra, 1), "b": clean_float(rb, 1), "gap": clean_float(ra - rb, 1)})
+    daily = both.pct_change(fill_method=None).tail(PERIOD_TRADING_DAYS["1Y"]).dropna()
+    return {**out, "available": True,
+            "ratio": history_payload(ratio, years=10, digits=6),
+            "ratio_percentile": clean_float(float((weekly <= ratio.iloc[-1]).mean() * 100), 0) if len(weekly) >= 52 else None,
+            "corr_1y": clean_float(float(daily[a].corr(daily[b])), 2) if len(daily) > 20 else None,
+            "windows": rows, "through": both.index[-1].strftime("%Y-%m-%d")}
 
 
 # --- CLOUD ----------------------------------------------------------------------

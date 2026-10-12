@@ -183,6 +183,44 @@ function relativeCard(g) {
   return card('AGAINST THE S&P 500 AND NASDAQ 100', el('span', { class: 'tag-row' }, [el('span', { class: 'dim', text: '= 100 at the start · rising = outperforming' }), pick]), node);
 }
 
+// Two names of the theme side by side (config `pairs`): the ratio of their
+// closes rebased to 100, each one's return by window and the gap.
+function pairCard(pair) {
+  const title = `${pair.a} vs ${pair.b}`;
+  if (!pair.available) return card(title, null, gap(`No prices for ${pair.a} or ${pair.b} in this build.`));
+  const node = el('div', { class: 'chart short' });
+  const ranges = availableRanges(pair.ratio.dates);
+  let active = ranges.includes('3Y') ? '3Y' : ranges[ranges.length - 1];
+  const draw = () => {
+    const cut = sliceRange(pair.ratio.dates, { ratio: pair.ratio.values }, active);
+    const first = cut.ratio.find((v) => v !== null && v !== undefined);
+    render(node, (option, p) => ({
+      ...option,
+      grid: { left: 44, right: 16, top: 12, bottom: 26 },
+      tooltip: { ...option.tooltip, trigger: 'axis', valueFormatter: (v) => (v === null || v === undefined ? DASH : num(v, 1)) },
+      xAxis: { ...option.xAxis, data: cut.dates },
+      yAxis: { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 9 } },
+      series: [{ name: `${pair.a} / ${pair.b}`, type: 'line', showSymbol: false, lineStyle: { color: p.accent, width: 1.5 }, itemStyle: { color: p.accent },
+        data: cut.ratio.map((v) => (v === null || v === undefined || !first ? null : Math.round((1000 * v) / first) / 10)),
+        markLine: { silent: true, symbol: 'none', data: [{ yAxis: 100 }], lineStyle: { color: p.faint }, label: { show: false } } }],
+    }));
+  };
+  requestAnimationFrame(draw);
+  const pick = Object.assign(periodSwitch(ranges, active, (r) => { active = r; draw(); }), { className: 'period-switch range-switch' });
+  const rows = pair.windows.map((w) => el('tr', {}, [
+    el('td', { text: w.period }),
+    el('td', { class: dirClass(w.a), text: pct(w.a, 1) }),
+    el('td', { class: dirClass(w.b), text: pct(w.b, 1) }),
+    el('td', { class: dirClass(w.gap), text: `${w.gap > 0 ? '+' : ''}${num(w.gap, 1)} pp` }),
+  ]));
+  const facts = [pair.ratio_percentile !== null && pair.ratio_percentile !== undefined ? `ratio at the ${pair.ratio_percentile}th percentile of its last ten years (weekly)` : null,
+    pair.corr_1y !== null && pair.corr_1y !== undefined ? `daily correlation ${num(pair.corr_1y, 2)} over the last year` : null].filter(Boolean).join(' · ');
+  return card(`${title} · ${pair.a} / ${pair.b}, = 100 at the start`, pick, [
+    el('div', { class: 'grid two' }, [node, table(['WINDOW', pair.a, pair.b, `${pair.a} − ${pair.b}`], rows)]),
+    el('div', { class: 'field-note', text: `${[facts, pair.note, `Adjusted closes (dividends included) through ${pair.through}`].filter(Boolean).map((t) => t.replace(/\.$/, '')).join('. ')}.` }),
+  ]);
+}
+
 // --- CLOUD -------------------------------------------------------------------------
 
 function capexCard(capex) {
@@ -911,6 +949,7 @@ export default async function renderThemes(root, data, _manifest, ctx = {}) {
     host.append(el('h2', { class: 'section-title' }, [g.label, el('span', { class: 'muted', text: ` proxy ${g.proxy}` })]));
     host.append(el('div', { class: 'grid two' }, [calendarCard(g, data.as_of, data.calendar_days), relativeCard(g)]));
     host.append(bellwetherCard(g));
+    (g.pairs || []).forEach((pair) => host.append(pairCard(pair)));
     themeCards(g.key, data).forEach((node) => host.append(node));
   };
   root.append(boardHost);

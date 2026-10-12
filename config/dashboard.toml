@@ -606,13 +606,16 @@ funds = [
 ]
 
 [sizek]
-# RELATIVE VALUE -> SIZE K. The large, cap-weighted arm against the equal-weight
-# or smaller arm of much the same market: how far the biggest companies have run
-# ahead of the rest, as a ratio (big over small) with where today's ratio sits in
-# its own history. ETF pairs use adjusted closes (dividends included); the UK pair
-# is two price indexes (no dividends), in pounds. Windows are named in
+# RELATIVE VALUE -> SIZE K. One arm of a pair against the other, as a ratio (big
+# over small) with where today's ratio sits in its own history. Size pairs: the
+# large, cap-weighted arm against the equal-weight or smaller arm of much the same
+# market. Style pairs: value against growth, a sector or a low-volatility fund
+# against the market. ETF pairs use adjusted closes (dividends included); the UK
+# pair is two price indexes (no dividends), in pounds. Windows are named in
 # config.PERIOD_TRADING_DAYS; ``gap_period`` is the rolling window of the
 # big-less-small return. ``big_name`` / ``small_name`` default to the symbol.
+# ``big_arm`` / ``small_arm`` are the labels the page prints for the two arms
+# (default LARGE / SMALL; a style pair names its own, e.g. VALUE / GROWTH).
 history_years = 25
 price_periods = ["1M", "3M", "6M", "1Y", "3Y", "5Y", "10Y"]
 gap_period = "1Y"
@@ -654,6 +657,35 @@ big_name = "FTSE 100"
 small_name = "FTSE 250"
 price_index = true
 note = "The 100 largest UK listings (many of them global exporters) against the next 250, which sell mostly in the UK. Price indexes in pounds, dividends excluded."
+
+[[sizek.pairs]]
+key = "value_growth"
+label = "VALUE vs GROWTH"
+big = "IWD"
+small = "IWF"
+big_arm = "VALUE"
+small_arm = "GROWTH"
+big_name = "IWD"
+small_name = "IWF"
+note = "The Russell 1000's value half (IWD) against its growth half (IWF): the same large and mid-sized companies, split by price against book value, earnings and growth. Value holds more banks, energy and health care; growth more technology."
+
+[[sizek.pairs]]
+key = "staples_market"
+label = "STAPLES vs MARKET"
+big = "XLP"
+small = "SPY"
+big_arm = "STAPLES"
+small_arm = "MARKET"
+note = "Consumer staples (XLP) against the S&P 500 (SPY): how far the defensive sector has lagged or led the whole market."
+
+[[sizek.pairs]]
+key = "lowvol_market"
+label = "LOW VOLATILITY vs MARKET"
+big = "USMV"
+small = "SPY"
+big_arm = "LOW VOL"
+small_arm = "MARKET"
+note = "The minimum-volatility S&P-style fund (USMV, from 2011) against the S&P 500: the market's least volatile names, weighted to keep the portfolio's swings small, against all of it."
 
 [europe]
 # EUROPE. Index levels, the STOXX 600 supersector funds, the FTSE 100 and EURO
@@ -997,6 +1029,29 @@ drivers = [
   { key = "gold", label = "gold (GLD), per 1%", kind = "pct", symbol = "GLD" },
   { key = "ten_year", label = "10-year yield, per 1bp", kind = "fred_bp", series = "DGS10" },
   { key = "credit", label = "HYG less LQD, per 1%", kind = "pair_pct", symbols = ["HYG", "LQD"] },
+]
+
+# Consumer staples: the Select Sector SPDR (XLP) is the proxy. It is in the
+# sector list (universe.sectors), so its prices come with the sector ETFs and
+# need no wiring. Drivers: the 10-year yield (staples as bond substitutes), the
+# dollar (much of their revenue is abroad), VIX (flight to safety) and sugar
+# futures (an input cost).
+[[themes.groups]]
+key = "staples"
+label = "STAPLES"
+etf = "XLP"
+bellwethers = ["WMT", "COST", "PG", "KO", "PM", "PEP"]
+# Two names side by side: return gap by window, the ratio's history, correlation.
+pairs = [
+  { a = "KO", b = "PEP", note = "Coca-Cola sells drinks almost only, mostly as concentrate to bottlers; PepsiCo is about half food (Frito-Lay, Quaker) and bottles much of its own drink volume. A rising ratio means KO is ahead." },
+]
+macro = ["CPI", "Retail sales", "PCE", "FOMC"]
+drivers_note = "Correlation and beta of each name's daily return beyond the S&P 500 with the day's move in each driver. Over the last year the names rose beyond the market on days the VIX rose (beta +0.41 to +0.50 per point, correlation 0.34 to 0.53) and on days the dollar rose (correlation 0.06 to 0.23, the reverse of what foreign earnings translation would suggest). The 10-year yield and sugar showed no reliable link, with correlations between -0.10 and +0.18. History, not a forecast."
+drivers = [
+  { key = "ten_year", label = "10-year yield, per 1bp", kind = "fred_bp", series = "DGS10" },
+  { key = "usd", label = "dollar (UUP), per 1%", kind = "pct", symbol = "UUP" },
+  { key = "vix", label = "VIX, per point", kind = "diff", symbol = "^VIX" },
+  { key = "sugar", label = "sugar futures (SB=F), per 1%", kind = "pct", symbol = "SB=F" },
 ]
 
 [valuation]

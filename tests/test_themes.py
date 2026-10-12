@@ -496,3 +496,17 @@ def test_theme_sources_record_how_many_observations_they_carry():
     assert rows == {"sec_capex": 5, "sec_releases": 4, "mops_revenue": 5, "altdata_openrouter": 2, "altdata_ramp": 2,
                     "korea_customs": 5, "motie_trade": 2, "adata_market_watch": 1, "korea_customs_memory": 8,
                     "fred_chip_prices": 9, "pcpartpicker": 33}
+
+
+def test_a_pair_carries_both_returns_the_gap_and_the_ratio():
+    from market_recap.panels import themes as panel
+    idx = pd.bdate_range("2020-01-01", periods=800)
+    closes = pd.DataFrame({"KO": np.linspace(50, 100, len(idx)), "PEP": np.linspace(100, 100, len(idx))}, index=idx)
+    out = panel._pair({"a": "KO", "b": "PEP", "note": "n"}, closes)
+    assert out["available"] and out["note"] == "n"
+    year = next(w for w in out["windows"] if w["period"] == "1Y")
+    assert year["b"] == 0.0 and year["gap"] == year["a"] > 0
+    assert [w["period"] for w in out["windows"]] == ["1M", "3M", "6M", "1Y", "3Y"]   # 800 sessions: no 5Y row
+    assert out["ratio_percentile"] == 100.0                 # a steadily rising ratio is at its high
+    assert out["ratio"]["values"][-1] == 1.0
+    assert not panel._pair({"a": "KO", "b": "XYZ"}, closes)["available"]
