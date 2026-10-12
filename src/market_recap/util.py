@@ -30,6 +30,43 @@ def describe_error(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"[:ERROR_DETAIL_CHARS]
 
 
+# Holdings files print issuer names in capitals. These words keep the spelling
+# their owners use; everything else is capitalised first letter only.
+NAME_WORDS = {
+    "JPMORGAN": "JPMorgan", "MCDONALD'S": "McDonald's", "IBM": "IBM", "AMD": "AMD",
+    "NVIDIA": "NVIDIA", "CVS": "CVS", "PNC": "PNC", "US": "US", "USA": "USA",
+    "UNITEDHEALTH": "UnitedHealth", "PAYPAL": "PayPal", "BLACKROCK": "BlackRock",
+    "EBAY": "eBay", "NETAPP": "NetApp", "HCA": "HCA", "AES": "AES", "CME": "CME",
+    "ICE": "ICE", "MSCI": "MSCI", "KLA": "KLA", "NRG": "NRG", "PPG": "PPG",
+    "PPL": "PPL", "DTE": "DTE", "CMS": "CMS", "CSX": "CSX", "EOG": "EOG",
+    "APA": "APA", "HP": "HP", "LKQ": "LKQ", "NXP": "NXP", "ON": "ON", "TJX": "TJX",
+    "WEC": "WEC", "AIG": "AIG", "II": "II", "III": "III", "FMC": "FMC",
+    "IDEXX": "IDEXX", "ADR": "ADR", "REIT": "REIT", "ETF": "ETF", "SPDR": "SPDR",
+    "LLC": "LLC", "PLC": "PLC", "NV": "NV", "SA": "SA", "AG": "AG", "SE": "SE",
+    "ASML": "ASML", "SAP": "SAP", "TSMC": "TSMC", "ABBVIE": "AbbVie",
+    "FEDEX": "FedEx", "DEXCOM": "DexCom",
+}
+
+
+def company_name(raw: Any) -> str:
+    """Readable issuer name. Mixed-case input is trusted as already correct."""
+    if not isinstance(raw, str):
+        return ""
+    if any(ch.islower() for ch in raw):
+        return raw.strip()
+    words = []
+    for word in raw.split():
+        if word == "+":
+            words.append("&")
+        elif "&" in word or any(ch.isdigit() for ch in word):
+            words.append(word)   # AT&T, S&P, 3M
+        elif word.upper() in NAME_WORDS:
+            words.append(NAME_WORDS[word.upper()])
+        else:
+            words.append(word[:1].upper() + word[1:].lower())
+    return " ".join(words)
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 

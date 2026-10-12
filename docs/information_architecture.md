@@ -205,30 +205,30 @@ Top to bottom:
    sector.
 8. **DCF.** Opens the model pre-filled.
 
-**As built (2026-10-03): the story first.** Under the header the page reads
-as the name's situation and what is ahead, then the detail:
+**As built (2026-10-12): summary, then recent, next report, long term.**
+Each figure appears once; detail behind a figure already shown is folded.
 
-- **SITUATION · WHAT THE MARKET HAS PRICED.** Next fiscal year's consensus
-  EPS against this one's, its 90-day revision, the forward P/E against the
-  trailing one and the own-history percentile, how the stock took its beats
-  (beat and fell), and the price against a year ago and its 52-week high --
-  with short tags where a pattern is plain (estimates rising fast; forward
-  multiple under half the trailing; beats priced in).
-- **The next report** (event card) or the one just traded (outcome card).
-- **TIMELINE.** The price with its own dated events (reports, rating changes,
-  insider buys, material 8-Ks, large moves) and, ahead, its report, the
-  linked peers whose reports have moved it, the macro dates, its themes'
-  data releases, and company events -- announced in its recent headlines
-  (investor days, product events, FDA dates, meetings, rulings; each with
-  its source) or hand-kept in `[events.company_events]` with the page that
-  states the date.
-- **WHAT MOVED IT.** Every report reaction and every large move (2.5 sigma of
-  its own, at least 2%) over two years, newest first, each with what
-  happened that session: its filings, ratings, insider buys, peers'
-  reports, its themes' data, and up to two company headlines (Finnhub, last
-  year). A match in time, not proof of cause; the rest is marked unexplained.
-- Then the report history, estimate revisions, the industry since the last
-  report, technicals, filings, P/E history and the statements.
+- **Summary strip.** Close (1Y change, from its high, market cap), 1M against
+  sector peers, valuation against its own ten years (P/E percentile with
+  forward and trailing; for a bank P/TBV percentile with ROTCE and forward
+  P/E), next year's EPS revision over 90 days with the street's growth, the
+  next report with its implied move, MONITOR's state. Tags only where a
+  pattern is plain, worded as counts, not causes (estimates rising fast;
+  forward multiple under half the trailing; "beat 8 of last 8, fell after
+  4 of them" -- a beat followed by a fall does not show the news was priced).
+- **RECENT.** The outcome card of a report the last session traded on, the
+  research note, evidence for and against, recent 8-Ks, the industry data
+  since the last report.
+- **NEXT REPORT.** The event card (consensus, what is priced, past reactions,
+  read-through peers), the TIMELINE of its own events and what is ahead, the
+  last eight reports and the estimate revisions by period (folded), and the
+  options' implied move with the IV term structure.
+- **LONG TERM.** Technicals, P/E against its own ten years, valuation and
+  quality against the sector median -- a bank on P/B, P/TBV, ROTCE, ROE and
+  yield against its sub-industry, never on EBITDA or free cash flow it does
+  not have -- WHAT MOVED IT (every report reaction and large move over two
+  years with what happened that session; a match in time, not proof of
+  cause), its AI-chain links and the filed statements.
 
 Read-through peers need a reason -- the same GICS industry, a shared theme,
 or a daily correlation of 0.45 -- and a positive report-day beta with a

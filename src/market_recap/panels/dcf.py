@@ -13,7 +13,7 @@ import pandas as pd
 from ..config import DCF_ARTIFACT_DIR
 from ..sources import sec
 from .financials import cik_for
-from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, describe_error, prune_stale, write_json
+from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, company_name, describe_error, prune_stale, write_json
 
 
 def _beta(stock: pd.Series, market: pd.Series, *, weeks: int, min_weeks: int) -> float | None:
@@ -93,7 +93,7 @@ def build(ctx, *, tickers: list[str] | None = None, use_cache: bool = True) -> d
 
         meta = ctx.holdings.loc[ctx.holdings["yahoo_symbol"] == symbol]
         if not meta.empty:
-            payload["company_name"] = str(meta.iloc[0]["name"]).title()
+            payload["company_name"] = company_name(meta.iloc[0]["name"])
             payload["sector"] = meta.iloc[0]["sector"]
         if symbol in ctx.closes.columns:
             series = ctx.closes[symbol].dropna()

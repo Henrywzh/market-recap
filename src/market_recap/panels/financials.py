@@ -11,7 +11,7 @@ from __future__ import annotations
 from ..compute import fundamentals as F
 from ..config import FINANCIALS_ARTIFACT_DIR
 from ..sources import sec
-from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, prune_stale, write_json
+from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, company_name, prune_stale, write_json
 
 STATEMENT_LABELS = {"income": "INCOME STATEMENT", "balance": "BALANCE SHEET", "cash_flow": "CASH FLOW"}
 
@@ -74,7 +74,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     meta = {}
     for frame in ctx.members.values():
         for row in frame.drop_duplicates("yahoo_symbol").itertuples():
-            meta.setdefault(row.yahoo_symbol, {"name": str(row.name).title(), "sector": row.sector})
+            meta.setdefault(row.yahoo_symbol, {"name": company_name(row.name), "sector": row.sector})
 
     if use_cache:
         sec.check_filings(cik_for(symbol, cik_map) for symbol in symbols)

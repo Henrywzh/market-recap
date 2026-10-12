@@ -6,12 +6,12 @@
 // section whose artifact does not cover the name says so and the rest of the
 // page still renders.
 
-import { el, card, table, num, pct, dirClass, sectionTitle, gap, DASH } from '../fmt.js';
+import { el, card, table, num, pct, dirClass, sectionTitle, gap, tag, DASH } from '../fmt.js';
 import { render } from '../charts.js';
 import { renderPeHistory } from './valuation.js';
 import { renderStatements } from './financials.js';
 import { renderSingleTicker } from './technicals.js';
-import { eventCard, outcomeCard, timelineCard, loadEvents, historyCard, revisionsCard, sinceCard, filingsCard, storyCard, situationCard } from '../event-card.js';
+import { eventCard, outcomeCard, timelineCard, loadEvents, historyCard, revisionsCard, sinceCard, filingsCard, storyCard, situation } from '../event-card.js';
 import { resolveTicker } from '../routes.js';
 import { chainCard } from '../chain-card.js';
 
@@ -20,6 +20,12 @@ const BILLION = 1e9;
 // SCREEN; these are the ones a first look needs.
 const KEY_METRICS = ['pe', 'ev_ebitda', 'fcf_yield', 'shareholder_yield', 'roic', 'operating_margin',
   'revenue_growth', 'net_debt_ebitda', 'piotroski'];
+// A bank has no EBITDA, free cash flow or operating margin: it is valued on
+// tangible book beside what it earns on it.
+const BANK_METRICS = ['pe', 'pe_forward', 'pb', 'ptbv', 'rotce', 'roe', 'dividend_yield', 'shareholder_yield', 'revenue_growth'];
+
+const present = (v) => v !== null && v !== undefined && Number.isFinite(v);
+export const isBank = (row) => row?.sector === 'Financials' && present(row?.ptbv_percentile);
 
 function stat(label, value, note, cls = '') {
   return el('div', { class: 'stat' }, [
@@ -86,31 +92,55 @@ function searchRow(symbol, universe, ctx) {
   ]);
 }
 
-function headerStats(symbol, row, mon) {
+// The summary: the price, what it pays, where estimates are going and the
+// next report -- each once, with the detail further down the page.
+function headerStats(row, mon, sit, implied) {
   const stats = [];
-  if (row) {
-    stats.push(stat('CLOSE', row.price === null || row.price === undefined ? DASH : `$${num(row.price)}`,
-      row.market_cap ? `mkt cap $${num(row.market_cap / BILLION, 1)}B` : null));
+  const offHigh = mon?.drawdown_pct ?? sit.offHigh;
+  if (row || present(sit.change1y)) {
+    stats.push(stat('CLOSE', present(row?.price) ? `$${num(row.price)}` : DASH,
+      [present(sit.change1y) ? `1Y ${pct(sit.change1y, 0)}` : null, present(offHigh) ? `${pct(offHigh, 1)} from 1Y high` : null,
+        row?.market_cap ? `$${num(row.market_cap / BILLION, 0)}B` : null].filter(Boolean).join(' · ') || null));
   }
   if (mon) {
-    stats.push(stat('FROM 1Y HIGH', pct(mon.drawdown_pct, 1), `as of ${mon.price_as_of || DASH}`, dirClass(mon.drawdown_pct)));
-    stats.push(stat('1M VS SECTOR PEERS', mon.peer_excess_pct === null || mon.peer_excess_pct === undefined
-      ? DASH : `${mon.peer_excess_pct > 0 ? '+' : ''}${num(mon.peer_excess_pct, 1)} pp`,
-    `${mon.peer_count || 0} peers, company excluded`, dirClass(mon.peer_excess_pct)));
-    stats.push(stat('MONITOR', mon.candidate ? 'QUEUED' : 'NOT QUEUED',
-      mon.candidate ? `price ${mon.price_state || '?'} · evidence ${mon.evidence_state || '?'}` : null));
-    const timing = mon.earnings_status && mon.earnings_status !== 'not_scheduled' ? mon.earnings_status.replace(/_/g, ' ') : null;
-    stats.push(stat('NEXT EARNINGS', mon.earnings_date || DASH, mon.earnings_date ? timing : 'none on the calendar'));
+    stats.push(stat('1M VS SECTOR PEERS', present(mon.peer_excess_pct) ? `${mon.peer_excess_pct > 0 ? '+' : ''}${num(mon.peer_excess_pct, 1)} pp` : DASH,
+      `${mon.peer_count || 0} peers, company excluded`, dirClass(mon.peer_excess_pct)));
   }
-  if (row) {
+  if (isBank(row)) {
+    stats.push(stat('P/TBV VS OWN 10Y', `${ordinal(row.ptbv_percentile)} pct`,
+      [`${num(row.ptbv, 2)}x`, present(row.rotce) ? `ROTCE ${num(row.rotce, 1)}%` : null, present(row.pe_forward) ? `fwd P/E ${num(row.pe_forward, 1)}x` : null].filter(Boolean).join(' · ')));
+  } else if (row) {
     // On the history's own basis: operating earnings unless the company has none.
     const basis = row.pe_basis && row.pe_basis !== 'reported' ? (row.pe_basis === 'operating' ? 'operating' : 'ex gains') : null;
-    const current = (row.pe_operating !== null && row.pe_operating !== undefined ? `${num(row.pe_operating, 1)}x ${basis} · ` : '')
-      + (row.pe_forward !== null && row.pe_forward !== undefined ? `${num(row.pe_forward, 1)}x fwd · ` : '');
-    stats.push(stat(`P/E VS OWN 10Y${basis ? ` · ${basis.toUpperCase()}` : ''}`, row.pe_percentile === null || row.pe_percentile === undefined ? DASH : `${ordinal(row.pe_percentile)} pct`,
-      row.pe_vs_median === null || row.pe_vs_median === undefined ? null : `${current}${row.pe_vs_median > 0 ? '+' : ''}${num(row.pe_vs_median, 0)}% vs median`));
+    const note = [present(row.pe_forward) ? `fwd ${num(row.pe_forward, 1)}x` : null, present(row.pe_operating) ? `trailing ${num(row.pe_operating, 1)}x` : null,
+      present(row.pe_vs_median) ? `${row.pe_vs_median > 0 ? '+' : ''}${num(row.pe_vs_median, 0)}% vs median` : null].filter(Boolean).join(' · ');
+    stats.push(stat(`P/E VS OWN 10Y${basis ? ` · ${basis.toUpperCase()}` : ''}`, present(row.pe_percentile) ? `${ordinal(row.pe_percentile)} pct` : DASH, note || null));
   }
-  return stats.length ? el('div', { class: 'stat-strip' }, stats) : null;
+  if (present(sit.drift)) {
+    stats.push(stat('NEXT-YEAR EPS · 90D', pct(sit.drift, 1),
+      [present(sit.growth) ? `street ${pct(sit.growth, 0)} on this year` : null, sit.driftNote?.split(' · ').slice(1).join(' · ')].filter(Boolean).join(' · '), dirClass(sit.drift)));
+  }
+  if (mon) {
+    const timing = mon.earnings_status && mon.earnings_status !== 'not_scheduled' ? mon.earnings_status.replace(/_/g, ' ') : null;
+    stats.push(stat('NEXT EARNINGS', mon.earnings_date || DASH, mon.earnings_date
+      ? [timing, implied ? `implied ±${num(implied.straddle_pct, 1)}%` : null].filter(Boolean).join(' · ') : 'none on the calendar'));
+    stats.push(stat('MONITOR', mon.candidate ? 'QUEUED' : 'NOT QUEUED',
+      mon.candidate ? `price ${mon.price_state || '?'} · evidence ${mon.evidence_state || '?'}` : null));
+  }
+  if (!stats.length) return null;
+  return el('div', {}, [
+    el('div', { class: 'stat-strip' }, stats),
+    sit.reads.length ? el('div', { class: 'tag-row ticker-reads' }, sit.reads.map(([text, tone]) => tag(text, tone))) : null,
+  ]);
+}
+
+// A section that is detail behind something already on the page: folded.
+function fold(label, node) {
+  return node ? el('details', { class: 'fold' }, [el('summary', { text: label }), node]) : null;
+}
+
+function group(label) {
+  return el('div', { class: 'ticker-group', text: label });
 }
 
 function links(symbol, { mon, dcf, pairs }) {
@@ -207,82 +237,61 @@ function evidenceCard(mon, ev) {
   ]);
 }
 
-// Past reactions against the implied move, and the options term structure.
-function earningsOptionsCard(symbol, ev, evidence) {
-  if (!ev || !(ev.reactions?.length || ev.options || ev.next || ev.focus)) return null;
-  const reactionNode = el('div', { class: 'chart short' });
+// The options term structure and the implied move's expiry. Past reactions,
+// the average move and the report date are on the event card above.
+function optionsCard(symbol, ev, evidence) {
+  const o = ev?.options;
+  if (!o) return null;
   const termNode = el('div', { class: 'chart short' });
-  const reactions = [...(ev.reactions || [])].reverse();
-  const implied = ev.options?.implied_move;
-  const mean = ev.mean_abs_move;
+  const implied = o.implied_move;
+  const term = o.term || [];
   requestAnimationFrame(() => {
-    render(reactionNode, (option, p) => ({
+    if (!term.length) return;
+    render(termNode, (option, p) => ({
       ...option,
-      grid: { left: 44, right: 12, top: 14, bottom: 24 },
-      tooltip: { ...option.tooltip, trigger: 'item', axisPointer: undefined,
-        formatter: (q) => { const r = reactions[q.dataIndex]; return r ? `<b>${r.date}</b> ${r.timing.toUpperCase()} ${r.time}<br>move ${pct(r.move_pct, 1)} · index ${pct(r.index_pct, 1)}` : ''; } },
-      xAxis: { ...option.xAxis, boundaryGap: true, data: reactions.map((r) => r.date.slice(0, 7)) },
-      yAxis: { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 9, formatter: (v) => `${v}%` } },
-      series: [{
-        type: 'bar', barMaxWidth: 16, data: reactions.map((r) => ({ value: r.move_pct, itemStyle: { color: r.move_pct >= 0 ? p.up : p.down } })),
-        markLine: { silent: true, symbol: 'none', data: [
-          ...(mean ? [{ yAxis: mean, name: 'avg |move|' }, { yAxis: -mean, name: 'avg |move|' }] : []),
-          ...(implied ? [{ yAxis: implied.straddle_pct, name: 'implied', lineStyle: { color: p.accent, type: 'solid' } },
-            { yAxis: -implied.straddle_pct, name: 'implied', lineStyle: { color: p.accent, type: 'solid' } }] : []),
-        ], lineStyle: { color: p.faint, type: 'dashed' }, label: { color: p.dim, fontSize: 9, formatter: (q) => q.name, position: 'insideEndTop' } },
-      }],
+      grid: { left: 44, right: 12, top: 26, bottom: 24 },
+      legend: { top: 0, textStyle: { color: p.dim, fontSize: 9 }, itemWidth: 10, itemHeight: 2 },
+      tooltip: { ...option.tooltip, trigger: 'axis', valueFormatter: (v) => (v === null || v === undefined ? DASH : `${num(v * 100, 1)}%`) },
+      xAxis: { ...option.xAxis, boundaryGap: true, data: term.map((t) => `${t.days}d`) },
+      yAxis: { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 9, formatter: (v) => `${Math.round(v * 100)}%` } },
+      series: [
+        { name: 'ATM', type: 'line', data: term.map((t) => t.atm_iv), lineStyle: { color: p.text, width: 1.6 }, itemStyle: { color: p.text } },
+        { name: '25Δ put', type: 'line', data: term.map((t) => t.put_25d_iv), lineStyle: { color: p.down, width: 1 }, itemStyle: { color: p.down } },
+        { name: '25Δ call', type: 'line', data: term.map((t) => t.call_25d_iv), lineStyle: { color: p.up, width: 1 }, itemStyle: { color: p.up } },
+      ],
     }));
-    const term = ev.options?.term || [];
-    if (term.length) {
-      render(termNode, (option, p) => ({
-        ...option,
-        grid: { left: 44, right: 12, top: 26, bottom: 24 },
-        legend: { top: 0, textStyle: { color: p.dim, fontSize: 9 }, itemWidth: 10, itemHeight: 2 },
-        tooltip: { ...option.tooltip, trigger: 'axis', valueFormatter: (v) => (v === null || v === undefined ? DASH : `${num(v * 100, 1)}%`) },
-        xAxis: { ...option.xAxis, boundaryGap: true, data: term.map((t) => `${t.days}d`) },
-        yAxis: { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 9, formatter: (v) => `${Math.round(v * 100)}%` } },
-        series: [
-          { name: 'ATM', type: 'line', data: term.map((t) => t.atm_iv), lineStyle: { color: p.text, width: 1.6 }, itemStyle: { color: p.text } },
-          { name: '25Δ put', type: 'line', data: term.map((t) => t.put_25d_iv), lineStyle: { color: p.down, width: 1 }, itemStyle: { color: p.down } },
-          { name: '25Δ call', type: 'line', data: term.map((t) => t.call_25d_iv), lineStyle: { color: p.up, width: 1 }, itemStyle: { color: p.up } },
-        ],
-      }));
-    }
   });
-  const next = ev.next;
-  const o = ev.options;
   const stats = el('div', { class: 'stat-strip ticker-eo-stats' }, [
-    stat('NEXT REPORT', next ? next.date : DASH, next ? `${(next.timing || '').toUpperCase() || 'time n/a'} · reaction ${next.reaction_session}` : 'none on the calendar'),
-    stat('AVG |MOVE| · LAST 8', mean !== null && mean !== undefined ? `±${num(mean, 1)}%` : DASH, `${ev.reactions?.length || 0} reports from 8-K filings`),
     stat('IMPLIED MOVE', implied ? `±${num(implied.straddle_pct, 1)}%` : DASH,
-      implied ? `ATM straddle to ${implied.expiry} (${implied.days}d), not the report alone` : (o ? 'no expiry after the report in the snapshot' : 'not in the options snapshot')),
-    stat('IV 30D', o?.iv30 ? `${num(o.iv30 * 100, 1)}%` : DASH,
-      o ? (o.iv30_percentile !== null && o.iv30_percentile !== undefined ? `${o.iv30_percentile}th pct of ${o.iv30_history_days} recorded days` : `${o.iv30_history_days} days recorded; percentile after ${evidence.iv_percentile_min_days}`) : 'not in the options snapshot'),
+      implied ? `ATM straddle to ${implied.expiry} (${implied.days}d), not the report alone` : 'no expiry after the report in the snapshot'),
+    stat('IV 30D', o.iv30 ? `${num(o.iv30 * 100, 1)}%` : DASH,
+      present(o.iv30_percentile) ? `${o.iv30_percentile}th pct of ${o.iv30_history_days} recorded days` : `${o.iv30_history_days} days recorded; percentile after ${evidence.iv_percentile_min_days}`),
   ]);
-  return card('EARNINGS & OPTIONS', el('span', { class: 'dim', text: o ? `options snapshot ${o.snapshot_day}` : '' }), [
-    stats,
-    el('div', { class: 'grid two' }, [
-      el('div', {}, [el('div', { class: 'card-title', text: 'REACTION TO THE LAST 8 REPORTS' }),
-        ev.reactions?.length ? reactionNode : el('div', { class: 'dim', text: 'No 8-K earnings release on file: foreign issuers report results on Form 6-K, which carries no item code to date the release by.' })]),
-      el('div', {}, [el('div', { class: 'card-title', text: 'IMPLIED VOL BY EXPIRY' }), (ev.options?.term || []).length ? termNode : el('div', { class: 'dim', text: `${symbol} is not in the options snapshot universe.` })]),
-    ]),
+  return card('OPTIONS · IMPLIED VOL BY EXPIRY', el('span', { class: 'dim', text: `snapshot ${o.snapshot_day}` }), [
+    stats, term.length ? termNode : el('div', { class: 'dim', text: `${symbol} has no term structure in the snapshot.` }),
   ]);
 }
 
 function valuationCard(symbol, row, data) {
   if (!row) return card('VALUATION & QUALITY', null, gap(`${symbol} is not on SCREEN in this build (not an index member, or no usable filings).`));
   const byKey = new Map(data.metrics.map((m) => [m.key, m]));
-  const peers = data.rows.filter((r) => r.sector === row.sector);
-  const rows = KEY_METRICS.filter((key) => byKey.has(key)).map((key) => {
+  // A bank against banks of its own kind where there are enough of them.
+  const kin = isBank(row) ? data.rows.filter((r) => r.sub_sector && r.sub_sector === row.sub_sector) : [];
+  const peers = kin.length >= 3 ? kin : data.rows.filter((r) => r.sector === row.sector);
+  const against = kin.length >= 3 ? row.sub_sector : row.sector;
+  // A metric neither the company nor its sector has is left out, not dashed.
+  const rows = (isBank(row) ? BANK_METRICS : KEY_METRICS).filter((key) => byKey.has(key)).map((key) => {
     const metric = byKey.get(key);
+    const mid = median(peers.map((r) => r[key]));
+    if (!present(row[key]) && !present(mid)) return null;
     return el('tr', {}, [
       el('td', { text: metric.label }),
       el('td', { text: format(row[key], metric.unit) }),
-      el('td', { class: 'dim', text: format(median(peers.map((r) => r[key])), metric.unit) }),
+      el('td', { class: 'dim', text: format(mid, metric.unit) }),
     ]);
-  });
-  return card(`VALUATION & QUALITY — AGAINST ${row.sector?.toUpperCase() || 'SECTOR'} MEDIAN (${peers.length} COMPANIES)`, null, [
-    table(['METRIC', symbol, 'SECTOR MEDIAN'], rows),
+  }).filter(Boolean);
+  return card(`VALUATION & QUALITY — AGAINST ${against?.toUpperCase() || 'SECTOR'} MEDIAN (${peers.length} COMPANIES)`, null, [
+    table(['METRIC', symbol, kin.length >= 3 ? 'PEER MEDIAN' : 'SECTOR MEDIAN'], rows),
     el('div', { class: 'field-note', text: `TTM to ${row.period_end} · filed ${row.filed} · full table on SCREEN` }),
   ]);
 }
@@ -325,41 +334,35 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
     return;
   }
 
-  const stats = headerStats(symbol, row, mon);
-  if (stats) root.append(stats);
-  // The report is the next thing that moves the name: its card, or the one
-  // the last session traded on, sits right under the header.
   const [eventPayload, prices] = await Promise.all([loadEvents(symbol), loadPrices(symbol)]);
   const asOf = events?.as_of || eventPayload?.as_of;
-  // The story first: where the name stands, then the report that moves it
-  // next, then how it got here and what is ahead.
-  const situation = eventPayload ? situationCard(eventPayload, row, prices) : null;
-  if (situation) root.append(situation);
-  const outcome = eventPayload ? outcomeCard(eventPayload) : null;
-  if (outcome) root.append(outcome);
-  const upcoming = eventPayload ? eventCard(eventPayload, asOf, { prices }) : null;
-  if (upcoming) root.append(upcoming);
-  const timeline = eventPayload ? timelineCard(eventPayload, prices, events?.macro, asOf) : null;
-  if (timeline) root.append(timeline);
-  const story = eventPayload ? storyCard(eventPayload) : null;
-  if (story) root.append(story);
-  // Its suppliers, customers and rivals in the AI chain, and how their
-  // reports this season have landed on it.
-  const chainLinks = chain ? chainCard(chain, symbol, { compact: true }) : null;
-  if (chainLinks) root.append(chainLinks);
-  // What the report is measured against: its own record, where estimates
-  // are moving, and what the industry data did since it last reported.
-  const history = eventPayload ? historyCard(eventPayload) : null;
-  if (history) root.append(history);
-  const expectations = eventPayload ? [revisionsCard(eventPayload), sinceCard(eventPayload)].filter(Boolean) : [];
-  if (expectations.length) root.append(expectations.length > 1 ? el('div', { class: 'grid two' }, expectations) : expectations[0]);
-  // Company sections need filings. A fund, an index or a name no index holds
-  // gets its price readings and one line saying why the rest is absent.
-  // Order: the price first, then what it is worth against its own history,
-  // then against its sector and the evidence, then the filings behind it.
+  const ev = evidence?.names?.[symbol] || null;
+  const sit = situation(eventPayload, row, prices);
+  const stats = headerStats(row, mon, sit, ev?.options?.implied_move);
+  if (stats) root.append(stats);
   const company = Boolean(row || mon);
-  const note = company ? noteCard(mon) : null;
-  if (note) root.append(note);
+  const add = (...nodes) => nodes.filter(Boolean).forEach((n) => root.append(n));
+
+  // What is new: a report the last session traded on, the evidence listed for
+  // and against, the industry data since the last report, recent filings.
+  add(group('RECENT'), eventPayload ? outcomeCard(eventPayload) : null, company ? noteCard(mon) : null);
+  const recent = [company ? evidenceCard(mon, ev) : null, eventPayload ? filingsCard(eventPayload) : null].filter(Boolean);
+  if (recent.length) add(recent.length > 1 ? el('div', { class: 'grid two' }, recent) : recent[0]);
+  add(eventPayload ? sinceCard(eventPayload) : null);
+
+  // The next report: what is expected and priced, what is ahead, and the
+  // record behind it, folded.
+  const upcoming = eventPayload ? eventCard(eventPayload, asOf, { prices }) : null;
+  if (upcoming || eventPayload?.timeline) {
+    add(group('NEXT REPORT'), upcoming, eventPayload ? timelineCard(eventPayload, prices, events?.macro, asOf) : null,
+      fold('LAST 8 REPORTS · EPS, GUIDE, MOVE AND DRIFT', eventPayload ? historyCard(eventPayload) : null),
+      fold('ESTIMATE REVISIONS BY PERIOD', eventPayload ? revisionsCard(eventPayload) : null),
+      optionsCard(symbol, ev, evidence || {}));
+  }
+
+  // The long view: price and trend, valuation against its own history and
+  // its sector, the moves that made it, its chain, the filed statements.
+  add(group('LONG TERM'));
   if (!company) {
     root.append(el('div', { class: 'notice', text:
       `${symbol} has baked prices but no filings in this build (a fund, an index or a non-member), so only its technicals are shown. `
@@ -372,20 +375,14 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   } else {
     root.append(card('PRICE & TREND', null, gap(`${symbol} has no baked price history in this build.`)));
   }
-  const filings = eventPayload ? filingsCard(eventPayload) : null;
-  if (filings) root.append(filings);
   if (row) {
     await section(root, 'P/E AGAINST ITS OWN 10 YEARS', (host) => {
       if (!row.pe_history) throw new Error(`${symbol} has no P/E history in this build (a loss, too little history, or no EPS filed)`);
       return renderPeHistory(host, symbol, valuation);
     });
   }
-  const ev = evidence?.names?.[symbol] || null;
-  if (company) {
-    root.append(el('div', { class: 'grid two' }, [valuationCard(symbol, row, valuation), evidenceCard(mon, ev)]));
-  }
-  const eo = earningsOptionsCard(symbol, ev, evidence || {});
-  if (eo) root.append(eo);
+  if (company) root.append(valuationCard(symbol, row, valuation));
+  add(eventPayload ? storyCard(eventPayload) : null, chain ? chainCard(chain, symbol, { compact: true }) : null);
   if (!company) return;
   await section(root, 'FINANCIALS — FILED ANNUAL STATEMENTS · SEC XBRL', (host) => {
     if (!financials) throw new Error('FINANCIALS was not built for this session.');

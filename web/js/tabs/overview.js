@@ -15,6 +15,8 @@ const present = (v) => v !== null && v !== undefined && Number.isFinite(v);
 const signed = (v, digits = 1, suffix = '') => (present(v) ? `${v > 0 ? '+' : ''}${num(v, digits)}${suffix}` : DASH);
 const pctOf = (v) => (present(v) ? `${Math.round(v * 100)}%` : DASH);
 const shortDate = (iso) => (iso ? new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).toUpperCase() : DASH);
+// The same day without the comma: FRI OCT 9.
+const longDate = (iso) => shortDate(iso).replace(',', '');
 const quarterOf = (iso) => (iso ? `Q${Math.floor(Number(iso.slice(5, 7)) / 3) + 1} ${iso.slice(0, 4)}` : DASH);
 const monthOf = (iso) => (iso ? new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }).toUpperCase() : DASH);
 
@@ -203,24 +205,34 @@ function distributionBlock(dist) {
   ]);
 }
 
+// Today, the two averages, and the highs and lows stay in view with the year's
+// chart; the one-week and one-month counts and the size of move sit behind a
+// disclosure, for a reader who wants the wider window.
 function breadthCard(blocks, history, dist) {
   if (!blocks.length) return card('BREADTH', null, el('div', { class: 'gap', text: 'No member closes in this build.' }));
+  const headers = ['', ...blocks.map((b) => `${b.key} · ${b.members}`)];
   const row = (label, cell) => el('tr', {}, [el('td', { class: 'ov-name', text: label }), ...blocks.map(cell)]);
   const share = (v) => el('td', { class: present(v) ? (v >= 50 ? 'up' : 'down') : 'dim', text: present(v) ? `${num(v, 0)}%` : DASH });
   const body = [
     row('Up / down · today', (b) => upDown(b['1D'], b.members)),
-    row('Up / down · 1 week', (b) => upDown(b['1W'], b.members)),
-    row('Up / down · 1 month', (b) => upDown(b['1M'], b.members)),
     row('Above 50-day average', (b) => share(b.above_50d)),
     row('Above 200-day average', (b) => share(b.above_200d)),
     row('New 52-week highs / lows', (b) => el('td', {}, [
       el('span', { class: 'up', text: b.new_highs ?? DASH }), el('span', { class: 'dim', text: ' / ' }), el('span', { class: 'down', text: b.new_lows ?? DASH }),
     ])),
   ];
+  const wider = [
+    row('Up / down · 1 week', (b) => upDown(b['1W'], b.members)),
+    row('Up / down · 1 month', (b) => upDown(b['1M'], b.members)),
+  ];
   return card('BREADTH', el('span', { class: 'dim', text: 'index members, counted by their own closes' }), [
-    grid(['', ...blocks.map((b) => `${b.key} · ${b.members}`)], body, 'ov-breadth'),
-    distributionBlock(dist),
+    grid(headers, body, 'ov-breadth'),
     breadthChart(history),
+    el('details', { class: 'ov-more' }, [
+      el('summary', { text: 'MORE BREADTH · 1W / 1M and size of move' }),
+      grid(headers, wider, 'ov-breadth'),
+      distributionBlock(dist),
+    ]),
   ]);
 }
 
@@ -376,7 +388,10 @@ export default function renderOverview(root, data) {
     'Rates and credit: a rising yield or a widening spread is red (bond prices fall, conditions tighten), a falling one green; the 10Y − 2Y slope stays grey. The 2Y and 10Y are Treasury\'s daily par yields, published the evening of the session; the 10-year TIPS yield and the ICE BofA spreads are FRED\'s, a day behind. Macro prints are the latest published value with the one before it; GDPNow is the Atlanta Fed\'s running estimate for the current quarter.',
     ...failed.map((k) => `${k}: ${data.failed[k]}`),
   ]));
-  root.append(el('div', { class: 'ov-live' }, [mountLive()]));
+  root.append(el('div', { class: 'ov-live' }, [mountLive({ asOf: data.as_of })]));
+  // The line between the live strip and the build's close: everything below is
+  // the session's close, whatever the strip above says.
+  root.append(el('div', { class: 'ov-close-head', text: `SESSION CLOSE · ${longDate(data.as_of)} — every figure below` }));
   const risk = riskLine(data.risk);
   if (risk) root.append(risk);
   // Two columns that stack independently, so a short card never leaves a

@@ -12,7 +12,7 @@ import pandas as pd
 
 from ..compute import returns as R
 from ..config import SESSION_COVERAGE_THRESHOLD, period_sessions
-from ..util import clean_float, to_iso_date
+from ..util import clean_float, company_name, to_iso_date
 
 # How many names each mover table lists. A round number with no analytic
 # meaning, which is exactly why it belongs in one named place.
@@ -96,7 +96,7 @@ def build(ctx) -> dict:
                 row = meta.loc[symbol]
                 movers.append({
                     "ticker": symbol,
-                    "name": str(row["name"]).title(),
+                    "name": company_name(row["name"]),
                     "sector": row["sector"],
                     "sub_sector": row["sub_sector"],
                     "price": clean_float(panel[symbol].iloc[-1], 2),

@@ -27,7 +27,7 @@ from ..compute import expectations as X
 from ..compute.returns import period_return
 from ..compute.xray import ticker_key
 from ..sources import calendars, expectations as expectation_feeds, fred, nasdaq, treasury
-from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float
+from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, company_name
 
 # How each source's dates are known.
 CERTAINTY = {
@@ -217,7 +217,7 @@ def _universe(ctx) -> dict[str, dict]:
     for key, frame in ctx.members.items():
         for row in frame.drop_duplicates("yahoo_symbol").itertuples():
             entry = names.setdefault(ticker_key(row.yahoo_symbol), {
-                "symbol": row.yahoo_symbol, "name": str(row.name).title(), "sector": row.sector,
+                "symbol": row.yahoo_symbol, "name": company_name(row.name), "sector": row.sector,
                 "weights": {}, "watchlist": False,
             })
             entry["weights"][key] = float(row.weight)

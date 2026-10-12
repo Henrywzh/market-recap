@@ -21,7 +21,7 @@ from ..config import period_sessions
 from ..context import YAHOO_URL
 from ..sources import estimates, yahoo
 from ..sources import europe as src
-from ..util import SourceRecord, clean_float, describe_error, to_iso_date
+from ..util import SourceRecord, clean_float, company_name, describe_error, to_iso_date
 
 HIGH_SESSIONS = 252
 SPARK_SESSIONS = 126
@@ -134,7 +134,7 @@ def _name_row(symbol: str, name: str | None, sector_source: str | None, closes: 
         if abs(growth) > cfg["eps_growth_cap"]:             # off a profit near zero: not a growth rate
             growth, out_of_range = None, True
     sector = E.broad_sector(sector_source, cfg["sector_map"])
-    return {"symbol": symbol, "name": name or symbol, "sector": sector, "sector_source": sector_source,
+    return {"symbol": symbol, "name": company_name(name) or symbol, "sector": sector, "sector_source": sector_source,
             "currency": E.currency_of(symbol), **_stats(s, cfg),
             "forward_pe": clean_float(m.get("forward_pe"), 1), "trailing_pe": clean_float(m.get("trailing_pe"), 1),
             "eps_growth": clean_float(growth, 1), "eps_growth_out_of_range": out_of_range, "market_cap": clean_float(m.get("market_cap"), 0),

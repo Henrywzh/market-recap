@@ -7,7 +7,7 @@ import pandas as pd
 from ..compute import returns as R
 from ..config import ETF_ARTIFACT_DIR, period_sessions
 from ..sources import invesco, ishares, snapshot_store, ssga, vanguard, yahoo
-from ..util import SourceRecord, clean_float, prune_stale, to_iso_date, write_json
+from ..util import SourceRecord, clean_float, company_name, prune_stale, to_iso_date, write_json
 
 
 def _returns_for(series: pd.Series, periods: list[str]) -> dict:
@@ -223,7 +223,7 @@ def build(ctx) -> dict:
         nodes.append(
             {
                 "ticker": row.yahoo_symbol,
-                "name": str(row.name).title(),
+                "name": company_name(row.name),
                 "sector": row.sector,
                 "sub_sector": row.sub_sector,
                 "weight": clean_float(row.weight, 4),

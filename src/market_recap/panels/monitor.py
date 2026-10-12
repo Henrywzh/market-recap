@@ -21,7 +21,7 @@ import pandas as pd
 from ..compute import monitor as M
 from ..compute.valuation import FINANCIALS_SECTOR
 from ..config import REPO_ROOT, period_sessions
-from ..util import SourceRecord
+from ..util import SourceRecord, company_name
 
 
 SCHEMA_VERSION = 1
@@ -172,7 +172,7 @@ def _member_metadata(ctx: Any, key: str) -> dict[str, dict[str, str | None]]:
         if ticker in out:
             continue
         out[ticker] = {
-            "name": _text(_record_value(record, "name", "label")) or ticker,
+            "name": company_name(_record_value(record, "name", "label")) or ticker,
             "sector": _text(_record_value(record, "sector")),
         }
     return out

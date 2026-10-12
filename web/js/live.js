@@ -6,12 +6,16 @@
 // did not arrive is a dash. Its feed (live-feed.js) refreshes every
 // `refresh_seconds` while the session is open and the tab is visible, and on
 // demand from its button.
+//
+// The five a reader scans first sit in one row; the rest open from a toggle.
 
 import { el, card, num, pct, dirClass, DASH } from './fmt.js';
-import { ageSeconds, ageText, isStale } from './live-model.js';
+import { ageSeconds, ageText, isStale, bondHoliday, newYorkDate, newYorkDayLabel } from './live-model.js';
 import { createFeed } from './live-feed.js';
 
 const ENDPOINT = 'api/quotes';
+const MORE_KEY = 'mr-live-more';
+export const PRIMARY = ['SPX', 'NDX', 'VIX', 'UST 10Y', 'DXY'];
 let active = null;
 
 function valueText(quote) {
@@ -28,6 +32,13 @@ function changeText(quote) {
   return `${quote.change >= 0 ? '+' : ''}${num(quote.change)} (${pct(quote.change_pct)})`;
 }
 
+// The age note after a price: how old it is, STALE once an open session has
+// left it behind, or on a bond-market holiday the reason no yield has moved.
+function ageNote(time, now, stale, holiday) {
+  if (holiday) return ' · bond market closed (holiday)';
+  return ` · ${ageText(ageSeconds(time, now))}${stale ? ' STALE' : ''}`;
+}
+
 function quoteStat(quote, body, now) {
   if (quote.error) {
     return el('div', { class: 'stat live-stat' }, [
@@ -37,8 +48,11 @@ function quoteStat(quote, body, now) {
     ]);
   }
   const stale = isStale(quote, body, now);
+  // A Treasury yield that has not moved on a bond-market holiday is correct, not late.
+  const holiday = stale && quote.kind === 'rate' && bondHoliday(newYorkDate(now));
+  const flagged = stale && !holiday;
   const direction = quote.kind === 'rate' ? quote.change_bp : quote.change_pct;
-  return el('div', { class: `stat live-stat${stale ? ' live-stale' : ''}` }, [
+  return el('div', { class: `stat live-stat${flagged ? ' live-stale' : ''}` }, [
     el('div', { class: 'stat-label', text: quote.label }),
     el('div', { class: 'stat-value', text: valueText(quote) }),
     el('div', { class: 'stat-note' }, [
@@ -46,7 +60,8 @@ function quoteStat(quote, body, now) {
       el('span', {
         class: 'live-age',
         'data-time': quote.time ?? '',
-        text: ` · ${ageText(ageSeconds(quote.time, now))}${stale ? ' STALE' : ''}`,
+        'data-holiday': holiday ? '1' : null,
+        text: ageNote(quote.time, now, flagged, holiday),
       }),
     ]),
   ]);
@@ -67,9 +82,31 @@ export function stripRows(quotes) {
   return [first, quotes.filter((q) => q.kind === 'watch')];
 }
 
-function createController() {
-  const first = el('div', { class: 'stat-strip live-strip' });
-  const second = el('div', { class: 'stat-strip live-strip live-strip-names' });
+// The primary quotes in PRIMARY's order; every other quote in stripRows' order.
+export function splitPrimary(quotes) {
+  const primary = PRIMARY.map((label) => quotes.find((q) => q.label === label)).filter(Boolean);
+  const picked = new Set(primary);
+  const [top, names] = stripRows(quotes);
+  return [primary, [...top, ...names].filter((q) => !picked.has(q))];
+}
+
+// The toggle's choice is the reader's own, kept per browser; a private window
+// simply forgets it.
+function readMore() {
+  try { return localStorage.getItem(MORE_KEY) === '1'; } catch { return false; }
+}
+
+function writeMore(open) {
+  try { localStorage.setItem(MORE_KEY, open ? '1' : '0'); } catch { /* not kept; fine */ }
+}
+
+function createController({ asOf } = {}) {
+  let more = readMore();
+  let title = null;   // the card's title node, set once the card exists
+  const primary = el('div', { class: 'stat-strip live-strip live-strip-primary' });
+  const toggle = el('button', { type: 'button', class: 'live-refresh live-more-toggle', 'aria-expanded': String(more) });
+  const toggleRow = el('div', { class: 'live-more-row' }, [toggle]);
+  const rest = el('div', { class: 'stat-strip live-strip live-strip-more' });
   const foot = el('div', { class: 'note-text' });
   const holder = el('div', {});
   const feed = createFeed(ENDPOINT, {
@@ -79,35 +116,51 @@ function createController() {
       const now = Date.now();
       holder.querySelectorAll('.live-age').forEach((span) => {
         const time = span.dataset.time === '' ? null : Number(span.dataset.time);
-        const stale = span.closest('.live-stale');
-        span.textContent = ` · ${ageText(ageSeconds(time, now))}${stale ? ' STALE' : ''}`;
+        const holiday = span.dataset.holiday === '1';
+        const stale = Boolean(span.closest('.live-stale'));
+        span.textContent = ageNote(time, now, stale, holiday);
       });
       if (!state.body) render();
     },
+  });
+  toggleRow.hidden = true;
+  rest.hidden = true;
+  toggle.addEventListener('click', () => {
+    more = !more;
+    writeMore(more);
+    render();
   });
 
   function render() {
     const body = feed.state.body;
     const now = Date.now();
     if (body) {
-      const [top, names] = stripRows(body.quotes);
-      first.replaceChildren(...top.map((q) => quoteStat(q, body, now)));
-      second.replaceChildren(...names.map((q) => quoteStat(q, body, now)));
+      const [top, others] = splitPrimary(body.quotes);
+      primary.replaceChildren(...top.map((q) => quoteStat(q, body, now)));
+      rest.replaceChildren(...others.map((q) => quoteStat(q, body, now)));
+      toggle.textContent = more ? '− less' : `+ ${others.length} more`;
+      toggleRow.hidden = others.length === 0;
     }
+    toggle.setAttribute('aria-expanded', String(more));
+    rest.hidden = !more;
+    if (title) title.textContent = `LIVE · ${newYorkDayLabel(now)}`;
     const minutes = Math.round((body?.refresh_seconds ?? 60) / 60);
-    foot.textContent = 'Intraday and unofficial: Yahoo (indices, VIX, the dollar, futures, names) and CNBC (Treasury yields), '
-      + `fetched through this site every ${minutes === 1 ? 'minute' : `${minutes} minutes`} while the session is open and this tab is visible. `
-      + 'Change is against the previous close. Every other figure on this page is the build\'s close.';
+    foot.textContent = 'Live, intraday, unofficial (Yahoo; Treasury yields CNBC), '
+      + `every ${minutes === 1 ? 'minute' : `${minutes} minutes`} while the session is open. `
+      + 'Change vs the previous close. '
+      + (asOf ? `Everything below is the build's close of ${asOf}.` : 'Everything below is the build\'s close.');
   }
 
-  holder.append(card('LIVE', feed.controls, [first, second, foot]));
+  const node = card(`LIVE · ${newYorkDayLabel(Date.now())}`, feed.controls, [primary, toggleRow, rest, foot]);
+  title = node.querySelector('.card-title');
+  holder.append(node);
   render();
   const controller = { node: holder, stop: () => { feed.stop(); if (active === controller) active = null; } };
   return controller;
 }
 
-export function mountLive() {
+export function mountLive({ asOf } = {}) {
   if (active) active.stop();
-  active = createController();
+  active = createController({ asOf });
   return active.node;
 }

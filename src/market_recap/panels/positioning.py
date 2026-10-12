@@ -32,7 +32,7 @@ from .. import cache
 from ..compute import evidence as V
 from ..compute import positioning as P
 from ..sources import finra, sec
-from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, history_payload, to_iso_date
+from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, company_name, history_payload, to_iso_date
 
 # Same-session artifacts this panel reads (build.optional_panel).
 INPUTS = ("catalysts", "evidence")
@@ -75,7 +75,7 @@ def _universe(ctx, settings) -> tuple[dict[str, dict], list[str]]:
     for spec in ctx.indices:
         for row in ctx.priced(spec.key).itertuples():
             entry = names.setdefault(finra.finra_symbol(row.yahoo_symbol), {
-                "ticker": row.yahoo_symbol, "name": str(row.name).title(), "sector": getattr(row, "sector", None),
+                "ticker": row.yahoo_symbol, "name": company_name(row.name), "sector": getattr(row, "sector", None),
                 "indices": [],
             })
             entry["indices"].append(spec.key)
@@ -247,7 +247,7 @@ def _insiders(ctx, settings) -> dict:
         for row in ctx.priced(spec.key).itertuples():
             cik = cik_map.get(row.yahoo_symbol.upper()) or cik_map.get(row.yahoo_symbol.upper().replace("-", "."))
             if cik:
-                members.setdefault(cik, {"ticker": row.yahoo_symbol, "name": str(row.name).title(),
+                members.setdefault(cik, {"ticker": row.yahoo_symbol, "name": company_name(row.name),
                                          "sector": getattr(row, "sector", None), "spx_weight": weights.get(row.yahoo_symbol)})
     started, fetched = time.monotonic(), 0
     buys: dict[int, list[dict]] = defaultdict(list)

@@ -21,6 +21,7 @@ import pandas as pd
 
 from ..compute import industries as I
 from ..compute import rotation as R
+from ..util import company_name
 
 # Panels read, each required to be from this session (build.optional_panel).
 INPUTS = ("valuation", "monitor")
@@ -51,7 +52,7 @@ def _member_frame(members: pd.DataFrame, closes: pd.DataFrame, settings: dict, v
         records[symbol] = {
             "sector": members.at[symbol, "sector"],
             "sub_sector": members.at[symbol, "sub_sector"],
-            "name": str(members.at[symbol, "name"]).title(),
+            "name": company_name(members.at[symbol, "name"]),
             "weight": float(members.at[symbol, "weight"]),
             **{key: series.get(symbol) for key, series in returns.items()},
             "drawdown": watch.get("drawdown_pct"),

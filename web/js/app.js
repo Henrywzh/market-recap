@@ -174,6 +174,20 @@ async function select(id, { silent = false, arg = null } = {}) {
   requestAnimationFrame(resizeAll);
 }
 
+// Each source falls in exactly one bucket, so the summary tally adds up.
+const BUCKET_CLASS = {
+  fresh: 'dim', partial: 'src-partial', stale: 'src-partial', unknown: 'src-partial',
+  failed: 'src-error', skipped: 'dim',
+};
+
+function sourceBucket(source) {
+  if (source.status === 'ok' && ['current', 'recent'].includes(source.freshness)) return 'fresh';
+  if (source.status === 'error') return 'failed';
+  if (source.status === 'partial') return 'partial';
+  if (source.status === 'skipped') return 'skipped';
+  return source.freshness === 'stale' ? 'stale' : 'unknown';
+}
+
 function renderFooter(manifest) {
   const footer = document.getElementById('footer');
   footer.innerHTML = '';
@@ -192,7 +206,30 @@ function renderFooter(manifest) {
     `Session: ${manifest.as_of} · Holdings file: ${manifest.holdings_as_of}`,
   ]));
 
-  const sources = (manifest.sources || []).map((source) => {
+  const all = manifest.sources || [];
+  const notes = all.filter((s) => s.error);
+
+  // Summary: the total, the non-empty buckets, then the number of notes.
+  const counts = {};
+  all.forEach((s) => { const b = sourceBucket(s); counts[b] = (counts[b] || 0) + 1; });
+  const summary = [`Sources: ${all.length}`];
+  Object.entries(BUCKET_CLASS).forEach(([bucket, cls]) => {
+    if (counts[bucket]) summary.push(' · ', el('span', { class: cls }, `${counts[bucket]} ${bucket}`));
+  });
+  if (notes.length) summary.push(' · ', el('span', { class: 'dim' }, `${notes.length} notes`));
+  footer.append(el('div', {}, summary));
+
+  // Exceptions: every source that is not both ok and fresh, with its reason.
+  all.filter((s) => sourceBucket(s) !== 'fresh').forEach((source) => {
+    const when = `${source.status}, ${source.freshness}${source.observed_date ? `, ${source.observed_date}` : ''}`;
+    footer.append(el('div', {}, [
+      el('span', { class: BUCKET_CLASS[sourceBucket(source)], text: source.label }),
+      el('span', { class: 'dim', text: ` (${when})${source.error ? `: ${source.error}` : ''}` }),
+    ]));
+  });
+
+  // The full list and the per-source notes sit behind a fold.
+  const nodes = all.map((source) => {
     const cls = source.status === 'ok' ? 'src-ok' : source.status === 'partial' ? 'src-partial' : source.status === 'skipped' ? 'dim' : 'src-error';
     return el('span', {}, [
       el('span', { class: cls, text: source.label }),
@@ -200,16 +237,15 @@ function renderFooter(manifest) {
     ]);
   });
   const list = el('div', {}, ['Sources: ']);
-  sources.forEach((node, index) => {
+  nodes.forEach((node, index) => {
     if (index) list.append(document.createTextNode(' · '));
     list.append(node);
   });
-  footer.append(list);
-
-  const partial = (manifest.sources || []).filter((s) => s.error);
-  partial.forEach((source) => {
-    footer.append(el('div', { class: 'dim', text: `${source.label}: ${source.error}` }));
+  const details = el('details', { class: 'src-details' }, [el('summary', { text: 'All sources and notes' }), list]);
+  notes.forEach((source) => {
+    details.append(el('div', { class: 'dim', text: `${source.label}: ${source.error}` }));
   });
+  footer.append(details);
 
   const errors = Object.entries(manifest.errors || {});
   if (errors.length) {

@@ -10,7 +10,7 @@ from __future__ import annotations
 import pandas as pd
 
 from ..compute import rotation as R
-from ..util import clean_float
+from ..util import clean_float, company_name
 
 SCHEMES = ("cap", "equal")
 # Sessions of daily relative strength the page can chart (the 12M window).
@@ -114,7 +114,7 @@ def build(ctx) -> dict:
             continue
         rows.append({
             "ticker": symbol,
-            "name": str(row["name"]).title(),
+            "name": company_name(row["name"]),
             "sector": row["sector"],
             "sub_sector": row["sub_sector"],
             "weight": clean_float(row["weight"], 3),

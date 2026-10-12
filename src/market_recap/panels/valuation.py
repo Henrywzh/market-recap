@@ -22,7 +22,7 @@ import pandas as pd
 from ..compute import valuation as V
 from ..config import VALUATION_ARTIFACT_DIR
 from ..sources import estimates, forward_pe_history, sec, snapshot_store
-from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, prune_stale, write_json
+from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, company_name, prune_stale, write_json
 from .financials import cik_for, universe
 
 # How far a company's share of index market cap may sit from its share of SPY
@@ -440,7 +440,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
     meta, indices = {}, {}
     for key, frame in ctx.members.items():
         for row in frame.drop_duplicates("yahoo_symbol").itertuples():
-            meta.setdefault(row.yahoo_symbol, {"name": str(row.name).title(), "sector": row.sector,
+            meta.setdefault(row.yahoo_symbol, {"name": company_name(row.name), "sector": row.sector,
                                                "sub_sector": getattr(row, "sub_sector", None)})
             indices.setdefault(row.yahoo_symbol, []).append(key)
 

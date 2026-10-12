@@ -602,51 +602,46 @@ export function timelineCard(payload, prices, macro, asOf, { daysAhead = 45 } = 
 }
 
 // Where the name stands now, in the market's own numbers: what the street
-// expects, how fast that has moved, what multiple it pays for it, how the
-// stock has taken good news, and where the price sits. Facts with short
-// readings -- the reader draws the conclusion.
-export function situationCard(payload, row, prices) {
-  const rev = Object.fromEntries((payload.revisions || []).map((r) => [r.period, r]));
+// expects, how fast that has moved, how the stock has taken its reports and
+// where the price sits. Facts with short readings -- the reader draws the
+// conclusion. TICKER draws them in its summary strip.
+export function situation(payload, row, prices) {
+  const rev = Object.fromEntries((payload?.revisions || []).map((r) => [r.period, r]));
   const thisYear = rev['0y'];
   const nextYear = rev['+1y'];
-  const hs = payload.history_summary || {};
-  const stats = [];
-  const reads = [];
+  const hs = payload?.history_summary || {};
+  const out = { reads: [] };
   if (thisYear?.eps && nextYear?.eps) {
-    const growth = (nextYear.eps / thisYear.eps - 1) * 100;
-    stats.push(stat('STREET EXPECTS', `${pct(growth, 0)} EPS`, `FY to ${nextYear.end?.slice(0, 7)}: ${num(nextYear.eps, 2)} vs ${num(thisYear.eps, 2)} (${thisYear.end?.slice(0, 7)})`, dirClass(growth)));
+    out.growth = (nextYear.eps / thisYear.eps - 1) * 100;
+    out.growthNote = `FY to ${nextYear.end?.slice(0, 7)} ${num(nextYear.eps, 2)} vs ${num(thisYear.eps, 2)}`;
   }
   const drift = nextYear?.changes?.['90d'];
   if (drift !== undefined && drift !== null) {
-    stats.push(stat('NEXT-YEAR EPS · 90D', pct(drift, 1), `this year ${pct(thisYear?.changes?.['90d'], 1)} · ${nextYear.up_30d ?? 0}↑ ${nextYear.down_30d ?? 0}↓ revisions in 30d`, dirClass(drift)));
-    if (drift >= 10) reads.push(['estimates rising fast', 'up']);
-    else if (drift <= -10) reads.push(['estimates falling fast', 'down']);
+    out.drift = drift;
+    out.driftNote = `this year ${pct(thisYear?.changes?.['90d'], 1)} · ${nextYear.up_30d ?? 0}↑ ${nextYear.down_30d ?? 0}↓ revisions in 30d`;
+    if (drift >= 10) out.reads.push(['estimates rising fast', 'up']);
+    else if (drift <= -10) out.reads.push(['estimates falling fast', 'down']);
   }
   if (row?.pe_forward) {
     const trailing = row.pe_operating ?? row.pe;
-    stats.push(stat('FORWARD P/E', `${num(row.pe_forward, 1)}×`, trailing ? `trailing ${num(trailing, 1)}×${row.pe_percentile !== null && row.pe_percentile !== undefined ? ` (${Math.round(row.pe_percentile)}th pct of own 10y)` : ''}` : 'next twelve months'));
-    if (trailing && row.pe_forward < 0.5 * trailing) reads.push(['forward multiple under half the trailing: earnings expected to jump', 'info']);
-    if (trailing && row.pe_forward > 1.2 * trailing) reads.push(['forward above trailing: earnings expected to fall', 'warn']);
+    if (trailing && row.pe_forward < 0.5 * trailing) out.reads.push(['forward multiple under half the trailing: earnings expected to jump', 'info']);
+    if (trailing && row.pe_forward > 1.2 * trailing) out.reads.push(['forward above trailing: earnings expected to fall', 'warn']);
   }
   if (hs.measured) {
-    stats.push(stat('ON ITS REPORTS', `beat ${hs.beats}/${hs.measured}`, `fell after ${hs.beat_and_fell} of the beats · up ${hs.up} of ${hs.reports}`));
-    if (hs.beats >= 4 && hs.beat_and_fell >= hs.beats / 2) reads.push([`beats have been priced in: fell after ${hs.beat_and_fell} of ${hs.beats}`, 'warn']);
+    out.reports = hs;
+    // A count, not a cause: a beat followed by a fall can mean the news was
+    // in the price, or that something else in the report mattered more.
+    if (hs.beats >= 4 && hs.beat_and_fell >= hs.beats / 2) out.reads.push([`beat ${hs.beats} of last ${hs.measured}, fell after ${hs.beat_and_fell} of them`, 'warn']);
   }
   if (prices?.close?.length > 252) {
     const close = prices.close;
     const last = close[close.length - 1];
-    const yearAgo = close[close.length - 253];
     const high = Math.max(...close.slice(-252).filter((v) => v !== null));
-    const off = (last / high - 1) * 100;
-    stats.push(stat('PRICE', pct((last / yearAgo - 1) * 100, 0), `1Y · ${off > -1 ? 'at its 52-week high' : `${pct(off, 0)} from its 52-week high`}`, dirClass(last - yearAgo)));
-    if (off <= -25) reads.push([`${pct(off, 0)} from its high`, 'down']);
+    out.change1y = (last / close[close.length - 253] - 1) * 100;
+    out.offHigh = (last / high - 1) * 100;
+    if (out.offHigh <= -25) out.reads.push([`${pct(out.offHigh, 0)} from its high`, 'down']);
   }
-  if (!stats.length) return null;
-  return card('SITUATION · WHAT THE MARKET HAS PRICED', el('span', { class: 'tag-row' }, reads.map(([text, tone]) => tag(text, tone))), [
-    el('div', { class: 'stat-strip event-stats' }, stats),
-    el('div', { class: 'field-note', text: 'Street expects: next fiscal year\'s consensus EPS against this one\'s (Yahoo). 90D: how far that consensus has moved in 90 days. Forward P/E: price over the next twelve months\' consensus EPS; trailing on the operating basis where the filings allow. '
-      + 'On its reports: beats of consensus and the share followed by a fall -- a pattern where good news was already in the price. The story behind it is in TIMELINE and WHAT MOVED IT below.' }),
-  ]);
+  return out;
 }
 
 // Every report reaction and every large move, newest first, each with what was

@@ -251,3 +251,34 @@ test('an index chart\'s value range always holds the previous close', async () =
   assert.ok(l2 < 100 && h2 > 100);
   assert.equal(valueRange({ c: [] }, null), null);
 });
+
+test('bond-market holidays: Columbus Day and Veterans Day, observed as the bond market does', () => {
+  assert.equal(L.bondHoliday('2026-10-12'), true);    // the second Monday of October
+  assert.equal(L.bondHoliday('2026-10-13'), false);
+  assert.equal(L.bondHoliday('2026-10-05'), false);   // the first Monday is not one
+  assert.equal(L.bondHoliday('2025-10-13'), true);
+  assert.equal(L.bondHoliday('2026-11-11'), true);    // a Wednesday
+  assert.equal(L.bondHoliday('2029-11-12'), true);    // Nov 11 is a Sunday: the Monday after
+  assert.equal(L.bondHoliday('2028-11-10'), false);   // Nov 11 is a Saturday: no weekday closure
+  assert.equal(L.bondHoliday('2028-11-13'), false);
+  assert.equal(L.bondHoliday('not a date'), false);
+});
+
+test('the strip\'s day is New York\'s calendar day, not UTC\'s', () => {
+  assert.equal(L.newYorkDate(Date.parse('2026-10-12T03:00:00Z')), '2026-10-11');   // 23:00 on the 11th in New York
+  assert.equal(L.newYorkDate(Date.parse('2026-10-12T15:00:00Z')), '2026-10-12');
+  assert.equal(L.newYorkDayLabel(Date.parse('2026-10-12T15:00:00Z')), 'MON OCT 12');
+});
+
+test('the five primary quotes lead in their own order; the rest follow in strip order', async () => {
+  const { splitPrimary, PRIMARY } = await import('../../web/js/live.js');
+  const quotes = [
+    { label: 'NVDA', kind: 'watch' }, { label: 'DXY', kind: 'macro' }, { label: 'WTI', kind: 'macro' },
+    { label: 'UST 10Y', kind: 'rate' }, { label: 'VIX', kind: 'macro' }, { label: 'NDX', kind: 'index' },
+    { label: 'SPX', kind: 'index' }, { label: 'UST 2Y', kind: 'rate' },
+  ];
+  assert.deepEqual(PRIMARY, ['SPX', 'NDX', 'VIX', 'UST 10Y', 'DXY']);
+  const [primary, rest] = splitPrimary(quotes);
+  assert.deepEqual(primary.map((q) => q.label), ['SPX', 'NDX', 'VIX', 'UST 10Y', 'DXY']);
+  assert.deepEqual(rest.map((q) => q.label), ['UST 2Y', 'WTI', 'NVDA']);
+});

@@ -19,7 +19,7 @@ from ..compute import xray as X
 from ..compute.returns import period_return
 from ..config import XRAY_ARTIFACT_DIR
 from ..sources import invesco, ishares, ssga, vanguard
-from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, prune_stale, write_json
+from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, company_name, prune_stale, write_json
 
 PROVIDERS = {
     "ssga": ("State Street daily holdings", ssga.fetch_holdings, "fund_holdings"),
@@ -121,7 +121,7 @@ def _equity_payload(ctx, ticker: str, frame: pd.DataFrame, sectors: dict[str, st
         "top": [
             {
                 "symbol": row.symbol,
-                "name": row.name,
+                "name": company_name(row.name),
                 "weight": clean_float(row.weight, 5),
                 "sector": row.sector if isinstance(row.sector, str) else None,
                 "country": getattr(row, "country", None),

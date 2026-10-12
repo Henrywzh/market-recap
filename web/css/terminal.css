@@ -381,6 +381,8 @@ a:hover { text-decoration: underline; }
 .src-ok { color: var(--up); }
 .src-partial { color: var(--accent); }
 .src-error { color: var(--down); }
+.src-details { margin-top: 4px; }
+.src-details summary { cursor: pointer; color: var(--text-dim); user-select: none; }
 
 .loading { padding: 40px 10px; color: var(--text-dim); font-size: 12px; }
 .hidden { display: none !important; }
@@ -716,9 +718,10 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .sectors-valuation { margin-bottom: 10px; }
 
 /* ---------- RISK ---------- */
-.risk-summary { margin-bottom: 10px; }
-.risk-summary .stat-note { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
-.risk-summary .mchip { margin: 0; }
+.risk-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-bottom: 10px; padding: 7px 10px;
+  border: 1px solid var(--border); background: var(--panel); font-size: 12px; }
+.risk-status .mchip { margin: 0; }
+.risk-status-count { font-weight: 700; letter-spacing: 0.04em; }
 .risk-horizon { margin-top: 14px; }
 .risk-sections { align-items: start; }
 .risk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin-bottom: 8px; }
@@ -771,6 +774,15 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .chart.ov-perf { height: 300px; }
 .chart.ov-mid { height: 190px; }
 .ov-sub { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+/* The line between the live strip and the session's close: small, dim, under a rule. */
+.ov-close-head { font-size: 10px; letter-spacing: 0.12em; color: var(--text-dim); margin: 12px 0 10px; padding-top: 7px; border-top: 1px solid var(--border-strong); }
+.ov-more { margin-top: 10px; }
+.ov-more > summary { cursor: pointer; list-style: none; font-size: 10px; letter-spacing: 0.08em; color: var(--text-dim); }
+.ov-more > summary::-webkit-details-marker { display: none; }
+.ov-more > summary::before { content: '+ '; }
+.ov-more[open] > summary::before { content: '− '; }
+.ov-more > summary:hover { color: var(--text); }
+.ov-more > .table-scroll { margin-top: 8px; }
 .ov-note { font-size: 11px; margin-top: 6px; }
 .ov-dist-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
 .ov-dist-head .ov-contrib-head { margin: 0; }
@@ -811,10 +823,10 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .ov-vol-stats { margin-top: 3px; font-variant-numeric: tabular-nums; }
 .move-card { display: grid; grid-template-columns: minmax(180px, 240px) 1fr; gap: 12px; align-items: start; }
 @media (max-width: 720px) { .move-card { grid-template-columns: 1fr; } }
-.ov-risk { display: flex; gap: 8px; align-items: baseline; font-size: 11.5px; padding: 6px 10px; margin-bottom: 10px; border: 1px solid var(--border); background: var(--panel); text-decoration: none; color: inherit; }
+.ov-risk { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; font-size: 11.5px; padding: 6px 10px; margin-bottom: 10px; border: 1px solid var(--border); background: var(--panel); text-decoration: none; color: inherit; }
 .ov-risk.down { border-color: color-mix(in srgb, var(--down) 60%, transparent); }
 .ov-risk:hover { border-color: var(--border-strong); text-decoration: none; }
-.ov-risk-label { font-size: 10px; letter-spacing: 0.1em; color: var(--text-dim); }
+.ov-risk-label { flex: none; font-size: 10px; letter-spacing: 0.1em; color: var(--text-dim); }
 .ov-event { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; align-items: baseline; }
 .ov-event:last-child { border-bottom: none; }
 .ov-event-figure { font-size: 11px; text-align: right; }
@@ -846,6 +858,16 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .risk-more > summary::-webkit-details-marker { display: none; }
 .risk-more > summary::before { content: '▸ '; }
 .risk-more[open] > summary::before { content: '▾ '; }
+
+/* ---------- TICKER: groups and folded detail ---------- */
+.ticker-reads { margin: 6px 0 2px; }
+.ticker-group { margin: 18px 0 8px; padding-top: 8px; border-top: 1px solid var(--border-strong);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: var(--accent); }
+.fold { margin: 0 0 10px; }
+.fold > summary { cursor: pointer; font-size: 11px; letter-spacing: 0.08em; color: var(--text-dim); padding: 6px 0; list-style: none; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: '▸ '; }
+.fold[open] > summary::before { content: '▾ '; }
 .ticker-eo-stats { margin-bottom: 8px; }
 
 /* ---------- State tags and history ranges ---------- */
@@ -1023,8 +1045,12 @@ table.data td.chain-quote { min-width: 280px; }
 .replay-slider { flex: 1 1 220px; min-width: 160px; accent-color: var(--accent); }
 .replay-day { font-size: 13px; white-space: nowrap; }
 .replay-log { display: grid; gap: 4px; margin-top: 6px; font-size: 12px; line-height: 1.45; min-height: 3em; }
-/* LIVE: the names row under the strip, and the index charts on INDICES. */
-.live-strip-names { margin-top: 6px; }
+/* LIVE: the five primary quotes in one row, the rest behind a toggle, and the index charts on INDICES. */
+.live-strip-primary { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 0; }
+.live-more-row { display: flex; justify-content: flex-end; margin: 4px 0 6px; }
+.live-strip-more { margin-bottom: 6px; }
+.live-strip-more[hidden], .live-more-row[hidden] { display: none; }
+@media (max-width: 640px) { .live-strip-primary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .live-index-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .live-index-head .stat-value { font-size: 15px; }
 

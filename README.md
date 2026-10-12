@@ -47,16 +47,22 @@ probabilities from fed funds futures beside Kalshi and Polymarket, the path
 a week and a month ago, the SOFR path and every open Kalshi release ladder.
 
 **Ticker** (`#ticker/AAPL`) is one company on one page, reached from any
-ticker link. It opens with the name's situation (what the street expects,
-how fast that moved, the multiple paid for it, how beats were taken), the
-next or last report, a timeline of its own events and what is ahead
+ticker link. A summary strip says each thing once: the close against a year
+ago and its high, the month against its sector peers, the valuation against
+its own ten years (P/E; P/TBV with ROTCE for a bank), the 90-day revision to
+next year's EPS, the next report with its implied move, and MONITOR's state,
+with short neutral tags where a pattern is plain. Then three groups. RECENT:
+a report the last session traded on, the evidence for and against (MONITOR's,
+plus insider buying from Form 4, short interest and rating changes for focus
+names), recent 8-Ks and the industry data since the last report. NEXT
+REPORT: the event card, a timeline of its own events and what is ahead
 (peers' reports, macro dates, its themes' data releases, announced and
-hand-kept company events), and WHAT MOVED IT -- every report and large move
-with what happened that session, headlines included; then header readings, price and
-trend, P/E against its own ten years, valuation against the sector median,
-evidence (MONITOR's, plus insider buying from Form 4, short interest and
-rating changes for focus names), earnings reactions to the last eight 8-K
-releases against the options-implied move, the IV term structure, and the
+hand-kept company events), the last eight reports and the estimate
+revisions folded, and the options' implied move and term structure. LONG
+TERM: price and trend, P/E against its own ten years, valuation against the
+sector median (a bank against its sub-industry, on bank measures), WHAT
+MOVED IT -- every report and large move with what happened that session,
+headlines included -- its AI-chain links and the
 filed statements. Each section is drawn by
 the panel that owns it, so nothing is computed twice. Views that take a
 ticker read it after a slash (`#dcf/MSFT`, `#technicals/NVDA`); hashes from

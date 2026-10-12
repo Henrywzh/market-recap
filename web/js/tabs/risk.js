@@ -180,7 +180,7 @@ function termChart(node, charts) {
 
 // `charts` histories are drawn one above the other; a click puts that tile's history
 // first and drops the oldest. Series past their line are shown first.
-function sectionCard(section, data, { charts = 1 } = {}) {
+function sectionCard(section, data, { charts = 1, head = null } = {}) {
   const tiles = section.tiles;
   let selected = [...tiles.filter((t) => t.breach), ...tiles.filter((t) => !t.breach)].slice(0, charts).map((t) => t.key);
   const grid = el('div', { class: 'risk-grid' });
@@ -212,10 +212,21 @@ function sectionCard(section, data, { charts = 1 } = {}) {
     requestAnimationFrame(() => termChart(termNode, data.charts || {}));
   }
   requestAnimationFrame(draw);
-  return card(section.label, el('span', { class: breached ? 'down' : 'dim', text: breached ? `${breached} of ${tiles.length} past threshold` : `${tiles.length} series · none past threshold` }), body);
+  return card(section.label, head ? el('span', { class: 'dim', text: head }) : el('span', { class: breached ? 'down' : 'dim', text: breached ? `${breached} of ${tiles.length} past threshold` : `${tiles.length} series · none past threshold` }), body);
 }
 
 const pctOf = (v) => (present(v) ? `${Math.round(v * 100)}%` : DASH);
+
+// What holds the anchor below full exposure today, in the rule's own terms.
+export function anchorLimits(c) {
+  if (!c) return [];
+  return [
+    c.trend_on === false ? 'TREND OFF (cap 50%)' : null,
+    c.copper_oil_on === false ? `COPPER/OIL OFF (cap ${Math.round((c.copper_oil_cap ?? 0.5) * 100)}%)` : null,
+    present(c.vol_scaled) && c.vol_scaled < 1 ? `VOL TARGET ×${num(c.vol_scaled, 2)}` : null,
+    present(c.ladder) && c.ladder < 1 ? `DRAWDOWN LADDER ×${num(c.ladder, 1)}` : null,
+  ].filter(Boolean);
+}
 
 function anchorCard(a) {
   if (!a || a.unavailable) return card('SYSTEMATIC ANCHOR', null, el('div', { class: 'gap', text: 'The anchor was not built for this session.' }));
@@ -243,10 +254,15 @@ function anchorCard(a) {
   };
   requestAnimationFrame(draw);
   const last = a.changes[a.changes.length - 1];
-  return card('SYSTEMATIC ANCHOR · EQUITY EXPOSURE', el('span', { class: 'dim', text: 'quantamental-lab frozen v1' }), [
+  const binding = anchorLimits(c);
+  const path = a.next === a.held || pctOf(a.next) === pctOf(a.held)
+    ? `unchanged next session${last ? ` · since ${last.date}` : ''}`
+    : `next session ${pctOf(a.next)}`;
+  return card('SYSTEMATIC ANCHOR · MODEL EXPOSURE', el('span', { class: 'dim', text: 'quantamental-lab v1 · not a position' }), [
     el('div', { class: 'anchor-head' }, [
       el('span', { class: 'anchor-value', text: pctOf(a.held) }),
-      el('span', { class: 'dim', text: `held · next session ${pctOf(a.next)}${last ? ` · since ${last.date}` : ''}` }),
+      el('span', { class: 'dim', text: `model target · ${path}` }),
+      el('span', { class: binding.length ? 'down' : 'dim', text: binding.length ? `limited by ${binding.join(' + ')}` : 'no limit binding' }),
     ]),
     el('div', { class: 'anchor-chips tag-row' }, [
       tag(`VOL ${present(c.realised_vol) ? num(c.realised_vol * 100, 1) : DASH}% → ×${num(c.vol_scaled, 2)}`, c.vol_scaled < 1 ? 'warn' : 'dim'),
@@ -325,20 +341,23 @@ function sentimentCard(g) {
   ]);
 }
 
+// One line for the page's state: which core series are past their line,
+// what crossed this week (only when something did), and the rest.
 function summary(data, core) {
   const past = core.filter((t) => t.breach);
   const others = data.sections.flatMap((s) => s.tiles).filter((t) => !t.core);
-  const stat = (label, value, note, cls = '') => el('div', { class: 'stat' }, [
-    el('div', { class: 'stat-label', text: label }),
-    el('div', { class: `stat-value ${cls}`, text: value }),
-    note ? el('div', { class: 'stat-note' }, note) : null,
-  ]);
   const changed = data.crossed.filter((b) => core.some((t) => t.key === b.key));
-  return el('div', { class: 'stat-strip risk-summary' }, [
-    stat('CORE PAST THEIR LINE', `${past.length} of ${core.length}`, past.map((t) => el('span', { class: 'mchip down', text: `${t.label} ${formatValue(t.value, t.unit)}` })), past.length ? 'down' : ''),
-    stat('CHANGED THIS WEEK', String(changed.length),
-      changed.map((b) => el('span', { class: `mchip ${b.crossed === 'into' ? 'down' : 'up'}`, text: `${b.label} ${b.crossed === 'into' ? '↑ in' : '↓ out'}` }))),
-    stat('OTHER SERIES', `${others.filter((t) => t.breach).length} of ${others.length}`, ['past their line · listed below']),
+  const sep = () => el('span', { class: 'dim', text: ' · ' });
+  return el('div', { class: 'risk-status' }, [
+    el('span', { class: past.length ? 'down risk-status-count' : 'risk-status-count', text: `${past.length} of ${core.length} core past their line` }),
+    ...past.map((t) => el('span', { class: 'mchip down', text: `${t.label} ${formatValue(t.value, t.unit)}` })),
+    sep(),
+    changed.length
+      ? el('span', {}, [el('span', { class: 'dim', text: 'this week ' }),
+        ...changed.map((b) => el('span', { class: `mchip ${b.crossed === 'into' ? 'down' : 'up'}`, text: `${b.label} ${b.crossed === 'into' ? '↑ in' : '↓ out'}` }))])
+      : el('span', { class: 'dim', text: 'none crossed this week' }),
+    sep(),
+    el('span', { class: 'dim', text: `other series ${others.filter((t) => t.breach).length} of ${others.length} past their line, listed below` }),
   ]);
 }
 
@@ -360,11 +379,12 @@ export default function renderRisk(root, payload) {
   if (!data || data.unavailable) throw new Error(data?.unavailable || 'risk artifact missing');
   const core = data.sections.flatMap((s) => s.tiles.map((t) => ({ ...t, horizon: s.horizon }))).filter((t) => t.core);
   const total = data.sections.reduce((n, s) => n + s.tiles.length, 0);
-  root.append(metaRow(`RISK · ANCHOR AND ${core.length} CORE SERIES · AS OF ${data.as_of} · CLICK A TILE FOR ITS HISTORY (TWO SHOWN)`, methodNotes()));
+  root.append(metaRow(`RISK · ANCHOR AND ${core.length} CORE SERIES · AS OF ${data.as_of}`, methodNotes()));
   root.append(summary(data, core));
   root.append(el('div', { class: 'grid risk-top' }, [
     el('div', { class: 'risk-left' }, [anchorCard(anchor), sentimentCard(data.sentiment)]),
-    sectionCard({ key: 'core', label: 'CORE SERIES', tiles: core }, data, { charts: 2 }),
+    // The status line above already counts the core series past their line.
+    sectionCard({ key: 'core', label: 'CORE SERIES', tiles: core }, data, { charts: 2, head: 'click a tile for its history' }),
   ]));
 
   // Everything else, drawn only when opened: a chart laid out while folded
