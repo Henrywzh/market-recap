@@ -92,7 +92,7 @@ export default function renderSizek(root, data, _manifest, ctx = {}) {
     root.append(gap('No size-K measurements in this build.'));
     return;
   }
-  root.append(sectionTitle('SIZE K', 'SIZE AND STYLE: ONE ARM AGAINST ANOTHER'));
+  root.append(sectionTitle('SIZE & STYLE', 'ONE ARM AGAINST ANOTHER'));
   root.append(metaRow(`AS OF ${data.as_of} · PRICES THROUGH ${data.inputs.prices_through}${data.inputs.no_prices.length ? ` · NO PRICES: ${data.inputs.no_prices.join(', ')}` : ''}`, data.notes));
   const wanted = String(ctx.arg || '').toLowerCase();
   const keys = data.views.map((v) => v.key);
