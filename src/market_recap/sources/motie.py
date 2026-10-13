@@ -35,13 +35,13 @@ NAMESPACE = "motie"
 UA = "Mozilla/5.0"
 _TITLE = re.compile(r"^(\d{4})년\s*(?:(?:상|하)반기\s*및\s*|연간\s*및\s*)?(\d{1,2})월\s*(?:및\s*(?:상|하)반기\s*)?수출입\s*동향$")
 # The chip line has been written four ways; each rule yields (US$ 억, y/y %):
-#   2026   "반도체 수출(466.5억 달러, +209.0%)"
+#   2026   "반도체 수출(466.5억 달러, +209.0%)", from 2026-09 with no "%": "(603.0억 달러, +262.8)"
 #   2025H1 "반도체 수출은 101억 달러(+8.1%)"
 #   2025H2 "반도체 수출은 25.4% 증가한 157.3억 달러로"
 #   list   "수출증가품목(억 달러, %) : 반도체166.1(+22.0)", "증가품목 수출액·증감률(억 달러, %) : 반도체 151.0(+27.1)"
 _AMOUNT, _PCT = r"([\d,.]+)", r"([+△-]?\s*[\d,.]+)"
 _SEMIS = (
-    (re.compile(rf"반도체\s*수출\s*\(\s*{_AMOUNT}\s*억\s*달러\s*,\s*{_PCT}\s*%\s*\)"), lambda m: (m.group(1), m.group(2))),
+    (re.compile(rf"반도체\s*수출\s*\(\s*{_AMOUNT}\s*억\s*달러\s*,\s*{_PCT}\s*%?\s*\)"), lambda m: (m.group(1), m.group(2))),
     (re.compile(rf"반도체\s*수출은\s*{_AMOUNT}\s*억\s*달러\s*\(\s*{_PCT}\s*%\s*\)"), lambda m: (m.group(1), m.group(2))),
     (re.compile(rf"반도체\s*수출은\s*{_PCT}\s*%\s*(증가|감소)한\s*{_AMOUNT}\s*억\s*달러"),
      lambda m: (m.group(3), ("-" if m.group(2) == "감소" else "") + m.group(1).lstrip("+"))),

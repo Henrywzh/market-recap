@@ -488,7 +488,13 @@ def _korea_flash(as_of: date) -> dict:
     if not rows:
         raise RuntimeError("; ".join(failed) or "no release read")
     latest = rows[-1]["month"]
-    return {"months": rows, "failed": failed, "due": T.monthly_due(latest, 1, as_of), "page": motie.LIST_URL}
+    due = T.monthly_due(latest, 1, as_of)
+    # A release the ministry published that this build could not read is not
+    # late: it is out, and the calendar says so instead of waiting on it.
+    unread = next((why for why in failed if due and why.startswith(f"{due['month']}:")), None)
+    if due and unread:
+        due = {**due, "late": False, "unread": unread}
+    return {"months": rows, "failed": failed, "due": due, "page": motie.LIST_URL}
 
 
 # PCPartPicker's Cloudflare refuses cloud servers (HTTP 403) and is not worked
@@ -1272,7 +1278,8 @@ def _data_dates(groups: list[dict], cloud: dict, semis: dict, as_of: date, setti
     def add(key: str, title: str, due: dict | None) -> None:
         if due and due["due"] <= end and key in by_key:
             by_key[key]["calendar"].append({"date": max(due["due"], (as_of + timedelta(days=1)).isoformat()), "kind": "data",
-                                            "title": f"{title} ({due['month']})", "late": due["late"]})
+                                            "title": f"{title} ({due['month']})" + (" · released, not read" if due.get("unread") else ""),
+                                            "late": due["late"]})
 
     for series in cloud.get("odm") if isinstance(cloud.get("odm"), list) else []:
         add("cloud", f"{series['label']} monthly revenue", series.get("due"))

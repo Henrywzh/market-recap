@@ -219,6 +219,9 @@ def test_motie_release_figures():
     assert out == {"released": "2026-09-01", "released_time": "11:00", "semis_bn": 46.65, "semis_yoy_pct": 209.0,
                    "total_bn": 98.25, "total_yoy_pct": 68.7}
     assert motie.parse_text("반도체 수출(80.2억 달러, △12.5%)")["semis_yoy_pct"] == -12.5
+    # September 2026 dropped the "%" inside the brackets.
+    sept = motie.parse_text("(IT) 반도체 수출(603.0억 달러, +262.8)은 메모리 수요 증가세가 지속되며,")
+    assert sept["semis_bn"] == 60.3 and sept["semis_yoy_pct"] == 262.8
     # The other wordings; the exact figure beats the rounded item list, and a
     # half-year or annual figure larger than the month's exports is skipped.
     late_2025 = ("* 수출 증가 품목(억 달러, %) : 반도체1,734(+22.2)\n12월 수출은 전년 대비 13.4% 증가한 696억 달러\n"
@@ -582,3 +585,13 @@ def test_the_validator_takes_a_theme_basket_or_a_note_and_refuses_a_group_with_n
         ("error", "y: history years are not an increasing list of fiscal years"),
         ("error", "z: a valuation basket names no bellwethers"),
     ]
+
+
+def test_a_flash_release_out_but_unread_is_not_late(monkeypatch):
+    from datetime import date
+    from market_recap.panels import themes as panel
+    rows = [{"month": "2026-08", "released": "2026-09-01", "semis_bn": 46.65}]
+    monkeypatch.setattr(panel.motie, "fetch", lambda as_of: (rows, ["2026-09: semiconductor line not found"]))
+    out = panel._korea_flash(date(2026, 10, 13))
+    assert out["due"]["month"] == "2026-09" and out["due"]["late"] is False
+    assert "not found" in out["due"]["unread"]
