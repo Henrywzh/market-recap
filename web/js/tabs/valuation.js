@@ -22,7 +22,6 @@ const ALL = '';
 // The P/E history's earnings bases, as the switch names them.
 const BASIS_NAMES = { operating: 'OPERATING', ex_gains: 'EX GAINS', reported: 'REPORTED' };
 // The scope switch's first option: the index and every sector, no sub-sector group.
-const SECTORS_SCOPE = 'SECTORS';
 // The valuation path's stages, in order (compute/valuation.py PATH_STAGES).
 const PATH_LABELS = { fy_prev: 'LAST FISCAL YEAR (actual)', fy0: 'THIS FISCAL YEAR', ntm: 'NEXT 12 MONTHS', fy1: 'NEXT FISCAL YEAR' };
 
@@ -265,31 +264,11 @@ export function renderAggregates(root, data) {
       + 'Both are trailing, not FactSet\'s forward operating P/E (on EARNINGS), so they run higher and move more around recessions. Percentile and band are over the last ten years of sessions, each on its own basis.',
     'VALUATION PATH: total market cap over total consensus EPS at last fiscal year (the actual, as Yahoo carries it), this fiscal year, the next twelve months and next fiscal year -- all on the analysts\' basis, so a step is earnings growth, not a change of accounting, and the same companies count at every stage. A group is drawn only when they hold at least '
       + `${num(agg.min_coverage * 100, 0)}% of its market cap. Each company's fiscal year is its own, so a sector mixes year-ends. These multiples are not comparable with the trailing P/E above (filed EPS, a different basis), and a sector's forward P/E has no history of its own until consensus has been recorded for a year.`,
-    'SUB-SECTOR GROUPS: a sector the config divides (Financials) can be opened beside its parts -- diversified banks, regional banks, investment banks and brokers, asset managers, insurers, payments and consumer finance, exchanges -- each a total of its own members\' market cap over their earnings, on the same bases and with the same member and weight caveats as a sector. A company sits in one group by its current GICS sub-industry (the S&P 500 labels on Wikipedia); the groups need not add up to the sector.',
-    'P / TANGIBLE BOOK and ROTCE: market cap over total common tangible book (shareholders\' equity less preferred stock, goodwill and other intangibles, from the latest 10-Q), and total TTM income to common over total average tangible book. The P/TBV switch draws its ten years: the same total over time, each quarter\'s tangible book per share only from the balance sheet filed by that day (on today\'s share basis, over the quarter\'s diluted count, which for a company that buys back stock runs a little above the period-end count), weights and members today\'s, as for P/E. ROTCE has no history yet. A company that tags neither goodwill nor intangibles has no tangible book, one that tags no preferred stock is taken as having none (said on its row), and deferred tax on intangibles and mortgage-servicing rights are not adjusted, so a bank\'s own reported tangible book per share can differ. A company counts only with a positive tangible book; the figure is drawn when those companies hold the minimum share of the group\'s cap, which most non-financial groups do not. Beside P / TBV on the table, the scatter can set it against ROTCE: what a bank earns on tangible equity is what its multiple should follow.',
+    'P / TANGIBLE BOOK is a bank measure and is shown on the bank sub-industry pages in SECTORS (diversified, regional and investment banks), each group against its own ten years. It is not drawn for a sector: a company counts only with a positive tangible book, and many sectors\' largest names (Visa, Mastercard, Home Depot, Procter & Gamble, AbbVie) have none after buybacks and acquired goodwill, so too little of the sector\'s cap qualifies.',
     'WHAT YOU WOULD NEED TO BELIEVE: price = multiple x EPS, so a forward P/E moved by some turns with next-twelve-months EPS revised by some percent implies the price change shown. The axes are set in config/dashboard.toml. It is arithmetic on today\'s multiple; neither the multiple nor the revision is forecast.',
   ]));
   root.append(aggregateSection(data));
-  root.append(...subgroupNotes(agg.subgroups));
   return true;
-}
-
-// What the config's split of a sector could not place, said where the groups
-// are drawn: a group that vanished because of a renamed label must not vanish quietly.
-function subgroupNotes(report) {
-  if (!report) return [];
-  const notes = [];
-  if (report.unmatched?.length) {
-    notes.push(notice(`Configured sub-industries that no company carries (check the GICS spelling in config): ${report.unmatched.join(' · ')}.`));
-  }
-  if (report.too_small?.length) {
-    notes.push(notice(`Groups under ${report.min_members} companies, not drawn: ${report.too_small.map((g) => `${g.label} (${g.companies})`).join(' · ')}.`));
-  }
-  if (report.unassigned?.length) {
-    notes.push(el('div', { class: 'dim', text: 'SUB-INDUSTRIES IN NO GROUP (still in their sector\'s total): '
-      + report.unassigned.map((u) => `${u.sector} · ${u.sub_industry} (${u.tickers.join(', ')})`).join(' · ') }));
-  }
-  return notes;
 }
 
 function aggregateSection(data) {
@@ -297,12 +276,9 @@ function aggregateSection(data) {
   if (!agg || !agg.series?.length) return null;
   const primary = agg.series.find((s) => s.kind === 'index') || agg.series[0];
   let selected = primary.key;
-  // The bars compare the index and the sectors; a divided sector (Financials)
-  // can be opened to compare it with its own parts instead.
-  const parents = [...new Set(agg.series.filter((s) => s.kind === 'subsector').map((s) => s.parent))];
-  let scope = SECTORS_SCOPE;
-  const inScope = (s) => (scope === SECTORS_SCOPE ? s.kind !== 'subsector'
-    : (s.kind === 'sector' && s.label === scope) || (s.kind === 'subsector' && s.parent === scope));
+  // The bars compare the indices and the eleven sectors. The bank groups the
+  // config splits out of Financials are shown on their sub-industry pages.
+  const inScope = (s) => s.kind !== 'subsector';
   const barsNode = el('div', { class: 'chart tall' });
   const lineNode = el('div', { class: 'chart tall' });
   const lineTitle = el('span', { class: 'dim' });
@@ -319,17 +295,14 @@ function aggregateSection(data) {
   // Older artifacts carry only the reported series, under the plain keys.
   const bases = agg.alternate ? [BASIS_NAMES[agg.basis], BASIS_NAMES[agg.alternate]] : ['REPORTED'];
   let basis = bases[0];
-  // P / tangible book has its own ten years where the build had the balance sheets for it.
-  const MEASURES = ['P/E', 'P/TBV'];
-  const hasBook = agg.series.some((s) => s.stats_ptbv);
-  let measure = MEASURES[0];
+  // P / tangible book is a bank measure: most sectors have too little positive
+  // tangible book for a total, so it is shown on the bank sub-industry pages.
   const view = (s) => {
-    if (measure === 'P/TBV') return { ...s, stats: s.stats_ptbv, pe: s.ptbv, coverage: s.coverage_ptbv };
     const suffix = basis === 'REPORTED' && agg.alternate ? `_${agg.alternate}` : '';
     return { ...s, stats: s[`stats${suffix}`], pe: s[`pe${suffix}`], coverage: s[`coverage${suffix}`] };
   };
   const other = (s) => {
-    if (!agg.alternate || measure === 'P/TBV') return null;
+    if (!agg.alternate) return null;
     const suffix = basis === 'REPORTED' ? '' : `_${agg.alternate}`;
     return { name: basis === 'REPORTED' ? 'operating' : 'reported', pe: s[`pe${suffix}`] };
   };
@@ -337,45 +310,31 @@ function aggregateSection(data) {
     const shown = agg.series.map(view).filter(inScope);
     if (!shown.some((x) => x.key === selected)) selected = (shown.find((x) => x.kind === 'index') || shown[0]).key;
     const s = shown.find((x) => x.key === selected);
-    percentileChart(barsNode, shown, selected, (key) => { selected = key; draw(); }, measure);
-    const book = measure === 'P/TBV';
-    barsTitle.textContent = `${measure} VS OWN 10 YEARS · INDICES & SECTORS`;
-    lineCardTitle.textContent = `${measure} · 10 YEARS`;
-    if (basisSwitch) basisSwitch.style.display = book ? 'none' : '';
-    lineTitle.textContent = book
-      ? `${s.label} · ${s.companies} companies · weekly · common tangible book as filed`
-      : `${s.label} · ${s.companies} companies · weekly · ${basis.toLowerCase()} earnings`;
+    percentileChart(barsNode, shown, selected, (key) => { selected = key; draw(); });
+    lineTitle.textContent = `${s.label} · ${s.companies} companies · weekly · ${basis.toLowerCase()} earnings`;
     if (s.stats) {
       const cap = s.stats.max > s.stats.p90 * AGGREGATE_AXIS_CAP ? s.stats.p90 * AGGREGATE_AXIS_CAP : null;
-      historyChart(lineNode, { dates: agg.dates, pe: s.pe, stats: s.stats, name: book ? 'p/tbv' : basis.toLowerCase() }, { cap, compare: other(agg.series.find((x) => x.key === selected)) });
+      historyChart(lineNode, { dates: agg.dates, pe: s.pe, stats: s.stats, name: basis.toLowerCase() }, { cap, compare: other(agg.series.find((x) => x.key === selected)) });
     }
     const st = s.stats || {};
     stats.replaceChildren(
-      stat(book ? 'P / TANGIBLE BOOK (as filed)' : `P/E (TTM, ${basis.toLowerCase()})`, present(st.current) ? `${num(st.current, 1)}x` : DASH, s.label),
+      stat(`P/E (TTM, ${basis.toLowerCase()})`, present(st.current) ? `${num(st.current, 1)}x` : DASH, s.label),
       stat('OWN 10Y PERCENTILE', present(st.percentile) ? `${num(st.percentile, 0)}th` : DASH, `range ${num(st.min, 1)}x – ${num(st.max, 1)}x`,
         st.percentile >= 80 ? 'down' : st.percentile <= 20 ? 'up' : ''),
       stat('VS 10Y MEDIAN', present(st.vs_median) ? `${st.vs_median > 0 ? '+' : ''}${num(st.vs_median, 0)}%` : DASH, `median ${num(st.median, 1)}x · IQR ${num(st.p25, 1)}–${num(st.p75, 1)}x`),
-      stat('COVERAGE', present(s.coverage) ? `${num(s.coverage * 100, 0)}%` : DASH,
-        book ? 'of its market cap with a positive tangible book' : 'of its market cap with filed EPS'),
+      stat('COVERAGE', present(s.coverage) ? `${num(s.coverage * 100, 0)}%` : DASH, 'of its market cap with filed EPS'),
       stat('FORWARD P/E (NTM)', present(s.forward_now?.pe) ? `${num(s.forward_now.pe, 1)}x` : DASH,
         s.forward_now ? `consensus EPS, ${num(s.forward_now.coverage * 100, 0)}% of cap · ${(s.forward_history?.dates || []).length} recorded days` : 'no consensus'),
-      stat('P / TANGIBLE BOOK', present(s.book?.ptbv) ? `${num(s.book.ptbv, 2)}x` : DASH,
-        s.book?.ptbv_coverage ? `latest filings, ${num(s.book.ptbv_coverage * 100, 0)}% of cap` : 'needs tangible book on most of its cap'),
-      stat('ROTCE (TTM)', present(s.book?.rotce) ? `${num(s.book.rotce, 1)}%` : DASH,
-        s.book?.rotce_coverage ? `income to common / avg tangible equity, ${num(s.book.rotce_coverage * 100, 0)}% of cap` : 'needs income to common'),
     );
     drawPath(s, pathNode, pathNote);
     drawScenario(s, agg.scenario, scenarioNode);
   };
   const basisSwitch = bases.length > 1 ? periodSwitch(bases, basis, (b) => { basis = b; draw(); }) : null;
-  const scopeSwitch = parents.length ? periodSwitch([SECTORS_SCOPE, ...parents], scope, (v) => { scope = v; draw(); }) : null;
-  const measureSwitch = hasBook ? periodSwitch(MEASURES, measure, (m) => { measure = m; draw(); }) : null;
   const section = el('div', { class: 'grid two val-agg' }, [
     card('P/E VS OWN 10 YEARS · INDICES & SECTORS', el('span', { class: 'tag-row' }, [
-      el('span', { class: 'dim', text: 'percentile · red ≥ 80th · green ≤ 20th · click to chart' }), measureSwitch, scopeSwitch, basisSwitch]), [barsNode]),
+      el('span', { class: 'dim', text: 'percentile · red ≥ 80th · green ≤ 20th · click to chart' }), basisSwitch]), [barsNode]),
     card('P/E · 10 YEARS', lineTitle, [stats, lineNode]),
   ]);
-  const [barsTitle, lineCardTitle] = section.querySelectorAll('.card-title');
   requestAnimationFrame(draw);
   const forward = el('div', { class: 'grid two val-agg' }, [
     card('VALUATION PATH · ANALYST CONSENSUS', pathNote, [pathNode]),

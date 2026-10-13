@@ -1,20 +1,30 @@
 // SECTORS: one hub for the market, its eleven GICS sectors, their sub-industries
 // and the names in each. The hash argument picks the page: none is the market
 // (#sectors), a sector's SPDR fund is a sector (#sectors/XLP), and a
-// sub-industry's key is its page (#sectors/XLP-SDNB). The rotation graph and
-// its valuation sit under the market, where they were a page of their own.
-// The figures come from sectors.json; sectors-model.js reads them.
+// sub-industry's key is its page (#sectors/XLP-SDNB). The hub keeps the rotation
+// graph and the valuation under its sector table. A sector or sub-industry page
+// opens on its charts -- against the market, its valuation now and next, the
+// map of its sub-industries and names -- and folds the tables away beneath them.
+// The figures come from sectors.json and each page's history from
+// artifacts/sectors/<KEY>.json; sectors-model.js reads and shapes them.
 
 import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, periodSwitch, tag, gap, DASH } from '../fmt.js';
 import { tickerHref, hashFor } from '../routes.js';
-import renderRotation from './rotation.js';
+import { render, multiLine } from '../charts.js';
+import { fundamentalCards } from '../basket-view.js';
+import { WINDOWS, pickWindow, sliceWindow, windowSwitch, alignTo } from '../windows.js';
+import { renderRotationGraph, renderRotationDetail } from './rotation.js';
 import { themeBlocks } from './themes.js';
 import {
-  PERIODS, DEFAULT_PERIOD, REPORT_WINDOW_DAYS, levelOf, membersOf, subsOf, sortRows, upcoming,
+  PERIODS, DEFAULT_PERIOD, REPORT_WINDOW_DAYS, CHART_PERIODS, DEFAULT_CHART_PERIOD, DEFAULT_WINDOW, NAMED_LIMIT,
+  levelOf, membersOf, subsOf, sortRows, upcoming,
   timingLabel, timingTitle, quadrantTag, evidenceFlags, extremesOf, themedSubs, ordinal, boolMark, nameColumns,
+  sectorShort, shortName, subBars, subMapPoints, nameMapPoints, symmetricRange, bandOf, pathBars, longestDates,
 } from '../sectors-model.js';
 
 const THIN_TITLE = 'fewer than 5 names: medians are fragile';
+// The lookback window the reader last picked on a sector or sub-industry page.
+const WINDOW_KEY = 'mr-window-sectors';
 const present = (v) => v !== null && v !== undefined && Number.isFinite(v);
 const signed = (v, digits = 1, unit = '') => (present(v) ? `${v > 0 ? '+' : ''}${num(v, digits)}${unit}` : DASH);
 const share = (v, digits = 1) => (present(v) ? `${num(v, digits)}%` : DASH);
@@ -22,6 +32,18 @@ const multiple = (v) => (present(v) ? `${num(v, 1)}×` : DASH);
 const sectorHref = (key) => `#${hashFor('sectors', key)}`;
 const themeHref = (key) => `#${hashFor('themes', String(key).toUpperCase())}`;
 const markTone = (v) => (v === true ? 'up' : v === false ? 'down' : 'dim');
+const chartNode = () => el('div', { class: 'chart' });
+const slot = () => el('div', { class: 'sx-slot' });
+
+// The four corners of the map, named by what a bubble there is: its return
+// against the index (lagging or leading) and its P/E against its own history
+// (rich or cheap).
+const MAP_CAPTIONS = [
+  { text: 'LAGGING AND RICH', at: { left: 62, top: 18 } },
+  { text: 'LEADING AND RICH', at: { right: 30, top: 18 } },
+  { text: 'LAGGING AND CHEAP', at: { left: 62, bottom: 46 } },
+  { text: 'LEADING AND CHEAP', at: { right: 30, bottom: 46 } },
+];
 
 // A link inside a clickable row keeps its own destination: the row ignores it.
 function link(text, href, className = null) {
@@ -56,11 +78,16 @@ function strip(cells) {
   return el('div', { class: 'stat-strip sx-stats' }, cells);
 }
 
-// The period every return on the page reads: one switch, shared by the strip,
-// the sub-industry table and the names table.
+// A table folded away until asked for: the page reads as charts first.
+function fold(summary, body) {
+  return el('details', { class: 'sx-fold' }, [el('summary', { text: summary }), body]);
+}
+
+// The period the tables' returns read: one switch, shared by the sub-industry
+// table and the names table, so a period change keeps the reader's sort.
 function periodControls(state, onPick) {
   return el('div', { class: 'sx-controls' }, [
-    el('span', { class: 'dim', text: 'PERIOD' }),
+    el('span', { class: 'dim', text: 'TABLE PERIOD' }),
     periodSwitch(PERIODS, state.period, (p) => {
       state.period = p;
       onPick();
@@ -79,47 +106,21 @@ function subLabelOf(data) {
   return Object.fromEntries((data.sub_industries || []).map((s) => [s.key, s.label]));
 }
 
-function performanceCells(row, period, { bench = null, fund = null, quadrant = null }) {
-  const ret = row.returns?.[period];
-  const vs = row.vs_index?.[period];
-  const rev = row.revision || {};
-  const cells = [
-    stat(`RETURN · ${period}`, pct(ret, 1), bench ? `S&P 500 ${pct(bench[period], 1)}` : null, dirClass(ret)),
-    stat(`VS S&P 500 · ${period}`, signed(vs, 1, ' pp'), 'percentage points, this less the index', dirClass(vs)),
-  ];
-  if (fund) cells.push(stat(`FUND · ${period}`, pct(fund[period], 1), 'the SPDR fund, for comparison', dirClass(fund[period])));
-  if (quadrant) {
-    cells.push(stat('ROTATION', quadrant.label, 'where it sits on the rotation graph',
-      quadrant.tone === 'up' || quadrant.tone === 'down' ? quadrant.tone : ''));
-  }
-  cells.push(
-    stat('ABOVE 200-DAY', share(row.above_200d, 0), 'share of its names above their 200-day average'),
-    stat('MEDIAN DRAWDOWN', pct(row.median_drawdown, 1), 'the median name, from its 1-year high', dirClass(row.median_drawdown)),
-    stat('EPS REVISIONS · 90D', pct(rev['90d'], 1), `30 days ${pct(rev['30d'], 1)} · ${rev.names ?? DASH} names`, dirClass(rev['90d'])),
-  );
-  return cells;
+// A table whose headers carry a tooltip where a column needs its meaning spelled out.
+function titledTable(headers, rows, titles = {}) {
+  const wrap = table(headers, rows);
+  wrap.querySelectorAll('th').forEach((th, i) => {
+    if (titles[headers[i]]) th.title = titles[headers[i]];
+  });
+  return wrap;
 }
 
-// The forward P/E is the median of the names; the sector's own P/E now against
-// its ten years (valuation aggregates) and, for Financials, P/TBV when present.
-function valuationCells(row, { valuation = null, showPtbv = false }) {
-  const pctl = present(row.pe_percentile)
-    ? `${ordinal(row.pe_percentile)} percentile of its own ten years`
-    : 'too little history to place it';
-  const cells = [stat('FORWARD P/E · MEDIAN', multiple(row.forward_pe), pctl)];
-  if (valuation) {
-    const now = valuation.pe_now;
-    const median = valuation.pe_median_10y;
-    const vs = present(now) && present(median) && median !== 0 ? ` · ${signed((now / median - 1) * 100, 0, '%')} now` : '';
-    cells.push(stat('P/E NOW', multiple(now), `10-year median ${multiple(median)}${vs}`));
-  }
-  if (showPtbv) {
-    const now = valuation?.ptbv_now;
-    const median = valuation?.ptbv_median_10y;
-    cells.push(stat('P/TBV NOW', multiple(now), present(median) ? `10-year median ${multiple(median)}` : 'kept for the bank groups only: on their sub-industry pages'));
-  }
-  return cells;
-}
+// The forward P/E is the aggregate (market cap over consensus EPS, as an index
+// is priced); P/E PCTL places the trailing P/E within its own ten years.
+const HUB_TITLES = {
+  'FWD P/E': 'aggregate NTM P/E: total market cap over total consensus EPS for the next twelve months',
+  'P/E PCTL': 'where its trailing P/E sits within its own ten years of weekly readings',
+};
 
 // The evidence flags as tags, then the best and worst names over three months.
 function flagsLine(row, extremes) {
@@ -130,6 +131,36 @@ function flagsLine(row, extremes) {
     ` ${signed(pick.return, 1, '%')}`,
   ]) : null);
   return el('div', { class: 'sx-flags' }, [...flags, name('BEST', extremes?.best), name('WORST', extremes?.worst)]);
+}
+
+// Financials' P/TBV, from the build's valuation figures where it has them.
+function ptbvLine(row) {
+  const v = row.valuation;
+  if (!present(v?.ptbv_now)) return null;
+  return el('div', { class: 'sx-flags' }, [
+    el('span', { class: 'dim', text: 'P/TBV' }),
+    el('span', { text: `${multiple(v.ptbv_now)} now · 10-year median ${multiple(v.ptbv_median_10y)}` }),
+  ]);
+}
+
+// The five figures across the top of a sector or sub-industry page.
+function headlineCells(row) {
+  const rev = row.revision || {};
+  const vs3 = row.vs_index?.['3M'];
+  const vsYtd = row.vs_index?.YTD;
+  const trailing = present(row.trailing_pe)
+    ? `of its own ten years · ${multiple(row.trailing_pe)} now, median ${multiple(row.pe_median_10y)}`
+    : 'too little history to place it';
+  const forward = present(row.forward_pe_median)
+    ? `aggregate · the median name ${multiple(row.forward_pe_median)}`
+    : 'aggregate: market cap over consensus EPS';
+  return [
+    stat('VS S&P 500 · 3M', signed(vs3, 1, ' pp'), 'percentage points, this less the index', dirClass(vs3)),
+    stat('VS S&P 500 · YTD', signed(vsYtd, 1, ' pp'), 'percentage points, this less the index', dirClass(vsYtd)),
+    stat('TRAILING P/E · PERCENTILE', ordinal(row.pe_percentile), trailing),
+    stat('FORWARD P/E · NTM', multiple(row.forward_pe), forward),
+    stat('EPS REVISIONS · 90D', pct(rev['90d'], 1), `30 days ${pct(rev['30d'], 1)} · ${rev.names ?? DASH} names`, dirClass(rev['90d'])),
+  ];
 }
 
 function nextCell(m) {
@@ -262,7 +293,7 @@ function sectorTable(data, state, ctx) {
       el('td', {}, [s.theme ? link(s.theme.toUpperCase(), themeHref(s.theme), 'tag tag-info') : DASH]),
     ], ctx, s.key, `${s.label} · ${s.members} names · ${share(s.weight)} of the index`);
   });
-  return table(['SECTOR', 'WEIGHT', 'RETURN', 'VS S&P', 'ROTATION', 'ABOVE 200D', 'MEDIAN DRAWDOWN', 'EPS REV 90D', 'FWD P/E', 'P/E PCTL', 'THEME'], rows);
+  return titledTable(['SECTOR', 'WEIGHT', 'RETURN', 'VS S&P', 'ROTATION', 'ABOVE 200D', 'MEDIAN DRAWDOWN', 'EPS REV 90D', 'FWD P/E', 'P/E PCTL', 'THEME'], rows, HUB_TITLES);
 }
 
 function subTable(subs, state, ctx) {
@@ -285,7 +316,7 @@ function subTable(subs, state, ctx) {
       el('td', {}, [s.theme ? link(s.theme.toUpperCase(), themeHref(s.theme), 'tag tag-info') : DASH]),
     ], ctx, s.key, `${s.label} · ${s.members} names`);
   });
-  return table(['SUB-INDUSTRY', 'NAMES', 'WEIGHT', 'RETURN', 'VS S&P', 'ABOVE 200D', 'MEDIAN DRAWDOWN', 'EPS REV 90D', 'FWD P/E', 'P/E PCTL', 'THEME'], rows);
+  return titledTable(['SUB-INDUSTRY', 'NAMES', 'WEIGHT', 'RETURN', 'VS S&P', 'ABOVE 200D', 'MEDIAN DRAWDOWN', 'EPS REV 90D', 'FWD P/E', 'P/E PCTL', 'THEME'], rows, HUB_TITLES);
 }
 
 function hubNotes(data) {
@@ -294,7 +325,7 @@ function hubNotes(data) {
     'Market, then sector, then sub-industry, then names. A sector is one SPDR fund\'s GICS group of the S&P 500; a row opens it, and each sector page opens its sub-industries and their names.',
     'Returns are cap-weighted from the names\' heat-map returns. VS S&P is the sector\'s return less the index\'s over the same period, in percentage points. A theme tag opens the THEMES page for that group.',
     'ABOVE 200D is the share of names above their 200-day average. MEDIAN DRAWDOWN is the median name\'s fall from its 1-year high. EPS REV 90D is the median change in FY1 EPS consensus over 90 days.',
-    'FWD P/E is the median name\'s forward multiple. P/E PCTL is where the current figure sits within its own ten years of history.',
+    'FWD P/E is aggregate: total market cap over total consensus EPS for the next twelve months, as an index is priced. P/E PCTL is where the trailing P/E sits within its own ten years.',
     noPe.length ? `No forward P/E in this build for: ${noPe.join(', ')}.` : null,
     ...(data.notes || []),
   ];
@@ -302,18 +333,509 @@ function hubNotes(data) {
 
 function sectorNotes(sector) {
   return [
-    'Returns and the S&P comparison are cap-weighted, from the names\' heat-map returns. VS S&P is the difference in percentage points. FUND is the SPDR fund\'s own return, for comparison.',
-    'Medians are of the names. ABOVE 200D is the share above their 200-day average. P/E PCTL is where the current figure sits within its own ten years of history.',
+    'The relative line is the sector\'s basket against the S&P 500\'s, each cap-weighted from the names\' daily closes, rebased to 100 at the start of the window. The SPDR fund against SPY is its second line, for comparison.',
+    'FORWARD P/E is aggregate, as an index is priced: total market cap over total consensus EPS for the next twelve months, with the median of the names kept beside it. The trailing P/E band marks the 25th to 75th percentile of its weekly readings over ten years, and its line the median.',
+    'The sub-industry bars, the map and the names chart use the PERIOD chosen above. A sub-industry with no P/E percentile is not on the map.',
     'NEXT REPORT: BMO reports before the open, AMC after the close, TBC has a date but no confirmed time of day. QUEUED marks a name the monitor has queued.',
     present(sector.forward_pe) ? null : 'This sector has no forward P/E in this build.',
   ];
 }
 
-// The market: every sector in one table, then the cross-sector themes, then the
-// rotation graph and the sector valuation the page held before.
-async function renderHub(root, data, manifest, ctx) {
+function subNotes(sub) {
+  return [
+    'The relative line is the sub-industry\'s basket against the S&P 500\'s, each cap-weighted from the names\' daily closes, rebased to 100 at the start of the window.',
+    'FORWARD P/E is aggregate: total market cap over total consensus EPS for the next twelve months. The trailing P/E band marks the 25th to 75th percentile of its weekly readings over ten years, and its line the median. The comparison cards set it against its sector.',
+    'A sub-industry with fewer than five names is thin, and its medians and P/E history move with any one name.',
+    'NEXT REPORT: BMO reports before the open, AMC after the close, TBC has a date but no confirmed time of day. QUEUED marks a name the monitor has queued.',
+    present(sub.forward_pe) ? null : 'This sub-industry has no forward P/E in this build.',
+  ];
+}
+
+// --- Charts and their history -------------------------------------------------
+
+// A page's own history file and the comparison's. Either may be missing in an
+// older build: the charts then say so in one line rather than failing the page.
+async function loadPage(ctx, key) {
+  if (!key) return { page: null, error: 'it has no page of its own' };
+  if (!ctx.loadArtifact) return { page: null, error: 'the page cannot load its history' };
+  try {
+    return { page: await ctx.loadArtifact(`sectors/${key}`), error: null };
+  } catch (error) {
+    return { page: null, error: error.message };
+  }
+}
+
+// The one line a chart shows in place of itself, saying why its history is absent.
+function missing(loaded, what) {
+  return gap(loaded?.error ? `${what} is unavailable: ${loaded.error}.` : `${what} is not in this build.`);
+}
+
+function offLine(list, what) {
+  return list.length ? el('div', { class: 'field-note', text: `${what}: ${list.join(', ')}.` }) : null;
+}
+
+// The window the reader last picked, if it is one the page knows.
+function readWindow() {
+  try {
+    const saved = localStorage.getItem(WINDOW_KEY);
+    return WINDOWS.includes(saved) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeWindow(window) {
+  try {
+    localStorage.setItem(WINDOW_KEY, window);
+  } catch {
+    // Private windows keep nothing: the choice then lasts the visit only.
+  }
+}
+
+// The basket against the S&P 500 over the window, rebased to 100 at its start;
+// the SPDR fund against SPY as a second line when the build carries one.
+function relativeChart(node, relative, window, names) {
+  if (!relative?.dates?.length || !Array.isArray(relative.basket)) return false;
+  const series = { basket: relative.basket };
+  if (Array.isArray(relative.fund) && relative.fund.some(present)) series.fund = relative.fund;
+  const rebase = Object.fromEntries(Object.keys(series).map((key) => [key, 'index']));
+  const cut = sliceWindow(relative.dates, series, window, rebase);
+  const lines = { [names.basket]: cut.series.basket };
+  if (cut.series.fund) lines[names.fund] = cut.series.fund;
+  multiLine(node, cut.dates, lines);
+  return true;
+}
+
+// Sub-industries against the S&P 500 over the period, largest first: green at
+// or above zero, red below. A click opens the sub-industry's page.
+function subBarChart(node, rows, period, onPick) {
+  node.style.height = `${Math.max(180, rows.length * 22 + 40)}px`;
+  const chart = render(node, (option, p) => ({
+    ...option,
+    grid: { left: 150, right: 46, top: 4, bottom: 20 },
+    tooltip: {
+      ...option.tooltip,
+      trigger: 'item',
+      axisPointer: undefined,
+      formatter: (q) => `<b>${rows[q.dataIndex].full}</b><br>${period} vs S&P 500 ${signed(rows[q.dataIndex].value, 1, ' pp')}`,
+    },
+    xAxis: { type: 'value', axisLabel: { color: p.dim, fontSize: 10 }, splitLine: { lineStyle: { color: p.border, opacity: 0.4 } } },
+    yAxis: {
+      type: 'category', inverse: true, data: rows.map((r) => r.label), triggerEvent: true,
+      axisLabel: { color: p.dim, fontSize: 10, width: 140, overflow: 'truncate' },
+      axisLine: { show: false }, axisTick: { show: false },
+    },
+    series: [{
+      type: 'bar', barMaxWidth: 12,
+      data: rows.map((r) => ({ value: r.value, itemStyle: { color: r.value >= 0 ? p.up : p.down, opacity: 0.85 } })),
+      label: { show: true, position: 'right', color: p.dim, fontSize: 10, formatter: (q) => signed(q.value, 1) },
+      markLine: { silent: true, symbol: 'none', data: [{ xAxis: 0 }], lineStyle: { color: p.faint }, label: { show: false } },
+    }],
+  }));
+  chart?.on('click', (q) => {
+    const index = q.componentType === 'yAxis' ? rows.findIndex((r) => r.label === q.value) : q.dataIndex;
+    if (rows[index]) onPick(rows[index].key);
+  });
+}
+
+// Trailing P/E by week in the window, with the middle half of its ten-year
+// readings shaded and the ten-year median drawn across.
+function bandChart(node, valuation, band, window) {
+  const cut = sliceWindow(valuation.dates, { pe: valuation.pe }, window);
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, right: 92, top: 14, bottom: 30 },
+    tooltip: { ...option.tooltip, valueFormatter: (v) => (present(v) ? `${num(v, 1)}×` : DASH) },
+    xAxis: { ...option.xAxis, data: cut.dates },
+    // The scale must hold the band and the median, not only the line.
+    yAxis: {
+      ...option.yAxis,
+      min: (v) => Math.floor(Math.min(v.min, band.p25) * 0.95),
+      max: (v) => Math.ceil(Math.max(v.max, band.p75) * 1.05),
+      axisLabel: { color: p.dim, fontSize: 10, formatter: (v) => `${v}×` },
+    },
+    series: [{
+      name: 'P/E', type: 'line', data: cut.series.pe, showSymbol: false, connectNulls: false, z: 2,
+      lineStyle: { width: 1.4, color: p.text }, itemStyle: { color: p.text },
+      markArea: {
+        silent: true, itemStyle: { color: p.accent, opacity: 0.12 },
+        data: [[{ yAxis: band.p25 }, { yAxis: band.p75 }]],
+      },
+      markLine: {
+        silent: true, symbol: 'none',
+        label: { color: p.dim, fontSize: 10, position: 'end', formatter: (d) => d.name },
+        data: [{ name: `median ${num(band.median, 1)}×`, yAxis: band.median, lineStyle: { color: p.accent, type: 'dashed' } }],
+      },
+    }],
+  }));
+}
+
+// The valuation path: the P/E at four stages on one analyst basis, with each
+// step's earnings growth written between the bars. The next twelve months is
+// the highlighted bar.
+function pathChart(node, bars) {
+  const top = Math.max(1, ...bars.map((b) => (present(b.pe) ? b.pe : 0)));
+  // Each stage's earnings growth on the stage before, under its label.
+  const labels = bars.map((b) => (present(b.growth) ? `${b.label}\nEPS ${signed(b.growth, 0, '%')}` : b.label));
+  render(node, (option, p) => ({
+    ...option,
+    grid: { left: 44, right: 16, top: 26, bottom: 40 },
+    tooltip: {
+      ...option.tooltip,
+      trigger: 'item',
+      axisPointer: undefined,
+      formatter: (q) => {
+        const b = bars[q.dataIndex];
+        const growth = present(b.growth) ? `<br>earnings ${signed(b.growth, 1, '%')} on the stage before` : '';
+        return `<b>${b.label}</b><br>P/E ${multiple(b.pe)}${growth}`;
+      },
+    },
+    xAxis: {
+      type: 'category', data: labels, boundaryGap: true,
+      axisLabel: { color: p.dim, fontSize: 10, interval: 0 }, axisLine: { lineStyle: { color: p.border } }, axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value', min: 0, max: Math.ceil((top * 1.25) / 5) * 5,
+      axisLabel: { color: p.dim, fontSize: 10, formatter: (v) => `${v}×` },
+      axisLine: { show: false }, axisTick: { show: false },
+      splitLine: { lineStyle: { color: p.border, opacity: 0.4 } },
+    },
+    series: [{
+      type: 'bar', barMaxWidth: 36,
+      data: bars.map((b) => ({ value: b.pe, itemStyle: { color: b.ntm ? p.accent : p.faint, opacity: b.ntm ? 0.95 : 0.6 } })),
+      label: {
+        show: true, position: 'top', color: p.text, fontSize: 10,
+        formatter: (q) => multiple(bars[q.dataIndex].pe),
+      },
+    }],
+  }));
+}
+
+// A scatter of bubbles, each sized by its weight, with dashed lines through
+// zero on x and the middle on y. `spec` gives the axes, labels and tooltip.
+function bubbleChart(node, points, spec) {
+  return render(node, (option, p) => {
+    const axis = (range, name, nameGap) => ({
+      type: 'value', min: range[0], max: range[1], name, nameLocation: 'middle', nameGap,
+      nameTextStyle: { color: p.dim, fontSize: 10 },
+      axisLabel: { color: p.dim, fontSize: 10 }, axisLine: { show: false }, axisTick: { show: false },
+      splitLine: { lineStyle: { color: p.border, opacity: 0.35 } },
+    });
+    return {
+      ...option,
+      grid: { left: 58, right: 26, top: 14, bottom: 42 },
+      tooltip: { ...option.tooltip, trigger: 'item', axisPointer: undefined, formatter: (q) => spec.tip(points[q.dataIndex]) },
+      graphic: (spec.captions || []).map((c) => ({
+        type: 'text', ...c.at, style: { text: c.text, fill: p.faint, font: '10px ui-monospace, Menlo, monospace' },
+      })),
+      xAxis: axis(spec.xRange, spec.xName, 26),
+      yAxis: axis(spec.yRange, spec.yName, 40),
+      series: [{
+        type: 'scatter',
+        labelLayout: { moveOverlap: 'shiftY' },
+        data: points.map((pt) => {
+          const color = spec.colorOf(pt, p);
+          return {
+            value: [pt.x, pt.y],
+            symbolSize: pt.size,
+            itemStyle: { color, opacity: 0.72, borderColor: color, borderWidth: 1 },
+            label: { show: spec.labelOf(pt), position: 'right', color: p.dim, fontSize: 10, formatter: () => pt.label },
+          };
+        }),
+        markLine: {
+          silent: true, symbol: 'none', label: { show: false },
+          lineStyle: { color: p.faint, type: 'dashed' },
+          data: [{ xAxis: 0 }, { yAxis: spec.yMid }],
+        },
+      }],
+    };
+  });
+}
+
+// The sub-industry map: where each sits against the index over the period, and
+// where its P/E sits in its own ten years. A click opens its page.
+function subMapChart(node, points, period, onPick) {
+  const chart = bubbleChart(node, points, {
+    xRange: symmetricRange(points.map((pt) => pt.x)),
+    yRange: [0, 100],
+    yMid: 50,
+    xName: `${period} VS S&P 500, PERCENTAGE POINTS →`,
+    yName: 'P/E PERCENTILE, OWN TEN YEARS →',
+    labelOf: () => true,
+    colorOf: (pt, p) => (pt.x >= 0 ? p.up : p.down),
+    tip: (pt) => `<b>${pt.full}</b><br>${period} vs S&P 500 ${signed(pt.x, 1, ' pp')}`
+      + `<br>P/E ${ordinal(pt.y)} percentile of its own ten years<br>${share(pt.weight, 2)} of the index`,
+    captions: MAP_CAPTIONS,
+  });
+  chart?.on('click', (q) => {
+    const pt = points[q.dataIndex];
+    if (pt) onPick(pt.key);
+  });
+}
+
+// The names: each one's return against the index over the period, and its
+// 90-day EPS revision. The heaviest are labelled; a click opens its ticker page.
+function namesChart(node, points, period) {
+  const chart = bubbleChart(node, points, {
+    xRange: symmetricRange(points.map((pt) => pt.x)),
+    yRange: symmetricRange(points.map((pt) => pt.y)),
+    yMid: 0,
+    xName: `${period} RETURN LESS THE S&P 500, PERCENTAGE POINTS →`,
+    yName: '90-DAY EPS REVISION, % →',
+    labelOf: (pt) => pt.named,
+    colorOf: (pt, p) => (pt.x >= 0 ? p.up : p.down),
+    tip: (pt) => `<b>${pt.ticker}</b> ${pt.full}<br>${period} ${signed(pt.x, 1, ' pp')} vs S&P 500`
+      + `<br>90-day EPS revision ${pct(pt.y, 1)}<br>${share(pt.weight, 2)} of the index`,
+  });
+  chart?.on('click', (q) => {
+    const pt = points[q.dataIndex];
+    if (pt) location.hash = tickerHref(pt.ticker);
+  });
+}
+
+// The page's own figures against the comparison's, as the valuation cards read
+// them. When either arm has no P/E history the card says why instead.
+function reasonOf(loaded, label) {
+  return loaded.error
+    ? `${label}'s history is unavailable: ${loaded.error}.`
+    : `${label} has too few names with filings for a P/E history.`;
+}
+
+function comparisonOf(own, ownLabel, other, otherLabel) {
+  if (!own.page?.valuation) return { missing: reasonOf(own, ownLabel) };
+  if (!other.page?.valuation) return { missing: reasonOf(other, otherLabel) };
+  return {
+    arms: [
+      { key: 'a', label: ownLabel, basket: own.page.valuation },
+      { key: 'b', label: otherLabel, basket: other.page.valuation },
+    ],
+  };
+}
+
+// The ratio the decomposition must track (basket-view.js): the page's
+// index-weighted basket over the S&P 500's (a sub-industry: over its sector's).
+// Not the SPDR fund: its single-name caps and dividends differ from the sector
+// for reasons that have nothing to do with which names it holds.
+function referenceOf(own, other, isSector) {
+  const r = own.page?.relative;
+  if (!r?.dates?.length) return null;
+  if (isSector) return { dates: r.dates, ratio: r.basket, label: 'the index-weighted basket' };
+  const s = other.page?.relative;
+  if (!s?.dates?.length) return null;
+  const parent = alignTo(r.dates, s.dates, s.basket);
+  return {
+    dates: r.dates,
+    ratio: r.basket.map((v, i) => (present(v) && present(parent[i]) && parent[i] !== 0 ? v / parent[i] : null)),
+    label: 'the index-weighted baskets',
+  };
+}
+
+// The period switch and the window switch that drive every chart on a page.
+function controlBar(chart, dates, onChange) {
+  return el('div', { class: 'sx-controls' }, [
+    el('span', { class: 'dim', text: 'WINDOW' }),
+    windowSwitch(dates, chart.window, (w) => {
+      chart.window = w;
+      writeWindow(w);
+      onChange();
+    }),
+    el('span', { class: 'dim', text: 'PERIOD' }),
+    periodSwitch(CHART_PERIODS, chart.period, (p) => {
+      chart.period = p;
+      onChange();
+    }),
+  ]);
+}
+
+// A sector or a sub-industry page, the same at both levels: the market-relative
+// line and the valuation charts first, the sub-industry map and the names
+// chart, then the tables folded away.
+async function renderLevel(root, data, ctx, row, isSector) {
+  const sector = isSector ? row : (data.sectors.find((s) => s.key === row.sector_key) || null);
+  const sectorLabel = sector?.label || row.sector || '';
+  const subs = isSector ? subsOf(data, row.key) : [];
+  const members = isSector ? membersOf(data, { sectorKey: row.key }) : membersOf(data, { subKey: row.key });
+  const subLabel = subLabelOf(data);
+  const financials = isSector ? row.key === 'XLF' : row.sector_key === 'XLF';
+  const [own, other] = await Promise.all([
+    loadPage(ctx, row.key),
+    loadPage(ctx, isSector ? 'MARKET' : row.sector_key),
+  ]);
+  const ownLabel = isSector ? sectorShort(row.label) : shortName(row.label, 24);
+  const otherLabel = isSector ? 'S&P 500' : sectorShort(sectorLabel);
+  // A sub-industry with too few names has no valuation history; its charts are skipped.
+  const thin = !isSector && !own.page?.valuation;
+  const dates = longestDates(own.page?.relative?.dates, own.page?.valuation?.dates);
+  const chart = { window: pickWindow(dates, readWindow() || DEFAULT_WINDOW), period: DEFAULT_CHART_PERIOD };
+  const tables = { period: DEFAULT_PERIOD, sort: { key: 'weight', direction: 'desc' } };
+
+  const slots = {
+    relative: slot(), bars: slot(), band: slot(), path: slot(), cards: slot(), map: slot(), names: slot(),
+  };
+  const nodes = {
+    relative: chartNode(), bars: chartNode(), band: chartNode(), path: chartNode(), map: chartNode(), names: chartNode(),
+  };
+
+  const drawRelative = () => {
+    const names = { basket: `${ownLabel} ÷ S&P 500`, fund: isSector && row.etf ? `${row.etf} ÷ SPY` : null };
+    const drawn = relativeChart(nodes.relative, own.page?.relative, chart.window, names);
+    slots.relative.replaceChildren(card(`${ownLabel.toUpperCase()} ÷ S&P 500 · ${chart.window}`,
+      el('span', { class: 'dim', text: 'rebased to 100 at the start of the window' }),
+      [drawn ? nodes.relative : missing(own, 'The relative line')]));
+  };
+
+  const drawBars = () => {
+    const rows = subBars(subs, chart.period);
+    slots.bars.replaceChildren(card(`SUB-INDUSTRIES · ${chart.period} VS S&P 500`,
+      el('span', { class: 'dim', text: 'pp · click a bar for its page' }),
+      [rows.length ? nodes.bars : gap('No sub-industry has a return for this period.')]));
+    if (rows.length) subBarChart(nodes.bars, rows, chart.period, (key) => go(ctx, 'sectors', key));
+  };
+
+  const drawBand = () => {
+    const val = own.page?.valuation;
+    const band = bandOf(val?.stats);
+    const title = band
+      ? `TRAILING P/E · ${num(band.current, 1)}× · ${ordinal(band.percentile)} OF ITS OWN TEN YEARS`
+      : 'TRAILING P/E';
+    let body = nodes.band;
+    if (!band) body = val ? gap(`${ownLabel} has too little P/E history for a band.`) : missing(own, 'The P/E history');
+    slots.band.replaceChildren(card(title, el('span', { class: 'dim', text: 'ten years, weekly · band 25th–75th' }), [body]));
+    // Always the full ten years: the band and the percentile are read against them.
+    if (band) bandChart(nodes.band, val, band, 'MAX');
+  };
+
+  const drawPath = () => {
+    const bars = pathBars(row.path);
+    const cover = row.path ? [
+      present(row.path.companies) ? `${row.path.companies} companies` : null,
+      present(row.path.coverage) ? `${num(row.path.coverage * 100, 0)}% of cap` : null,
+    ].filter(Boolean).join(' · ') : '';
+    slots.path.replaceChildren(card('VALUATION PATH · CONSENSUS', cover ? el('span', { class: 'dim', text: cover }) : null,
+      [bars.length ? nodes.path : gap(`${row.label}: no valuation path in this build.`)]));
+    if (bars.length) pathChart(nodes.path, bars);
+  };
+
+  const drawCards = () => {
+    const fundamentals = comparisonOf(own, ownLabel, other, otherLabel);
+    const reference = referenceOf(own, other, isSector);
+    slots.cards.replaceChildren(...fundamentalCards(fundamentals, chart.window, [ownLabel, otherLabel], reference, reference?.label));
+  };
+
+  const drawMap = () => {
+    const { points, off } = subMapPoints(subs, chart.period);
+    slots.map.replaceChildren(card(`SUB-INDUSTRIES · ${chart.period} VS S&P 500, AGAINST THEIR OWN P/E`,
+      el('span', { class: 'dim', text: 'bubble ~ weight · click for its page' }),
+      [points.length ? nodes.map : gap('No sub-industry has both a return and a P/E percentile for this period.'),
+        offLine(off, 'not on the map')]));
+    if (points.length) subMapChart(nodes.map, points, chart.period, (key) => go(ctx, 'sectors', key));
+  };
+
+  const drawNames = () => {
+    const bench = data.benchmark?.returns?.[chart.period];
+    const { points, off } = nameMapPoints(members, chart.period, bench);
+    let empty = 'No name has both a return and a 90-day revision for this period.';
+    if (!present(bench)) empty = 'The S&P 500 has no return for this period.';
+    slots.names.replaceChildren(card(`NAMES · ${chart.period} VS S&P 500, AND 90-DAY EPS REVISIONS`,
+      el('span', { class: 'dim', text: `bubble ~ weight · the ${NAMED_LIMIT} heaviest labelled · click for its page` }),
+      [points.length ? nodes.names : gap(empty), offLine(off, 'not on the map')]));
+    if (points.length) namesChart(nodes.names, points, chart.period);
+  };
+
+  const subsHost = el('div');
+  const drawSubs = () => subsHost.replaceChildren(subTable(subs, tables, ctx));
+  const names = namesCard(members, tables, {
+    withSub: isSector, financials, subLabel: isSector ? subLabel : {}, title: `NAMES · ${members.length}`,
+  });
+  const redrawTables = () => {
+    drawSubs();
+    names.draw();
+  };
+  const redraw = () => {
+    drawRelative();
+    if (isSector) drawBars();
+    if (!thin) {
+      drawBand();
+      drawPath();
+      drawCards();
+    }
+    if (isSector) drawMap();
+    drawNames();
+  };
+  redrawTables();
+
+  const meta = isSector
+    ? `AS OF ${data.as_of} · ${subs.length} SUB-INDUSTRIES, ${subs.filter((s) => s.thin).length} THIN`
+    : `AS OF ${data.as_of} · ${row.key} · ${row.members} names in this sub-industry`;
+  const valuationBody = thin
+    ? gap(own.error
+      ? `${row.label}'s history is unavailable: ${own.error}.`
+      : `${row.label} has fewer than five names with a P/E history, so its valuation charts are skipped.`)
+    : el('div', {}, [el('div', { class: 'grid two' }, [slots.band, slots.path]), slots.cards]);
+  const extremes = isSector ? { best: row.best, worst: row.worst } : (members.length > 1 ? extremesOf(members, '3M') : null);
+  const folds = [];
+  if (isSector) folds.push(fold(`SUB-INDUSTRY TABLE · ${subs.length}`, subsHost));
+  folds.push(fold(`NAME TABLE · ${members.length}`, names.node));
+  folds.push(fold(`REPORTS AHEAD · ${upcoming(members, data.as_of).length}`, reportsCard(members, data.as_of)));
+
+  const crumbParts = isSector
+    ? [{ label: 'SECTORS', href: '#sectors' }, { label: row.label }]
+    : [{ label: 'SECTORS', href: '#sectors' }, { label: sectorLabel, href: sectorHref(row.sector_key) }, { label: row.label }];
+  const subtitle = isSector
+    ? `${row.etf} · ${share(row.weight, 2)} OF THE S&P 500 · ${row.members} NAMES`
+    : `${sectorLabel} · ${share(row.weight, 2)} OF THE S&P 500 · ${row.members} NAMES`;
+
+  // A null child (a line that does not apply) is dropped here: the DOM would
+  // otherwise print it as the word "null".
+  const parts = [
+    crumbs(crumbParts),
+    sectionTitle(row.label.toUpperCase(), subtitle),
+    metaRow(meta, isSector ? sectorNotes(row) : subNotes(row)),
+    strip(headlineCells(row)),
+    flagsLine(row, extremes),
+    ptbvLine(row),
+    !isSector && row.thin ? el('div', { class: 'sx-flags' }, [tag('THIN', 'warn', THIN_TITLE), el('span', { class: 'dim', text: THIN_TITLE })]) : null,
+    sectionTitle('1 · AGAINST THE MARKET', isSector ? 'the basket and its fund against the S&P 500, and the sub-industries against it' : 'the basket against the S&P 500'),
+    controlBar(chart, dates, redraw),
+    isSector ? el('div', { class: 'grid two' }, [slots.relative, slots.bars]) : slots.relative,
+    sectionTitle('2 · VALUATION, NOW AND NEXT', 'trailing P/E, the valuation path, and what moved the ratio'),
+    valuationBody,
+    ...(isSector ? [sectionTitle('3 · INSIDE THE SECTOR', 'sub-industries: excess return against their own P/E'), slots.map] : []),
+    sectionTitle(`${isSector ? 4 : 3} · NAMES`, 'return against the S&P 500 and the 90-day EPS revision'),
+    slots.names,
+    sectionTitle('TABLES', 'the figures behind the charts, folded away'),
+    periodControls(tables, redrawTables),
+    ...folds,
+  ];
+  root.append(...parts.filter(Boolean));
+  requestAnimationFrame(redraw);
+
+  const subThemes = isSector ? themedSubs(data, row.key) : [];
+  if (row.theme || subThemes.length) {
+    const section = el('div', { class: 'sx-industry' });
+    root.append(section);
+    await industryData(section, row.theme, subThemes, ctx);
+  }
+}
+
+// --- The market hub ----------------------------------------------------------
+
+// The market: where money is rotating first, then every sector in one table,
+// the cross-sector themes, and the industry scorecard and sector valuation.
+async function renderHub(root, data, _manifest, ctx) {
   const state = { period: DEFAULT_PERIOD, sort: { key: 'weight', direction: 'desc' } };
   const thin = data.sub_industries.filter((s) => s.thin).length;
+  // The rotation graph's charts draw on the next frame, so its host must be
+  // in the page before it renders. Its per-sector drill-down is left out: the
+  // sector pages open from the table below.
+  const rotationHost = el('div', { class: 'sectors-rotation' });
+  root.append(rotationHost);
+  try {
+    renderRotationGraph(rotationHost, await ctx.loadArtifact('rotation'), { drill: false });
+  } catch (error) {
+    rotationHost.replaceChildren(gap(`The rotation graph is unavailable: ${error.message}.`));
+  }
+
   root.append(sectionTitle('SECTORS', 'MARKET → SECTOR → SUB-INDUSTRY → NAMES'));
   root.append(metaRow(`AS OF ${data.as_of} · ${data.sectors.length} SECTORS · ${data.sub_industries.length} SUB-INDUSTRIES, ${thin} THIN · ${data.members.length} NAMES`, hubNotes(data)));
 
@@ -338,110 +860,9 @@ async function renderHub(root, data, manifest, ctx) {
     ]));
   }
 
-  // The rotation page, as the market's own section. Its charts draw on the
-  // next frame, so the host must be in the page first.
-  const rotationHost = el('div', { class: 'sectors-rotation' });
-  root.append(rotationHost);
-  try {
-    const rotation = await ctx.loadArtifact('rotation');
-    await renderRotation(rotationHost, rotation, manifest, ctx);
-  } catch (error) {
-    rotationHost.replaceChildren(gap(`The rotation page is unavailable: ${error.message}.`));
-  }
-}
-
-async function renderSector(root, data, _manifest, ctx, sector) {
-  const state = { period: DEFAULT_PERIOD, sort: { key: 'weight', direction: 'desc' } };
-  const subs = subsOf(data, sector.key);
-  const members = membersOf(data, { sectorKey: sector.key });
-  const subLabel = subLabelOf(data);
-  const financials = sector.key === 'XLF';
-  const valuation = sector.valuation || null;
-  const showPtbv = financials || present(valuation?.ptbv_now);
-
-  root.append(crumbs([{ label: 'SECTORS', href: '#sectors' }, { label: sector.label }]));
-  root.append(sectionTitle(sector.label.toUpperCase(), `${sector.etf} · ${share(sector.weight, 2)} OF THE S&P 500 · ${sector.members} NAMES`));
-  root.append(metaRow(`AS OF ${data.as_of} · ${subs.length} SUB-INDUSTRIES, ${subs.filter((s) => s.thin).length} THIN`, sectorNotes(sector)));
-
-  const perfHost = el('div');
-  const subsHost = el('div');
-  const drawPerf = () => perfHost.replaceChildren(strip(performanceCells(sector, state.period, {
-    bench: data.benchmark?.returns,
-    fund: sector.etf_returns,
-    quadrant: quadrantTag(sector.quadrant),
-  })));
-  const drawSubs = () => subsHost.replaceChildren(subTable(subs, state, ctx));
-  const names = namesCard(members, state, { withSub: true, financials, subLabel, title: `NAMES · ${members.length}` });
-  const redraw = () => {
-    drawPerf();
-    drawSubs();
-    names.draw();
-  };
-  drawPerf();
-  drawSubs();
-  root.append(
-    periodControls(state, redraw),
-    perfHost,
-    strip(valuationCells(sector, { valuation, showPtbv })),
-    flagsLine(sector, { best: sector.best, worst: sector.worst }),
-    card(`SUB-INDUSTRIES · ${subs.length}`, el('span', { class: 'dim', text: 'heaviest first · click a row' }), [subsHost]),
-    names.node,
-    reportsCard(members, data.as_of),
-  );
-
-  const subThemes = themedSubs(data, sector.key);
-  if (sector.theme || subThemes.length) {
-    const section = el('div', { class: 'sx-industry' });
-    root.append(section);
-    await industryData(section, sector.theme, subThemes, ctx);
-  }
-}
-
-async function renderSub(root, data, _manifest, ctx, sub) {
-  const state = { period: DEFAULT_PERIOD, sort: { key: 'weight', direction: 'desc' } };
-  const sector = data.sectors.find((s) => s.key === sub.sector_key) || null;
-  const sectorLabel = sector?.label || sub.sector;
-  const members = membersOf(data, { subKey: sub.key });
-  const extremes = members.length > 1 ? extremesOf(members, '3M') : null;
-
-  root.append(crumbs([
-    { label: 'SECTORS', href: '#sectors' },
-    { label: sectorLabel, href: sectorHref(sub.sector_key) },
-    { label: sub.label },
-  ]));
-  root.append(sectionTitle(sub.label.toUpperCase(), `${sectorLabel} · ${share(sub.weight, 2)} OF THE S&P 500 · ${sub.members} NAMES`));
-  root.append(metaRow(`AS OF ${data.as_of} · ${sub.key} · ${sub.members} names in this sub-industry`, [
-    'Medians are of the names; a sub-industry with fewer than five is thin, and its medians move with any one name.',
-    'Returns are cap-weighted from the names\' heat-map returns. VS S&P is the difference in percentage points.',
-  ]));
-  if (sub.thin) {
-    root.append(el('div', { class: 'sx-flags' }, [tag('THIN', 'warn', THIN_TITLE), el('span', { class: 'dim', text: THIN_TITLE })]));
-  }
-
-  const perfHost = el('div');
-  const drawPerf = () => perfHost.replaceChildren(strip(performanceCells(sub, state.period, { bench: data.benchmark?.returns })));
-  const financials = sub.sector_key === 'XLF';
-  const names = namesCard(members, state, {
-    withSub: false, financials, subLabel: {}, title: `NAMES · ${members.length}`,
-  });
-  drawPerf();
-  root.append(
-    periodControls(state, () => {
-      drawPerf();
-      names.draw();
-    }),
-    perfHost,
-    strip(valuationCells(sub, { valuation: sub.valuation || null, showPtbv: present(sub.valuation?.ptbv_now) })),
-    flagsLine(sub, extremes),
-    names.node,
-    reportsCard(members, data.as_of),
-  );
-
-  if (sub.theme) {
-    const section = el('div', { class: 'sx-industry' });
-    root.append(section);
-    await industryData(section, sub.theme, [], ctx);
-  }
+  const detailHost = el('div', { class: 'sectors-detail' });
+  root.append(detailHost);
+  await renderRotationDetail(detailHost, ctx);
 }
 
 export default async function renderSectors(root, data, manifest, ctx = {}) {
@@ -450,8 +871,8 @@ export default async function renderSectors(root, data, manifest, ctx = {}) {
     return;
   }
   const found = levelOf(ctx.arg, data);
-  if (found.level === 'sector') return renderSector(root, data, manifest, ctx, found.sector);
-  if (found.level === 'sub') return renderSub(root, data, manifest, ctx, found.sub);
+  if (found.level === 'sector') return renderLevel(root, data, ctx, found.sector, true);
+  if (found.level === 'sub') return renderLevel(root, data, ctx, found.sub, false);
   if (found.level === 'unknown') {
     root.append(gap(`There is no sector or sub-industry called ${ctx.arg} in this build. The sectors are below.`));
   }

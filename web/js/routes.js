@@ -60,7 +60,8 @@ export const ALIASES = {
 
 export const DEFAULT_VIEW = 'overview';
 
-const TICKER_PATTERN = /^[A-Z0-9^][A-Z0-9.\-=]{0,14}$/;
+// Underscores too: SIZE & STYLE pairs are keyed value_growth, ff_hml.
+const TICKER_PATTERN = /^[A-Z0-9^][A-Z0-9._\-=]{0,14}$/;
 
 export function cleanTicker(value) {
   const text = String(value || '').trim().toUpperCase();

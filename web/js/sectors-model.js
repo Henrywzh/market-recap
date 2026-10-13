@@ -177,3 +177,143 @@ export function nameColumns(period, { withSub = true, financials = false, subLab
   );
   return cols;
 }
+
+// --- Charts-first pages: a sector or sub-industry's charts. Pure: the page
+// draws what these return, and a missing figure stays out of the picture.
+
+// The periods the page's charts offer, short enough to read at a glance.
+export const CHART_PERIODS = ['1M', '3M', 'YTD', '1Y'];
+export const DEFAULT_CHART_PERIOD = '3M';
+// The lookback window a page opens on when the reader has not picked one.
+export const DEFAULT_WINDOW = '1Y';
+// How many of the heaviest names carry a label on the names chart.
+export const NAMED_LIMIT = 8;
+// The valuation path's stages, in the order the build carries them.
+export const PATH_STAGES = [
+  { key: 'fy_prev', label: 'LAST FY' },
+  { key: 'fy0', label: 'THIS FY' },
+  { key: 'ntm', label: 'NEXT 12M' },
+  { key: 'fy1', label: 'NEXT FY' },
+];
+
+const SECTOR_SHORT = {
+  'Communication Services': 'Comm Services',
+  'Consumer Discretionary': 'Cons Discretionary',
+  'Consumer Staples': 'Cons Staples',
+  'Information Technology': 'Info Tech',
+};
+
+// A sector's name short enough for a chart's title or legend.
+export function sectorShort(label) {
+  return SECTOR_SHORT[label] || label;
+}
+
+// A label short enough for a chart axis: the part before a comma, without the
+// words in brackets, cut to `max` characters with an ellipsis.
+export function shortName(label, max = 22) {
+  const text = String(label ?? '').replace(/\([^)]*\)/g, '').split(',')[0].replace(/\s+/g, ' ').trim();
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+// The bars: each sub-industry's return against the S&P 500 over the period,
+// largest first. A sub-industry with no figure for the period is left off.
+export function subBars(subs, period) {
+  return (subs || [])
+    .filter((s) => finite(s?.vs_index?.[period]))
+    .map((s) => ({ key: s.key, label: shortName(s.label), full: s.label, value: s.vs_index[period] }))
+    .sort((a, b) => b.value - a.value);
+}
+
+// Bubble diameters: area in proportion to weight, the heaviest at `max`
+// pixels, and a point with no weight at `min`.
+export function withSizes(points, min = 8, max = 36) {
+  const top = Math.max(0, ...points.map((p) => (finite(p.weight) && p.weight > 0 ? p.weight : 0)));
+  return points.map((p) => {
+    const share = finite(p.weight) && p.weight > 0 && top > 0 ? p.weight / top : 0;
+    return { ...p, size: share ? Math.max(min, max * Math.sqrt(share)) : min };
+  });
+}
+
+// The sub-industries on the map: x is the excess return over the period (pp),
+// y the P/E's place in its own ten years (0 to 100). One missing either is not
+// drawn at a made-up place; it is listed apart as `off`.
+export function subMapPoints(subs, period) {
+  const points = [];
+  const off = [];
+  for (const s of subs || []) {
+    const x = s?.vs_index?.[period];
+    const y = s?.pe_percentile;
+    if (finite(x) && finite(y)) points.push({ key: s.key, full: s.label, label: shortName(s.label), x, y, weight: s.weight });
+    else off.push(shortName(s.label, 40));
+  }
+  return { points: withSizes(points), off };
+}
+
+// The names on the map: x is the name's return over the period less the
+// index's (pp), y its FY1 EPS revision over 90 days (%). The heaviest `limit`
+// names are labelled. A name missing either figure is listed apart as `off`.
+export function nameMapPoints(members, period, benchmarkReturn, limit = NAMED_LIMIT) {
+  const points = [];
+  const off = [];
+  for (const m of members || []) {
+    const ret = m?.returns?.[period];
+    const rev = m?.revision_90d;
+    if (finite(ret) && finite(benchmarkReturn) && finite(rev)) {
+      points.push({ key: m.ticker, ticker: m.ticker, full: m.name || m.ticker, label: m.ticker, x: ret - benchmarkReturn, y: rev, weight: m.weight });
+    } else {
+      off.push(m.ticker);
+    }
+  }
+  const named = new Set(sortRows(points, 'weight', 'desc').slice(0, limit).map((p) => p.ticker));
+  return { points: withSizes(points).map((p) => ({ ...p, named: named.has(p.ticker) })), off };
+}
+
+// A symmetric axis around zero that holds every value, with a tenth to spare,
+// rounded up to a round step. No values gives a unit axis.
+export function symmetricRange(values) {
+  const reach = Math.max(0, ...(values || []).filter(finite).map((v) => Math.abs(v)));
+  const want = reach > 0 ? reach * 1.1 : 1;
+  // Half-decade steps, so a reach of 110 gives 150 rather than 200.
+  const step = 10 ** Math.floor(Math.log10(want)) / 2;
+  const top = Math.ceil(want / step) * step;
+  return [-top, top];
+}
+
+// The P/E band a page draws, from its basket's stats: the ten-year median, the
+// middle half of its weekly readings (25th to 75th percentile), and the
+// current reading with its place among them. Null when there are no stats.
+export function bandOf(stats) {
+  if (!stats || !finite(stats.median) || !finite(stats.p25) || !finite(stats.p75)) return null;
+  return {
+    median: stats.median,
+    p25: stats.p25,
+    p75: stats.p75,
+    current: finite(stats.current) ? stats.current : null,
+    percentile: finite(stats.percentile) ? stats.percentile : null,
+    weeks: finite(stats.weeks) ? stats.weeks : null,
+  };
+}
+
+// The valuation path as four bars in the build's order. Each carries its P/E
+// and the earnings growth from the stage before it; a missing figure stays
+// null. No path at all is an empty list.
+export function pathBars(path) {
+  const stages = Array.isArray(path?.stages) ? path.stages : [];
+  if (!stages.length) return [];
+  return PATH_STAGES.map(({ key, label }) => {
+    const stage = stages.find((s) => s?.key === key) || {};
+    return {
+      key,
+      label,
+      ntm: key === 'ntm',
+      pe: finite(stage.pe) ? stage.pe : null,
+      growth: finite(stage.growth) ? stage.growth : null,
+    };
+  });
+}
+
+// The longest of several date lists. A page's window switch offers what its
+// longest series covers, so a short series does not hide the long one.
+export function longestDates(...lists) {
+  return lists.reduce((best, dates) => (Array.isArray(dates) && dates.length > best.length ? dates : best), []);
+}

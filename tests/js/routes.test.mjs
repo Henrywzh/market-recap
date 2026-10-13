@@ -88,3 +88,7 @@ test('a dotted share class resolves to the build\'s dashed symbol, nothing else 
   assert.equal(R.resolveTicker('XYZ.B', has), 'XYZ.B');            // unknown either way: left as typed
   assert.equal(R.resolveTicker(null, has), null);
 });
+
+test('a pair key with an underscore survives the hash', () => {
+  assert.deepEqual(R.parseHash("#sizek/value_growth"), { id: "sizek", arg: "VALUE_GROWTH" });
+});

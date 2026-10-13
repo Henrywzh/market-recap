@@ -11,6 +11,11 @@ the config by judgment; see compute.kshape.
 The P/E and EPS histories come from this session's VALUATION artifacts (SEC
 filings and closes); a name VALUATION does not cover has prices only, and a
 build without VALUATION shows prices only. Nothing is filled in.
+
+Each view also carries ``fundamentals``: each leg as an equal-weight basket of
+its names (compute.baskets), so the leg ratio's P/E and earnings parts are the
+same measured figures the page's P/E chart shows. The arm helpers here are
+shared with SIZE K (panels.sizek).
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ import json
 
 import pandas as pd
 
+from ..compute import baskets as B
 from ..compute import kshape as K
 from ..compute import valuation as V
 from ..config import PERIOD_TRADING_DAYS, VALUATION_ARTIFACT_DIR
@@ -64,6 +70,80 @@ def _pe_series(history: dict | None) -> pd.Series | None:
     return pd.Series(history["pe"], index=pd.to_datetime(history["dates"]), dtype=float)
 
 
+# --- Fundamentals: an arm as a basket of its names' P/E and earnings ------------------
+# The same baskets the page's P/E charts are drawn from (compute.baskets), so a
+# ratio of two arms splits into a ratio of multiples and a ratio of earnings.
+
+FUNDAMENTAL_YEARS = 10     # the arms' history on the page, at most; the artifacts run back further
+NO_VALUATION = ("The VALUATION tab was not built in this session, so there are no filings histories "
+                "to build the baskets from.")
+
+
+class Histories:
+    """Each name's VALUATION history, read once per build, and the weekly closes
+    and earnings yields of any set of names (compute.baskets.frames). A name
+    without a history is absent from both frames. The frames are kept per set
+    of names, since several arms share names."""
+
+    def __init__(self) -> None:
+        self._read: dict[str, dict | None] = {}
+        self._frames: dict[frozenset, tuple[pd.DataFrame, pd.DataFrame]] = {}
+
+    def frames(self, tickers) -> tuple[pd.DataFrame, pd.DataFrame]:
+        key = frozenset(tickers)
+        if key not in self._frames:
+            for ticker in key:
+                if ticker not in self._read:
+                    self._read[ticker] = _read_history(ticker)
+            self._frames[key] = B.frames({t: self._read[t] for t in sorted(key)})
+        return self._frames[key]
+
+
+def arm(key: str, label: str, names: list[str], closes: pd.DataFrame, yields: pd.DataFrame,
+        weights: dict[str, float] | None = None, *, years: int, fund_coverage: float | None = None,
+        note: str | None = None) -> tuple[dict, str | None]:
+    """One arm of a fundamentals pair, and the reason it has no basket when it has none.
+
+    A name takes part when it has a filings history in ``closes`` and, for a
+    cap-weighted arm (``weights`` given), a positive weight. Names left out are
+    listed in the arm's note rather than dropped silently: a basket that quietly
+    has fewer names would look like the whole leg."""
+    usable = [t for t in names if t in closes.columns and (weights is None or (weights.get(t) or 0) > 0)]
+    left_out = [t for t in names if t not in usable]
+    notes = [note] if note else []
+    if left_out:
+        why = "a filings history" if weights is None else "a filings history or a market cap"
+        shown = ", ".join(left_out[:12]) + (f" and {len(left_out) - 12} more" if len(left_out) > 12 else "")
+        notes.append(f"Left out for lack of {why}: {shown}.")
+    basket, reason = None, None
+    if not usable:
+        reason = f"{label}: no name has a filings history, so no basket can be built."
+    else:
+        basket = B.payload(B.basket(closes[usable], yields.reindex(columns=usable), weights), years=years)
+        if basket is None:
+            reason = f"{label}: none of its names had a P/E from their filings, so no basket can be built."
+    return {"key": key, "label": label, "basket": basket, "fund_coverage": clean_float(fund_coverage, 3),
+            "note": " ".join(notes) or None}, reason
+
+
+def fundamentals(built: list[tuple[dict, str | None]], notes: list[str] | None = None) -> dict:
+    """The payload the page's cards read: both arms, or the reason they cannot be drawn.
+    An arm with no basket makes the whole payload ``missing``: the cards need both."""
+    reasons = [reason for _, reason in built if reason]
+    if reasons:
+        return {"missing": " ".join(reasons)}
+    return {"arms": [a for a, _ in built], "notes": list(notes or [])}
+
+
+def _leg_fundamentals(top: list[str], bottom: list[str], histories: dict, built: bool, years: int) -> dict:
+    """Each leg as an equal-weight basket of its names with a filings history."""
+    if not built:
+        return {"missing": NO_VALUATION}
+    closes, yields = B.frames({t: histories.get(t) for t in dict.fromkeys(top + bottom)})
+    return fundamentals([arm("top", "Top leg", top, closes, yields, years=years),
+                         arm("bottom", "Bottom leg", bottom, closes, yields, years=years)])
+
+
 def _name_row(ticker: str, leg: str, closes: pd.DataFrame, valuation: dict, trends: dict, periods: dict[str, int],
               today: pd.Timestamp) -> dict:
     price = closes[ticker].dropna() if ticker in closes.columns else pd.Series(dtype=float)
@@ -96,10 +176,12 @@ def _name_row(ticker: str, leg: str, closes: pd.DataFrame, valuation: dict, tren
 
 
 def _view(key: str, label: str, note: str | None, top: list[str], bottom: list[str], *, closes: pd.DataFrame,
-          valuation: dict, trends: dict, today: pd.Timestamp, histories: dict[str, dict | None], cfg: dict, periods: dict[str, int]) -> dict:
+          valuation: dict, trends: dict, today: pd.Timestamp, histories: dict[str, dict | None], cfg: dict, periods: dict[str, int],
+          valuation_built: bool) -> dict:
     years = int(cfg["history_years"])
     top_ix, bottom_ix = K.leg_index(closes, top), K.leg_index(closes, bottom)
     out: dict = {"key": key, "label": label, "note": note, "top": top, "bottom": bottom}
+    out["fundamentals"] = _leg_fundamentals(top, bottom, histories, valuation_built, min(years, FUNDAMENTAL_YEARS))
 
     both = pd.concat([top_ix.rename("top"), bottom_ix.rename("bottom")], axis=1).dropna()
     if len(both) > 1:
@@ -196,7 +278,8 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         trends, _ = estimates.fetch_trends(uncovered) if uncovered else ({}, {})
     except Exception:  # noqa: BLE001 -- those names then show no forward multiple
         trends = {}
-    kw = dict(closes=closes, valuation=valuation, trends=trends, today=pd.Timestamp(ctx.as_of), histories=histories, cfg=cfg, periods=periods)
+    kw = dict(closes=closes, valuation=valuation, trends=trends, today=pd.Timestamp(ctx.as_of), histories=histories, cfg=cfg, periods=periods,
+              valuation_built=bool(valuation_panel))
     views = [_view("overall", cfg["overall_label"], "Every pair's top leg against every pair's bottom leg, and the low-end names with no top-leg counterpart "
                    "(fast food, dollar stores). Equal weight.", top_all, bottom_all, **kw)]
     views += [_view(p["key"], p["label"], p.get("note"), list(p["top"]), list(p["bottom"]), **kw) for p in pairs]

@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -17,6 +18,13 @@ from market_recap.panels import sectors as panel
 from market_recap.util import BuildLog
 
 KEY = re.compile(r"^[A-Z0-9.=-]{1,15}$")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_artifacts(tmp_path, monkeypatch):
+    # The panel writes one file per page and reads VALUATION histories: keep both out of the repo's artifacts.
+    monkeypatch.setattr(panel, "SECTORS_ARTIFACT_DIR", tmp_path / "sectors")
+    monkeypatch.setattr(panel, "VALUATION_ARTIFACT_DIR", tmp_path / "valuation")
 
 
 # --- compute helpers -------------------------------------------------------
@@ -99,6 +107,7 @@ CONFIG = {
     "sectors": {
         "sector_themes": {"Energy": "energy", "Consumer Staples": "staples"},
         "sub_industry_themes": {"Tobacco": "tobacco"},
+        "valuation_min_members": 5,
     },
 }
 PERIODS = ["1D", "1M", "3M"]
@@ -207,8 +216,11 @@ def _inputs(**overrides):
     return inputs
 
 
-def _ctx(config=CONFIG):
-    return SimpleNamespace(config=config, as_of="2026-10-12", log=BuildLog())
+def _ctx(config=CONFIG, closes=None, etf_closes=None):
+    # No prices unless a test gives some: the page series are then empty, and the rest of the hub is unchanged.
+    return SimpleNamespace(config=config, as_of="2026-10-12", log=BuildLog(),
+                           closes=pd.DataFrame() if closes is None else closes,
+                           etf_closes=pd.DataFrame() if etf_closes is None else etf_closes)
 
 
 def _sector(out, label):
@@ -229,7 +241,7 @@ def test_the_hub_has_the_contract_keys_and_orders_sectors_then_subs_then_names_b
     assert [s["key"] for s in out["sub_industries"]] == ["XLE-OGEP", "XLP-SDNB", "XLP-T"]
     assert [m["ticker"] for m in out["members"]] == ["XOM", "KO", "CVX", "PEP", "PM"]
     assert all(KEY.match(s["key"]) for s in out["sub_industries"])
-    assert len(out["notes"]) == 2
+    assert len(out["notes"]) == 3
 
 
 def test_sector_returns_are_cap_weighted_and_a_missing_return_is_renormalised():
@@ -249,7 +261,9 @@ def test_each_sector_joins_its_fund_its_rotation_quadrant_its_multiples_and_its_
     assert staples["etf"] == "XLP" and staples["etf_returns"] == {"1D": 0.4, "1M": -1.0, "3M": 4.0}
     assert energy["etf"] == "XLE" and energy["etf_returns"] is None          # fund absent: null
     assert energy["quadrant"] == "leading" and staples["quadrant"] == "lagging"
-    assert energy["forward_pe"] == 11.0 and energy["pe_percentile"] == 30.0
+    # The hub's multiples are aggregates; with no VALUATION caps here there is no aggregate, and INDUSTRIES' medians stay.
+    assert energy["forward_pe"] is None and energy["pe_percentile"] is None
+    assert energy["forward_pe_median"] == 11.0 and energy["pe_percentile_median"] == 30.0
     assert energy["revision"] == {"30d": -1.0, "90d": 2.0, "names": 2}
     assert energy["evidence"] == {"sold_off": False, "estimates_cut": True, "cheap_vs_own_history": True}
     assert energy["above_200d"] == 60.0 and energy["down_share_1m"] == 40.0 and energy["median_drawdown"] == -5.0
@@ -267,7 +281,8 @@ def test_a_sub_industry_industries_read_takes_its_evidence_and_one_it_did_not_re
     assert soft["returns"]["3M"] == 8.0            # PEP's 3M is missing: KO alone
     assert soft["above_200d"] == 100.0 and soft["median_drawdown"] == -2.0
     assert soft["revision"] == {"30d": 3.4, "90d": 7.1, "names": 2}
-    assert soft["forward_pe"] == 24.0 and soft["pe_percentile"] == 60.0
+    assert soft["forward_pe_median"] == 24.0 and soft["pe_percentile_median"] == 60.0
+    assert soft["forward_pe"] is None and soft["trailing_pe"] is None and soft["path"] is None
     assert soft["evidence"]["cheap_vs_own_history"] is False
     assert soft["theme"] is None and soft["sector"] == "Consumer Staples" and soft["sector_key"] == "XLP"
     # Not in INDUSTRIES: returns and weight from the names, the evidence empty.

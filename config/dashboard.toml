@@ -126,6 +126,9 @@ sector_themes = { "Energy" = "energy", "Consumer Staples" = "staples", "Consumer
 sub_industry_themes = { "Semiconductors" = "semis", "Diversified Banks" = "banks", "Regional Banks" = "banks", "Homebuilding" = "housing", "Hotels, Resorts & Cruise Lines" = "cruise", "Aerospace & Defense" = "defense" }
 # VALUATION's subsector bands (P/E and P/TBV against ten years) shown on these sub-industries' pages.
 sub_industry_valuation = { "Diversified Banks" = "fin-diversified-banks", "Regional Banks" = "fin-regional-banks", "Investment Banking & Brokerage" = "fin-investment-banks" }
+# A page's P/E band and aggregate multiples need at least this many names with a
+# ten-year weekly P/E history; fewer and the page's multiples are left blank.
+valuation_min_members = 5
 
 # Intraday prices, fetched in the reader's browser through
 # functions/api/quotes.js (Yahoo's spark, 20 symbols a call; CNBC for the
@@ -629,6 +632,13 @@ funds = [
 # built as price indexes from the portfolios' returns, before fees and trading
 # costs. The file is monthly and runs a month or more behind; history_years cuts
 # it to the same window as the other pairs.
+# ``big_basket`` / ``small_basket`` give each arm a basket of names whose trailing
+# P/E and earnings are built from VALUATION (SEC filings and closes), so the gap
+# can be split into a re-rating and an earnings difference: "index:SPX" (S&P 500
+# members, cap-weighted; ":equal" for equal weight), "index:NDX" likewise,
+# "sector:<GICS sector>" (S&P 500 members), "holdings:<iShares fund>" (the fund's
+# own holding weights, looked through to the names). ``*_basket_label`` names a
+# fund's arm on the page. A pair with no baskets says why in ``fundamentals_note``.
 history_years = 25
 price_periods = ["1M", "3M", "6M", "1Y", "3Y", "5Y", "10Y"]
 gap_period = "1Y"
@@ -638,6 +648,8 @@ key = "sp500"
 label = "S&P 500: CAP vs EQUAL"
 big = "SPY"
 small = "RSP"
+big_basket = "index:SPX"
+small_basket = "index:SPX:equal"
 note = "The same 500 companies: SPY weights them by market value, RSP gives each the same weight and rebalances quarterly. The gap is the return of the largest names against the typical one."
 
 [[sizek.pairs]]
@@ -645,6 +657,8 @@ key = "nasdaq100"
 label = "NASDAQ-100: CAP vs EQUAL"
 big = "QQQ"
 small = "QQEW"
+big_basket = "index:NDX"
+small_basket = "index:NDX:equal"
 note = "The same 100 companies, cap-weighted (QQQ, whose index caps its largest weights) against equal-weight (QQEW, from 2006)."
 
 [[sizek.pairs]]
@@ -652,6 +666,7 @@ key = "large_small"
 label = "LARGE vs SMALL"
 big = "SPY"
 small = "IWM"
+fundamentals_note = "Small companies are outside the universe the P/E figures are built from (the S&P 500 and Nasdaq-100 members, from their SEC filings), and many of the Russell 2000 have no earnings. Prices only."
 note = "The S&P 500 against the Russell 2000. Different companies, not a re-weighting; the small-cap index holds many with no earnings."
 
 [[sizek.pairs]]
@@ -659,6 +674,7 @@ key = "large_mid"
 label = "LARGE vs MID"
 big = "SPY"
 small = "MDY"
+fundamentals_note = "Mid-sized companies are outside the universe the P/E figures are built from (the S&P 500 and Nasdaq-100 members, from their SEC filings). Prices only."
 note = "The S&P 500 against the S&P MidCap 400."
 
 [[sizek.pairs]]
@@ -669,6 +685,7 @@ small = "^FTMC"
 big_name = "FTSE 100"
 small_name = "FTSE 250"
 price_index = true
+fundamentals_note = "UK-listed companies are outside the universe the P/E figures are built from (the S&P 500 and Nasdaq-100 members, from their SEC filings), and these are price indexes in pounds. Prices only."
 note = "The 100 largest UK listings (many of them global exporters) against the next 250, which sell mostly in the UK. Price indexes in pounds, dividends excluded."
 
 [[sizek.pairs]]
@@ -680,6 +697,10 @@ big_arm = "VALUE"
 small_arm = "GROWTH"
 big_name = "IWD"
 small_name = "IWF"
+big_basket = "holdings:IWD"
+small_basket = "holdings:IWF"
+big_basket_label = "IWD · Russell 1000 Value"
+small_basket_label = "IWF · Russell 1000 Growth"
 note = "The Russell 1000's value half (IWD) against its growth half (IWF): the same large and mid-sized companies, split by price against book value, earnings and growth. Value holds more banks, energy and health care; growth more technology."
 
 [[sizek.pairs]]
@@ -692,6 +713,7 @@ small_arm = "GROWTH"
 big_name = "FF value"
 small_name = "FF growth"
 source = "french"
+fundamentals_note = "Fama-French portfolios are not companies: they file nothing, so there are no earnings to build a P/E from. Prices only."
 note = "Kenneth French's value factor: the cheapest 30% of US stocks by book-to-market against the dearest 30%, each half of small and large companies, value-weighted, every listed US common stock (NYSE, AMEX, Nasdaq). The ratio follows cumulative HML. Monthly updates with a lag of about a month."
 
 [[sizek.pairs]]
@@ -704,6 +726,7 @@ small_arm = "GROWTH"
 big_name = "FF large value"
 small_name = "FF large growth"
 source = "french"
+fundamentals_note = "Fama-French portfolios are not companies: they file nothing, so there are no earnings to build a P/E from. Prices only."
 note = "The large-company half of HML: the cheapest 30% of the big stocks against the dearest 30%, value-weighted. Not the same split as IWD/IWF: Russell scores growth forecasts too and splits names between its halves, while this sorts on book-to-market alone, so the two can diverge (in the three years to August 2026 this value leg rose about 136%, IWD about 71%)."
 
 [[sizek.pairs]]
@@ -711,6 +734,8 @@ key = "staples_market"
 label = "STAPLES vs MARKET"
 big = "XLP"
 small = "SPY"
+big_basket = "sector:Consumer Staples"
+small_basket = "index:SPX"
 big_arm = "STAPLES"
 small_arm = "MARKET"
 note = "Consumer staples (XLP) against the S&P 500 (SPY): how far the defensive sector has lagged or led the whole market."
@@ -720,6 +745,9 @@ key = "lowvol_market"
 label = "LOW VOLATILITY vs MARKET"
 big = "USMV"
 small = "SPY"
+big_basket = "holdings:USMV"
+small_basket = "index:SPX"
+big_basket_label = "USMV · MSCI USA Minimum Volatility"
 big_arm = "LOW VOL"
 small_arm = "MARKET"
 note = "The minimum-volatility S&P-style fund (USMV, from 2011) against the S&P 500: the market's least volatile names, weighted to keep the portfolio's swings small, against all of it."

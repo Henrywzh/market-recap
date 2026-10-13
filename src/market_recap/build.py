@@ -181,6 +181,8 @@ def run(
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in events.INPUTS})
                 elif name == "kshape":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in kshape.INPUTS})
+                elif name == "sizek":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in sizek.INPUTS})
                 elif name == "themes":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in themes.INPUTS})
                 elif name == "chain":

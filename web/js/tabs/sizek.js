@@ -2,15 +2,26 @@
 // arm against the equal-weight or smaller one, of much the same market) and
 // style pairs (value against growth, staples or low volatility against the
 // market). Each view names its arms (big_arm / small_arm, default LARGE / SMALL).
-// The ratio of their prices with where it sits in its own history, each arm's
-// path, the rolling one-year gap, returns by window and each calendar year. The
-// page shows the divergence; it does not say which arm is right, and it carries
-// no valuation for the arms (see the notes).
+// One window switch above the charts cuts every dated chart of the pair to the
+// same lookback, and the reader's choice is kept between pairs. The charts show
+// the ratio of the arms' prices with where it sits in its own history, each
+// arm's path and the rolling one-year gap; the valuation cards then split the
+// ratio into multiple and earnings. Returns by window and by calendar year stay
+// in tables below. The stat strip is full-history. The page shows the
+// divergence; it does not say which arm is right.
 
 import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, periodSwitch, gap, DASH } from '../fmt.js';
 import { areaLine, multiLine, zeroLine } from '../charts.js';
+import { fundamentalCards } from '../basket-view.js';
+import { pickWindow, windowSwitch } from '../windows.js';
 import { percentileView, multipleText, spreadRows } from '../kshape-model.js';
-import { leadText, extremesText, yearRows, yearsWon, wonText } from '../sizek-model.js';
+import { leadText, extremesText, yearRows, yearsWon, wonText, readWindow, writeWindow, priceSeries, gapSeries, fundamentalsOf } from '../sizek-model.js';
+
+// One memory per tab, so the reader's window survives switching pairs and
+// reloads. The default is five years: long enough to show a regime, short
+// enough that the last year is still legible.
+const WINDOW_KEY = 'mr-window-sizek';
+const DEFAULT_WINDOW = '5Y';
 
 const present = (v) => v !== null && v !== undefined && Number.isFinite(v);
 const signed = (v, digits, unit = '') => (present(v) ? `${v > 0 ? '+' : ''}${num(v, digits)}${unit}` : DASH);
@@ -32,6 +43,8 @@ function arms(v) {
   return { big: v.big_arm || 'LARGE', small: v.small_arm || 'SMALL' };
 }
 
+// Full-history figures: the strip says "of its own weeks", so it does not move
+// with the window.
 function strip(v) {
   const p = v.price, g = v.gap, b = v.big_name, sm = v.small_name, a = arms(v);
   const pp = p ? percentileView(p.ratio_percentile) : null;
@@ -44,33 +57,45 @@ function strip(v) {
   ]);
 }
 
-function render(data, host, key) {
-  const v = data.views.find((x) => x.key === key) || data.views[0];
+function windowBar(dates, window, onPick) {
+  return el('div', { class: 'pair-window' }, [
+    el('span', { class: 'pair-window-label', text: 'WINDOW' }),
+    windowSwitch(dates, window, onPick),
+  ]);
+}
+
+// The charts, all cut to one window: the ratio and the arms, the rolling gap,
+// and the valuation cards that split the ratio into multiple and earnings.
+function chartCards(data, v, win) {
   const p = v.price, a = arms(v);
-  if (!p) {
-    host.replaceChildren(card(v.label, null, [gap(`No prices for ${(v.no_prices || []).join(', ') || 'this pair'}.`)]));
-    return;
-  }
+  const ratio = priceSeries(p, win);
   const ratioNode = chart();
   const armsNode = chart();
-  const ratioCard = card(`RATIO · ${v.big_name} ÷ ${v.small_name} · SINCE ${p.since}`, el('span', { class: 'dim', text: `${p.sessions} sessions through ${p.through} · ${percentileView(p.ratio_percentile).text} of its own weeks` }), [
+  const ratioCard = card(`RATIO · ${v.big_name} ÷ ${v.small_name} · ${win}`, el('span', { class: 'dim', text: `since ${p.since} · ${p.sessions} sessions through ${data.inputs.prices_through} · ${percentileView(p.ratio_percentile).text} of its own weeks` }), [
     ratioNode, p.extremes ? el('div', { class: 'field-note', text: extremesText(p.extremes) }) : null]);
-  const armsCard = card('EACH ARM · =100 WHEN BOTH FIRST TRADED', null, [armsNode]);
+  const armsCard = card(`EACH ARM · =100 AT THE WINDOW'S START · ${win}`, null, [armsNode]);
   queueMicrotask(() => {
-    areaLine(ratioNode, p.dates, p.ratio);
-    multiLine(armsNode, p.dates, { [`${a.big} · ${v.big_name}`]: p.big, [`${a.small} · ${v.small_name}`]: p.small });
+    areaLine(ratioNode, ratio.dates, ratio.series.ratio);
+    multiLine(armsNode, ratio.dates, { [`${a.big} · ${v.big_name}`]: ratio.series.big, [`${a.small} · ${v.small_name}`]: ratio.series.small });
   });
 
-  const cards = [el('div', { class: 'grid two' }, [ratioCard, armsCard])];
+  const out = [el('div', { class: 'grid two' }, [ratioCard, armsCard])];
   if (v.gap) {
     const node = chart(200);
-    queueMicrotask(() => zeroLine(node, v.gap.dates, v.gap.gap));
-    cards.push(card(`${v.big_name} LESS ${v.small_name} · RETURN OVER ${v.gap.window}, PERCENTAGE POINTS`, el('span', { class: 'dim', text: `${v.gap.windows} windows from ${v.gap.first}` }), [node,
+    const cut = gapSeries(v.gap, win);
+    queueMicrotask(() => zeroLine(node, cut.dates, cut.series.gap));
+    out.push(card(`${v.big_name} LESS ${v.small_name} · RETURN OVER ${v.gap.window}, PERCENTAGE POINTS · ${win}`, el('span', { class: 'dim', text: `${v.gap.windows} windows from ${v.gap.first}` }), [node,
       el('div', { class: 'sc-fomc-line', text: leadText(v.gap, v.big_name, v.small_name) }),
       el('div', { class: 'field-note', text: 'Rolling windows overlap: neighbouring points share most of their days, so the number of times the lead changed hands is far smaller than the number of points.' })]));
   }
+  out.push(...fundamentalCards(fundamentalsOf(v), win, [a.big, a.small], v.price ? { dates: v.price.dates, ratio: v.price.ratio } : null, `${v.big_name} ÷ ${v.small_name}`));
+  return out;
+}
 
-  const spreadBody = spreadRows(p.spreads).map((r) => el('tr', {}, [
+// The tables are readings of whole periods, not dated charts: they stay full.
+function tables(v) {
+  const a = arms(v);
+  const spreadBody = spreadRows(v.price.spreads).map((r) => el('tr', {}, [
     el('td', { text: r.period }), el('td', { class: dirClass(r.top), text: pct(r.top, 1) }), el('td', { class: dirClass(r.bottom), text: pct(r.bottom, 1) }),
     el('td', { class: r.tone === 'dim' ? 'dim' : r.tone, text: signed(r.spread, 1, ' pp') }),
   ]));
@@ -78,13 +103,12 @@ function render(data, host, key) {
     el('td', { text: r.label }), el('td', { class: dirClass(r.big), text: pct(r.big, 1) }), el('td', { class: dirClass(r.small), text: pct(r.small, 1) }),
     el('td', { class: r.tone === 'dim' ? 'dim' : r.tone, text: signed(r.gap, 1, ' pp') }),
   ]));
-  cards.push(el('div', { class: 'grid two' }, [
+  return [el('div', { class: 'grid two' }, [
     card('RETURNS BY WINDOW', null, [table(['WINDOW', `${a.big} · ${v.big_name}`, `${a.small} · ${v.small_name}`, `${a.big} − ${a.small}`], spreadBody),
       el('div', { class: 'field-note', text: 'A window longer than the common history is absent, not shortened.' })]),
     card('RETURNS BY CALENDAR YEAR', null, [table(['YEAR', `${a.big} · ${v.big_name}`, `${a.small} · ${v.small_name}`, `${a.big} − ${a.small}`], yearBody),
       el('div', { class: 'field-note', text: 'The first year starts at the first close both were priced; the current year is to date.' })]),
-  ]));
-  host.replaceChildren(strip(v), v.note ? el('div', { class: 'note-text', text: v.note }) : null, ...cards);
+  ])];
 }
 
 export default function renderSizek(root, data, _manifest, ctx = {}) {
@@ -99,10 +123,35 @@ export default function renderSizek(root, data, _manifest, ctx = {}) {
   const first = keys.includes(wanted) ? wanted : keys[0];
   const host = el('div', {});
   const byLabel = Object.fromEntries(data.views.map((v) => [v.label, v.key]));
+  let lookback = readWindow(WINDOW_KEY, DEFAULT_WINDOW);
+
+  // Redraws the pair. A pair shorter than the remembered window shows its
+  // longest covered window instead, and the remembered choice is kept.
+  const draw = (key) => {
+    const v = data.views.find((x) => x.key === key) || data.views[0];
+    if (!v.price) {
+      host.replaceChildren(card(v.label, null, [gap(`No prices for ${(v.no_prices || []).join(', ') || 'this pair'}.`)]));
+      return;
+    }
+    const win = pickWindow(v.price.dates, lookback);
+    // replaceChildren turns a null child into the text "null", so absent parts are filtered out.
+    host.replaceChildren(...[
+      windowBar(v.price.dates, win, (next) => {
+        lookback = next;
+        writeWindow(WINDOW_KEY, next);
+        draw(v.key);
+      }),
+      strip(v),
+      v.note ? el('div', { class: 'note-text', text: v.note }) : null,
+      ...chartCards(data, v, win),
+      ...tables(v),
+    ].filter(Boolean));
+  };
+
   root.append(periodSwitch(data.views.map((v) => v.label), data.views.find((v) => v.key === first).label, (label) => {
     ctx.setArg?.(byLabel[label]);
-    render(data, host, byLabel[label]);
+    draw(byLabel[label]);
   }));
   root.append(host);
-  render(data, host, first);
+  draw(first);
 }

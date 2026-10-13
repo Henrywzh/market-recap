@@ -77,6 +77,14 @@ sectors; semis, banks, housing, cruise and defense on their sub-industries).
 THEMES keeps every group; only cloud & AI capex spans sectors. Screen leaves
 the menu (reached from a ticker's P/E link); `#rotation` opens the hub.
 
+A sector or sub-industry page opens on its charts, in four numbered blocks:
+the basket against the S&P 500 over one lookback window (with the SPDR fund
+against SPY for a sector) beside the sub-industry bars; the trailing P/E
+against its own ten years with the valuation path and the fundamentals cards
+against its sector or the market; a map of its sub-industries (against the
+index, and their P/E in their own ten years); and a names chart. Its tables
+sit folded beneath. The hub keeps the rotation graph and the sector table.
+
 The plan below is the original one, kept for the record.
 
 Four top-level modes plus a tools menu. Each mode has at most four views.

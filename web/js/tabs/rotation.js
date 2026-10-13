@@ -376,11 +376,23 @@ function methodNotes(data) {
   ];
 }
 
-// SECTORS: where money is rotating (this panel), then how expensive each
-// index and sector is against its own ten years (VALUATION's aggregates).
+// SECTORS: where money is rotating (this panel), then the typical member of
+// each sector and how expensive each index and sector is against its own ten
+// years. The SECTORS hub puts its sector table between the two halves.
 export default async function renderRotation(root, data, _manifest, ctx = {}) {
+  renderRotationGraph(root, data);
+  await renderRotationDetail(root, ctx);
+}
+
+// `drill: false` leaves out the "INSIDE ..." card for the selected sector, so
+// the SECTORS hub shows the rotation graph and the heat grid only: the sector
+// pages open from the table, not from here.
+export function renderRotationGraph(root, data, { drill = true } = {}) {
   root.append(sectionTitle('ROTATION', 'RELATIVE STRENGTH VS THE S&P 500'));
-  renderRotationSection(root, data);
+  renderRotationSection(root, data, { drill });
+}
+
+export async function renderRotationDetail(root, ctx = {}) {
   // The typical member of each group with the evidence beside it. A view has
   // at most four tabs (docs/information_architecture.md), so this is a section
   // of SECTORS rather than a view of its own.
@@ -397,7 +409,7 @@ export default async function renderRotation(root, data, _manifest, ctx = {}) {
   }
 }
 
-function renderRotationSection(root, data) {
+function renderRotationSection(root, data, { drill = true } = {}) {
   const groups = data.groups || [];
   if (!groups.length) {
     root.append(el('div', { class: 'gap', text: 'No sector baskets were built for this session.' }));
@@ -456,7 +468,7 @@ function renderRotationSection(root, data) {
     }
     gridHost.replaceChildren(card('RELATIVE STRENGTH BY WINDOW', el('span', { class: 'dim', text: 'pp vs S&P 500 · click a row to inspect' }),
       [heatGrid(ranked, view, bench, pick, today)]));
-    drillHost.replaceChildren(...[drillDown(data, view)].filter(Boolean));
+    drillHost.replaceChildren(...[drill ? drillDown(data, view) : null].filter(Boolean));
   }
 
   const pressed = () => [...windowSwitch.children].forEach((b) => b.setAttribute('aria-pressed', String(b.textContent === view.window)));
@@ -504,7 +516,9 @@ function renderRotationSection(root, data) {
       card('RELATIVE ROTATION GRAPH', rrgNote, [rrgNode]),
       linesCard,
     ]),
-    el('div', { class: 'grid two rot-bottom' }, [gridHost, drillHost]),
+    drill
+      ? el('div', { class: 'grid two rot-bottom' }, [gridHost, drillHost])
+      : el('div', { class: 'sx-wide' }, [gridHost]),
   );
   requestAnimationFrame(draw);
 }

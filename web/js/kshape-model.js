@@ -3,6 +3,7 @@
 // tone. Nothing here says which leg is right.
 
 import { num, DASH } from './fmt.js';
+import { sliceWindow } from './windows.js';
 
 const finite = (v) => v !== null && v !== undefined && Number.isFinite(v);
 const signed = (v, digits) => (finite(v) ? `${v > 0 ? '+' : ''}${num(v, digits)}` : DASH);
@@ -69,4 +70,22 @@ export function nameRow(n) {
 export function peRangeText(pe) {
   if (!pe) return null;
   return `median ${multipleText(pe.ratio_median)}, 10th to 90th percentile ${multipleText(pe.ratio_p10)} to ${multipleText(pe.ratio_p90)}, ${pe.dates_used} weeks`;
+}
+
+// The price ratio and the two legs cut to the window: the ratio is =1 and each
+// leg =100 at the window's first close. Only the price charts are rebased.
+export function legSeries(price, window) {
+  return sliceWindow(price.dates, { ratio: price.ratio, top: price.top, bottom: price.bottom }, window,
+    { ratio: 'ratio', top: 'index', bottom: 'index' });
+}
+
+// Trailing P/E medians and their ratio cut to the window, as readings: a P/E is
+// never rebased, so the cut is all that changes.
+export function peSeries(pe, window) {
+  return sliceWindow(pe.dates, { ratio: pe.ratio, top: pe.top, bottom: pe.bottom }, window);
+}
+
+// Year-on-year EPS growth cut to the window; a growth rate is not rebased.
+export function epsSeries(eps, window) {
+  return sliceWindow(eps.dates, { top: eps.top, bottom: eps.bottom }, window);
 }

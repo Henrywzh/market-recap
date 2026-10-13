@@ -105,6 +105,11 @@ def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits,
     ptbv = V.ptbv_series(prices, V.tbv_steps(data.eps_history, splits))
     ptbv_stats = V.pe_stats(ptbv) if not ptbv.empty else None
     by_filed = {s["filed"]: s for s in operating}
+    # The close and the earnings yield (lead basis, losses included) on the same
+    # weeks, so a basket of names can be totalled later (compute.baskets).
+    closes = prices.dropna()
+    lead_steps = reported_steps if lead == V.REPORTED else V.as_steps(operating)
+    earnings_yield = (V.plausible_eps(closes, lead_steps) / closes * 100).reindex(dates)
 
     def payload(key: str) -> dict | None:
         if stats[key] is None:
@@ -127,6 +132,8 @@ def _history(symbol: str, data: sec.Filer, prices: pd.Series | None, splits,
         "fiscal_forward": fiscal,
         "ptbv": [clean_float(v, 2) for v in ptbv.reindex(dates).to_numpy()] if ptbv_stats else None,
         "ptbv_stats": _stats_json(ptbv_stats) if ptbv_stats else None,
+        "close": [clean_float(v, 4) for v in closes.reindex(dates).to_numpy()],
+        "ey": [clean_float(v, 3) for v in earnings_yield.to_numpy()],
         # Each quarter's TTM EPS both ways, and what the operating figure took out.
         "eps": [
             {"filed": filed, "period_end": end, "reported": clean_float(eps, 4),

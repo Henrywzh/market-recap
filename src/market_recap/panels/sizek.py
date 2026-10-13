@@ -8,8 +8,15 @@ their ratio with where today's ratio sits among its own weeks, returns by
 window, the rolling one-year return gap and how often and how long the first
 arm led, and each calendar year's gap. Each pair names its arms (``big_arm`` /
 ``small_arm``, default LARGE / SMALL).
-Prices only: a fund's own P/E is not a measured figure here (no look-through
-to its holdings is kept), and the page says so. See compute.sizek.
+Where a pair names a basket for each arm (``big_basket`` / ``small_basket``),
+each arm is also rebuilt as a basket of its names' trailing P/E and earnings,
+the way the VALUATION tab builds an index, so the gap splits into a re-rating
+and an earnings difference (``fundamentals``; see panels.kshape.arm). Specs:
+``index:SPX`` / ``index:SPX:equal`` / ``index:NDX`` / ``index:NDX:equal`` (index
+members, cap-weighted or equal), ``sector:<GICS sector>`` (S&P 500 members,
+cap-weighted or equal), and ``holdings:<iShares fund>`` (the fund's own holding weights,
+looked through to the names). A pair without baskets is prices only, and says
+why in ``fundamentals_note``. See compute.sizek.
 A pair with ``source = "french"`` takes its arms from Kenneth French's daily
 portfolio returns instead of Yahoo: factor series (the Fama-French value and
 size sorts), not funds, and published monthly with a lag. See sources.french.
@@ -21,15 +28,27 @@ import pandas as pd
 
 from ..compute import kshape as K
 from ..compute import sizek as S
+from ..compute import xray as X
 from ..config import PERIOD_TRADING_DAYS
 from ..context import YAHOO_URL
-from ..sources import french, yahoo
+from ..sources import french, ishares, yahoo
 from ..util import SourceRecord, clean_float, describe_error, to_iso_date
-from .kshape import _series_payload
+from .kshape import FUNDAMENTAL_YEARS, NO_VALUATION, Histories, _series_payload
+from .kshape import arm as basket_arm
+from .kshape import fundamentals as basket_fundamentals
+from .xray import _equity_lines
+
+INPUTS = ("valuation",)
+# The index the sector groups are drawn from (config universe.indices, primary = true).
+PRIMARY_INDEX = "SPX"
+INDEX_NAMES = {"SPX": "S&P 500", "NDX": "Nasdaq-100"}
+BASKET_KINDS = ("index", "sector", "holdings")
 
 NOTES = (
-    "Prices only. Whether either arm is dearer than the other on earnings is not measured here: a fund's reported P/E is a snapshot "
-    "of its holdings today, not a history, and none is kept.",
+    "Prices are the ratio of the two arms. Where a pair has a basket for each arm, the page also splits the gap into the arms' P/E "
+    "and earnings: each arm is rebuilt from its names' SEC filings and closes, as the VALUATION tab builds an index, at today's "
+    "weights and members. A pair without baskets is prices only: its arms are outside the filings universe (S&P 500 and Nasdaq-100 "
+    "members), and the pair says so.",
     "A ratio's percentile is where today's value sits among its own past weeks. A ratio that has risen for years says only that "
     "the first arm has led, not that it must turn.",
     "Some pairs differ in how they are built: the equal-weight funds rebalance on a schedule and hold more small and mid-sized names than "
@@ -133,7 +152,112 @@ def _from_french(pair: dict) -> bool:
     return pair.get("source") == "french"
 
 
-def build(ctx) -> dict:
+# --- Fundamentals: each arm as a basket of its names' P/E and earnings -------------
+
+def parse_basket(text: str) -> tuple[str, str, bool]:
+    """A basket spec as (kind, name, equal weight): 'index:SPX', 'index:SPX:equal',
+    'sector:Consumer Staples', 'holdings:IWD'. Equal weight is for index and sector
+    arms only; a fund's arm is weighted by the fund's own holdings."""
+    kind, _, rest = str(text).partition(":")
+    name, _, mode = rest.partition(":")
+    if kind not in BASKET_KINDS or not name or mode not in ("", "equal") or (mode and kind == "holdings"):
+        raise ValueError(f"unknown basket spec {text!r}")
+    return kind, name, mode == "equal"
+
+
+def basket_label(kind: str, name: str, equal: bool) -> str:
+    """The arm's name on the page when the config gives none. A fund's arm is
+    named by its ticker, so a fund's full name goes in the config instead."""
+    if kind == "index":
+        return f"{INDEX_NAMES.get(name, name)} {'equal-weight' if equal else 'cap-weighted'}"
+    if kind == "sector":
+        return f"{name} sector" + (", equal-weight" if equal else "")
+    return name
+
+
+def _members(kind: str, name: str, rows: dict[str, dict]) -> list[str]:
+    """The names an index or sector arm holds today, from this session's VALUATION rows."""
+    if kind == "index":
+        return [t for t, r in rows.items() if name in (r.get("indices") or [])]
+    return [t for t, r in rows.items() if r.get("sector") == name and PRIMARY_INDEX in (r.get("indices") or [])]
+
+
+def _fund(ticker: str, memo: dict, ctx) -> dict:
+    """A fund's equity lines from its iShares file, fetched once per build. A
+    failed fetch is kept and logged, never raised: the other arms still build."""
+    if ticker not in memo:
+        label = f"{ticker} holdings (iShares), for the SIZE & STYLE fundamentals"
+        try:
+            frame, as_of, url = ishares.fetch_holdings(ticker)
+            lines = _equity_lines(frame, "ishares", "")
+            memo[ticker] = {"lines": lines, "as_of": as_of, "error": None}
+            ctx.log.add(SourceRecord(f"sizek_{ticker.lower()}_holdings", label, url, observed_date=as_of, rows=int(len(lines)),
+                                     policy="fund_holdings"))
+        except Exception as exc:  # noqa: BLE001 -- the arm says why it has no basket; the page's other arms still build
+            memo[ticker] = {"lines": None, "as_of": None, "error": describe_error(exc)}
+            ctx.log.add(SourceRecord(f"sizek_{ticker.lower()}_holdings", label, ishares.HOME_URL, policy="fund_holdings",
+                                     status="error", error=describe_error(exc)))
+    return memo[ticker]
+
+
+def _holdings_arm(which: str, label: str, ticker: str, rows: dict[str, dict], histories: Histories, memo: dict, ctx,
+                  years: int) -> tuple[dict, str | None]:
+    """A fund's arm: its holding weights on the names with a filings history.
+    Fund coverage is the share of the fund's equity weight those names hold."""
+    fund = _fund(ticker, memo, ctx)
+    if fund["lines"] is None:
+        return ({"key": which, "label": label, "basket": None, "fund_coverage": None, "note": None},
+                f"{label}: the holdings of {ticker} could not be fetched ({fund['error']}).")
+    lines = fund["lines"]
+    total = float(lines["weight"].sum())
+    us = lines[lines["us_listed"]]
+    # The same mapping the X-RAY tab uses: an issuer's ticker onto this build's own symbol.
+    symbols = X.resolve_symbols(us["ticker"], list(rows))
+    by_symbol = us["weight"].groupby(symbols.to_numpy()).sum()
+    names = [s for s in by_symbol.index if s in rows]
+    closes, yields = histories.frames(names)
+    weights = {s: float(by_symbol[s]) for s in names if s in closes.columns}
+    coverage = sum(weights.values()) / total if total > 0 else None
+    note = f"Weights are {ticker}'s own holding weights as of {fund['as_of']}, for the names with a filings history."
+    return basket_arm(which, label, list(weights), closes, yields, weights, years=years, fund_coverage=coverage, note=note)
+
+
+def _arm(which: str, spec: str, label: str | None, rows: dict[str, dict], histories: Histories, memo: dict, ctx,
+         years: int) -> tuple[dict, str | None]:
+    kind, name, equal = parse_basket(spec)
+    label = label or basket_label(kind, name, equal)
+    if kind == "holdings":
+        return _holdings_arm(which, label, name, rows, histories, memo, ctx, years)
+    names = _members(kind, name, rows)
+    # Cap-weighted arms use this session's market caps; a name without one is left out and says so.
+    weights = None if equal else {t: float(rows[t]["market_cap"]) for t in names if rows[t].get("market_cap")}
+    closes, yields = histories.frames(names)
+    return basket_arm(which, label, names, closes, yields, weights, years=years)
+
+
+def _valuation_rows(inputs: dict | None) -> dict[str, dict] | None:
+    """VALUATION's rows by ticker, or None when VALUATION was not built this session."""
+    panel = (inputs or {}).get("valuation")
+    if panel is None:
+        return None
+    return {r["ticker"]: r for r in panel.get("rows", []) if r.get("ticker")}
+
+
+def _pair_fundamentals(pair: dict, rows: dict[str, dict] | None, histories: Histories, memo: dict, ctx, years: int) -> dict:
+    """The pair's fundamentals block, or the reason it has none. A pair with no
+    baskets carries its ``fundamentals_note``; a pair with baskets but no
+    VALUATION this session says that instead of showing nothing."""
+    specs = [(pair.get("big_basket"), pair.get("big_basket_label"), "big"),
+             (pair.get("small_basket"), pair.get("small_basket_label"), "small")]
+    if not all(spec for spec, _, _ in specs):
+        return {"fundamentals_note": pair.get("fundamentals_note")}
+    if rows is None:
+        return {"fundamentals": {"missing": NO_VALUATION}, "fundamentals_note": None}
+    built = [_arm(which, spec, label, rows, histories, memo, ctx, years) for spec, label, which in specs]
+    return {"fundamentals": basket_fundamentals(built), "fundamentals_note": None}
+
+
+def build(ctx, *, inputs: dict | None = None) -> dict:
     cfg = ctx.config["sizek"]
     pairs = cfg["pairs"]
     wanted = sorted({s for p in pairs if not _from_french(p) for s in (p["big"], p["small"])})
@@ -154,10 +278,16 @@ def build(ctx) -> dict:
     periods = {label: PERIOD_TRADING_DAYS[label] for label in cfg["price_periods"]}
     gap_sessions = PERIOD_TRADING_DAYS[cfg["gap_period"]]
     views = [_view(p, closes, cfg, periods, gap_sessions) for p in pairs]
+    # Baskets come from this session's VALUATION rows and per-name histories, read once for all the pairs.
+    rows = _valuation_rows(inputs)
+    histories, memo = Histories(), {}
+    years = min(int(cfg["history_years"]), FUNDAMENTAL_YEARS)
+    for pair, view in zip(pairs, views):
+        view.update(_pair_fundamentals(pair, rows, histories, memo, ctx, years))
     return {
         "as_of": ctx.as_of,
         "settings": {k: cfg[k] for k in ("history_years", "price_periods", "gap_period")},
-        "inputs": {"prices_through": to_iso_date(closes.index[-1]), "no_prices": missing},
+        "inputs": {"prices_through": to_iso_date(closes.index[-1]), "no_prices": missing, "valuation_built": rows is not None},
         "views": views,
         "notes": list(NOTES),
     }

@@ -1161,3 +1161,19 @@ th[aria-sort] .sx-sort { color: var(--accent); }
 .sx-theme .tag-row { margin-top: 6px; }
 .sx-theme-line { font-size: 11.5px; line-height: 1.9; margin: 2px 0 10px; }
 .sx-industry { margin-top: 6px; }
+
+/* SECTORS pages, charts first: a chart's grid cell may shrink below its
+   content (ECharts sizes to its box), a folded table opens in place, and a
+   block that spans the row (the hub's heat grid) takes the full width. */
+.sx-slot { min-width: 0; }
+.sx-wide { min-width: 0; }
+.sx-fold { margin: 10px 0 0; border-top: 1px solid var(--border); padding-top: 6px; min-width: 0; }
+.sx-fold > summary { color: var(--accent); cursor: pointer; font-size: 10.5px; letter-spacing: 0.1em; user-select: none; padding: 4px 0; }
+.sx-fold > summary:hover { color: var(--text); }
+.sx-fold[open] > summary { color: var(--text-dim); }
+.sx-fold > .card { margin-top: 6px; }
+
+/* SIZE & STYLE and K-SHAPE: the one window switch above a pair's charts. The
+   label sits on the same line as the buttons, and the row wraps on a phone. */
+.pair-window { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 8px 0 6px; }
+.pair-window-label { font-size: 10px; letter-spacing: 0.1em; color: var(--text-dim); }

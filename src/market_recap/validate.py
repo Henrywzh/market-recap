@@ -297,6 +297,26 @@ def _check_xray(config: dict, payload: dict | None) -> list[Finding]:
     return out
 
 
+def _check_sizek(config: dict, payload: dict | None) -> list[Finding]:
+    """A pair configured with baskets must carry its fundamentals block; a block
+    that says why it is missing is a notice, not an error (a fund's fetch can fail)."""
+    if payload is None:
+        return []
+    out = []
+    views = {v.get("key"): v for v in payload.get("views") or []}
+    for pair in config.get("sizek", {}).get("pairs") or []:
+        if not (pair.get("big_basket") and pair.get("small_basket")):
+            continue
+        view = views.get(pair["key"])
+        if view is None:
+            out.append(Finding("error", "sizek", f"{pair['key']} is configured but not in the panel"))
+        elif "fundamentals" not in view:
+            out.append(Finding("error", "sizek", f"{pair['key']} names baskets but has no fundamentals block"))
+        elif (view["fundamentals"] or {}).get("missing"):
+            out.append(Finding("notice", "sizek", f"{pair['key']}: {view['fundamentals']['missing']}"))
+    return out
+
+
 def _check_presets(config: dict, technicals: dict | None) -> list[Finding]:
     """A relative-strength preset whose legs were never baked renders empty."""
     if not technicals:
@@ -377,6 +397,16 @@ def _check_sectors(payload: dict | None) -> list[Finding]:
     if payload.get("missing"):
         out.append(Finding("notice", "sectors",
                            f"{', '.join(payload['missing'])} did not build this session; the fields that read it are empty"))
+    # The hub's P/E fields are a number or null; a string or a boolean here would break the page's tables and charts.
+    numeric = ("forward_pe", "trailing_pe", "pe_percentile", "pe_median_10y", "forward_pe_median", "pe_percentile_median")
+    for entry in (payload.get("sectors") or []) + (payload.get("sub_industries") or []):
+        for field in numeric:
+            value = entry.get(field)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
+                out.append(Finding("error", "sectors", f"{entry.get('key')}: {field} is {value!r}, not a number or null"))
+        path = entry.get("path")
+        if path is not None and not (isinstance(path, dict) and isinstance(path.get("stages"), list)):
+            out.append(Finding("error", "sectors", f"{entry.get('key')}: path is neither null nor a stages list"))
     return out
 
 
@@ -446,6 +476,7 @@ def run() -> dict:
         + _check_financials(panels.get("financials"))
         + _check_valuation(panels.get("valuation"))
         + _check_xray(config, panels.get("xray"))
+        + _check_sizek(config, panels.get("sizek"))
         + _check_catalysts(panels.get("catalysts"))
         # A carried ledger is the live one verbatim; checking it against this
         # code is what may have failed, and would block the rest of the page.
