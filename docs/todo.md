@@ -649,3 +649,49 @@ Yahoo's forward and trailing P/E and consensus EPS each evening. Not done:
 - **More groups**: European defense (Rheinmetall, BAE, Saab, Leonardo, Thales),
   the DAX and CAC 40 members.
 
+## 17. The semiconductor selloff of 8-13 October: what we missed, and what was built (2026-10-13)
+
+SMH fell 6.3% from the 7 October close to 13 October, intraday (12.4% below its
+22 June high), the Nasdaq-100 2.0%, the S&P 500 nothing; memory and storage fell 14%
+to 16% (Hynix, SanDisk, Micron, Samsung), the equipment makers 9% to 11%, Nvidia
+4%. Ten-year yields barely moved (5.28% to 5.22%). Three layers: storage news
+before it (Toshiba to double hard disk output on 2 October, Seagate and Western
+Digital down 10% and 7%); the FT report on 8 October that OpenAI's annualized
+revenue was about $20bn below what investors had been shown; CXMT's 4F2 DRAM cell
+and year-end server DDR5 plan (10 October, TrendForce: CXMT 9.5% of 2Q26 DRAM
+revenue, up from 7.6%). TSMC's September revenue (+54.6% y/y, 8 October) was in
+the page and was not the problem: every series the page holds is realized
+activity, and the move was about what comes next (financing, competition).
+
+Built: (1) earnings importance by a name's share of its THEMES group's
+bellwether market cap (TSM was "low": no index weight); (2) the consensus
+snapshot records Yahoo's 7-day revision counts (from 2026-10-13); (3) a
+hand-kept catalyst log with exposed names, price since the event and the
+estimate change since the snapshot at the prior close (CALENDAR).
+
+**Tested and not built: an unexplained-mover detector.** A price-only flag
+(a name's or group's residual against its sector fund, or a basket against the
+S&P 500, beyond a robust z of its own previous 60 sessions) would not have
+caught these. Single names at z >= 5 and 3% fire 4.5 times a day on average over
+the last 500 sessions and missed the storage names on 2 and 6 October; sub-
+industry medians fire on 15% of days at z >= 5 and 43% at 3.5, and the memory
+group's residual on 2 October was 9.2% at z -3.0; relative to the S&P 500 the
+largest z of any basket on the worst days was -2.8 (hard disks, 2 October) and
+-2.6 (AI cloud, 8 October), inside the noise of a volatile group. The moves were
+large and not unusual for those names; what was missing was the cause, not the
+detection, and SECTORS and INDUSTRIES already show the sub-industry returns.
+Not built.
+
+First read of the estimates: through 12 October, consensus EPS and revenue for
+19 semiconductor names had a median change of 0.0% since the 7 October close
+(current year EPS: 5 up, 3 down, 11 unchanged); Seagate and Western Digital were
+revised up while their shares fell about 20%. The selloff so far is in what
+investors pay, not in expected earnings; the averages lag analysts and the
+history is 8 snapshot days.
+
+Open: a REVISIONS test of whether the first days' estimate change after such
+an event predicts the next months (needs a quarter or two of snapshots); a cycle
+position reading for memory (contract price momentum from ADATA / TrendForce;
+one DDR4 kit in PCPartPicker's index: +95% over twelve months, -2.4% over one); a claims ledger for the numbers prices lean on (OpenAI's reported
+revenue and its basis, CXMT's share) beyond the three events entered.
+

@@ -230,3 +230,41 @@ def earnings_importance(weight: float | None, high: float, medium: float) -> str
     if weight is None:
         return "low"
     return "high" if weight >= high else "medium" if weight >= medium else "low"
+
+
+RANK = {"low": 0, "medium": 1, "high": 2}
+
+
+def stronger(*levels: str) -> str:
+    """The most important of the given importance labels."""
+    return max(levels, key=lambda level: RANK[level])
+
+
+def theme_shares(groups: list[dict], caps: dict[str, float | None], key=lambda s: s) -> dict[str, dict]:
+    """Each bellwether's share of its theme's bellwether market cap, the
+    largest across the themes it is in: {key(symbol): {"theme", "label", "share"}}.
+
+    A name outside the S&P 500 and Nasdaq-100 (an ADR such as TSM) has no index
+    weight, so an index-weight rule calls the report of its theme's second
+    largest company unimportant; its weight among its theme's names is the
+    measure of how much it speaks for the theme. A theme with fewer than three
+    names with a cap gives no shares: a share of two is not a ranking."""
+    out: dict[str, dict] = {}
+    for spec in groups:
+        names = [s for s in spec.get("bellwethers") or [] if caps.get(s)]
+        if len(names) < 3:
+            continue
+        total = sum(caps[s] for s in names)
+        for symbol in names:
+            share = caps[symbol] / total
+            held = out.get(key(symbol))
+            if held is None or share > held["share"]:
+                out[key(symbol)] = {"theme": spec["key"], "label": spec["label"], "share": share}
+    return out
+
+
+def theme_importance(share: float | None, high: float, medium: float) -> str:
+    """By the share of the theme's bellwether market cap."""
+    if share is None:
+        return "low"
+    return "high" if share >= high else "medium" if share >= medium else "low"

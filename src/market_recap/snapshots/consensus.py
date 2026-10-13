@@ -7,7 +7,10 @@ evening. One file per New York date:
 - ``consensus/YYYY/YYYY-MM-DD.csv.gz``: one row per company and fiscal
   period (this and next quarter, this and next year) from Yahoo's
   earningsTrend: the period's end, consensus EPS and its range, analysts,
-  revenue, and the 30-day revision counts.
+  revenue, and the 7- and 30-day revision counts (analysts who raised or
+  cut: Yahoo's own counts, which are not nested: the 7-day count can exceed
+  the 30-day one, so each is read on its own). Files written before
+  2026-10-13 have no 7-day columns.
 
 The universe is the published VALUATION table, so the snapshot covers the
 companies the site values. A second run on a date that already has most of
@@ -29,7 +32,7 @@ from ..sources.http import FetchError, get_text
 from . import store
 
 COLUMNS = ("fetched_at", "symbol", "period", "end", "eps", "eps_low", "eps_high", "analysts",
-           "revenue", "up_30d", "down_30d")
+           "revenue", "up_30d", "down_30d", "up_7d", "down_7d")
 # A day already recorded for this share of the universe is not fetched again.
 COMPLETE_SHARE = 0.8
 
@@ -48,7 +51,8 @@ def rows_for(fetched_at: str, symbol: str, trend: Mapping[str, Any]) -> list[dic
         out.append({"fetched_at": fetched_at, "symbol": symbol, "period": period, "end": row.get("end"),
                     "eps": row.get("eps"), "eps_low": row.get("low"), "eps_high": row.get("high"),
                     "analysts": row.get("analysts"), "revenue": row.get("revenue"),
-                    "up_30d": row.get("up_30d"), "down_30d": row.get("down_30d")})
+                    "up_30d": row.get("up_30d"), "down_30d": row.get("down_30d"),
+                    "up_7d": row.get("up_7d"), "down_7d": row.get("down_7d")})
     return out
 
 

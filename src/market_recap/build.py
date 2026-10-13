@@ -16,7 +16,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalysts, chain, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, sizek, themes, valuation, xray
+from .panels import anchor, catalyst_log, catalysts, chain, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, sizek, themes, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -30,6 +30,8 @@ PANELS = {
     # Breadth and stress readings from fund prices; reads no other panel.
     "market_state": market_state.build,
     "catalysts": catalysts.build,
+    # Hand-kept unscheduled events: prices and the consensus snapshots since; reads no other panel.
+    "catalyst_log": catalyst_log.build,
     "priced": priced.build,
     # Measures past data releases against rates and stocks; reads no other panel.
     "scenarios": scenarios.build,

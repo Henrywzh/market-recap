@@ -144,3 +144,28 @@ def consensus_history(since: date, until: date) -> dict[str, dict[str, dict]]:
                 out[day.isoformat()] = trends
         day += timedelta(days=1)
     return out
+
+
+CONSENSUS_COLUMNS = ("date", "symbol", "period", "end", "eps", "analysts", "revenue", "up_30d", "down_30d", "up_7d", "down_7d")
+
+
+def consensus_table(since: date, until: date) -> pd.DataFrame:
+    """Every recorded consensus row between two dates, one row per day, company
+    and fiscal period, with the day as an ISO string in ``date``. A file written
+    before the 7-day revision counts were recorded has them as NaN. Empty
+    (with the columns) when nothing was recorded."""
+    base = root() / "consensus"
+    frames = []
+    day = since
+    while day <= until:
+        path = base / f"{day:%Y}" / f"{day:%Y-%m-%d}.csv.gz"
+        if path.exists():
+            try:
+                frame = pd.read_csv(path, compression="gzip")
+            except (OSError, ValueError):
+                frame = None
+            if frame is not None and not frame.empty:
+                frame["date"] = day.isoformat()
+                frames.append(frame.reindex(columns=list(CONSENSUS_COLUMNS)))
+        day += timedelta(days=1)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=list(CONSENSUS_COLUMNS))

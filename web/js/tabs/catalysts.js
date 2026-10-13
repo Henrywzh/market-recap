@@ -6,6 +6,7 @@
 // earnings). The page leads with the shape of the next three weeks and the
 // releases that matter; every event keeps its full detail one click down.
 
+import catalystLogSection from './catalyst-log.js';
 import { el, card, table, num, pct, dirClass, sectionTitle, gap, metaRow, DASH } from '../fmt.js';
 import { eventCard, outcomeCard, loadPrices } from '../event-card.js';
 import { tickerHref } from '../routes.js';
@@ -268,6 +269,7 @@ function earningsRow(event) {
     ]),
     el('span', { class: 'cat-figures' }, [
       weight ? el('span', { class: 'dim', text: `${num(weight, 2)}%` }) : null,
+      event.theme ? el('span', { class: 'dim', title: `share of the ${event.theme.label} bellwethers' market cap`, text: `${num(event.theme.share, 0)}% of ${event.theme.key}` }) : null,
       el('span', {}, [el('span', { class: 'dim', text: 'EST ' }), event.eps_forecast === null ? DASH : `$${num(event.eps_forecast, 2)}`]),
       event.last_year_eps === null ? null : el('span', { class: 'dim', text: `YR AGO $${num(event.last_year_eps, 2)}` }),
     ]),
@@ -571,6 +573,9 @@ export default async function renderCatalysts(root, data, _manifest, ctx = {}) {
   const keys = keyReleases(data);
   if (keys) root.append(keys);
   root.append(lastSession(data.recent, data.certainty_labels));
+  const log = await ctx.loadArtifact?.('catalyst_log').catch(() => null);
+  const logCard = log && log.as_of === data.as_of ? catalystLogSection(log) : null;
+  if (logCard) root.append(logCard);
   root.append(el('div', { class: 'field-row cat-filter' }, [
     el('span', { class: 'cat-lane', text: 'ALL EVENTS' }),
     switchGroup([['high', 'HIGH'], ['medium', 'MEDIUM+'], ['low', 'ALL']], filter.importance, set('importance')),

@@ -295,3 +295,20 @@ def test_europe_snapshot_records_multiples_and_consensus_and_keeps_an_earlier_ro
     assert rows["RMS.PA"]["forward_pe"] == "26.0" and rows["RMS.PA"]["eps_0y"] == ""                # no consensus: blank, not zero
     assert europe.row_for("t", "Z", None, None) is None
     assert europe.run(root=tmp_path, now=datetime(2026, 10, 3, 23, 58, tzinfo=timezone.utc), symbols=universe)["status"] == "skipped"   # a Saturday
+
+
+def test_consensus_snapshot_records_the_seven_day_revision_counts_and_reads_a_file_without_them(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+    import csv
+    import gzip
+    from market_recap.snapshots import consensus
+    full = {"0y": {"eps": 1.0, "end": "2026-12-31", "up_30d": 10, "down_30d": 2, "up_7d": 26, "down_7d": 1}}
+    bare = {"0y": {"eps": 2.0, "end": "2026-12-31"}}                               # no revision counts from Yahoo: blank, not zero
+    monkeypatch.setattr(consensus.estimates, "fetch_trends", lambda symbols, use_cache=False: ({"A": full, "B": bare}, {}))
+    consensus.run(root=tmp_path, now=datetime(2026, 10, 1, 23, 50, tzinfo=timezone.utc), symbols=["A", "B"])
+    path = next(tmp_path.rglob("*.csv.gz"))
+    with gzip.open(path, "rt") as handle:
+        rows = {r["symbol"]: r for r in csv.DictReader(handle)}
+    assert (rows["A"]["up_7d"], rows["A"]["down_7d"], rows["A"]["up_30d"]) == ("26", "1", "10")
+    assert rows["B"]["up_7d"] == "" and rows["B"]["down_7d"] == ""
+    assert consensus.COLUMNS[-2:] == ("up_7d", "down_7d")

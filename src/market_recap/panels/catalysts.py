@@ -18,6 +18,7 @@ The event fields follow the research control tower's event contract
 from __future__ import annotations
 
 from datetime import date, timedelta
+from concurrent.futures import ThreadPoolExecutor
 import re
 
 import pandas as pd
@@ -26,7 +27,7 @@ from ..compute import catalysts as C
 from ..compute import expectations as X
 from ..compute.returns import period_return
 from ..compute.xray import ticker_key
-from ..sources import calendars, expectations as expectation_feeds, fred, nasdaq, treasury
+from ..sources import calendars, estimates, expectations as expectation_feeds, fred, nasdaq, treasury
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, company_name
 
 # How each source's dates are known.
@@ -230,8 +231,21 @@ def _universe(ctx) -> dict[str, dict]:
     return names
 
 
+def _theme_shares(ctx, settings: dict, use_cache: bool) -> dict[str, dict]:
+    """Share of its theme's bellwether market cap, by ticker key, for the names
+    the THEMES groups list; empty when no theme rule is configured or no caps came."""
+    groups = (ctx.config.get("themes") or {}).get("groups") or []
+    if "earnings_theme_high_share" not in settings or not groups:
+        return {}
+    symbols = sorted({s for spec in groups for s in spec.get("bellwethers") or []})
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        caps = dict(zip(symbols, pool.map(lambda s: estimates.market_cap(s, use_cache=use_cache), symbols)))
+    return C.theme_shares(groups, caps, key=ticker_key)
+
+
 def _earnings(ctx, settings: dict, dates: list[date], use_cache: bool) -> tuple[list[dict], list[str]]:
     names = _universe(ctx)
+    themes = _theme_shares(ctx, settings, use_cache)
     events, failed = [], []
     misses = 0
     for day in dates:
@@ -256,6 +270,10 @@ def _earnings(ctx, settings: dict, dates: list[date], use_cache: bool) -> tuple[
             weight = max(entry["weights"].values(), default=None)
             importance = C.earnings_importance(
                 weight, settings["earnings_high_weight"], settings["earnings_medium_weight"])
+            theme = themes.get(ticker_key(row["symbol"]))
+            if theme:
+                importance = C.stronger(importance, C.theme_importance(
+                    theme["share"], settings["earnings_theme_high_share"], settings["earnings_theme_medium_share"]))
             events.append({
                 "event_key": f"nasdaq:{day.isoformat()}:{entry['symbol']}",
                 "lane": "single_name", "scope": "us_equity", "event_type": "earnings",
@@ -265,6 +283,7 @@ def _earnings(ctx, settings: dict, dates: list[date], use_cache: bool) -> tuple[
                 "certainty_class": "vendor_calendar", "importance": importance,
                 "source_id": "nasdaq", "source_url": nasdaq.PAGE_URL,
                 "index_weights": {k: clean_float(v, 3) for k, v in entry["weights"].items()},
+                "theme": None if not theme else {"key": theme["theme"], "label": theme["label"], "share": clean_float(theme["share"] * 100, 1)},
                 "watchlist": entry["watchlist"],
                 "eps_forecast": row["eps_forecast"], "estimates": row["estimates"],
                 "last_year_eps": row["last_year_eps"], "fiscal_quarter": row["fiscal_quarter"],

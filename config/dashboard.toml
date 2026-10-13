@@ -752,6 +752,57 @@ big_arm = "LOW VOL"
 small_arm = "MARKET"
 note = "The minimum-volatility S&P-style fund (USMV, from 2011) against the S&P 500: the market's least volatile names, weighted to keep the portfolio's swings small, against all of it."
 
+[catalyst_log]
+# CALENDAR -> UNSCHEDULED CATALYSTS. Dated events no calendar announces (a leak,
+# a competitor's announcement, a supply report), kept by hand with their source,
+# and the names the coverage tied to each. For each: the exposed names' price
+# since the close before the event, and how far consensus EPS and revenue (the
+# nightly snapshots, from 2026-10-01) have moved since the snapshot at that
+# close. The exposed list is a judgment; it is not a measured exposure.
+# A median move of at least ``price_move_pct`` (percent) counts as a price move
+# and of at least ``revision_pct`` as an estimate revision; fewer than
+# ``min_names`` names with a recorded estimate gives no reading (a basket of two
+# is a pair, and the page says how many names it rests on).
+price_move_pct = 3.0
+revision_pct = 1.0
+min_names = 2
+periods = ["0q", "0y", "+1y"]
+period_labels = { "0q" = "THIS QUARTER", "0y" = "THIS YEAR", "+1y" = "NEXT YEAR" }
+# The estimate the reading is taken from.
+read_period = "0y"
+
+# ``after_close = true`` when the news broke after the day's close: the day's own
+# close is then the reference. Otherwise the reference is the close before the date.
+[[catalyst_log.items]]
+key = "toshiba_hdd_2026_10_02"
+date = "2026-10-02"
+title = "Toshiba reported to plan doubling hard disk output"
+kind = "supply"
+detail = "Reported by 24/7 Wall St. (no original source named): Toshiba, the smallest of the three hard disk makers, would double capacity centred on its Philippines plant, with a medium-term goal of 30% of the market by capacity. Seagate fell 10% and Western Digital 7% in morning trading that day."
+source = "24/7 Wall St."
+url = "https://247wallst.com/investing/2026/10/02/seagate-tumbles-10-western-digital-drops-7-as-toshiba-moves-to-double-hard-disk-output/"
+exposed = ["STX", "WDC"]
+
+[[catalyst_log.items]]
+key = "openai_revenue_2026_10_08"
+date = "2026-10-08"
+title = "FT: OpenAI's annualized revenue about $20bn below what investors had been shown"
+kind = "demand"
+detail = "The Financial Times, citing financial documents provided to investors, reported OpenAI's annualized revenue about $20 billion lower than previously indicated. Secondary coverage notes part of the gap is how revenue is counted (net or gross), and that the higher figure may not have come from OpenAI. Nvidia and AMD are among OpenAI's large suppliers."
+source = "Financial Times, as reported by Yahoo Finance / Stocktwits"
+url = "https://finance.yahoo.com/markets/stocks/articles/nasdaq-100-ends-lower-report-225519360.html"
+exposed = ["ORCL", "NVDA", "AMD", "AVGO", "MSFT", "CRWV", "MU"]
+
+[[catalyst_log.items]]
+key = "cxmt_4f2_2026_10_10"
+date = "2026-10-10"
+title = "CXMT shows a denser DRAM cell (4F2) and plans a server DDR5 launch by year-end"
+kind = "competition"
+detail = "CXMT's president presented the 4F2 architecture at an integrated-circuit conference in Shanghai on 10 October (Yicai Global, via TrendForce); DDR5 RDIMMs based on it are planned for year-end. 4F2 is not expected in the market at volume before 2028 (Economy Tribune, via TrendForce). TrendForce's 2Q26 DRAM ranking: Samsung 39.4%, SK hynix 24.9%, Micron 23.3%, CXMT 9.5% (7.6% a quarter earlier)."
+source = "TrendForce"
+url = "https://www.trendforce.com/news/2026/10/12/news-cxmt-accelerates-4f%C2%B2-dram-push-eyes-year-end-server-ddr5-rdimm-launch/"
+exposed = ["MU", "000660.KS", "005930.KS"]
+
 [europe]
 # EUROPE. Index levels, the STOXX 600 supersector funds, the FTSE 100 and EURO
 # STOXX 50 members, and named groups of other names (luxury, UK financials),
@@ -1263,6 +1314,11 @@ heatmap_days = 21
 # Nasdaq-100 (percent): a 1% name moves the index on its own.
 earnings_high_weight = 1.0
 earnings_medium_weight = 0.25
+# A name's report is at least this important when it is this share of the
+# market cap of its THEMES group's bellwethers: TSM is in no index the
+# weights come from, and is the second largest company in the semiconductor group.
+earnings_theme_high_share = 0.15
+earnings_theme_medium_share = 0.05
 
 # Scheduled events shown, matched by a regular expression against the title in
 # the source's own calendar; anything unmatched is left off. ``prints`` names

@@ -152,3 +152,39 @@ def test_a_recurring_release_missing_from_its_calendar_is_reported():
     ]
     missing = panel._expected_missing(everything, releases, date(2026, 9, 23))
     assert missing == ["Jobs (bls, none within 40 days)"]      # census not fetched: already reported as failed
+
+
+def test_theme_shares_rank_a_name_by_its_cap_among_its_theme_and_skip_a_theme_too_small_to_rank():
+    groups = [{"key": "semis", "label": "SEMIS", "bellwethers": ["NVDA", "TSM", "MU", "NOCAP"]},
+              {"key": "pair", "label": "PAIR", "bellwethers": ["A", "B"]},
+              {"key": "cloud", "label": "CLOUD", "bellwethers": ["NVDA", "MSFT", "ORCL"]}]
+    caps = {"NVDA": 5000.0, "TSM": 2000.0, "MU": 1000.0, "NOCAP": None, "A": 1.0, "B": 1.0, "MSFT": 4000.0, "ORCL": 1000.0}
+    shares = C.theme_shares(groups, caps)
+    assert shares["TSM"]["share"] == pytest.approx(2000 / 8000) and shares["TSM"]["theme"] == "semis"
+    assert "NOCAP" not in shares and "A" not in shares and "B" not in shares          # no cap, and a theme of two names
+    assert shares["NVDA"]["theme"] == "semis" and shares["NVDA"]["share"] == pytest.approx(5000 / 8000)   # the larger of its two shares
+    assert C.theme_importance(0.25, 0.15, 0.05) == "high" and C.theme_importance(0.07, 0.15, 0.05) == "medium"
+    assert C.theme_importance(0.01, 0.15, 0.05) == "low" and C.theme_importance(None, 0.15, 0.05) == "low"
+    assert C.stronger("low", "high", "medium") == "high" and C.stronger("medium", "low") == "medium"
+
+
+def test_an_adr_outside_the_indexes_gets_its_theme_importance_not_low(monkeypatch):
+    members = {"spx": pd.DataFrame({"yahoo_symbol": ["NVDA", "MU"], "name": ["Nvidia Corp", "Micron Technology Inc"],
+                                     "sector": ["Information Technology"] * 2, "weight": [7.0, 0.1]})}
+    watchlist = pd.DataFrame({"ticker": ["TSM"], "label": ["TSMC (ADR)"], "name": ["TSMC"], "sector": ["Information Technology"]})
+    settings = {"earnings_high_weight": 1.0, "earnings_medium_weight": 0.25, "earnings_theme_high_share": 0.15, "earnings_theme_medium_share": 0.05}
+    groups = [{"key": "semis", "label": "SEMIS", "bellwethers": ["NVDA", "TSM", "MU"]}]
+    ctx = type("C", (), {"members": members, "watchlist": watchlist, "as_of": "2026-10-13", "config": {"themes": {"groups": groups}}})()
+    monkeypatch.setattr(panel.estimates, "market_cap", lambda s, **kw: {"NVDA": 5000.0, "TSM": 2000.0, "MU": 1000.0}[s])
+    rows = [{"symbol": s, "timing": "bmo", "eps_forecast": 1.0, "estimates": 5, "last_year_eps": 0.5, "fiscal_quarter": "Q3", "eps": None, "surprise_pct": None}
+            for s in ("NVDA", "TSM", "MU")]
+    monkeypatch.setattr(panel.nasdaq, "fetch_reported", lambda day, as_of, **kw: rows)
+    events, failed = panel._earnings(ctx, settings, [date(2026, 10, 15)], True)
+    by = {e["symbol"]: e for e in events}
+    assert not failed
+    assert by["TSM"]["importance"] == "high" and by["TSM"]["theme"] == {"key": "semis", "label": "SEMIS", "share": 25.0}   # was "low": no index weight
+    assert by["NVDA"]["importance"] == "high"
+    assert by["MU"]["importance"] == "medium"                                          # 12.5% of its theme, 0.1% of the index
+    settings_off = {k: v for k, v in settings.items() if "theme" not in k}
+    off = {e["symbol"]: e for e in panel._earnings(ctx, settings_off, [date(2026, 10, 15)], True)[0]}
+    assert off["TSM"]["importance"] == "low" and off["TSM"]["theme"] is None            # no theme rule configured: the old rule alone
