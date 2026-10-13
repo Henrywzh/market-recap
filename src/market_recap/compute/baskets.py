@@ -158,3 +158,84 @@ def payload(frame: pd.DataFrame | None, *, years: int | None = None) -> dict | N
         "names": int(frame["names"].iloc[-1]),
         "stats": None if summary is None else {k: (round(v, 2) if isinstance(v, float) else v) for k, v in summary.items()},
     }
+
+
+# --- What the market expects of a basket, today -------------------------------
+# From VALUATION's rows (consensus per-share EPS, price, market cap, TTM revenue
+# growth from filings). Each name is held at its value in the basket (market cap,
+# a fund's holding weight, or equal value), so a name's earnings in the basket are
+# value x EPS / price -- the same totalling as the P/E above, on today's figures.
+
+def _held(rows: dict[str, dict], values: dict[str, float] | None) -> dict[str, float]:
+    if values is None:
+        return {t: 1.0 for t in rows}
+    return {t: float(values[t]) for t in rows if (values.get(t) or 0) > 0}
+
+
+def outlook(rows: dict[str, dict], values: dict[str, float] | None = None, revenue: dict[str, float] | None = None,
+            *, min_coverage: float = DEFAULT_MIN_COVERAGE) -> dict:
+    """Forward P/E (next twelve months), consensus EPS growth this fiscal year
+    (over last year's actual) and next (over this year), and TTM revenue growth,
+    for one basket; each None when the names it needs hold less than
+    ``min_coverage`` of the basket's value.
+
+    ``rows`` maps ticker -> VALUATION row; ``values`` ticker -> value held (None:
+    equal value); ``revenue`` ticker -> its latest annual revenue, which weights
+    the names' revenue growth (so the figure is the basket's total revenue
+    growth, near enough, not an average of percentages).
+    """
+    held = _held(rows, values)
+    total = sum(held.values())
+    out: dict = {"forward_pe": None, "eps_growth_this": None, "eps_growth_next": None, "revenue_growth": None,
+                 "names": len(held)}
+    if not total:
+        return out
+
+    def earnings(field: str) -> dict[str, float]:
+        found = {}
+        for ticker, value in held.items():
+            row = rows[ticker]
+            eps, price = row.get(field), row.get("price")
+            if eps is not None and price:
+                found[ticker] = value * eps / price
+        return found
+
+    def covers(names) -> bool:
+        return sum(held[t] for t in names) / total >= min_coverage
+
+    ntm = earnings("eps_ntm")
+    if ntm and covers(ntm) and sum(ntm.values()) > 0:
+        out["forward_pe"] = sum(held[t] for t in ntm) / sum(ntm.values())
+
+    def growth(before: dict[str, float], after: dict[str, float]) -> float | None:
+        both = [t for t in before if t in after]
+        start = sum(before[t] for t in both)
+        if not both or not covers(both) or start <= 0:
+            return None
+        return (sum(after[t] for t in both) / start - 1) * 100
+
+    prev, fy0, fy1 = earnings("eps_fy_prev"), earnings("eps_fy0"), earnings("eps_fy1")
+    out["eps_growth_this"] = growth(prev, fy0)
+    out["eps_growth_next"] = growth(fy0, fy1)
+
+    if revenue:
+        weights, rates = {}, {}
+        for ticker, value in held.items():
+            row = rows[ticker]
+            rate, cap, sales = row.get("revenue_growth"), row.get("market_cap"), revenue.get(ticker)
+            if rate is not None and cap and sales and sales > 0:
+                weights[ticker] = value / cap * sales      # the basket's share of the name's revenue
+                rates[ticker] = rate
+        if weights and covers(weights):
+            out["revenue_growth"] = sum(weights[t] * rates[t] for t in weights) / sum(weights.values())
+    return out
+
+
+def latest_revenue(directory: Path, ticker: str) -> float | None:
+    """A name's latest annual revenue from its FINANCIALS artifact, or None."""
+    try:
+        body = json.loads((directory / f"{ticker}.json").read_text())
+    except (OSError, ValueError):
+        return None
+    values = [v for v in ((body.get("values") or {}).get("revenue") or []) if v is not None]
+    return float(values[-1]) if values else None

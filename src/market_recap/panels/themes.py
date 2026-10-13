@@ -1178,36 +1178,10 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         for series in (section.get("series") or {}).values():
             series.pop("published", None)
     return {"as_of": ctx.as_of, "calendar_days": int(settings.get("calendar_days", 42)), "groups": groups,
-            "heatmap": _heatmap(catalysts, as_of, int(settings.get("heatmap_days", 21))),
             "membership": _membership(ctx, settings, excess),
             "member_corr": float(settings.get("member_corr", 0.55)),
             "cloud": cloud, "semis": semis, "energy": energy, "housing": housing, "banks": banks, "consumer": consumer, "studies": studies,
             "drivers": drivers, **driven}
-
-
-def _heatmap(catalysts: dict, as_of: date, days: int) -> dict:
-    """S&P 500 weight reporting, by GICS sector and session, over the next ``days``."""
-    end = (as_of + timedelta(days=days)).isoformat()
-    events = [e for e in catalysts.get("events") or [] if e.get("event_type") == "earnings"
-              and as_of.isoformat() < e["date"] <= end and (e.get("index_weights") or {}).get("SPX")]
-    dates = sorted({e["date"] for e in events})
-    sectors = sorted({e.get("sector") or "Other" for e in events})
-    cells: dict[tuple[str, str], dict] = {}
-    for e in events:
-        cell = cells.setdefault((e.get("sector") or "Other", e["date"]), {"weight": 0.0, "names": []})
-        cell["weight"] += e["index_weights"]["SPX"]
-        cell["names"].append((e["symbol"], e["index_weights"]["SPX"]))
-    rows = []
-    for sector in sectors:
-        row = []
-        for day in dates:
-            c = cells.get((sector, day))
-            row.append(None if not c else {"w": round(c["weight"], 3),
-                                           "top": [n for n, _ in sorted(c["names"], key=lambda x: -x[1])[:4]],
-                                           "n": len(c["names"])})
-        rows.append({"sector": sector, "cells": row, "total": round(sum(c["w"] for c in row if c), 2)})
-    return {"dates": dates, "rows": sorted(rows, key=lambda r: -r["total"]),
-            "day_totals": [round(sum((r["cells"][i] or {}).get("w", 0) for r in rows), 2) for i in range(len(dates))]}
 
 
 def _membership(ctx, settings: dict, excess: pd.DataFrame) -> dict:

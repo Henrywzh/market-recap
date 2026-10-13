@@ -31,6 +31,7 @@ CONFIG = {
 def _isolated_artifacts(tmp_path, monkeypatch):
     monkeypatch.setattr(panel, "SECTORS_ARTIFACT_DIR", tmp_path / "sectors")
     monkeypatch.setattr(panel, "VALUATION_ARTIFACT_DIR", tmp_path / "valuation")
+    monkeypatch.setattr(panel, "FINANCIALS_ARTIFACT_DIR", tmp_path / "financials")
     (tmp_path / "valuation").mkdir()
     return tmp_path
 
@@ -306,3 +307,46 @@ def test_the_validator_takes_numbers_and_nulls_and_refuses_strings_and_a_bad_pat
     assert [f.check for f in errors] == ["sectors"] * 3
     assert all(f.severity == "error" for f in errors)
     assert "forward_pe" in errors[0].detail and "trailing_pe" in errors[1].detail and "path" in errors[2].detail
+
+
+def test_the_validator_takes_the_index_expectations_as_numbers_or_nulls():
+    good = {"missing": [], "sub_industries": [], "sectors": [{"key": "XLK"}],
+            "market": {"revenue_growth": None, "eps_growth_next": 5.1, "eps_growth_this": 5.7, "forward_pe": 17.2}}
+    assert validate._check_sectors(good) == []
+    bad = {"missing": [], "sub_industries": [], "sectors": [{"key": "XLK"}], "market": {"eps_growth_this": "5%"}}
+    errors = findings_of_errors(bad)
+    assert len(errors) == 1 and "market" in errors[0].detail and "eps_growth_this" in errors[0].detail
+
+
+def test_expectations_are_weighted_as_the_aggregate_is_and_the_index_needs_the_same_cover(_isolated_artifacts):
+    financials = _isolated_artifacts / "financials"
+    financials.mkdir()
+    # Latest annual revenue on file for KO, PEP and PM; XOM and CVX have none.
+    for ticker, sales in {"KO": 100.0, "PEP": 100.0, "PM": 50.0}.items():
+        (financials / f"{ticker}.json").write_text(json.dumps({"values": {"revenue": [sales * 0.9, sales]}}))
+    valuation = _valuation_rows()
+    growth = {"KO": 5.0, "PEP": 3.0, "PM": 1.0, "XOM": 10.0}
+    for row in valuation["rows"]:
+        row["revenue_growth"] = growth[row["ticker"]]
+    closes, etf = _prices()
+    out = panel.build(_ctx(CONFIG, closes, etf), {"heatmaps": _heatmaps(), "valuation": valuation, "industries": None,
+                                                  "rotation": None, "monitor": None, "themes": None})
+
+    sectors = {s["label"]: s for s in out["sectors"]}
+    subs = {s["label"]: s for s in out["sub_industries"]}
+    staples = sectors["Consumer Staples"]
+    # Each name's value is its market cap, so its revenue weight is its sales: (100 x 5 + 100 x 3 + 50 x 1) / 250.
+    assert staples["revenue_growth"] == pytest.approx(3.4)
+    # Consensus earnings over the same names (cap x EPS / price): 252 last year, 267 this, 308 next: 6.0% then 15.4%.
+    assert staples["eps_growth_this"] == pytest.approx(6.0) and staples["eps_growth_next"] == pytest.approx(15.4)
+    assert subs["Soft Drinks & Non-alcoholic Beverages"]["revenue_growth"] == pytest.approx(4.0)
+    # The index's names with revenue on file hold 70% of its value: short of 80%, so no revenue figure for the index.
+    market = out["market"]
+    assert market["revenue_growth"] is None
+    # The index's earnings: 522 -> 552 -> 638 over KO, PEP, PM and XOM.
+    assert market["eps_growth_this"] == pytest.approx(5.7) and market["eps_growth_next"] == pytest.approx(15.6)
+    assert market["forward_pe"] == pytest.approx(17.2)
+    pages = _isolated_artifacts / "sectors"
+    assert _read(pages, "XLP")["outlook"] == {"forward_pe": 25.0, "eps_growth_this": 6.0, "eps_growth_next": 15.4,
+                                              "revenue_growth": 3.4, "names": 3}
+    assert _read(pages, "MARKET")["outlook"]["names"] == 4          # CVX has no VALUATION market cap, so it is out

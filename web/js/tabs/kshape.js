@@ -1,21 +1,21 @@
 // K-SHAPE: a high-income leg against a low-income leg, within an industry.
-// For each pair: the ratio of the legs' prices, of their trailing P/Es and the
-// growth of their earnings, each with where today's value sits in its own
-// history, and a table of who is in which leg. The legs are a judgment, set in
-// the config. One window switch above the charts cuts every dated chart of the
-// pair to the same lookback, kept between pairs. The price charts come first,
-// then the valuation cards that split the price ratio into multiple and
-// earnings, then the P/E and EPS charts. The stat strip is full-history. The
-// page shows the divergence and what has been paid for it; it does not say
-// which leg is right.
+// For each pair: the ratio of the legs' prices with where today's ratio sits in
+// its own history; then the valuation section, which splits the ratio into
+// multiple and earnings and gives forward P/E and growth; then the table of who
+// is in each leg. The legs' price indexes and returns, and the trailing P/E and
+// EPS growth histories, sit in a DETAIL fold, closed. The legs are a judgment,
+// set in the config. One window switch cuts the price ratio and the folded
+// charts to the same lookback, kept between pairs. The stat strip is
+// full-history. The page shows the divergence and what has been paid for it;
+// it does not say which leg is right.
 
 import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, periodSwitch, gap, DASH } from '../fmt.js';
 import { areaLine, multiLine } from '../charts.js';
-import { fundamentalCards } from '../basket-view.js';
+import { valuationSection } from '../basket-view.js';
 import { pickWindow, windowSwitch } from '../windows.js';
 import { tickerHref } from '../routes.js';
 import { percentileView, multipleText, premiumView, spreadRows, nameRow, peRangeText, legSeries, peSeries, epsSeries } from '../kshape-model.js';
-import { readWindow, writeWindow, fundamentalsOf } from '../sizek-model.js';
+import { readWindow, writeWindow, fundamentalsOf, detailFold } from '../sizek-model.js';
 
 // The window memory is per tab; three years is the default, since the P/E and
 // EPS histories are shorter than the price history.
@@ -61,35 +61,45 @@ function windowBar(dates, window, onPick) {
   ]);
 }
 
-function priceCards(v, win) {
+// The one chart in the main flow: the price ratio over the window, rebased to 1
+// at its start, with where it sits among its own weeks.
+function ratioCard(v, win) {
   const p = v.price;
-  if (!p) return [card('PRICE', null, [gap('A leg has no prices.')])];
+  if (!p) return card('PRICE RATIO', null, [gap('A leg has no prices.')]);
   const cut = legSeries(p, win);
-  const ratioNode = chart();
-  const legsNode = chart();
-  const card1 = card(`PRICE RATIO · TOP ÷ BOTTOM · ${win}`, el('span', { class: 'dim', text: `since ${p.since} (=1.00) · ${p.sessions} sessions · ${percentileView(p.ratio_percentile).text} of its own weeks` }), [ratioNode]);
-  const card2 = card(`EACH LEG, EQUAL WEIGHT · =100 AT THE WINDOW'S START · ${win}`, null, [legsNode]);
-  queueMicrotask(() => {
-    areaLine(ratioNode, cut.dates, cut.series.ratio);
-    multiLine(legsNode, cut.dates, { [`TOP · ${v.top.join(', ')}`]: cut.series.top, [`BOTTOM · ${v.bottom.join(', ')}`]: cut.series.bottom });
-  });
-  const rows = spreadRows(p.spreads).map((r) => el('tr', {}, [
+  const node = chart();
+  queueMicrotask(() => areaLine(node, cut.dates, cut.series.ratio));
+  return card(`PRICE RATIO · TOP ÷ BOTTOM · ${win}`,
+    el('span', { class: 'dim', text: `=1.00 at the window's start · ${p.sessions} sessions · ${percentileView(p.ratio_percentile).text} of its own weeks` }), [node]);
+}
+
+// Each leg's price index over the window. Queued, not drawn: it sits in the fold.
+function legsCard(v, win, paints) {
+  if (!v.price) return null;
+  const cut = legSeries(v.price, win);
+  const node = chart();
+  paints.push(() => multiLine(node, cut.dates, { [`TOP · ${v.top.join(', ')}`]: cut.series.top, [`BOTTOM · ${v.bottom.join(', ')}`]: cut.series.bottom }));
+  return card(`EACH LEG, EQUAL WEIGHT · =100 AT THE WINDOW'S START · ${win}`, null, [node]);
+}
+
+function returnsCard(v) {
+  if (!v.price) return null;
+  const rows = spreadRows(v.price.spreads).map((r) => el('tr', {}, [
     el('td', { text: r.period }), el('td', { class: dirClass(r.top), text: pct(r.top, 1) }), el('td', { class: dirClass(r.bottom), text: pct(r.bottom, 1) }),
     el('td', { class: r.tone === 'dim' ? 'dim' : r.tone, text: signed(r.spread, 1, ' pp') }),
   ]));
   // The returns table is a reading of whole periods, not a dated chart: it stays full.
-  const card3 = card('RETURNS · TOP LEG AGAINST BOTTOM LEG', null, [table(['WINDOW', 'TOP', 'BOTTOM', 'TOP − BOTTOM'], rows),
+  return card('RETURNS · TOP LEG AGAINST BOTTOM LEG', null, [table(['WINDOW', 'TOP', 'BOTTOM', 'TOP − BOTTOM'], rows),
     el('div', { class: 'field-note', text: 'A window longer than both legs\' common history is absent, not shortened.' })]);
-  return [el('div', { class: 'grid two' }, [card1, card2]), card3];
 }
 
-function peCard(v, settings, win) {
+function peCard(v, settings, win, paints) {
   const pe = v.pe;
   if (!pe) return card('TRAILING P/E', null, [gap('No P/E history for both legs: a name outside the valuation universe has prices only, and a build without VALUATION shows none.')]);
   const cut = peSeries(pe, win);
   const legsNode = chart();
   const ratioNode = chart();
-  queueMicrotask(() => {
+  paints.push(() => {
     multiLine(legsNode, cut.dates, { [`TOP · ${pe.covered.top.join(', ')}`]: cut.series.top, [`BOTTOM · ${pe.covered.bottom.join(', ')}`]: cut.series.bottom });
     areaLine(ratioNode, cut.dates, cut.series.ratio);
   });
@@ -100,12 +110,12 @@ function peCard(v, settings, win) {
   ]);
 }
 
-function epsCard(v, win) {
+function epsCard(v, win, paints) {
   const e = v.eps;
   if (!e) return null;
   const cut = epsSeries(e, win);
   const node = chart(210);
-  queueMicrotask(() => multiLine(node, cut.dates, { 'TOP · median EPS growth, y/y %': cut.series.top, 'BOTTOM · median EPS growth, y/y %': cut.series.bottom }));
+  paints.push(() => multiLine(node, cut.dates, { 'TOP · median EPS growth, y/y %': cut.series.top, 'BOTTOM · median EPS growth, y/y %': cut.series.bottom }));
   return card(`EARNINGS · TRAILING 12-MONTH EPS, YEAR-ON-YEAR GROWTH · MEDIAN OF EACH LEG · ${win}`, el('span', { class: 'dim', text: `to ${e.latest}` }), [node,
     el('div', { class: 'field-note', text: 'Growth is drawn where the year-earlier EPS was positive and the change is within ±150%; a leg-quarter with none is blank.' })]);
 }
@@ -143,6 +153,7 @@ export default function renderKshape(root, data, _manifest, ctx = {}) {
   const labels = data.views.map((v) => v.label);
   const byLabel = Object.fromEntries(data.views.map((v) => [v.label, v.key]));
   let lookback = readWindow(WINDOW_KEY, DEFAULT_WINDOW);
+  const foldState = { open: false };
 
   // Redraws the pair. A pair shorter than the remembered window shows its
   // longest covered window instead, and the remembered choice is kept.
@@ -150,6 +161,13 @@ export default function renderKshape(root, data, _manifest, ctx = {}) {
     const v = data.views.find((x) => x.key === key) || data.views[0];
     const dates = v.price?.dates || [];
     const win = pickWindow(dates, lookback);
+    const paints = [];
+    const fold = detailFold(foldState, () => paints.forEach((paint) => paint()), [
+      legsCard(v, win, paints),
+      returnsCard(v),
+      peCard(v, data.settings, win, paints),
+      epsCard(v, win, paints),
+    ].filter(Boolean));
     host.replaceChildren(...[
       v.price ? windowBar(dates, win, (next) => {
         lookback = next;
@@ -157,11 +175,10 @@ export default function renderKshape(root, data, _manifest, ctx = {}) {
         draw(v.key);
       }) : null,
       strip(v),
-      ...priceCards(v, win),
-      ...fundamentalCards(fundamentalsOf(v), win, ['TOP', 'BOTTOM'], v.price ? { dates: v.price.dates, ratio: v.price.ratio } : null, 'the legs\' price indexes'),
-      peCard(v, data.settings, win),
-      epsCard(v, win),
+      ratioCard(v, win),
+      ...valuationSection(fundamentalsOf(v), ['TOP', 'BOTTOM'], v.price ? { dates: v.price.dates, ratio: v.price.ratio } : null, 'the legs\' price indexes'),
       namesCard(v),
+      fold,
     ].filter(Boolean));
   };
 

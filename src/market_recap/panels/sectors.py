@@ -17,7 +17,8 @@ required, since without it there are no names to show.
 
 Each page also goes to its own file in artifacts/sectors (MARKET, a sector's key,
 a sub-industry's key): its relative line against the S&P 500 and its ten-year
-weekly P/E band, built from the names' per-ticker VALUATION histories. The hub's
+weekly P/E band, built from the names' per-ticker VALUATION histories, and its
+expectations (``outlook``: forward P/E, consensus EPS growth, revenue growth). The hub's
 P/E figures are aggregates (total market cap over total earnings, as an index's
 P/E is), with INDUSTRIES' medians kept beside them as ``*_median``.
 """
@@ -29,10 +30,12 @@ import pandas as pd
 from ..compute import baskets as B
 from ..compute import industries as I
 from ..compute import sectors as S
-from ..config import SECTORS_ARTIFACT_DIR, VALUATION_ARTIFACT_DIR
+from ..config import FINANCIALS_ARTIFACT_DIR, SECTORS_ARTIFACT_DIR, VALUATION_ARTIFACT_DIR
 from ..util import clean_float, company_name, prune_stale, write_json
 # The valuation path of a group, as panels/valuation builds it for its own groups (reused, not copied).
 from .valuation import _path as valuation_path
+# The expectations reader shared with SIZE & STYLE and K-SHAPE: revenue per name, and the outlook's rounding.
+from .kshape import Revenues, outlook_payload
 
 # Panels read, each required to be from this session (build.optional_panel).
 INPUTS = ("heatmaps", "industries", "rotation", "valuation", "monitor", "themes")
@@ -45,6 +48,7 @@ NOTES = [
     "Returns are cap-weighted from the names' published index weights; a sub-industry's evidence (down share, drawdown, revisions) is the median of its names, as on INDUSTRIES.",
     "Forward P/E, trailing P/E, the trailing P/E's percentile on its own ten years and its ten-year median are aggregates: a group's total market cap over its total earnings, as an index's P/E is, losses counted. Forward P/E needs estimates for 80% of the cap; a group with fewer than the minimum names, and Real Estate (not valued on earnings, as on INDUSTRIES), shows none. forward_pe_median and pe_percentile_median are the medians of the names' own multiples.",
     "Sub-industries are as the holdings file names them; a name the Wikipedia GICS list did not cover takes its sub-industry from Yahoo's fallback classification.",
+    "Expected growth is consensus EPS growth this and next fiscal year, and TTM revenue growth from filings, over the same names and market-cap weights as the aggregate P/E. A figure needs names holding 80% of that value; the forward P/E is the aggregate's own.",
 ]
 
 
@@ -252,8 +256,23 @@ def _page_notes(*, names: list[str], closes: pd.DataFrame, relative: dict | None
     return notes
 
 
+def _outlook(caps: dict[str, float], value: dict[str, dict], revenues: Revenues, forward_pe: float | None) -> dict:
+    """The names' consensus EPS growth and revenue growth, over the names and market-cap weights the aggregate P/E uses.
+
+    The forward P/E is the aggregate's own figure, so a page never shows two.
+    """
+    found = B.outlook({n: value[n] for n in caps}, caps, revenues.of(list(caps)))
+    return {**outlook_payload(found), "forward_pe": forward_pe}
+
+
+def _market_summary(fields: dict) -> dict:
+    """The whole index for the hub: its aggregate P/E now and against its own ten years, and its expectations."""
+    keys = ("forward_pe", "trailing_pe", "pe_percentile", "eps_growth_next", "eps_growth_this", "revenue_growth")
+    return {key: fields.get(key) for key in keys}
+
+
 def _page(key: str, label: str, level: str, names: list[str], *, ctx, index: dict | None, weights: dict[str, float],
-          read, value: dict[str, dict], pe_applies: bool, min_names: int, fund: str | None = None,
+          read, revenues: Revenues, value: dict[str, dict], pe_applies: bool, min_names: int, fund: str | None = None,
           with_fund: bool = False) -> tuple[dict, dict]:
     """One page's file, and the sectors.json fields that read the same aggregates.
 
@@ -276,7 +295,11 @@ def _page(key: str, label: str, level: str, names: list[str], *, ctx, index: dic
                                 with_fund=with_fund, fund=fund, etf_closes=etf_closes, pe_applies=pe_applies,
                                 usable=usable, band=band, min_names=min_names)
     rows = [value[n] for n in names if n in value]
-    fields = {**_multiples(rows, min_names=min_names, pe_applies=pe_applies), **_band_fields(band)}
+    multiples = _multiples(rows, min_names=min_names, pe_applies=pe_applies)
+    outlook = _outlook(caps, value, revenues, multiples["forward_pe"])
+    page["outlook"] = outlook
+    fields = {**multiples, **_band_fields(band), "eps_growth_next": outlook["eps_growth_next"],
+              "eps_growth_this": outlook["eps_growth_this"], "revenue_growth": outlook["revenue_growth"]}
     return page, fields
 
 
@@ -333,9 +356,11 @@ def build(ctx, inputs: dict) -> dict:
     index_weights = _index_weights(heatmaps.get("constituents") or [])
     index = S.index_basket(ctx.closes, index_weights)
     read = _history_reader()
+    revenues = Revenues(FINANCIALS_ARTIFACT_DIR)
     pages: dict[str, dict] = {}
-    market_page, _ = _page(MARKET_KEY, BENCHMARK["label"], "market", list(index_weights), ctx=ctx, index=index,
-                           weights=index_weights, read=read, value=value, pe_applies=True, min_names=min_names)
+    market_page, market_fields = _page(MARKET_KEY, BENCHMARK["label"], "market", list(index_weights), ctx=ctx, index=index,
+                                       weights=index_weights, read=read, revenues=revenues, value=value, pe_applies=True,
+                                       min_names=min_names)
     pages[MARKET_KEY] = market_page
 
     sectors_out, subs_out, members_out = [], [], []
@@ -353,7 +378,7 @@ def build(ctx, inputs: dict) -> dict:
             returns, versus = _returns(members, periods, benchmark)
             count = len(members)
             page, fields = _page(key, sub, "sub", [m["ticker"] for m in members], ctx=ctx, index=index,
-                                 weights=index_weights, read=read, value=value, pe_applies=pe_applies,
+                                 weights=index_weights, read=read, revenues=revenues, value=value, pe_applies=pe_applies,
                                  min_names=min_names)
             pages[key] = page
             subs_out.append({
@@ -383,7 +408,7 @@ def build(ctx, inputs: dict) -> dict:
         fund = etfs.get(funds.get(sector) or "")
         ind_row = ind_sectors.get(sector)
         page, fields = _page(sector_keys[sector], sector, "sector", [r["ticker"] for r in rows], ctx=ctx, index=index,
-                             weights=index_weights, read=read, value=value, pe_applies=pe_applies,
+                             weights=index_weights, read=read, revenues=revenues, value=value, pe_applies=pe_applies,
                              min_names=min_names, fund=funds.get(sector), with_fund=True)
         pages[sector_keys[sector]] = page
         sectors_out.append({
@@ -430,6 +455,7 @@ def build(ctx, inputs: dict) -> dict:
         "as_of": ctx.as_of,
         "periods": periods,
         "benchmark": benchmark_out,
+        "market": _market_summary(market_fields),
         "sectors": sectors_out,
         "sub_industries": subs_out,
         "members": members_out,

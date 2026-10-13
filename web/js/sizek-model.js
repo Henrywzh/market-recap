@@ -1,8 +1,9 @@
-// SIZE K: how the build's figures read on the page. Pure, tested under node.
+// SIZE K: how the build's figures read on the page. Pure, tested under node,
+// except detailFold at the end, the one DOM helper (SIZE K and K-SHAPE share it).
 // The build measured every number; these functions phrase them and pick a
 // tone. Nothing here says which arm is right.
 
-import { num, DASH } from './fmt.js';
+import { el, num, DASH } from './fmt.js';
 import { sliceWindow, WINDOWS } from './windows.js';
 
 const finite = (v) => v !== null && v !== undefined && Number.isFinite(v);
@@ -84,4 +85,20 @@ export function fundamentalsOf(view, fallbackReason = 'Valuation for these arms 
   if (arms.length === 2 && arms.every((a) => a.basket?.dates?.length)) return f;
   const reasons = [...new Set(arms.map((a) => a.missing).filter(Boolean))];
   return { missing: reasons.length ? reasons.join(' ') : (view.fundamentals_note || 'No filings history for both arms.') };
+}
+
+// The DETAIL fold of a pair page: closed by default, and its charts are drawn
+// only once it is open, because ECharts cannot size a node that is hidden.
+// `state.open` keeps the reader's choice across window switches, which rebuild
+// the page; `paint` draws every chart in the fold.
+export function detailFold(state, paint, children) {
+  const node = el('details', { class: 'fold pair-detail', open: state.open ? '' : null }, [
+    el('summary', { text: 'DETAIL' }), ...children,
+  ]);
+  node.addEventListener('toggle', () => {
+    state.open = node.open;
+    if (node.open) paint();
+  });
+  if (state.open) queueMicrotask(paint);
+  return node;
 }

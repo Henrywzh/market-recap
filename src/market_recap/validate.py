@@ -236,6 +236,11 @@ def _check_catalysts(payload: dict | None) -> list[Finding]:
             for m in payload.get("expected_missing") or []]
     if not payload.get("events"):
         out.append(Finding("error", "catalysts", "no upcoming event at all"))
+    # The earnings-weight card reads these two lists; an older build without the key is fine, a malformed one is not.
+    heatmap = payload.get("heatmap")
+    if heatmap is not None and not (isinstance(heatmap, dict) and isinstance(heatmap.get("dates"), list)
+                                    and isinstance(heatmap.get("rows"), list)):
+        out.append(Finding("error", "catalysts", "heatmap is neither absent nor a dates and rows block"))
     return out
 
 
@@ -314,6 +319,10 @@ def _check_sizek(config: dict, payload: dict | None) -> list[Finding]:
             out.append(Finding("error", "sizek", f"{pair['key']} names baskets but has no fundamentals block"))
         elif (view["fundamentals"] or {}).get("missing"):
             out.append(Finding("notice", "sizek", f"{pair['key']}: {view['fundamentals']['missing']}"))
+        else:
+            # Each arm carries its outlook beside its basket; an arm without one is a build fault, not a data gap.
+            out += [Finding("error", "sizek", f"{pair['key']} {arm.get('key')} arm has no outlook")
+                    for arm in view["fundamentals"].get("arms") or [] if not isinstance(arm.get("outlook"), dict)]
     return out
 
 
@@ -398,8 +407,10 @@ def _check_sectors(payload: dict | None) -> list[Finding]:
         out.append(Finding("notice", "sectors",
                            f"{', '.join(payload['missing'])} did not build this session; the fields that read it are empty"))
     # The hub's P/E fields are a number or null; a string or a boolean here would break the page's tables and charts.
-    numeric = ("forward_pe", "trailing_pe", "pe_percentile", "pe_median_10y", "forward_pe_median", "pe_percentile_median")
-    for entry in (payload.get("sectors") or []) + (payload.get("sub_industries") or []):
+    numeric = ("forward_pe", "trailing_pe", "pe_percentile", "pe_median_10y", "forward_pe_median", "pe_percentile_median",
+               "eps_growth_next", "eps_growth_this", "revenue_growth")
+    market = {"key": "market", **(payload.get("market") or {})}
+    for entry in (payload.get("sectors") or []) + (payload.get("sub_industries") or []) + [market]:
         for field in numeric:
             value = entry.get(field)
             if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):

@@ -1177,3 +1177,7 @@ th[aria-sort] .sx-sort { color: var(--accent); }
    label sits on the same line as the buttons, and the row wraps on a phone. */
 .pair-window { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 8px 0 6px; }
 .pair-window-label { font-size: 10px; letter-spacing: 0.1em; color: var(--text-dim); }
+
+/* SIZE & STYLE and K-SHAPE: the DETAIL fold under the valuation block. Its
+   chart cells may shrink below their content, as the SECTORS folds allow. */
+.pair-detail { min-width: 0; margin: 10px 0 0; }

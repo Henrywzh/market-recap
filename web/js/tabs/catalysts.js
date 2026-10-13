@@ -323,6 +323,39 @@ function sessionStrip(data, onPick) {
   ]);
 }
 
+// The earnings-weight grid's shape for drawing: the largest cell, which takes the
+// full shade, and the days. Null when the build has no grid (an older build),
+// and then the card is left out.
+export function heatmapModel(h) {
+  if (!h || !Array.isArray(h.dates) || !h.dates.length || !Array.isArray(h.rows)) return null;
+  const max = Math.max(...h.rows.flatMap((r) => (r.cells || []).map((c) => c?.w || 0)), 0.01);
+  return { ...h, max };
+}
+
+// S&P 500 weight reporting by sector and session, the next three weeks: each
+// cell shaded by its share of the largest cell, and hover for the names.
+function heatmapCard(h) {
+  const model = heatmapModel(h);
+  if (!model) return null;
+  const day = (d) => new Date(`${d}T00:00:00Z`).toUTCString().slice(0, 11);
+  const head = el('tr', {}, [el('th', { text: 'SECTOR' }), ...model.dates.map((d) => el('th', { class: 'heat-day', text: day(d) })), el('th', { text: 'TOTAL' })]);
+  const rows = model.rows.map((r) => el('tr', {}, [
+    el('td', { class: 'heat-sector', text: r.sector }),
+    ...(r.cells || []).map((c) => el('td', {
+      class: 'heat-cell', style: c ? `--heat:${Math.round((100 * c.w) / model.max)}%` : null,
+      title: c ? `${c.n} reporting · ${(c.top || []).join(', ')}` : '', text: c ? num(c.w, c.w < 1 ? 2 : 1) : '',
+    })),
+    el('td', { class: 'dim', text: `${num(r.total, 1)}%` }),
+  ]));
+  const totals = el('tr', {}, [
+    el('td', { class: 'dim', text: 'ALL' }),
+    ...(model.day_totals || []).map((t) => el('td', { class: 'dim heat-total', text: t ? num(t, 1) : '' })),
+    el('td', {}),
+  ]);
+  return card('EARNINGS WEIGHT BY SECTOR · NEXT THREE WEEKS', el('span', { class: 'dim', text: '% of S&P 500 weight reporting; hover for names' }),
+    el('div', { class: 'table-scroll' }, [el('table', { class: 'data heatmap-table' }, [el('thead', {}, [head]), el('tbody', {}, [...rows, totals])])]));
+}
+
 function keyReleaseCard(event) {
   const { expectation, previous } = headline(event);
   const market = (event.expectations || []).find((r) => r.kind === 'market' && r.low != null && r.high != null);
@@ -529,6 +562,9 @@ export default async function renderCatalysts(root, data, _manifest, ctx = {}) {
   search.addEventListener('input', () => { filter.query = search.value.trim(); draw(); });
 
   root.append(sessionStrip(data, jump));
+  // The sector grid sits under the strip it details; an older build has none.
+  const heat = heatmapCard(data.heatmap);
+  if (heat) root.append(heat);
   const events = await ctx.loadArtifact?.('events').catch(() => null);
   const lead = events && events.as_of === data.as_of ? await eventLead(events) : null;
   if (lead) root.append(lead);

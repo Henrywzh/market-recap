@@ -241,21 +241,6 @@ def test_release_guidance_quotes_forward_capex_sentences_only():
                           "• Data Center revenue of $89.0 billion, up 117% from a year ago") == ("89.0", "117")
 
 
-def test_heatmap_sums_index_weight_by_sector_and_day():
-    from market_recap.panels import themes as panel
-    catalysts = {"events": [
-        {"event_type": "earnings", "date": "2026-10-13", "sector": "Financials", "symbol": "JPM", "index_weights": {"SPX": 1.4}},
-        {"event_type": "earnings", "date": "2026-10-13", "sector": "Financials", "symbol": "GS", "index_weights": {"SPX": 0.4}},
-        {"event_type": "earnings", "date": "2026-10-14", "sector": "Health Care", "symbol": "JNJ", "index_weights": {"SPX": 1.0}},
-        {"event_type": "earnings", "date": "2026-12-01", "sector": "Health Care", "symbol": "X", "index_weights": {"SPX": 1.0}},
-    ]}
-    out = panel._heatmap(catalysts, date(2026, 9, 29), 21)
-    assert out["dates"] == ["2026-10-13", "2026-10-14"]
-    fin = next(r for r in out["rows"] if r["sector"] == "Financials")
-    assert fin["cells"][0] == {"w": 1.8, "top": ["JPM", "GS"], "n": 2} and fin["cells"][1] is None
-    assert out["day_totals"] == [1.8, 1.0]
-
-
 # --- ENERGY & HOUSING -----------------------------------------------------------------
 
 EIA_PAGE = """<table><tr><td class="B6">2026-Aug </td><td class="B5">08/28</td><td class="B3">420,100</td>

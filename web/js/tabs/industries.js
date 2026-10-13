@@ -32,6 +32,15 @@ const COLUMNS = [
 const x = (value) => (value === null || value === undefined ? DASH : `${num(value, 1)}×`);
 const whole = (value) => (value === null || value === undefined ? DASH : num(value, 0));
 
+// A thin sub-industry (fewer names than the build's threshold) is left off the
+// table: a median of so few names is noise, and its page is under SECTORS.
+// Sectors are never hidden. `hidden` counts the thin rows the filter kept.
+export function splitThin(rows, level) {
+  if (level !== 'sub_industries') return { shown: rows, hidden: 0 };
+  const shown = rows.filter((r) => !r.thin);
+  return { shown, hidden: rows.length - shown.length };
+}
+
 function memberTable(row) {
   const rows = row.member_rows.map((m) => el('tr', {}, [
     el('td', {}, [el('a', { href: tickerHref(m.ticker), text: m.ticker }), el('span', { class: 'dim', text: ` ${m.name}` })]),
@@ -91,7 +100,7 @@ export default function renderIndustries(root, data) {
       `Tags are evidence, not a verdict. SOLD OFF: median 1M at or below ${settings.sold_off_return_pct}% with at least ${Math.round(settings.sold_off_down_share * 100)}% of names down. `
         + `EST CUT / EST HELD: median revision below ${settings.estimates_cut_30d_pct}% (30d) or ${settings.estimates_cut_90d_pct}% (90d), or not. P/E LOW: percentile at or below ${settings.cheap_percentile}. `
         + 'Estimates cover this fiscal year only: a fall the estimates do not explain can still be a fall about the years after it.',
-      `A group with fewer than ${settings.thin_below} names is marked thin. Click a group to see its names; hover its name for its best and worst.`,
+      `A sub-industry with fewer than ${settings.thin_below} names is thin and left off this table; its page is under SECTORS. Click a group to see its names; hover its name for its best and worst.`,
     ],
   ));
 
@@ -113,11 +122,17 @@ export default function renderIndustries(root, data) {
   root.append(el('div', { class: 'field-row' }, [levelSwitch, filterSwitch, el('label', { class: 'field' }, [sectorSelect])]));
 
   const host = el('div', {});
+  const thinLine = el('div', { class: 'field-note' });
   const note = el('div', { class: 'field-note' });
-  root.append(host, note);
+  root.append(host, thinLine, note);
 
   function draw() {
-    const rows = sortRows(applyFilters(data[state.level], state), state.sort.key, state.sort.descending);
+    const { shown, hidden } = splitThin(applyFilters(data[state.level], state), state.level);
+    const rows = sortRows(shown, state.sort.key, state.sort.descending);
+    thinLine.textContent = hidden
+      ? `${hidden} thin sub-${hidden === 1 ? 'industry' : 'industries'} hidden (fewer than ${settings.thin_below} names): `
+        + `${hidden === 1 ? 'its page is' : 'their pages are'} under SECTORS.`
+      : '';
     const head = COLUMNS.map((c) => el('th', {
       text: c.label + (state.sort.key === c.key ? (state.sort.descending ? ' ▼' : ' ▲') : ''),
       style: c.key === 'evidence' ? null : 'cursor:pointer',

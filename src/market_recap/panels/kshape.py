@@ -27,7 +27,7 @@ import pandas as pd
 from ..compute import baskets as B
 from ..compute import kshape as K
 from ..compute import valuation as V
-from ..config import PERIOD_TRADING_DAYS, VALUATION_ARTIFACT_DIR
+from ..config import FINANCIALS_ARTIFACT_DIR, PERIOD_TRADING_DAYS, VALUATION_ARTIFACT_DIR
 from ..context import YAHOO_URL
 from ..sources import estimates, yahoo
 from ..util import SourceRecord, clean_float, describe_error, to_iso_date
@@ -99,9 +99,41 @@ class Histories:
         return self._frames[key]
 
 
+class Revenues:
+    """Each name's latest annual revenue from its FINANCIALS artifact, read once per build. It weights
+    the names' revenue growth in an arm's outlook, so the figure is the basket's total growth."""
+
+    def __init__(self, directory) -> None:
+        self._directory = directory
+        self._read: dict[str, float | None] = {}
+
+    def of(self, tickers) -> dict[str, float | None]:
+        for ticker in tickers:
+            if ticker not in self._read:
+                self._read[ticker] = B.latest_revenue(self._directory, ticker)
+        return {ticker: self._read[ticker] for ticker in tickers}
+
+
+def outlook_payload(outlook: dict) -> dict:
+    """baskets.outlook with its figures rounded to one decimal, as the pages carry them."""
+    return {key: (round(value, 1) if isinstance(value, float) else value) for key, value in outlook.items()}
+
+
+def _arm_outlook(usable: list[str], weights: dict[str, float] | None, rows: dict[str, dict],
+                 revenue: dict[str, float | None]) -> dict:
+    """The arm's expectations over the names the basket holds, valued as the basket values them.
+
+    A name with no VALUATION row stays in the total with no earnings, so the
+    coverage falls rather than the figure quietly describing the names that have one."""
+    held = None if weights is None else {t: weights[t] for t in usable}
+    found = B.outlook({t: rows.get(t, {}) for t in usable}, held, {t: revenue.get(t) for t in usable})
+    return outlook_payload(found)
+
+
 def arm(key: str, label: str, names: list[str], closes: pd.DataFrame, yields: pd.DataFrame,
         weights: dict[str, float] | None = None, *, years: int, fund_coverage: float | None = None,
-        note: str | None = None) -> tuple[dict, str | None]:
+        note: str | None = None, rows: dict[str, dict] | None = None,
+        revenue: dict[str, float | None] | None = None) -> tuple[dict, str | None]:
     """One arm of a fundamentals pair, and the reason it has no basket when it has none.
 
     A name takes part when it has a filings history in ``closes`` and, for a
@@ -123,7 +155,8 @@ def arm(key: str, label: str, names: list[str], closes: pd.DataFrame, yields: pd
         if basket is None:
             reason = f"{label}: none of its names had a P/E from their filings, so no basket can be built."
     return {"key": key, "label": label, "basket": basket, "fund_coverage": clean_float(fund_coverage, 3),
-            "note": " ".join(notes) or None}, reason
+            "note": " ".join(notes) or None,
+            "outlook": _arm_outlook(usable, weights, rows or {}, revenue or {})}, reason
 
 
 def fundamentals(built: list[tuple[dict, str | None]], notes: list[str] | None = None) -> dict:
@@ -135,13 +168,16 @@ def fundamentals(built: list[tuple[dict, str | None]], notes: list[str] | None =
     return {"arms": [a for a, _ in built], "notes": list(notes or [])}
 
 
-def _leg_fundamentals(top: list[str], bottom: list[str], histories: dict, built: bool, years: int) -> dict:
-    """Each leg as an equal-weight basket of its names with a filings history."""
+def _leg_fundamentals(top: list[str], bottom: list[str], histories: dict, built: bool, years: int,
+                      valuation: dict[str, dict], revenues: Revenues) -> dict:
+    """Each leg as an equal-weight basket of its names with a filings history, and its outlook."""
     if not built:
         return {"missing": NO_VALUATION}
-    closes, yields = B.frames({t: histories.get(t) for t in dict.fromkeys(top + bottom)})
-    return fundamentals([arm("top", "Top leg", top, closes, yields, years=years),
-                         arm("bottom", "Bottom leg", bottom, closes, yields, years=years)])
+    names = list(dict.fromkeys(top + bottom))
+    closes, yields = B.frames({t: histories.get(t) for t in names})
+    revenue = revenues.of(names)
+    return fundamentals([arm("top", "Top leg", top, closes, yields, years=years, rows=valuation, revenue=revenue),
+                         arm("bottom", "Bottom leg", bottom, closes, yields, years=years, rows=valuation, revenue=revenue)])
 
 
 def _name_row(ticker: str, leg: str, closes: pd.DataFrame, valuation: dict, trends: dict, periods: dict[str, int],
@@ -177,11 +213,12 @@ def _name_row(ticker: str, leg: str, closes: pd.DataFrame, valuation: dict, tren
 
 def _view(key: str, label: str, note: str | None, top: list[str], bottom: list[str], *, closes: pd.DataFrame,
           valuation: dict, trends: dict, today: pd.Timestamp, histories: dict[str, dict | None], cfg: dict, periods: dict[str, int],
-          valuation_built: bool) -> dict:
+          valuation_built: bool, revenues: Revenues) -> dict:
     years = int(cfg["history_years"])
     top_ix, bottom_ix = K.leg_index(closes, top), K.leg_index(closes, bottom)
     out: dict = {"key": key, "label": label, "note": note, "top": top, "bottom": bottom}
-    out["fundamentals"] = _leg_fundamentals(top, bottom, histories, valuation_built, min(years, FUNDAMENTAL_YEARS))
+    out["fundamentals"] = _leg_fundamentals(top, bottom, histories, valuation_built, min(years, FUNDAMENTAL_YEARS),
+                                            valuation, revenues)
 
     both = pd.concat([top_ix.rename("top"), bottom_ix.rename("bottom")], axis=1).dropna()
     if len(both) > 1:
@@ -279,7 +316,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     except Exception:  # noqa: BLE001 -- those names then show no forward multiple
         trends = {}
     kw = dict(closes=closes, valuation=valuation, trends=trends, today=pd.Timestamp(ctx.as_of), histories=histories, cfg=cfg, periods=periods,
-              valuation_built=bool(valuation_panel))
+              valuation_built=bool(valuation_panel), revenues=Revenues(FINANCIALS_ARTIFACT_DIR))
     views = [_view("overall", cfg["overall_label"], "Every pair's top leg against every pair's bottom leg, and the low-end names with no top-leg counterpart "
                    "(fast food, dollar stores). Equal weight.", top_all, bottom_all, **kw)]
     views += [_view(p["key"], p["label"], p.get("note"), list(p["top"]), list(p["bottom"]), **kw) for p in pairs]

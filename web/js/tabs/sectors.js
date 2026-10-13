@@ -10,9 +10,9 @@
 
 import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, periodSwitch, tag, gap, DASH } from '../fmt.js';
 import { tickerHref, hashFor } from '../routes.js';
-import { render, multiLine } from '../charts.js';
-import { fundamentalCards } from '../basket-view.js';
-import { WINDOWS, pickWindow, sliceWindow, windowSwitch, alignTo } from '../windows.js';
+import { render } from '../charts.js';
+import { valuationSection } from '../basket-view.js';
+import { WINDOWS, pickWindow, sliceWindow, windowSwitch } from '../windows.js';
 import { renderRotationGraph, renderRotationDetail } from './rotation.js';
 import { themeBlocks } from './themes.js';
 import {
@@ -20,6 +20,7 @@ import {
   levelOf, membersOf, subsOf, sortRows, upcoming,
   timingLabel, timingTitle, quadrantTag, evidenceFlags, extremesOf, themedSubs, ordinal, boolMark, nameColumns,
   sectorShort, shortName, subBars, subMapPoints, nameMapPoints, symmetricRange, bandOf, pathBars, longestDates,
+  comparisonOf, referenceOf,
 } from '../sectors-model.js';
 
 const THIN_TITLE = 'fewer than 5 names: medians are fragile';
@@ -143,23 +144,32 @@ function ptbvLine(row) {
   ]);
 }
 
-// The five figures across the top of a sector or sub-industry page.
-function headlineCells(row) {
-  const rev = row.revision || {};
+// A note's parts joined by a dot; a part the build lacks (empty) is dropped.
+const notes = (...parts) => parts.filter(Boolean).join(' · ');
+const vsMarket = (value) => (present(value) ? `S&P 500 ${signed(value, 1, '%')}` : null);
+
+// The six figures across the top of a sector or sub-industry page: the return
+// against the index, the P/E against its own history, what the market expects
+// (forward P/E, next fiscal year's EPS growth) and the revenue it has booked.
+// Each growth figure carries the S&P 500's beside it, from the build's market object.
+function headlineCells(row, market) {
   const vs3 = row.vs_index?.['3M'];
   const vsYtd = row.vs_index?.YTD;
   const trailing = present(row.trailing_pe)
     ? `of its own ten years · ${multiple(row.trailing_pe)} now, median ${multiple(row.pe_median_10y)}`
     : 'too little history to place it';
-  const forward = present(row.forward_pe_median)
-    ? `aggregate · the median name ${multiple(row.forward_pe_median)}`
-    : 'aggregate: market cap over consensus EPS';
+  const forward = notes('aggregate',
+    present(row.forward_pe_median) ? `median name ${multiple(row.forward_pe_median)}` : null,
+    present(market?.forward_pe) ? `S&P 500 ${multiple(market.forward_pe)}` : null);
   return [
     stat('VS S&P 500 · 3M', signed(vs3, 1, ' pp'), 'percentage points, this less the index', dirClass(vs3)),
     stat('VS S&P 500 · YTD', signed(vsYtd, 1, ' pp'), 'percentage points, this less the index', dirClass(vsYtd)),
     stat('TRAILING P/E · PERCENTILE', ordinal(row.pe_percentile), trailing),
     stat('FORWARD P/E · NTM', multiple(row.forward_pe), forward),
-    stat('EPS REVISIONS · 90D', pct(rev['90d'], 1), `30 days ${pct(rev['30d'], 1)} · ${rev.names ?? DASH} names`, dirClass(rev['90d'])),
+    stat('EPS GROWTH · NEXT FY', signed(row.eps_growth_next, 1, '%'),
+      notes('consensus', vsMarket(market?.eps_growth_next)), dirClass(row.eps_growth_next)),
+    stat('REVENUE GROWTH · TTM', signed(row.revenue_growth, 1, '%'),
+      notes('year on year, from filings', vsMarket(market?.revenue_growth)), dirClass(row.revenue_growth)),
   ];
 }
 
@@ -333,7 +343,7 @@ function hubNotes(data) {
 
 function sectorNotes(sector) {
   return [
-    'The relative line is the sector\'s basket against the S&P 500\'s, each cap-weighted from the names\' daily closes, rebased to 100 at the start of the window. The SPDR fund against SPY is its second line, for comparison.',
+    'The relative line is the sector\'s basket against the S&P 500\'s, each cap-weighted from the names\' daily closes, rebased to 100 at the start of the window.',
     'FORWARD P/E is aggregate, as an index is priced: total market cap over total consensus EPS for the next twelve months, with the median of the names kept beside it. The trailing P/E band marks the 25th to 75th percentile of its weekly readings over ten years, and its line the median.',
     'The sub-industry bars, the map and the names chart use the PERIOD chosen above. A sub-industry with no P/E percentile is not on the map.',
     'NEXT REPORT: BMO reports before the open, AMC after the close, TBC has a date but no confirmed time of day. QUEUED marks a name the monitor has queued.',
@@ -344,7 +354,7 @@ function sectorNotes(sector) {
 function subNotes(sub) {
   return [
     'The relative line is the sub-industry\'s basket against the S&P 500\'s, each cap-weighted from the names\' daily closes, rebased to 100 at the start of the window.',
-    'FORWARD P/E is aggregate: total market cap over total consensus EPS for the next twelve months. The trailing P/E band marks the 25th to 75th percentile of its weekly readings over ten years, and its line the median. The comparison cards set it against its sector.',
+    'FORWARD P/E is aggregate: total market cap over total consensus EPS for the next twelve months. The trailing P/E band marks the 25th to 75th percentile of its weekly readings over ten years, and its line the median. The valuation section sets it against its sector.',
     'A sub-industry with fewer than five names is thin, and its medians and P/E history move with any one name.',
     'NEXT REPORT: BMO reports before the open, AMC after the close, TBC has a date but no confirmed time of day. QUEUED marks a name the monitor has queued.',
     present(sub.forward_pe) ? null : 'This sub-industry has no forward P/E in this build.',
@@ -392,17 +402,23 @@ function writeWindow(window) {
   }
 }
 
-// The basket against the S&P 500 over the window, rebased to 100 at its start;
-// the SPDR fund against SPY as a second line when the build carries one.
-function relativeChart(node, relative, window, names) {
+// The basket against the S&P 500 over the window, rebased to 100 at its start,
+// with the 100 line across: above it, the basket has led the index since then.
+function relativeChart(node, relative, window) {
   if (!relative?.dates?.length || !Array.isArray(relative.basket)) return false;
-  const series = { basket: relative.basket };
-  if (Array.isArray(relative.fund) && relative.fund.some(present)) series.fund = relative.fund;
-  const rebase = Object.fromEntries(Object.keys(series).map((key) => [key, 'index']));
-  const cut = sliceWindow(relative.dates, series, window, rebase);
-  const lines = { [names.basket]: cut.series.basket };
-  if (cut.series.fund) lines[names.fund] = cut.series.fund;
-  multiLine(node, cut.dates, lines);
+  const cut = sliceWindow(relative.dates, { basket: relative.basket }, window, { basket: 'index' });
+  render(node, (option, p) => ({
+    ...option,
+    xAxis: { ...option.xAxis, data: cut.dates },
+    series: [{
+      name: 'basket ÷ S&P 500', type: 'line', data: cut.series.basket, showSymbol: false,
+      lineStyle: { width: 1.4, color: p.text }, itemStyle: { color: p.text },
+      markLine: {
+        silent: true, symbol: 'none', label: { show: false },
+        lineStyle: { color: p.faint, type: 'dashed' }, data: [{ yAxis: 100 }],
+      },
+    }],
+  }));
   return true;
 }
 
@@ -593,43 +609,6 @@ function namesChart(node, points, period) {
   });
 }
 
-// The page's own figures against the comparison's, as the valuation cards read
-// them. When either arm has no P/E history the card says why instead.
-function reasonOf(loaded, label) {
-  return loaded.error
-    ? `${label}'s history is unavailable: ${loaded.error}.`
-    : `${label} has too few names with filings for a P/E history.`;
-}
-
-function comparisonOf(own, ownLabel, other, otherLabel) {
-  if (!own.page?.valuation) return { missing: reasonOf(own, ownLabel) };
-  if (!other.page?.valuation) return { missing: reasonOf(other, otherLabel) };
-  return {
-    arms: [
-      { key: 'a', label: ownLabel, basket: own.page.valuation },
-      { key: 'b', label: otherLabel, basket: other.page.valuation },
-    ],
-  };
-}
-
-// The ratio the decomposition must track (basket-view.js): the page's
-// index-weighted basket over the S&P 500's (a sub-industry: over its sector's).
-// Not the SPDR fund: its single-name caps and dividends differ from the sector
-// for reasons that have nothing to do with which names it holds.
-function referenceOf(own, other, isSector) {
-  const r = own.page?.relative;
-  if (!r?.dates?.length) return null;
-  if (isSector) return { dates: r.dates, ratio: r.basket, label: 'the index-weighted basket' };
-  const s = other.page?.relative;
-  if (!s?.dates?.length) return null;
-  const parent = alignTo(r.dates, s.dates, s.basket);
-  return {
-    dates: r.dates,
-    ratio: r.basket.map((v, i) => (present(v) && present(parent[i]) && parent[i] !== 0 ? v / parent[i] : null)),
-    label: 'the index-weighted baskets',
-  };
-}
-
 // The period switch and the window switch that drive every chart on a page.
 function controlBar(chart, dates, onChange) {
   return el('div', { class: 'sx-controls' }, [
@@ -670,17 +649,16 @@ async function renderLevel(root, data, ctx, row, isSector) {
   const tables = { period: DEFAULT_PERIOD, sort: { key: 'weight', direction: 'desc' } };
 
   const slots = {
-    relative: slot(), bars: slot(), band: slot(), path: slot(), cards: slot(), map: slot(), names: slot(),
+    relative: slot(), bars: slot(), band: slot(), path: slot(), map: slot(), names: slot(),
   };
   const nodes = {
     relative: chartNode(), bars: chartNode(), band: chartNode(), path: chartNode(), map: chartNode(), names: chartNode(),
   };
 
   const drawRelative = () => {
-    const names = { basket: `${ownLabel} ÷ S&P 500`, fund: isSector && row.etf ? `${row.etf} ÷ SPY` : null };
-    const drawn = relativeChart(nodes.relative, own.page?.relative, chart.window, names);
+    const drawn = relativeChart(nodes.relative, own.page?.relative, chart.window);
     slots.relative.replaceChildren(card(`${ownLabel.toUpperCase()} ÷ S&P 500 · ${chart.window}`,
-      el('span', { class: 'dim', text: 'rebased to 100 at the start of the window' }),
+      el('span', { class: 'dim', text: '=100 at the window\'s start' }),
       [drawn ? nodes.relative : missing(own, 'The relative line')]));
   };
 
@@ -714,12 +692,6 @@ async function renderLevel(root, data, ctx, row, isSector) {
     slots.path.replaceChildren(card('VALUATION PATH · CONSENSUS', cover ? el('span', { class: 'dim', text: cover }) : null,
       [bars.length ? nodes.path : gap(`${row.label}: no valuation path in this build.`)]));
     if (bars.length) pathChart(nodes.path, bars);
-  };
-
-  const drawCards = () => {
-    const fundamentals = comparisonOf(own, ownLabel, other, otherLabel);
-    const reference = referenceOf(own, other, isSector);
-    slots.cards.replaceChildren(...fundamentalCards(fundamentals, chart.window, [ownLabel, otherLabel], reference, reference?.label));
   };
 
   const drawMap = () => {
@@ -757,12 +729,22 @@ async function renderLevel(root, data, ctx, row, isSector) {
     if (!thin) {
       drawBand();
       drawPath();
-      drawCards();
     }
     if (isSector) drawMap();
     drawNames();
   };
   redrawTables();
+
+  // The valuation section does not follow the window switch: it covers every
+  // window itself, so it is built once. Its charts draw on a microtask, which
+  // runs after the synchronous append below has put them in the page.
+  const reference = referenceOf(own, other, isSector);
+  const valuation = thin ? [] : valuationSection(
+    comparisonOf(own, ownLabel, other, otherLabel),
+    [ownLabel, otherLabel],
+    reference,
+    reference?.label,
+  );
 
   const meta = isSector
     ? `AS OF ${data.as_of} · ${subs.length} SUB-INDUSTRIES, ${subs.filter((s) => s.thin).length} THIN`
@@ -771,7 +753,7 @@ async function renderLevel(root, data, ctx, row, isSector) {
     ? gap(own.error
       ? `${row.label}'s history is unavailable: ${own.error}.`
       : `${row.label} has fewer than five names with a P/E history, so its valuation charts are skipped.`)
-    : el('div', {}, [el('div', { class: 'grid two' }, [slots.band, slots.path]), slots.cards]);
+    : el('div', {}, [el('div', { class: 'grid two' }, [slots.band, slots.path]), ...valuation]);
   const extremes = isSector ? { best: row.best, worst: row.worst } : (members.length > 1 ? extremesOf(members, '3M') : null);
   const folds = [];
   if (isSector) folds.push(fold(`SUB-INDUSTRY TABLE · ${subs.length}`, subsHost));
@@ -791,11 +773,11 @@ async function renderLevel(root, data, ctx, row, isSector) {
     crumbs(crumbParts),
     sectionTitle(row.label.toUpperCase(), subtitle),
     metaRow(meta, isSector ? sectorNotes(row) : subNotes(row)),
-    strip(headlineCells(row)),
+    strip(headlineCells(row, data.market)),
     flagsLine(row, extremes),
     ptbvLine(row),
     !isSector && row.thin ? el('div', { class: 'sx-flags' }, [tag('THIN', 'warn', THIN_TITLE), el('span', { class: 'dim', text: THIN_TITLE })]) : null,
-    sectionTitle('1 · AGAINST THE MARKET', isSector ? 'the basket and its fund against the S&P 500, and the sub-industries against it' : 'the basket against the S&P 500'),
+    sectionTitle('1 · AGAINST THE MARKET', isSector ? 'the basket against the S&P 500, and the sub-industries against it' : 'the basket against the S&P 500'),
     controlBar(chart, dates, redraw),
     isSector ? el('div', { class: 'grid two' }, [slots.relative, slots.bars]) : slots.relative,
     sectionTitle('2 · VALUATION, NOW AND NEXT', 'trailing P/E, the valuation path, and what moved the ratio'),

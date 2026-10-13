@@ -2,20 +2,21 @@
 // arm against the equal-weight or smaller one, of much the same market) and
 // style pairs (value against growth, staples or low volatility against the
 // market). Each view names its arms (big_arm / small_arm, default LARGE / SMALL).
-// One window switch above the charts cuts every dated chart of the pair to the
-// same lookback, and the reader's choice is kept between pairs. The charts show
-// the ratio of the arms' prices with where it sits in its own history, each
-// arm's path and the rolling one-year gap; the valuation cards then split the
-// ratio into multiple and earnings. Returns by window and by calendar year stay
-// in tables below. The stat strip is full-history. The page shows the
-// divergence; it does not say which arm is right.
+// The page reads in three charts: the ratio of the arms' prices with where it
+// sits in its own history, then the valuation section (forward P/E and growth,
+// the P/E premium against its own history, and what moved the ratio in each
+// window). Each arm's path, the rolling one-year gap and the returns tables sit
+// in a DETAIL fold, closed. One window switch cuts the ratio and the folded
+// charts to the same lookback, and the reader's choice is kept between pairs.
+// The stat strip is full-history. The page shows the divergence; it does not
+// say which arm is right.
 
 import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, periodSwitch, gap, DASH } from '../fmt.js';
 import { areaLine, multiLine, zeroLine } from '../charts.js';
-import { fundamentalCards } from '../basket-view.js';
+import { valuationSection } from '../basket-view.js';
 import { pickWindow, windowSwitch } from '../windows.js';
 import { percentileView, multipleText, spreadRows } from '../kshape-model.js';
-import { leadText, extremesText, yearRows, yearsWon, wonText, readWindow, writeWindow, priceSeries, gapSeries, fundamentalsOf } from '../sizek-model.js';
+import { leadText, extremesText, yearRows, yearsWon, wonText, readWindow, writeWindow, priceSeries, gapSeries, fundamentalsOf, detailFold } from '../sizek-model.js';
 
 // One memory per tab, so the reader's window survives switching pairs and
 // reloads. The default is five years: long enough to show a regime, short
@@ -64,31 +65,40 @@ function windowBar(dates, window, onPick) {
   ]);
 }
 
-// The charts, all cut to one window: the ratio and the arms, the rolling gap,
-// and the valuation cards that split the ratio into multiple and earnings.
-function chartCards(data, v, win) {
-  const p = v.price, a = arms(v);
+// The one chart in the main flow: the ratio over the window, rebased to 1 at
+// its start, with where the ratio sits in its own full history.
+function ratioCard(v, win) {
+  const p = v.price;
   const ratio = priceSeries(p, win);
-  const ratioNode = chart();
-  const armsNode = chart();
-  const ratioCard = card(`RATIO · ${v.big_name} ÷ ${v.small_name} · ${win}`, el('span', { class: 'dim', text: `since ${p.since} · ${p.sessions} sessions through ${data.inputs.prices_through} · ${percentileView(p.ratio_percentile).text} of its own weeks` }), [
-    ratioNode, p.extremes ? el('div', { class: 'field-note', text: extremesText(p.extremes) }) : null]);
-  const armsCard = card(`EACH ARM · =100 AT THE WINDOW'S START · ${win}`, null, [armsNode]);
-  queueMicrotask(() => {
-    areaLine(ratioNode, ratio.dates, ratio.series.ratio);
-    multiLine(armsNode, ratio.dates, { [`${a.big} · ${v.big_name}`]: ratio.series.big, [`${a.small} · ${v.small_name}`]: ratio.series.small });
-  });
+  const node = chart();
+  queueMicrotask(() => areaLine(node, ratio.dates, ratio.series.ratio));
+  return card(`RATIO · ${v.big_name} ÷ ${v.small_name} · ${win}`,
+    el('span', { class: 'dim', text: `=1.00 at the window's start · ${percentileView(p.ratio_percentile).text} of its own weeks` }), [
+      node,
+      p.extremes ? el('div', { class: 'field-note', text: extremesText(p.extremes) }) : null,
+    ]);
+}
 
-  const out = [el('div', { class: 'grid two' }, [ratioCard, armsCard])];
+// The folded charts, all cut to the window: each arm's path and the rolling
+// gap with its lead. Their paints are queued, not drawn, because the fold is
+// closed until the reader opens it.
+function detailCharts(v, win, paints) {
+  const a = arms(v);
+  const armsCut = priceSeries(v.price, win);
+  const armsNode = chart();
+  paints.push(() => multiLine(armsNode, armsCut.dates, {
+    [`${a.big} · ${v.big_name}`]: armsCut.series.big,
+    [`${a.small} · ${v.small_name}`]: armsCut.series.small,
+  }));
+  const out = [card(`EACH ARM · =100 AT THE WINDOW'S START · ${win}`, null, [armsNode])];
   if (v.gap) {
     const node = chart(200);
     const cut = gapSeries(v.gap, win);
-    queueMicrotask(() => zeroLine(node, cut.dates, cut.series.gap));
+    paints.push(() => zeroLine(node, cut.dates, cut.series.gap));
     out.push(card(`${v.big_name} LESS ${v.small_name} · RETURN OVER ${v.gap.window}, PERCENTAGE POINTS · ${win}`, el('span', { class: 'dim', text: `${v.gap.windows} windows from ${v.gap.first}` }), [node,
       el('div', { class: 'sc-fomc-line', text: leadText(v.gap, v.big_name, v.small_name) }),
       el('div', { class: 'field-note', text: 'Rolling windows overlap: neighbouring points share most of their days, so the number of times the lead changed hands is far smaller than the number of points.' })]));
   }
-  out.push(...fundamentalCards(fundamentalsOf(v), win, [a.big, a.small], v.price ? { dates: v.price.dates, ratio: v.price.ratio } : null, `${v.big_name} ÷ ${v.small_name}`));
   return out;
 }
 
@@ -124,6 +134,7 @@ export default function renderSizek(root, data, _manifest, ctx = {}) {
   const host = el('div', {});
   const byLabel = Object.fromEntries(data.views.map((v) => [v.label, v.key]));
   let lookback = readWindow(WINDOW_KEY, DEFAULT_WINDOW);
+  const foldState = { open: false };
 
   // Redraws the pair. A pair shorter than the remembered window shows its
   // longest covered window instead, and the remembered choice is kept.
@@ -134,17 +145,22 @@ export default function renderSizek(root, data, _manifest, ctx = {}) {
       return;
     }
     const win = pickWindow(v.price.dates, lookback);
+    const a = arms(v);
+    const paints = [];
+    const folded = [...detailCharts(v, win, paints), ...tables(v)];
+    const fold = detailFold(foldState, () => paints.forEach((paint) => paint()), folded);
     // replaceChildren turns a null child into the text "null", so absent parts are filtered out.
     host.replaceChildren(...[
+      strip(v),
+      v.note ? el('div', { class: 'note-text', text: v.note }) : null,
       windowBar(v.price.dates, win, (next) => {
         lookback = next;
         writeWindow(WINDOW_KEY, next);
         draw(v.key);
       }),
-      strip(v),
-      v.note ? el('div', { class: 'note-text', text: v.note }) : null,
-      ...chartCards(data, v, win),
-      ...tables(v),
+      ratioCard(v, win),
+      ...valuationSection(fundamentalsOf(v), [a.big, a.small], { dates: v.price.dates, ratio: v.price.ratio }, `${v.big_name} ÷ ${v.small_name}`),
+      fold,
     ].filter(Boolean));
   };
 

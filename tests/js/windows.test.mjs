@@ -54,3 +54,20 @@ test('the split is withheld where today\'s names do not track the real ratio', a
   assert.equal(tracking(joined, reference, '5Y').ok, false);
   assert.ok(!trackedWindows(joined, reference).includes('5Y'));
 });
+
+test('the attribution bars add up to the ratio\'s change', async () => {
+  const { joinArms, attributionRow, attributionRows, premiumView } = await import('../../web/js/basket-view.js');
+  const basket = (price, pe) => ({ dates: DATES, price, pe, earnings: price.map((p, i) => p / pe[i]) });
+  const joined = joinArms({ arms: [
+    { label: 'A', basket: basket([100, 110, 120, 130, 140, 150, 160], [20, 20, 22, 24, 24, 24, 25]) },
+    { label: 'B', basket: basket([100, 100, 100, 100, 100, 100, 100], [10, 10, 10, 10, 10, 10, 10]) },
+  ] });
+  const row = attributionRow(joined, null, 'MAX');
+  assert.ok(Math.abs(row.multiple + row.earnings - row.total) < 1e-9);
+  assert.ok(Math.abs(row.total - 60) < 1e-9);
+  // Multiple +25% and earnings +28% of a +60% move: log shares 0.223 and 0.247 of 0.470.
+  assert.ok(Math.abs(row.multiple - (60 * Math.log(1.25)) / Math.log(1.6)) < 1e-9);
+  assert.ok(attributionRows(joined, null).every((r) => r.ok));
+  const view = premiumView(joined, null);
+  assert.equal(view.now, 150);
+});

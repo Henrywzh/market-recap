@@ -25,6 +25,7 @@ def _isolated_artifacts(tmp_path, monkeypatch):
     # The panel writes one file per page and reads VALUATION histories: keep both out of the repo's artifacts.
     monkeypatch.setattr(panel, "SECTORS_ARTIFACT_DIR", tmp_path / "sectors")
     monkeypatch.setattr(panel, "VALUATION_ARTIFACT_DIR", tmp_path / "valuation")
+    monkeypatch.setattr(panel, "FINANCIALS_ARTIFACT_DIR", tmp_path / "financials")
 
 
 # --- compute helpers -------------------------------------------------------
@@ -233,7 +234,7 @@ def test_inputs_are_the_six_named_panels():
 
 def test_the_hub_has_the_contract_keys_and_orders_sectors_then_subs_then_names_by_weight():
     out = panel.build(_ctx(), _inputs())
-    assert set(out) == {"as_of", "periods", "benchmark", "sectors", "sub_industries", "members", "themes", "notes", "missing"}
+    assert set(out) == {"as_of", "periods", "benchmark", "market", "sectors", "sub_industries", "members", "themes", "notes", "missing"}
     assert out["as_of"] == "2026-10-12" and out["periods"] == PERIODS and out["missing"] == []
     assert [s["label"] for s in out["sectors"]] == ["Energy", "Consumer Staples"]   # 9.0 before 7.0
     assert out["benchmark"]["symbol"] == "SPY" and out["benchmark"]["returns"]["3M"] == 3.0
@@ -241,7 +242,10 @@ def test_the_hub_has_the_contract_keys_and_orders_sectors_then_subs_then_names_b
     assert [s["key"] for s in out["sub_industries"]] == ["XLE-OGEP", "XLP-SDNB", "XLP-T"]
     assert [m["ticker"] for m in out["members"]] == ["XOM", "KO", "CVX", "PEP", "PM"]
     assert all(KEY.match(s["key"]) for s in out["sub_industries"])
-    assert len(out["notes"]) == 3
+    assert len(out["notes"]) == 4
+    # No VALUATION caps in these inputs, so the index has no aggregate and no expectations: every figure is null.
+    assert out["market"] == {"forward_pe": None, "trailing_pe": None, "pe_percentile": None,
+                             "eps_growth_next": None, "eps_growth_this": None, "revenue_growth": None}
 
 
 def test_sector_returns_are_cap_weighted_and_a_missing_return_is_renormalised():

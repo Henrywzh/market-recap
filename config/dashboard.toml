@@ -914,8 +914,6 @@ openrouter_months = 7
 capex_filers = ["MSFT", "GOOGL", "AMZN", "META", "ORCL"]
 capex_quarters = 12
 nvda_quarters = 8
-# Earnings weight by sector and day, over the next heatmap_days.
-heatmap_days = 21
 # A name "trades with" a theme when its daily excess return correlated with
 # the theme's proxy at or above this over the last year (TICKER shows it).
 member_corr = 0.55
@@ -1259,6 +1257,8 @@ horizon_days = 30
 # High-importance macro events (FOMC, CPI, payrolls, GDP) are listed this far out.
 high_importance_horizon_days = 45
 week_sessions = 5
+# Earnings weight by sector and day, over the next heatmap_days (the calendar's S&P 500 card).
+heatmap_days = 21
 # An earnings report's importance is the company's weight in the S&P 500 or
 # Nasdaq-100 (percent): a 1% name moves the index on its own.
 earnings_high_weight = 1.0

@@ -381,24 +381,6 @@ function guidanceCard(g) {
   ]);
 }
 
-function heatmapCard(h) {
-  if (!h?.dates?.length) return null;
-  const max = Math.max(...h.rows.flatMap((r) => r.cells.map((c) => c?.w || 0)), 0.01);
-  const day = (d) => new Date(`${d}T00:00:00Z`).toUTCString().slice(0, 11);
-  const head = el('tr', {}, [el('th', { text: 'SECTOR' }), ...h.dates.map((d) => el('th', { class: 'heat-day', text: day(d) })), el('th', { text: 'TOTAL' })]);
-  const rows = h.rows.map((r) => el('tr', {}, [
-    el('td', { class: 'heat-sector', text: r.sector }),
-    ...r.cells.map((c) => el('td', {
-      class: 'heat-cell', style: c ? `--heat:${Math.round((100 * c.w) / max)}%` : null,
-      title: c ? `${c.n} reporting · ${c.top.join(', ')}` : '', text: c ? num(c.w, c.w < 1 ? 2 : 1) : '',
-    })),
-    el('td', { class: 'dim', text: `${num(r.total, 1)}%` }),
-  ]));
-  const totals = el('tr', {}, [el('td', { class: 'dim', text: 'ALL' }), ...h.day_totals.map((t) => el('td', { class: 'dim heat-total', text: t ? num(t, 1) : '' })), el('td', {})]);
-  return card('EARNINGS WEIGHT BY SECTOR · NEXT THREE WEEKS', el('span', { class: 'dim', text: '% of S&P 500 weight reporting; hover for names' }),
-    el('div', { class: 'table-scroll' }, [el('table', { class: 'data heatmap-table' }, [el('thead', {}, [head]), el('tbody', {}, [...rows, totals])])]));
-}
-
 // --- SEMIS -------------------------------------------------------------------------
 
 function koreaCard(k) {
@@ -950,7 +932,6 @@ export default async function renderThemes(root, data, _manifest, ctx = {}) {
     'Data dates: when each monthly series is due -- Taiwan revenue by the 10th, Korea\'s confirmed customs figures around the 15th; a series past due is marked late.',
   ]));
   const boardHost = el('div', {});
-  const heat = heatmapCard(data.heatmap);
   const host = el('div', {});
   // The hash argument is upper-cased like a ticker (#themes/SEMIS).
   const wanted = String(ctx.arg || '').toLowerCase();
@@ -961,7 +942,6 @@ export default async function renderThemes(root, data, _manifest, ctx = {}) {
     host.replaceChildren(...themeBlocks(active, data));
   };
   root.append(boardHost);
-  if (heat) root.append(heat);
   root.append(host);
   draw();
 }

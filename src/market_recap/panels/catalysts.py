@@ -337,6 +337,32 @@ def _week(sessions: list[date], events: list[dict], start: date) -> list[dict]:
     return days
 
 
+def _heatmap(events: list[dict], as_of: date, days: int) -> dict:
+    """S&P 500 weight reporting, by GICS sector and session, over the next ``days``: each earnings
+    date's index weight, summed by sector. Moved here from THEMES, which no longer carries it."""
+    end = (as_of + timedelta(days=days)).isoformat()
+    reporting = [e for e in events if e.get("event_type") == "earnings"
+                 and as_of.isoformat() < e["date"] <= end and (e.get("index_weights") or {}).get("SPX")]
+    dates = sorted({e["date"] for e in reporting})
+    sectors = sorted({e.get("sector") or "Other" for e in reporting})
+    cells: dict[tuple[str, str], dict] = {}
+    for e in reporting:
+        cell = cells.setdefault((e.get("sector") or "Other", e["date"]), {"weight": 0.0, "names": []})
+        cell["weight"] += e["index_weights"]["SPX"]
+        cell["names"].append((e["symbol"], e["index_weights"]["SPX"]))
+    rows = []
+    for sector in sectors:
+        row = []
+        for day in dates:
+            c = cells.get((sector, day))
+            row.append(None if not c else {"w": round(c["weight"], 3),
+                                           "top": [n for n, _ in sorted(c["names"], key=lambda x: -x[1])[:4]],
+                                           "n": len(c["names"])})
+        rows.append({"sector": sector, "cells": row, "total": round(sum(c["w"] for c in row if c), 2)})
+    return {"dates": dates, "rows": sorted(rows, key=lambda r: -r["total"]),
+            "day_totals": [round(sum((r["cells"][i] or {}).get("w", 0) for r in rows), 2) for i in range(len(dates))]}
+
+
 def build(ctx, *, use_cache: bool = True) -> dict:
     settings = ctx.config["catalysts"]
     session = date.fromisoformat(ctx.as_of)
@@ -369,6 +395,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             end, session + timedelta(days=int(settings.get("high_importance_horizon_days", 0)))).isoformat(),
         "week_sessions": [d.isoformat() for d in week_sessions],
         "week": _week(week_sessions, upcoming, session),
+        "heatmap": _heatmap(upcoming, session, int(settings.get("heatmap_days", 21))),
         "events": upcoming,
         "recent": _recent(ctx, macro, earnings, session, previous, use_cache),
         "expected_missing": expected_missing,

@@ -4,6 +4,7 @@ The VALUATION reader and the price and estimate fetches are monkeypatched; no ne
 """
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -121,6 +122,7 @@ def _ctx(monkeypatch, histories):
         raise AssertionError("no network: prices and estimates are fakes")
 
     monkeypatch.setattr(P, "_read_history", lambda t: histories.get(t))
+    monkeypatch.setattr(P, "FINANCIALS_ARTIFACT_DIR", Path(__file__).with_name("no-financials-here"))
     monkeypatch.setattr(P.yahoo, "fetch_closes", no_fetch)
     monkeypatch.setattr(P.estimates, "fetch_trends", lambda syms, **kw: ({}, {}))
     return ctx
@@ -150,6 +152,26 @@ def test_without_valuation_every_view_says_so_and_has_no_baskets(monkeypatch):
     for view in panel["views"]:
         assert view["fundamentals"] == {"missing": P.NO_VALUATION}
     assert panel["inputs"]["valuation_built"] is False
+
+
+def _valued(ticker, *, eps_ntm, prev, now, nxt):
+    """A VALUATION row at a price of 100: consensus EPS for last year, this year and next."""
+    return {"ticker": ticker, "price": 100.0, "market_cap": 1e9, "eps_ntm": eps_ntm,
+            "eps_fy_prev": prev, "eps_fy0": now, "eps_fy1": nxt}
+
+
+def test_each_leg_carries_its_outlook_over_the_names_with_a_filings_history(monkeypatch):
+    histories = {"T1": artifact(5.0), "T2": artifact(4.0), "B1": artifact(10.0), "LOW": artifact(20.0)}
+    ctx = _ctx(monkeypatch, histories)
+    rows = [_valued("T1", eps_ntm=5.0, prev=4.0, now=5.0, nxt=5.5), _valued("T2", eps_ntm=4.0, prev=3.6, now=4.0, nxt=4.2)]
+    panel = P.build(ctx, inputs={"valuation": {"rows": rows, "as_of": ctx.as_of}})
+
+    air = panel["views"][1]
+    top, bottom = (arm["outlook"] for arm in air["fundamentals"]["arms"])
+    # Equal value: forward 2 / (0.05 + 0.04); EPS 0.076 -> 0.09 -> 0.097; no revenue file, so no revenue growth.
+    assert top == {"forward_pe": 22.2, "eps_growth_this": 18.4, "eps_growth_next": 7.8, "revenue_growth": None, "names": 2}
+    # B1 has a filings history but no VALUATION row, so it has no earnings to total and the leg has no figure.
+    assert bottom["names"] == 1 and bottom["forward_pe"] is None and bottom["eps_growth_this"] is None
 
 
 def test_a_leg_with_no_filings_history_at_all_makes_its_view_missing_with_that_leg_named(monkeypatch):

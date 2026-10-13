@@ -67,3 +67,26 @@ def test_thin_keeps_recent_days_and_older_weeks():
     recent = out[out.index > days[-1] - pd.Timedelta(days=365)]
     assert len(recent) > 240 and out.index[0] == days[0]
     assert len(out) < 262 + 110
+
+
+def test_outlook_totals_forward_multiples_and_growth():
+    rows = {
+        "A": {"price": 100.0, "market_cap": 300.0, "eps_ntm": 5.0, "eps_fy_prev": 4.0, "eps_fy0": 5.0, "eps_fy1": 6.0, "revenue_growth": 10.0},
+        "B": {"price": 50.0, "market_cap": 100.0, "eps_ntm": 5.0, "eps_fy_prev": 5.0, "eps_fy0": 5.0, "eps_fy1": 5.0, "revenue_growth": -5.0},
+    }
+    out = B.outlook(rows, {"A": 300.0, "B": 100.0}, {"A": 100.0, "B": 300.0})
+    # Earnings held: A 300 x 5/100 = 15, B 100 x 5/50 = 10 -> 400 / 25.
+    assert out["forward_pe"] == pytest.approx(16.0)
+    # FY0 15 + 10 = 25 -> FY1 18 + 10 = 28.
+    assert out["eps_growth_next"] == pytest.approx(12.0)
+    assert out["eps_growth_this"] == pytest.approx((25 / 22 - 1) * 100)
+    # Revenue held: A 300/300 x 100 = 100, B 100/100 x 300 = 300 -> (100 x 10 - 300 x 5) / 400.
+    assert out["revenue_growth"] == pytest.approx(-1.25)
+    equal = B.outlook(rows, None)
+    assert equal["forward_pe"] == pytest.approx(2 / (0.05 + 0.10))
+    assert equal["revenue_growth"] is None
+
+
+def test_outlook_needs_coverage():
+    rows = {"A": {"price": 10.0, "market_cap": 10.0, "eps_ntm": 1.0}, "B": {"price": 10.0, "market_cap": 90.0}}
+    assert B.outlook(rows, {"A": 10.0, "B": 90.0})["forward_pe"] is None

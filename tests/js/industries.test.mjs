@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as M from '../../web/js/industries-model.js';
+import { splitThin } from '../../web/js/tabs/industries.js';
 
 const row = (label, sector, one, extra = {}) => ({
   label, sector, members: 6, weight: 1,
@@ -60,4 +61,14 @@ test('estimates held and cut are different tags, and the tags name their thresho
 
 test('sectors are listed once, sorted', () => {
   assert.deepEqual(M.sectorsOf(ROWS), ['Consumer Discretionary', 'Financials', 'Information Technology']);
+});
+
+test('a thin sub-industry is left off the table and counted; a sector is never hidden', () => {
+  const rows = [{ label: 'Thin A', thin: true }, { label: 'Solid', thin: false }, { label: 'Thin B', thin: true }];
+  const sub = splitThin(rows, 'sub_industries');
+  assert.deepEqual(sub.shown.map((r) => r.label), ['Solid']);
+  assert.equal(sub.hidden, 2);
+  const sectors = splitThin(rows, 'sectors');
+  assert.equal(sectors.shown.length, 3);
+  assert.equal(sectors.hidden, 0);
 });

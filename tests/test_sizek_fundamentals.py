@@ -5,6 +5,7 @@ monkeypatched, so nothing reaches the network.
 """
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -31,6 +32,13 @@ def artifact(close, ey, dates=None):
 def flat(ey, n=80):
     """A name whose price never moves and whose earnings yield is ``ey`` percent: its P/E is 100 / ey."""
     return artifact([100.0] * n, [ey] * n)
+
+
+NO_FINANCIALS = Path(__file__).with_name("no-financials-here")     # no FINANCIALS files: revenue growth reads as None
+
+
+def no_revenue():
+    return KP.Revenues(NO_FINANCIALS)
 
 
 def row(ticker, *, indices=("SPX",), sector="Information Technology", cap=100.0):
@@ -124,8 +132,8 @@ def test_a_cap_weighted_arm_is_the_total_value_over_total_earnings_and_an_equal_
     rows = {"A": row("A", cap=300.0), "B": row("B", cap=100.0), "C": row("C", cap=None)}
     ctx = _Ctx()
 
-    cap, cap_reason = P._arm("big", "index:SPX", None, rows, KP.Histories(), {}, ctx, 10)
-    equal, equal_reason = P._arm("small", "index:SPX:equal", None, rows, KP.Histories(), {}, ctx, 10)
+    cap, cap_reason = P._arm("big", "index:SPX", None, rows, KP.Histories(), {}, ctx, 10, no_revenue())
+    equal, equal_reason = P._arm("small", "index:SPX:equal", None, rows, KP.Histories(), {}, ctx, 10, no_revenue())
 
     # Value 3 and 1 on earnings 0.15 and 0.10 of price: 4 over 0.25 is 16 on every week.
     assert cap_reason is None and cap["label"] == "S&P 500 cap-weighted" and cap["fund_coverage"] is None
@@ -138,7 +146,7 @@ def test_a_cap_weighted_arm_is_the_total_value_over_total_earnings_and_an_equal_
 
 def test_an_arm_whose_names_have_no_history_has_no_basket_and_says_so(monkeypatch):
     _histories(monkeypatch, {})
-    arm, reason = P._arm("big", "sector:Consumer Staples", None, {"A": row("A", sector="Consumer Staples")}, KP.Histories(), {}, _Ctx(), 10)
+    arm, reason = P._arm("big", "sector:Consumer Staples", None, {"A": row("A", sector="Consumer Staples")}, KP.Histories(), {}, _Ctx(), 10, no_revenue())
     assert arm["basket"] is None and reason.startswith("Consumer Staples sector: no name has a filings history")
 
 
@@ -156,7 +164,7 @@ def test_a_fund_arm_is_weighted_by_the_fund_s_holdings_and_says_how_much_of_the_
     ctx = _Ctx()
     rows = {"A": row("A"), "B": row("B")}     # Z is not in VALUATION: its 20% is in the denominator only
 
-    arm, reason = P._arm("big", "holdings:IWD", "IWD · Russell 1000 Value", rows, KP.Histories(), {}, ctx, 10)
+    arm, reason = P._arm("big", "holdings:IWD", "IWD · Russell 1000 Value", rows, KP.Histories(), {}, ctx, 10, no_revenue())
 
     # Shares from the holding weights at a price of 100: values 0.5 and 0.3. Earnings 0.5 x 5% + 0.3 x 10% = 0.055 on 0.8.
     assert reason is None and arm["label"] == "IWD · Russell 1000 Value"
@@ -179,8 +187,8 @@ def test_a_failed_holdings_fetch_says_why_is_logged_and_is_fetched_once(monkeypa
     ctx, histories, memo = _Ctx(), KP.Histories(), {}
     rows = {"A": row("A")}
 
-    arm, reason = P._arm("big", "holdings:USMV", None, rows, histories, memo, ctx, 10)
-    again, again_reason = P._arm("small", "holdings:USMV", None, rows, histories, memo, ctx, 10)
+    arm, reason = P._arm("big", "holdings:USMV", None, rows, histories, memo, ctx, 10, no_revenue())
+    again, again_reason = P._arm("small", "holdings:USMV", None, rows, histories, memo, ctx, 10, no_revenue())
 
     assert arm["basket"] is None and "could not be fetched" in reason and "timed out" in reason
     assert again["basket"] is None and calls == ["USMV"]                                   # one fetch per build, not per arm
@@ -193,14 +201,14 @@ def test_a_failed_holdings_fetch_says_why_is_logged_and_is_fetched_once(monkeypa
 def test_a_pair_without_baskets_carries_its_note_and_fetches_nothing(monkeypatch):
     monkeypatch.setattr(P.ishares, "fetch_holdings", _no_fetch)
     pair = {"key": "small", "big": "IWM", "small": "SPY", "fundamentals_note": "Small companies are outside the universe."}
-    block = P._pair_fundamentals(pair, {"A": row("A")}, KP.Histories(), {}, _Ctx(), 10)
+    block = P._pair_fundamentals(pair, {"A": row("A")}, KP.Histories(), {}, _Ctx(), 10, no_revenue())
     assert block == {"fundamentals_note": "Small companies are outside the universe."}     # no fundamentals key at all
 
 
 def test_a_pair_with_baskets_but_no_valuation_this_session_says_so_and_fetches_nothing(monkeypatch):
     monkeypatch.setattr(P.ishares, "fetch_holdings", _no_fetch)
     pair = {"key": "vg", "big_basket": "holdings:IWD", "small_basket": "holdings:IWF"}
-    block = P._pair_fundamentals(pair, None, KP.Histories(), {}, _Ctx(), 10)
+    block = P._pair_fundamentals(pair, None, KP.Histories(), {}, _Ctx(), 10, no_revenue())
     assert block == {"fundamentals": {"missing": KP.NO_VALUATION}, "fundamentals_note": None}
 
 
@@ -210,7 +218,7 @@ def test_a_pair_gives_both_arms_or_the_reason_one_arm_cannot_be_built(monkeypatc
     rows = {"A": row("A", cap=1.0), "B": row("B", cap=1.0)}
     pair = {"key": "sp", "big_basket": "index:SPX", "small_basket": "index:SPX:equal"}
 
-    block = P._pair_fundamentals(pair, rows, KP.Histories(), {}, _Ctx(), 10)
+    block = P._pair_fundamentals(pair, rows, KP.Histories(), {}, _Ctx(), 10, no_revenue())
     arms = block["fundamentals"]["arms"]
     assert [a["key"] for a in arms] == ["big", "small"] and block["fundamentals"]["notes"] == []
 
@@ -220,7 +228,7 @@ def test_a_pair_gives_both_arms_or_the_reason_one_arm_cannot_be_built(monkeypatc
         raise FetchError("no such fund")
 
     monkeypatch.setattr(P.ishares, "fetch_holdings", no_such_fund)
-    missing = P._pair_fundamentals(pair_missing, rows, KP.Histories(), {}, _Ctx(), 10)["fundamentals"]
+    missing = P._pair_fundamentals(pair_missing, rows, KP.Histories(), {}, _Ctx(), 10, no_revenue())["fundamentals"]
     assert set(missing) == {"missing"} and "could not be fetched" in missing["missing"]
 
 
@@ -229,13 +237,14 @@ def test_the_histories_are_read_once_however_many_arms_share_a_name(monkeypatch)
     rows = {"A": row("A", cap=1.0), "B": row("B", cap=1.0)}
     histories = KP.Histories()
     for spec in ("index:SPX", "index:SPX:equal", "index:SPX"):
-        P._arm("big", spec, None, rows, histories, {}, _Ctx(), 10)
+        P._arm("big", spec, None, rows, histories, {}, _Ctx(), 10, no_revenue())
     assert sorted(reads) == ["A", "B"]
 
 
 # --- the panel, end to end on fakes -----------------------------------------------------
 
 def _panel(monkeypatch, pairs, rows, holdings, inputs="valuation"):
+    monkeypatch.setattr(P, "FINANCIALS_ARTIFACT_DIR", NO_FINANCIALS)
     idx = pd.bdate_range("2021-01-04", periods=900)
     cfg = {**load_config(), "sizek": {"history_years": 25, "price_periods": ["1M", "1Y", "10Y"], "gap_period": "1Y", "pairs": pairs}}
     ctx = _Ctx(cfg, as_of=idx[-1].date().isoformat())
@@ -302,3 +311,51 @@ def test_validate_flags_a_basket_pair_without_its_block_and_notes_a_missing_one(
     assert {"severity": "error", "check": "sizek", "detail": "sp names baskets but has no fundamentals block"} in findings
     assert len(findings) == 2
     assert V._check_sizek(config, None) == []
+
+
+def test_validate_flags_an_arm_built_without_its_outlook():
+    config = {"sizek": {"pairs": [{"key": "sp", "big_basket": "index:SPX", "small_basket": "index:SPX:equal"}]}}
+    payload = {"views": [{"key": "sp", "fundamentals": {"arms": [
+        {"key": "big", "outlook": {"forward_pe": 20.0}}, {"key": "small"}]}}]}
+    findings = [f.as_dict() for f in V._check_sizek(config, payload)]
+    assert findings == [{"severity": "error", "check": "sizek", "detail": "sp small arm has no outlook"}]
+
+
+# --- each arm's outlook: forward P/E, consensus EPS growth and revenue growth ---------
+
+def _outlook_row(ticker, cap, *, prev, now, nxt, revenue_growth=None):
+    """A VALUATION row at a price of 100, with consensus EPS for last year, this year and next."""
+    return {"ticker": ticker, "indices": ["SPX"], "sector": "Information Technology", "market_cap": cap,
+            "price": 100.0, "eps_ntm": now, "eps_fy_prev": prev, "eps_fy0": now, "eps_fy1": nxt,
+            "revenue_growth": revenue_growth}
+
+
+def test_each_arm_carries_its_outlook_over_the_names_it_holds_at_the_values_it_holds_them(monkeypatch, tmp_path):
+    _histories(monkeypatch, {"A": flat(5.0), "B": flat(10.0), "C": flat(5.0)})
+    (tmp_path / "A.json").write_text(json.dumps({"values": {"revenue": [90.0, 100.0]}}))
+    (tmp_path / "B.json").write_text(json.dumps({"values": {"revenue": [50.0]}}))
+    revenues = KP.Revenues(tmp_path)
+    rows = {"A": _outlook_row("A", 300.0, prev=4.0, now=4.4, nxt=4.84, revenue_growth=10.0),
+            "B": _outlook_row("B", 100.0, prev=2.0, now=2.2, nxt=2.0, revenue_growth=4.0),
+            "C": _outlook_row("C", None, prev=1.0, now=1.0, nxt=1.0)}
+
+    cap, _ = P._arm("big", "index:SPX", None, rows, KP.Histories(), {}, _Ctx(), 10, revenues)
+    equal, _ = P._arm("small", "index:SPX:equal", None, rows, KP.Histories(), {}, _Ctx(), 10, revenues)
+
+    # Cap-weighted: C has no market cap, so it is out. Forward 400 / 15.4; EPS 14 -> 15.4 -> 16.52; revenue
+    # weighted by each name's sales (100 and 50) at 10% and 4%.
+    assert cap["outlook"] == {"forward_pe": 26.0, "eps_growth_this": 10.0, "eps_growth_next": 7.3,
+                              "revenue_growth": 8.0, "names": 2}
+    # Equal value over all three: C has no revenue file, so the names with revenue hold only two thirds of the value.
+    assert equal["outlook"] == {"forward_pe": 39.5, "eps_growth_this": 8.6, "eps_growth_next": 3.2,
+                                "revenue_growth": None, "names": 3}
+
+
+def test_a_name_without_consensus_eps_lowers_the_coverage_so_the_outlook_has_no_figure(monkeypatch):
+    _histories(monkeypatch, {"A": flat(5.0), "B": flat(10.0)})
+    rows = {"A": _outlook_row("A", 100.0, prev=4.0, now=4.4, nxt=4.8),
+            "B": {**_outlook_row("B", 100.0, prev=2.0, now=2.2, nxt=2.4), "eps_ntm": None, "eps_fy0": None}}
+    arm, reason = P._arm("big", "index:SPX:equal", None, rows, KP.Histories(), {}, _Ctx(), 10, no_revenue())
+    # Half the value has an estimate: below the 80% the outlook asks for, so every figure is None.
+    assert reason is None and arm["outlook"]["names"] == 2
+    assert arm["outlook"]["forward_pe"] is None and arm["outlook"]["eps_growth_this"] is None

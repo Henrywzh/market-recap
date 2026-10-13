@@ -13,7 +13,33 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from market_recap.compute import catalysts as C
+from market_recap import validate
+from market_recap.panels import catalysts as panel
 from market_recap.sources import calendars, nasdaq
+
+
+def test_heatmap_sums_index_weight_by_sector_and_day():
+    # The earnings-weight card, moved here from THEMES: index weight of each earnings date, summed by sector.
+    events = [
+        {"event_type": "earnings", "date": "2026-10-13", "sector": "Financials", "symbol": "JPM", "index_weights": {"SPX": 1.4}},
+        {"event_type": "earnings", "date": "2026-10-13", "sector": "Financials", "symbol": "GS", "index_weights": {"SPX": 0.4}},
+        {"event_type": "earnings", "date": "2026-10-14", "sector": "Health Care", "symbol": "JNJ", "index_weights": {"SPX": 1.0}},
+        {"event_type": "earnings", "date": "2026-12-01", "sector": "Health Care", "symbol": "X", "index_weights": {"SPX": 1.0}},
+        {"event_type": "macro", "date": "2026-10-13", "title": "CPI", "importance": "high"},
+    ]
+    out = panel._heatmap(events, date(2026, 9, 29), 21)
+    assert out["dates"] == ["2026-10-13", "2026-10-14"]
+    fin = next(r for r in out["rows"] if r["sector"] == "Financials")
+    assert fin["cells"][0] == {"w": 1.8, "top": ["JPM", "GS"], "n": 2} and fin["cells"][1] is None
+    assert out["day_totals"] == [1.8, 1.0]
+
+
+def test_the_validator_takes_a_heatmap_block_or_none_and_refuses_a_malformed_one():
+    base = {"events": [{"date": "2026-10-13"}]}
+    assert validate._check_catalysts(base) == []                       # an older build has no heatmap key
+    assert validate._check_catalysts({**base, "heatmap": {"dates": [], "rows": []}}) == []
+    bad = validate._check_catalysts({**base, "heatmap": {"dates": "2026-10-13", "rows": []}})
+    assert [(f.severity, f.check) for f in bad] == [("error", "catalysts")]
 
 
 def test_nyse_holidays_2026_match_the_published_calendar():

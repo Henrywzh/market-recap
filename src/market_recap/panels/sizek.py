@@ -29,11 +29,11 @@ import pandas as pd
 from ..compute import kshape as K
 from ..compute import sizek as S
 from ..compute import xray as X
-from ..config import PERIOD_TRADING_DAYS
+from ..config import FINANCIALS_ARTIFACT_DIR, PERIOD_TRADING_DAYS
 from ..context import YAHOO_URL
 from ..sources import french, ishares, yahoo
 from ..util import SourceRecord, clean_float, describe_error, to_iso_date
-from .kshape import FUNDAMENTAL_YEARS, NO_VALUATION, Histories, _series_payload
+from .kshape import FUNDAMENTAL_YEARS, NO_VALUATION, Histories, Revenues, _series_payload
 from .kshape import arm as basket_arm
 from .kshape import fundamentals as basket_fundamentals
 from .xray import _equity_lines
@@ -201,7 +201,7 @@ def _fund(ticker: str, memo: dict, ctx) -> dict:
 
 
 def _holdings_arm(which: str, label: str, ticker: str, rows: dict[str, dict], histories: Histories, memo: dict, ctx,
-                  years: int) -> tuple[dict, str | None]:
+                  years: int, revenues: Revenues) -> tuple[dict, str | None]:
     """A fund's arm: its holding weights on the names with a filings history.
     Fund coverage is the share of the fund's equity weight those names hold."""
     fund = _fund(ticker, memo, ctx)
@@ -219,20 +219,21 @@ def _holdings_arm(which: str, label: str, ticker: str, rows: dict[str, dict], hi
     weights = {s: float(by_symbol[s]) for s in names if s in closes.columns}
     coverage = sum(weights.values()) / total if total > 0 else None
     note = f"Weights are {ticker}'s own holding weights as of {fund['as_of']}, for the names with a filings history."
-    return basket_arm(which, label, list(weights), closes, yields, weights, years=years, fund_coverage=coverage, note=note)
+    return basket_arm(which, label, list(weights), closes, yields, weights, years=years, fund_coverage=coverage, note=note,
+                      rows=rows, revenue=revenues.of(list(weights)))
 
 
 def _arm(which: str, spec: str, label: str | None, rows: dict[str, dict], histories: Histories, memo: dict, ctx,
-         years: int) -> tuple[dict, str | None]:
+         years: int, revenues: Revenues) -> tuple[dict, str | None]:
     kind, name, equal = parse_basket(spec)
     label = label or basket_label(kind, name, equal)
     if kind == "holdings":
-        return _holdings_arm(which, label, name, rows, histories, memo, ctx, years)
+        return _holdings_arm(which, label, name, rows, histories, memo, ctx, years, revenues)
     names = _members(kind, name, rows)
     # Cap-weighted arms use this session's market caps; a name without one is left out and says so.
     weights = None if equal else {t: float(rows[t]["market_cap"]) for t in names if rows[t].get("market_cap")}
     closes, yields = histories.frames(names)
-    return basket_arm(which, label, names, closes, yields, weights, years=years)
+    return basket_arm(which, label, names, closes, yields, weights, years=years, rows=rows, revenue=revenues.of(names))
 
 
 def _valuation_rows(inputs: dict | None) -> dict[str, dict] | None:
@@ -243,7 +244,8 @@ def _valuation_rows(inputs: dict | None) -> dict[str, dict] | None:
     return {r["ticker"]: r for r in panel.get("rows", []) if r.get("ticker")}
 
 
-def _pair_fundamentals(pair: dict, rows: dict[str, dict] | None, histories: Histories, memo: dict, ctx, years: int) -> dict:
+def _pair_fundamentals(pair: dict, rows: dict[str, dict] | None, histories: Histories, memo: dict, ctx, years: int,
+                       revenues: Revenues) -> dict:
     """The pair's fundamentals block, or the reason it has none. A pair with no
     baskets carries its ``fundamentals_note``; a pair with baskets but no
     VALUATION this session says that instead of showing nothing."""
@@ -253,7 +255,7 @@ def _pair_fundamentals(pair: dict, rows: dict[str, dict] | None, histories: Hist
         return {"fundamentals_note": pair.get("fundamentals_note")}
     if rows is None:
         return {"fundamentals": {"missing": NO_VALUATION}, "fundamentals_note": None}
-    built = [_arm(which, spec, label, rows, histories, memo, ctx, years) for spec, label, which in specs]
+    built = [_arm(which, spec, label, rows, histories, memo, ctx, years, revenues) for spec, label, which in specs]
     return {"fundamentals": basket_fundamentals(built), "fundamentals_note": None}
 
 
@@ -280,10 +282,10 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     views = [_view(p, closes, cfg, periods, gap_sessions) for p in pairs]
     # Baskets come from this session's VALUATION rows and per-name histories, read once for all the pairs.
     rows = _valuation_rows(inputs)
-    histories, memo = Histories(), {}
+    histories, memo, revenues = Histories(), {}, Revenues(FINANCIALS_ARTIFACT_DIR)
     years = min(int(cfg["history_years"]), FUNDAMENTAL_YEARS)
     for pair, view in zip(pairs, views):
-        view.update(_pair_fundamentals(pair, rows, histories, memo, ctx, years))
+        view.update(_pair_fundamentals(pair, rows, histories, memo, ctx, years, revenues))
     return {
         "as_of": ctx.as_of,
         "settings": {k: cfg[k] for k in ("history_years", "price_periods", "gap_period")},
