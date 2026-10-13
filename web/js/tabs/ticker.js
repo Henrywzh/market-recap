@@ -316,11 +316,15 @@ export function companyOutlook(row) {
 // the block shows what it has and says what it lacks. A sector page without its
 // price and earnings series cannot be split into the comparison cards, so only
 // its strip and history are given.
-export async function companyValuation(ctx, symbol, row, sectors) {
+export async function companyValuation(ctx, symbol, row, sectors, financials = null) {
   const sectorKey = sectors?.sectors?.find((s) => s.label === row.sector)?.key;
+  // Ask only for the files the panels say they wrote: VALUATION marks a name with
+  // a P/E history, FINANCIALS lists the names it has statements for.
+  const hasHistory = Boolean(row?.pe_history);
+  const hasStatements = !financials || (financials.available || []).some((a) => a.ticker === symbol);
   const [own, statement, sectorPage] = await Promise.all([
-    optional(ctx, `valuation/${encodeURIComponent(symbol)}`),
-    optional(ctx, `financials/${encodeURIComponent(symbol)}`),
+    hasHistory ? optional(ctx, `valuation/${encodeURIComponent(symbol)}`) : null,
+    hasStatements ? optional(ctx, `financials/${encodeURIComponent(symbol)}`) : null,
     sectorKey ? optional(ctx, `sectors/${sectorKey}`) : null,
   ]);
   const peer = sectorPage?.valuation?.price ? sectorPage.valuation : null;
@@ -414,7 +418,7 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   // A failure here blanks this block only, as the other sections of this page do.
   if (row) {
     try {
-      root.append(...await companyValuation(ctx, symbol, row, sectors));
+      root.append(...await companyValuation(ctx, symbol, row, sectors, financials));
     } catch (error) {
       root.append(card('VALUATION', null, gap(error.message)));
     }

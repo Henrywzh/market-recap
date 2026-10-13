@@ -60,7 +60,7 @@ const ctxWith = (files) => ({
   },
 });
 
-const ROW = { ticker: 'AAPL', sector: 'Information Technology', pe_forward: 20.5, eps_fy0: 6, eps_fy1: 6.6, revenue_growth: 31.2 };
+const ROW = { ticker: 'AAPL', sector: 'Information Technology', pe_history: { basis: 'operating' }, pe_forward: 20.5, eps_fy0: 6, eps_fy1: 6.6, revenue_growth: 31.2 };
 
 const VALUATION = {
   dates: ['2024-01-05', '2024-01-12', '2024-01-19'],
@@ -131,5 +131,14 @@ test('a sector page without its price series still gives the strip; the comparis
     const nodes = await companyValuation(ctx, 'AAPL', ROW, sectors);
     await flush();
     assert.match(nodes.map(textOf).join(' '), /20\.5× vs 19\.6×/);
+  });
+});
+
+test('a name without a P/E history or statements asks for neither file', async () => {
+  await withBrowser(async () => {
+    const asked = [];
+    const ctx = { loadArtifact: async (name) => { asked.push(name); throw new Error('missing'); } };
+    await companyValuation(ctx, 'BRK-B', { ticker: 'BRK-B', sector: 'Financials', pe_history: false }, null, { available: [{ ticker: 'AAPL' }] });
+    assert.deepEqual(asked, []);
   });
 });
