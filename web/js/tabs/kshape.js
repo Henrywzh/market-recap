@@ -1,7 +1,8 @@
 // K-SHAPE: a high-income leg against a low-income leg, within an industry.
 // For each pair: the ratio of the legs' prices with where today's ratio sits in
-// its own history; then the valuation section, which splits the ratio into
-// multiple and earnings and gives forward P/E and growth; then the table of who
+// its own history; then the VALUATION block, which sets each leg's pay and
+// expectations, its business by fiscal year and the split of the ratio into
+// multiple and earnings; then the table of who
 // is in each leg. The legs' price indexes and returns, and the trailing P/E and
 // EPS growth histories, sit in a DETAIL fold, closed. The legs are a judgment,
 // set in the config. One window switch cuts the price ratio and the folded
@@ -11,11 +12,10 @@
 
 import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, periodSwitch, gap, DASH } from '../fmt.js';
 import { areaLine, multiLine } from '../charts.js';
-import { valuationSection } from '../basket-view.js';
 import { pickWindow, windowSwitch } from '../windows.js';
 import { tickerHref } from '../routes.js';
 import { percentileView, multipleText, premiumView, spreadRows, nameRow, peRangeText, legSeries, peSeries, epsSeries } from '../kshape-model.js';
-import { readWindow, writeWindow, fundamentalsOf, detailFold } from '../sizek-model.js';
+import { readWindow, writeWindow, pairValuation, detailFold } from '../sizek-model.js';
 
 // The window memory is per tab; three years is the default, since the P/E and
 // EPS histories are shorter than the price history.
@@ -176,7 +176,7 @@ export default function renderKshape(root, data, _manifest, ctx = {}) {
       }) : null,
       strip(v),
       ratioCard(v, win),
-      ...valuationSection(fundamentalsOf(v), ['TOP', 'BOTTOM'], v.price ? { dates: v.price.dates, ratio: v.price.ratio } : null, 'the legs\' price indexes'),
+      ...pairValuation(v, ['TOP', 'BOTTOM']),
       namesCard(v),
       fold,
     ].filter(Boolean));

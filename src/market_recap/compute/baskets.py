@@ -239,3 +239,98 @@ def latest_revenue(directory: Path, ticker: str) -> float | None:
         return None
     values = [v for v in ((body.get("values") or {}).get("revenue") or []) if v is not None]
     return float(values[-1]) if values else None
+
+
+# --- Fundamentals by fiscal year ------------------------------------------------
+# From each name's FINANCIALS artifact (annual statements as filed: ``columns``
+# with each fiscal_year, ``values`` with revenue, gross_profit, ebit per year).
+# A basket holds a fraction of each company (its value held over its market
+# cap: 1 for a sector holding the whole company, a fund's weight over the cap
+# for a fund), and its figures are totals of those fractions -- revenue growth
+# is the basket's total revenue against the year before over the names reported
+# both years, margins are total profit over total revenue. Each company's
+# fiscal year is its own, so a year mixes year-ends.
+
+HISTORY_YEARS = 10
+
+
+def read_statements(directory: Path, ticker: str) -> dict | None:
+    try:
+        return json.loads((directory / f"{ticker}.json").read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _by_year(statement: dict, field: str) -> dict[int, float]:
+    years = [c.get("fiscal_year") for c in statement.get("columns") or []]
+    values = (statement.get("values") or {}).get(field) or []
+    return {int(y): float(v) for y, v in zip(years, values) if y is not None and v is not None}
+
+
+def _field(statement: dict, field: str, fallbacks: tuple = ()) -> dict[int, float]:
+    """A field by year, filled where it is missing from the first fallback that
+    has it (a fallback is a field name, or a function of the statement)."""
+    out = _by_year(statement, field)
+    for fallback in fallbacks:
+        extra = fallback(statement) if callable(fallback) else _by_year(statement, fallback)
+        for year, value in extra.items():
+            out.setdefault(year, value)
+    return out
+
+
+def _gross_from_cost(statement: dict) -> dict[int, float]:
+    revenue, cost = _by_year(statement, "revenue"), _by_year(statement, "cost_of_revenue")
+    return {y: revenue[y] - cost[y] for y in revenue if y in cost}
+
+
+def fundamentals_history(statements: dict[str, dict | None], fractions: dict[str, float],
+                         *, years: int = HISTORY_YEARS, min_coverage: float = DEFAULT_MIN_COVERAGE) -> dict | None:
+    """{years, revenue_growth, gross_margin, operating_margin} in percent, one
+    entry per fiscal year (last ``years``), each None when the names it needs
+    carry less than ``min_coverage`` of the basket's revenue that year.
+
+    ``statements`` maps ticker -> FINANCIALS artifact; ``fractions`` ticker -> the
+    share of the company the basket holds (1.0 for the whole company).
+
+    Gross profit is revenue less cost of revenue where a company tags no gross
+    profit; operating profit is pre-tax income where it reports no operating
+    line (banks, insurers). A year some companies have not reported yet is
+    measured against their previous year's revenue, so a half-filed year fails
+    the coverage test instead of standing for the few that filed.
+    """
+    names = {t: f for t, f in fractions.items() if f and f > 0 and statements.get(t)}
+    if not names:
+        return None
+    revenue = {t: _by_year(statements[t], "revenue") for t in names}
+    gross = {t: _field(statements[t], "gross_profit", (_gross_from_cost,)) for t in names}
+    operating = {t: _field(statements[t], "ebit", ("pretax_income",)) for t in names}
+    every = sorted({y for r in revenue.values() for y in r})
+    if not every:
+        return None
+    span = every[-years:]
+
+    def scale(t: str, year: int) -> float:
+        """The company's revenue that year, or the year before when it has not reported."""
+        value = revenue[t].get(year)
+        if value is None or value <= 0:
+            value = revenue[t].get(year - 1)
+        return names[t] * value if value and value > 0 else 0.0
+
+    def coverage(year: int, tickers: list[str]) -> float:
+        base = sum(scale(t, year) for t in names)
+        return sum(names[t] * revenue[t][year] for t in tickers) / base if base else 0.0
+
+    out = {"years": span, "revenue_growth": [], "gross_margin": [], "operating_margin": []}
+    for year in span:
+        both = [t for t in names if revenue[t].get(year, 0) > 0 and revenue[t].get(year - 1, 0) > 0]
+        growth = None
+        if both and coverage(year, both) >= min_coverage:
+            growth = (sum(names[t] * revenue[t][year] for t in both) / sum(names[t] * revenue[t][year - 1] for t in both) - 1) * 100
+        out["revenue_growth"].append(None if growth is None else round(growth, 1))
+        for key, field in (("gross_margin", gross), ("operating_margin", operating)):
+            tickers = [t for t in names if revenue[t].get(year, 0) > 0 and year in field[t]]
+            margin = None
+            if tickers and coverage(year, tickers) >= min_coverage:
+                margin = sum(names[t] * field[t][year] for t in tickers) / sum(names[t] * revenue[t][year] for t in tickers) * 100
+            out[key].append(None if margin is None else round(margin, 1))
+    return out

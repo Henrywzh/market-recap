@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from market_recap.compute import baskets as B
 from market_recap.config import load_config
@@ -139,7 +140,9 @@ def test_the_panel_gives_each_view_its_two_legs_as_baskets_and_names_the_leg_mem
     arms = air["fundamentals"]["arms"]
     assert [a["label"] for a in arms] == ["Top leg", "Bottom leg"]
     assert arms[0]["basket"]["names"] == 2 and arms[1]["basket"]["names"] == 1
-    assert arms[1]["note"] == "Left out for lack of a filings history: NEW."
+    # No VALUATION rows here, so B1 has no market cap either: it is out of the history too, and the note says so.
+    assert arms[1]["note"] == ("Left out for lack of a filings history: NEW. "
+                               "Left out of the fundamentals history for lack of a market cap: B1.")
     # Top: 2 over (0.05 + 0.04) is 22.22. Bottom: B1 alone, 10% yield, so P/E 10.
     assert set(arms[0]["basket"]["pe"]) == {22.22} and set(arms[1]["basket"]["pe"]) == {10.0}
     assert overall["fundamentals"]["arms"][1]["basket"]["names"] == 2                # B1 and LOW; NEW left out of both views' bottom
@@ -180,3 +183,93 @@ def test_a_leg_with_no_filings_history_at_all_makes_its_view_missing_with_that_l
     panel = P.build(ctx, inputs={"valuation": {"rows": [], "as_of": ctx.as_of}})
     air = panel["views"][1]
     assert set(air["fundamentals"]) == {"missing"} and air["fundamentals"]["missing"].startswith("Top leg: no name has a filings history")
+
+
+# --- each arm's history: revenue growth and margins by fiscal year ---------------------
+
+def _statement(revenue, ebit, years=(2023, 2024), gross=None):
+    """A FINANCIALS artifact as far as the history reads it: annual revenue and operating profit by fiscal year."""
+    values = {"revenue": list(revenue), "ebit": list(ebit)}
+    if gross is not None:
+        values["gross_profit"] = list(gross)
+    return {"columns": [{"fiscal_year": y} for y in years], "values": values}
+
+
+def _write_statement(directory, ticker, statement):
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{ticker}.json").write_text(json.dumps(statement))
+
+
+def test_statements_are_read_once_and_the_revenue_weights_read_them_the_way_baskets_does(tmp_path, monkeypatch):
+    _write_statement(tmp_path, "A", _statement([100.0, 110.0], [20.0, 22.0]))
+    reads = []
+    original = B.read_statements
+
+    def counting(directory, ticker):
+        reads.append(ticker)
+        return original(directory, ticker)
+
+    monkeypatch.setattr(B, "read_statements", counting)
+    statements = P.Statements(tmp_path)
+    revenues = P.Revenues(tmp_path, statements)
+    assert revenues.of(["A", "NOPE"]) == {"A": 110.0, "NOPE": None}
+    assert revenues.of(["A"]) == {"A": 110.0}
+    assert statements.of(["A", "NOPE"])["A"]["values"]["ebit"] == [20.0, 22.0]
+    assert sorted(reads) == ["A", "NOPE"]                                        # each file opened once, however often asked
+    assert P.Revenues(tmp_path).of(["A"]) == {"A": B.latest_revenue(tmp_path, "A")}     # the same reading as baskets
+
+
+def test_an_equal_weight_arm_holds_each_name_at_one_over_its_market_cap(tmp_path):
+    _write_statement(tmp_path, "A", _statement([100.0, 120.0], [20.0, 24.0]))
+    _write_statement(tmp_path, "B", _statement([300.0, 330.0], [30.0, 33.0]))
+    closes, yields = B.frames({"A": artifact(5.0), "B": artifact(10.0)})
+    rows = {"A": {"market_cap": 300.0}, "B": {"market_cap": 100.0}}
+    arm, reason = P.arm("top", "Top leg", ["A", "B"], closes, yields, years=10, rows=rows,
+                        statements=P.Statements(tmp_path))
+    assert reason is None and arm["note"] is None
+    # Shares of each company: 1/300 and 1/100. Margins and growth are ratios, so the scale of the shares cancels.
+    share_a, share_b = 1 / 300, 1 / 100
+    history = arm["history"]
+    assert history["years"] == [2023, 2024]
+    assert history["revenue_growth"][0] is None
+    assert history["revenue_growth"][1] == pytest.approx(
+        ((120 * share_a + 330 * share_b) / (100 * share_a + 300 * share_b) - 1) * 100, abs=0.05)
+    assert history["operating_margin"][1] == pytest.approx(
+        (24 * share_a + 33 * share_b) / (120 * share_a + 330 * share_b) * 100, abs=0.05)
+
+
+def test_a_name_with_no_market_cap_is_left_out_of_an_equal_weight_history_and_the_note_says_so(tmp_path):
+    _write_statement(tmp_path, "A", _statement([100.0, 120.0], [20.0, 24.0]))
+    _write_statement(tmp_path, "C", _statement([50.0, 50.0], [25.0, 25.0]))           # a margin of 50% that must not count
+    closes, yields = B.frames({"A": artifact(5.0), "C": artifact(5.0)})
+    arm, _ = P.arm("top", "Top leg", ["A", "C"], closes, yields, years=10, rows={"A": {"market_cap": 100.0}},
+                   statements=P.Statements(tmp_path))
+    assert arm["history"]["operating_margin"][1] == pytest.approx(24 / 120 * 100, abs=0.05)   # A alone
+    assert arm["note"] == "Left out of the fundamentals history for lack of a market cap: C."
+    assert arm["basket"]["names"] == 2                                                        # C still counts in the basket
+
+
+def test_an_arm_without_statements_has_no_history(monkeypatch):
+    closes, yields = B.frames({"A": artifact(5.0)})
+    arm, _ = P.arm("top", "Top leg", ["A"], closes, yields, years=10, rows={"A": {"market_cap": 1.0}})
+    assert arm["history"] is None and arm["note"] is None
+
+
+def test_the_panel_gives_each_leg_a_history_from_the_filings_on_disk(monkeypatch, tmp_path):
+    for ticker, revenue in {"T1": [100.0, 120.0], "T2": [60.0, 66.0], "B1": [300.0, 330.0]}.items():
+        _write_statement(tmp_path, ticker, _statement(revenue, [r / 10 for r in revenue]))
+    histories = {"T1": artifact(5.0), "T2": artifact(4.0), "B1": artifact(10.0), "LOW": artifact(20.0)}
+    ctx = _ctx(monkeypatch, histories)
+    monkeypatch.setattr(P, "FINANCIALS_ARTIFACT_DIR", tmp_path)
+    rows = [{**_valued(t, eps_ntm=5.0, prev=4.0, now=5.0, nxt=5.5), "market_cap": cap}
+            for t, cap in (("T1", 200.0), ("T2", 100.0), ("B1", 300.0))]
+    panel = P.build(ctx, inputs={"valuation": {"rows": rows, "as_of": ctx.as_of}})
+    json.dumps(panel, allow_nan=False)
+
+    arms = panel["views"][1]["fundamentals"]["arms"]
+    top, bottom = arms[0]["history"], arms[1]["history"]
+    assert top["years"] == [2023, 2024] and bottom["years"] == [2023, 2024]
+    # Top leg: 2 shares at 1/200 and 1/100 over revenue 120 and 66 against 100 and 60 the year before.
+    assert top["revenue_growth"][1] == pytest.approx(((120 / 200 + 66 / 100) / (100 / 200 + 60 / 100) - 1) * 100, abs=0.05)
+    assert bottom["revenue_growth"][1] == pytest.approx(10.0)                              # B1 alone: 330 over 300
+    assert bottom["operating_margin"][1] == pytest.approx(33.0 / 330.0 * 100, abs=0.05)

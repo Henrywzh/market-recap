@@ -96,20 +96,6 @@ test('a symmetric axis holds every value with a tenth to spare, in round steps, 
   assert.deepEqual(M.symmetricRange([100, -40]), [-150, 150]);
 });
 
-test('the P/E band is the ten-year median and the middle half, with the current reading', () => {
-  const band = M.bandOf({ median: 26.1, p25: 23.4, p75: 29.9, p10: 20, p90: 33, current: 27.3, percentile: 62.5, weeks: 520 });
-  assert.deepEqual(band, { median: 26.1, p25: 23.4, p75: 29.9, current: 27.3, percentile: 62.5, weeks: 520 });
-});
-
-test('a band with no stats, or without its median and quartiles, is null; a missing reading stays null', () => {
-  assert.equal(M.bandOf(null), null);
-  assert.equal(M.bandOf({ median: 20, p25: null, p75: 25 }), null);
-  const partial = M.bandOf({ median: 20, p25: 18, p75: 25, current: null, percentile: undefined });
-  assert.equal(partial.current, null);
-  assert.equal(partial.percentile, null);
-  assert.equal(partial.weeks, null);
-});
-
 test('the valuation path comes out in build order, with the NTM stage marked and a missing growth left null', () => {
   const bars = M.pathBars({
     stages: [

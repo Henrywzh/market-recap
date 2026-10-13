@@ -14,8 +14,10 @@ build without VALUATION shows prices only. Nothing is filled in.
 
 Each view also carries ``fundamentals``: each leg as an equal-weight basket of
 its names (compute.baskets), so the leg ratio's P/E and earnings parts are the
-same measured figures the page's P/E chart shows. The arm helpers here are
-shared with SIZE K (panels.sizek).
+same measured figures the page's P/E chart shows. Each arm also carries its
+``history``: the names' revenue growth and margins by fiscal year, each name
+held at its share of its market cap. The arm helpers here are shared with
+SIZE K (panels.sizek), SECTORS and THEMES.
 """
 
 from __future__ import annotations
@@ -99,18 +101,41 @@ class Histories:
         return self._frames[key]
 
 
-class Revenues:
-    """Each name's latest annual revenue from its FINANCIALS artifact, read once per build. It weights
-    the names' revenue growth in an arm's outlook, so the figure is the basket's total growth."""
+class Statements:
+    """Each name's FINANCIALS artifact, read once per build. The fundamentals history and the revenue
+    weights both read it, so a name's file is opened once however many arms and pages list the name."""
 
     def __init__(self, directory) -> None:
         self._directory = directory
+        self._read: dict[str, dict | None] = {}
+
+    def get(self, ticker: str) -> dict | None:
+        if ticker not in self._read:
+            self._read[ticker] = B.read_statements(self._directory, ticker)
+        return self._read[ticker]
+
+    def of(self, tickers) -> dict[str, dict | None]:
+        return {ticker: self.get(ticker) for ticker in tickers}
+
+
+def _latest_revenue(statement: dict | None) -> float | None:
+    """A name's latest annual revenue from its statement: the same reading as baskets.latest_revenue."""
+    values = [v for v in ((statement or {}).get("values") or {}).get("revenue") or [] if v is not None]
+    return float(values[-1]) if values else None
+
+
+class Revenues:
+    """Each name's latest annual revenue, read once per build from the shared statements. It weights
+    the names' revenue growth in an arm's outlook, so the figure is the basket's total growth."""
+
+    def __init__(self, directory, statements: Statements | None = None) -> None:
+        self._statements = Statements(directory) if statements is None else statements
         self._read: dict[str, float | None] = {}
 
     def of(self, tickers) -> dict[str, float | None]:
         for ticker in tickers:
             if ticker not in self._read:
-                self._read[ticker] = B.latest_revenue(self._directory, ticker)
+                self._read[ticker] = _latest_revenue(self._statements.get(ticker))
         return {ticker: self._read[ticker] for ticker in tickers}
 
 
@@ -130,23 +155,59 @@ def _arm_outlook(usable: list[str], weights: dict[str, float] | None, rows: dict
     return outlook_payload(found)
 
 
+def _listed(names: list[str]) -> str:
+    """Up to twelve names, then a count of the rest, for a note."""
+    return ", ".join(names[:12]) + (f" and {len(names) - 12} more" if len(names) > 12 else "")
+
+
+def _fractions(names: list[str], weights: dict[str, float] | None, rows: dict[str, dict]) -> dict[str, float]:
+    """Each name's share of its company that the arm holds: the value held over the name's market cap.
+
+    A cap-weighted arm holds market caps, so each share is 1.0; a fund holds its
+    holding weight; an equal-weight arm holds one unit of each name. Any scale
+    common to every name cancels in margins and growth, so only the division by
+    the cap decides how the names weigh against each other. A name with no market
+    cap has no share to measure, so it is left out.
+    """
+    out: dict[str, float] = {}
+    for ticker in names:
+        cap = (rows.get(ticker) or {}).get("market_cap")
+        if cap:
+            out[ticker] = (1.0 if weights is None else float(weights[ticker])) / float(cap)
+    return out
+
+
 def arm(key: str, label: str, names: list[str], closes: pd.DataFrame, yields: pd.DataFrame,
         weights: dict[str, float] | None = None, *, years: int, fund_coverage: float | None = None,
         note: str | None = None, rows: dict[str, dict] | None = None,
-        revenue: dict[str, float | None] | None = None) -> tuple[dict, str | None]:
+        revenue: dict[str, float | None] | None = None,
+        statements: Statements | None = None) -> tuple[dict, str | None]:
     """One arm of a fundamentals pair, and the reason it has no basket when it has none.
 
     A name takes part when it has a filings history in ``closes`` and, for a
     cap-weighted arm (``weights`` given), a positive weight. Names left out are
     listed in the arm's note rather than dropped silently: a basket that quietly
-    has fewer names would look like the whole leg."""
+    has fewer names would look like the whole leg.
+
+    With ``statements``, the arm also carries its ``history``: the fundamentals by
+    fiscal year over the names it holds, each at its share of the company (see
+    ``_fractions``). Names with no market cap are left out of the history only,
+    and the note says so.
+    """
     usable = [t for t in names if t in closes.columns and (weights is None or (weights.get(t) or 0) > 0)]
     left_out = [t for t in names if t not in usable]
+    shares = _fractions(usable, weights, rows or {})
     notes = [note] if note else []
     if left_out:
         why = "a filings history" if weights is None else "a filings history or a market cap"
-        shown = ", ".join(left_out[:12]) + (f" and {len(left_out) - 12} more" if len(left_out) > 12 else "")
-        notes.append(f"Left out for lack of {why}: {shown}.")
+        notes.append(f"Left out for lack of {why}: {_listed(left_out)}.")
+    history = None
+    if statements is not None:
+        capless = [t for t in usable if t not in shares]
+        if capless:
+            notes.append(f"Left out of the fundamentals history for lack of a market cap: {_listed(capless)}.")
+        if shares:
+            history = B.fundamentals_history(statements.of(list(shares)), shares, years=years)
     basket, reason = None, None
     if not usable:
         reason = f"{label}: no name has a filings history, so no basket can be built."
@@ -156,7 +217,8 @@ def arm(key: str, label: str, names: list[str], closes: pd.DataFrame, yields: pd
             reason = f"{label}: none of its names had a P/E from their filings, so no basket can be built."
     return {"key": key, "label": label, "basket": basket, "fund_coverage": clean_float(fund_coverage, 3),
             "note": " ".join(notes) or None,
-            "outlook": _arm_outlook(usable, weights, rows or {}, revenue or {})}, reason
+            "outlook": _arm_outlook(usable, weights, rows or {}, revenue or {}),
+            "history": history}, reason
 
 
 def fundamentals(built: list[tuple[dict, str | None]], notes: list[str] | None = None) -> dict:
@@ -169,15 +231,17 @@ def fundamentals(built: list[tuple[dict, str | None]], notes: list[str] | None =
 
 
 def _leg_fundamentals(top: list[str], bottom: list[str], histories: dict, built: bool, years: int,
-                      valuation: dict[str, dict], revenues: Revenues) -> dict:
-    """Each leg as an equal-weight basket of its names with a filings history, and its outlook."""
+                      valuation: dict[str, dict], revenues: Revenues, statements: Statements | None = None) -> dict:
+    """Each leg as an equal-weight basket of its names with a filings history, its outlook and its history."""
     if not built:
         return {"missing": NO_VALUATION}
     names = list(dict.fromkeys(top + bottom))
     closes, yields = B.frames({t: histories.get(t) for t in names})
     revenue = revenues.of(names)
-    return fundamentals([arm("top", "Top leg", top, closes, yields, years=years, rows=valuation, revenue=revenue),
-                         arm("bottom", "Bottom leg", bottom, closes, yields, years=years, rows=valuation, revenue=revenue)])
+    return fundamentals([arm("top", "Top leg", top, closes, yields, years=years, rows=valuation, revenue=revenue,
+                             statements=statements),
+                         arm("bottom", "Bottom leg", bottom, closes, yields, years=years, rows=valuation, revenue=revenue,
+                             statements=statements)])
 
 
 def _name_row(ticker: str, leg: str, closes: pd.DataFrame, valuation: dict, trends: dict, periods: dict[str, int],
@@ -213,12 +277,12 @@ def _name_row(ticker: str, leg: str, closes: pd.DataFrame, valuation: dict, tren
 
 def _view(key: str, label: str, note: str | None, top: list[str], bottom: list[str], *, closes: pd.DataFrame,
           valuation: dict, trends: dict, today: pd.Timestamp, histories: dict[str, dict | None], cfg: dict, periods: dict[str, int],
-          valuation_built: bool, revenues: Revenues) -> dict:
+          valuation_built: bool, revenues: Revenues, statements: Statements | None = None) -> dict:
     years = int(cfg["history_years"])
     top_ix, bottom_ix = K.leg_index(closes, top), K.leg_index(closes, bottom)
     out: dict = {"key": key, "label": label, "note": note, "top": top, "bottom": bottom}
     out["fundamentals"] = _leg_fundamentals(top, bottom, histories, valuation_built, min(years, FUNDAMENTAL_YEARS),
-                                            valuation, revenues)
+                                            valuation, revenues, statements)
 
     both = pd.concat([top_ix.rename("top"), bottom_ix.rename("bottom")], axis=1).dropna()
     if len(both) > 1:
@@ -315,8 +379,10 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         trends, _ = estimates.fetch_trends(uncovered) if uncovered else ({}, {})
     except Exception:  # noqa: BLE001 -- those names then show no forward multiple
         trends = {}
+    statements = Statements(FINANCIALS_ARTIFACT_DIR)
     kw = dict(closes=closes, valuation=valuation, trends=trends, today=pd.Timestamp(ctx.as_of), histories=histories, cfg=cfg, periods=periods,
-              valuation_built=bool(valuation_panel), revenues=Revenues(FINANCIALS_ARTIFACT_DIR))
+              valuation_built=bool(valuation_panel), revenues=Revenues(FINANCIALS_ARTIFACT_DIR, statements),
+              statements=statements)
     views = [_view("overall", cfg["overall_label"], "Every pair's top leg against every pair's bottom leg, and the low-end names with no top-leg counterpart "
                    "(fast food, dollar stores). Equal weight.", top_all, bottom_all, **kw)]
     views += [_view(p["key"], p["label"], p.get("note"), list(p["top"]), list(p["bottom"]), **kw) for p in pairs]

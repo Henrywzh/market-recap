@@ -3,9 +3,9 @@
 // style pairs (value against growth, staples or low volatility against the
 // market). Each view names its arms (big_arm / small_arm, default LARGE / SMALL).
 // The page reads in three charts: the ratio of the arms' prices with where it
-// sits in its own history, then the valuation section (forward P/E and growth,
-// the P/E premium against its own history, and what moved the ratio in each
-// window). Each arm's path, the rolling one-year gap and the returns tables sit
+// sits in its own history, then the VALUATION block (what each arm pays and
+// expects, its business by fiscal year, the P/E premium against its own history,
+// and what moved the ratio in each window). Each arm's path, the rolling one-year gap and the returns tables sit
 // in a DETAIL fold, closed. One window switch cuts the ratio and the folded
 // charts to the same lookback, and the reader's choice is kept between pairs.
 // The stat strip is full-history. The page shows the divergence; it does not
@@ -13,10 +13,9 @@
 
 import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, periodSwitch, gap, DASH } from '../fmt.js';
 import { areaLine, multiLine, zeroLine } from '../charts.js';
-import { valuationSection } from '../basket-view.js';
 import { pickWindow, windowSwitch } from '../windows.js';
 import { percentileView, multipleText, spreadRows } from '../kshape-model.js';
-import { leadText, extremesText, yearRows, yearsWon, wonText, readWindow, writeWindow, priceSeries, gapSeries, fundamentalsOf, detailFold } from '../sizek-model.js';
+import { leadText, extremesText, yearRows, yearsWon, wonText, readWindow, writeWindow, priceSeries, gapSeries, pairValuation, detailFold } from '../sizek-model.js';
 
 // One memory per tab, so the reader's window survives switching pairs and
 // reloads. The default is five years: long enough to show a regime, short
@@ -159,7 +158,7 @@ export default function renderSizek(root, data, _manifest, ctx = {}) {
         draw(v.key);
       }),
       ratioCard(v, win),
-      ...valuationSection(fundamentalsOf(v), [a.big, a.small], { dates: v.price.dates, ratio: v.price.ratio }, `${v.big_name} ÷ ${v.small_name}`),
+      ...pairValuation(v, [a.big, a.small], { dates: v.price.dates, ratio: v.price.ratio }, `${v.big_name} ÷ ${v.small_name}`),
       fold,
     ].filter(Boolean));
   };

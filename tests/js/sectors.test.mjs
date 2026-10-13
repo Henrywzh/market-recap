@@ -189,38 +189,15 @@ test('the name columns read the build\'s fields, and a missing field sorts last'
   assert.deepEqual(M.sortRows(data.members, cols.pctl.get, 'desc').map((m) => m.ticker), ['KO', 'JPM', 'PEP', 'BAC', 'GIS', 'WFC']);
 });
 
-test('a pair\'s arms carry each page\'s outlook beside its valuation; an older page has none', () => {
-  const valuation = { dates: ['2024-01-05', '2024-01-12'], pe: [20, 21] };
-  const own = { page: { valuation, outlook: { forward_pe: 21.5, eps_growth_next: 12.4, revenue_growth: 6.1 } } };
-  const other = { page: { valuation: { dates: ['2024-01-05'], pe: [18] } } };
-  const pair = M.comparisonOf(own, 'Tech', other, 'S&P 500');
-  assert.equal(pair.missing, undefined);
-  assert.equal(pair.arms[0].basket, valuation);
-  assert.equal(pair.arms[0].outlook.forward_pe, 21.5);
-  assert.equal(pair.arms[1].outlook, undefined);
-});
-
-test('a pair whose page history failed or is thin says why, naming the page that lacks it', () => {
-  const other = { page: { valuation: { dates: ['2024-01-05'], pe: [18] } } };
-  const failed = M.comparisonOf({ page: null, error: 'HTTP 404' }, 'Tech', other, 'S&P 500');
-  assert.equal(failed.missing, 'Tech\'s history is unavailable: HTTP 404.');
-  assert.equal(failed.arms, undefined);
-  const thin = M.comparisonOf({ page: {}, error: null }, 'Tech', other, 'S&P 500');
-  assert.equal(thin.missing, 'Tech has too few names with filings for a P/E history.');
-  const otherFailed = M.comparisonOf(other, 'Tech', { page: null, error: 'gone' }, 'Info Tech');
-  assert.equal(otherFailed.missing, 'Info Tech\'s history is unavailable: gone.');
-});
-
-test('a sector is read against its index-weighted basket; a sub-industry against its sector, day by day', () => {
-  const sector = { page: { relative: { dates: ['d1', 'd2'], basket: [1.1, 1.2] } } };
-  assert.deepEqual(M.referenceOf(sector, {}, true), { dates: ['d1', 'd2'], ratio: [1.1, 1.2], label: 'the index-weighted basket' });
-  const sub = { page: { relative: { dates: ['d1', 'd2', 'd3'], basket: [0.5, 0.6, 1.5] } } };
-  const parent = { page: { relative: { dates: ['d1', 'd3'], basket: [1, 2] } } };
-  const ratio = M.referenceOf(sub, parent, false);
-  assert.deepEqual(ratio.dates, ['d1', 'd2', 'd3']);
-  // The sector has no value on d2, so that day has no ratio rather than a made-up one.
-  assert.deepEqual(ratio.ratio, [0.5, null, 0.75]);
-  assert.equal(ratio.label, 'the index-weighted baskets');
-  assert.equal(M.referenceOf({ page: {} }, parent, false), null);
-  assert.equal(M.referenceOf(sub, { page: null }, false), null);
+test('a page\'s valuation parts are passed on as they are; an older page with none gives nulls', () => {
+  const valuation = { dates: ['2024-01-05'], pe: [20] };
+  const parts = M.pageValuation({ valuation, outlook: { forward_pe: 21.5 }, history: { years: [2024] } });
+  assert.equal(parts.valuation, valuation);
+  assert.equal(parts.outlook.forward_pe, 21.5);
+  assert.deepEqual(parts.history.years, [2024]);
+  // An older build has no outlook or history: the block shows dashes for them.
+  assert.deepEqual(M.pageValuation({ valuation }), { valuation, outlook: null, history: null });
+  assert.deepEqual(M.pageValuation({}), { valuation: null, outlook: null, history: null });
+  assert.equal(M.pageValuation(null), null);
+  assert.equal(M.pageValuation(undefined), null);
 });

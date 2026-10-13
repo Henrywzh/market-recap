@@ -17,8 +17,10 @@ required, since without it there are no names to show.
 
 Each page also goes to its own file in artifacts/sectors (MARKET, a sector's key,
 a sub-industry's key): its relative line against the S&P 500 and its ten-year
-weekly P/E band, built from the names' per-ticker VALUATION histories, and its
-expectations (``outlook``: forward P/E, consensus EPS growth, revenue growth). The hub's
+weekly P/E band, built from the names' per-ticker VALUATION histories, its
+expectations (``outlook``: forward P/E, consensus EPS growth, revenue growth), and
+its fundamentals by fiscal year (``history``: revenue growth and margins, from the
+names' FINANCIALS). The hub's
 P/E figures are aggregates (total market cap over total earnings, as an index's
 P/E is), with INDUSTRIES' medians kept beside them as ``*_median``.
 """
@@ -35,7 +37,7 @@ from ..util import clean_float, company_name, prune_stale, write_json
 # The valuation path of a group, as panels/valuation builds it for its own groups (reused, not copied).
 from .valuation import _path as valuation_path
 # The expectations reader shared with SIZE & STYLE and K-SHAPE: revenue per name, and the outlook's rounding.
-from .kshape import Revenues, outlook_payload
+from .kshape import Revenues, Statements, outlook_payload
 
 # Panels read, each required to be from this session (build.optional_panel).
 INPUTS = ("heatmaps", "industries", "rotation", "valuation", "monitor", "themes")
@@ -265,6 +267,11 @@ def _outlook(caps: dict[str, float], value: dict[str, dict], revenues: Revenues,
     return {**outlook_payload(found), "forward_pe": forward_pe}
 
 
+def _history(statements: Statements, caps: dict[str, float]) -> dict | None:
+    """The names' fundamentals by fiscal year, each held whole (1.0), over the same names as the page's valuation basket."""
+    return B.fundamentals_history(statements.of(list(caps)), {name: 1.0 for name in caps})
+
+
 def _market_summary(fields: dict) -> dict:
     """The whole index for the hub: its aggregate P/E now and against its own ten years, and its expectations."""
     keys = ("forward_pe", "trailing_pe", "pe_percentile", "eps_growth_next", "eps_growth_this", "revenue_growth")
@@ -272,8 +279,8 @@ def _market_summary(fields: dict) -> dict:
 
 
 def _page(key: str, label: str, level: str, names: list[str], *, ctx, index: dict | None, weights: dict[str, float],
-          read, revenues: Revenues, value: dict[str, dict], pe_applies: bool, min_names: int, fund: str | None = None,
-          with_fund: bool = False) -> tuple[dict, dict]:
+          read, revenues: Revenues, statements: Statements, value: dict[str, dict], pe_applies: bool, min_names: int,
+          fund: str | None = None, with_fund: bool = False) -> tuple[dict, dict]:
     """One page's file, and the sectors.json fields that read the same aggregates.
 
     ``names`` are the page's tickers; ``value`` is VALUATION's rows by ticker. The
@@ -298,6 +305,7 @@ def _page(key: str, label: str, level: str, names: list[str], *, ctx, index: dic
     multiples = _multiples(rows, min_names=min_names, pe_applies=pe_applies)
     outlook = _outlook(caps, value, revenues, multiples["forward_pe"])
     page["outlook"] = outlook
+    page["history"] = _history(statements, caps)
     fields = {**multiples, **_band_fields(band), "eps_growth_next": outlook["eps_growth_next"],
               "eps_growth_this": outlook["eps_growth_this"], "revenue_growth": outlook["revenue_growth"]}
     return page, fields
@@ -356,11 +364,12 @@ def build(ctx, inputs: dict) -> dict:
     index_weights = _index_weights(heatmaps.get("constituents") or [])
     index = S.index_basket(ctx.closes, index_weights)
     read = _history_reader()
-    revenues = Revenues(FINANCIALS_ARTIFACT_DIR)
+    statements = Statements(FINANCIALS_ARTIFACT_DIR)
+    revenues = Revenues(FINANCIALS_ARTIFACT_DIR, statements)
     pages: dict[str, dict] = {}
     market_page, market_fields = _page(MARKET_KEY, BENCHMARK["label"], "market", list(index_weights), ctx=ctx, index=index,
-                                       weights=index_weights, read=read, revenues=revenues, value=value, pe_applies=True,
-                                       min_names=min_names)
+                                       weights=index_weights, read=read, revenues=revenues, statements=statements,
+                                       value=value, pe_applies=True, min_names=min_names)
     pages[MARKET_KEY] = market_page
 
     sectors_out, subs_out, members_out = [], [], []
@@ -378,8 +387,8 @@ def build(ctx, inputs: dict) -> dict:
             returns, versus = _returns(members, periods, benchmark)
             count = len(members)
             page, fields = _page(key, sub, "sub", [m["ticker"] for m in members], ctx=ctx, index=index,
-                                 weights=index_weights, read=read, revenues=revenues, value=value, pe_applies=pe_applies,
-                                 min_names=min_names)
+                                 weights=index_weights, read=read, revenues=revenues, statements=statements,
+                                 value=value, pe_applies=pe_applies, min_names=min_names)
             pages[key] = page
             subs_out.append({
                 "key": key,
@@ -408,8 +417,8 @@ def build(ctx, inputs: dict) -> dict:
         fund = etfs.get(funds.get(sector) or "")
         ind_row = ind_sectors.get(sector)
         page, fields = _page(sector_keys[sector], sector, "sector", [r["ticker"] for r in rows], ctx=ctx, index=index,
-                             weights=index_weights, read=read, revenues=revenues, value=value, pe_applies=pe_applies,
-                             min_names=min_names, fund=funds.get(sector), with_fund=True)
+                             weights=index_weights, read=read, revenues=revenues, statements=statements,
+                             value=value, pe_applies=pe_applies, min_names=min_names, fund=funds.get(sector), with_fund=True)
         pages[sector_keys[sector]] = page
         sectors_out.append({
             "key": sector_keys[sector],

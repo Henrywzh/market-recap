@@ -1,10 +1,12 @@
 // SIZE K: how the build's figures read on the page. Pure, tested under node,
-// except detailFold at the end, the one DOM helper (SIZE K and K-SHAPE share it).
+// except detailFold and pairValuation, the two that build page nodes (SIZE K and
+// K-SHAPE share both).
 // The build measured every number; these functions phrase them and pick a
 // tone. Nothing here says which arm is right.
 
-import { el, num, DASH } from './fmt.js';
+import { el, num, DASH, sectionTitle, gap } from './fmt.js';
 import { sliceWindow, WINDOWS } from './windows.js';
+import { valuationBlock } from './valuation-block.js';
 
 const finite = (v) => v !== null && v !== undefined && Number.isFinite(v);
 
@@ -85,6 +87,30 @@ export function fundamentalsOf(view, fallbackReason = 'Valuation for these arms 
   if (arms.length === 2 && arms.every((a) => a.basket?.dates?.length)) return f;
   const reasons = [...new Set(arms.map((a) => a.missing).filter(Boolean))];
   return { missing: reasons.length ? reasons.join(' ') : (view.fundamentals_note || 'No filings history for both arms.') };
+}
+
+// An arm as the valuation block reads it: its basket, outlook and filings history.
+// An older build has no history for an arm, and the block copes with that.
+export function armPart(arm) {
+  return { valuation: arm.basket, outlook: arm.outlook || null, history: arm.history || null };
+}
+
+// The VALUATION block for a pair's two arms, the same on SIZE & STYLE and K-SHAPE.
+// An arm with no filings history gives the reason the page has always shown, in
+// place of the block's generic line. `reference` ({dates, ratio}) is given only
+// where the arms' membership changes over time (SIZE & STYLE); the fixed lists
+// of K-SHAPE pass none. The names the arms left out stay on the page as a note.
+export function pairValuation(view, [a, b], reference = null, referenceLabel = 'the real ratio') {
+  const f = fundamentalsOf(view);
+  if (f.missing) {
+    return [sectionTitle('VALUATION', `${a} against ${b}: what the market pays, what the business earns`), gap(f.missing)];
+  }
+  const [x, y] = f.arms;
+  const notes = [...(f.notes || []), ...f.arms.map((arm) => arm.note)].filter(Boolean);
+  return [
+    ...valuationBlock({ name: a, benchmark: b, own: armPart(x), other: armPart(y), reference, referenceLabel }),
+    notes.length ? el('div', { class: 'field-note', text: notes.join(' ') }) : null,
+  ].filter(Boolean);
 }
 
 // The DETAIL fold of a pair page: closed by default, and its charts are drawn

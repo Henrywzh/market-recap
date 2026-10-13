@@ -4,7 +4,6 @@
 // date means. A missing figure stays missing (null), never a zero.
 
 import { DASH } from './fmt.js';
-import { alignTo } from './windows.js';
 
 export const PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y'];
 export const DEFAULT_PERIOD = '1M';
@@ -280,21 +279,6 @@ export function symmetricRange(values) {
   return [-top, top];
 }
 
-// The P/E band a page draws, from its basket's stats: the ten-year median, the
-// middle half of its weekly readings (25th to 75th percentile), and the
-// current reading with its place among them. Null when there are no stats.
-export function bandOf(stats) {
-  if (!stats || !finite(stats.median) || !finite(stats.p25) || !finite(stats.p75)) return null;
-  return {
-    median: stats.median,
-    p25: stats.p25,
-    p75: stats.p75,
-    current: finite(stats.current) ? stats.current : null,
-    percentile: finite(stats.percentile) ? stats.percentile : null,
-    weeks: finite(stats.weeks) ? stats.weeks : null,
-  };
-}
-
 // The valuation path as four bars in the build's order. Each carries its P/E
 // and the earnings growth from the stage before it; a missing figure stays
 // null. No path at all is an empty list.
@@ -319,44 +303,16 @@ export function longestDates(...lists) {
   return lists.reduce((best, dates) => (Array.isArray(dates) && dates.length > best.length ? dates : best), []);
 }
 
-// --- A page against its comparison: the valuation section's two arms ---------
-// Each arm is the page's own valuation history and its outlook (forward P/E,
-// growth). An older page file has no outlook: the arm then has none, and the
-// section shows dashes for it rather than failing.
-
-// Why a page's valuation is missing: its history failed to load, or the build
-// has too few names with filings for a P/E history.
-export function reasonOf(loaded, label) {
-  return loaded.error
-    ? `${label}'s history is unavailable: ${loaded.error}.`
-    : `${label} has too few names with filings for a P/E history.`;
-}
-
-export function comparisonOf(own, ownLabel, other, otherLabel) {
-  if (!own.page?.valuation) return { missing: reasonOf(own, ownLabel) };
-  if (!other.page?.valuation) return { missing: reasonOf(other, otherLabel) };
+// --- A page's valuation, as the VALUATION block reads it ----------------------
+// A page file carries its valuation (the weekly P/E history), its outlook
+// (forward P/E, growth) and its history (revenue growth and margins by fiscal
+// year). Each part is passed on as it is: an older build has none of the newer
+// parts, and the block shows a dash or a gap line for them rather than failing.
+export function pageValuation(page) {
+  if (!page) return null;
   return {
-    arms: [
-      { key: 'a', label: ownLabel, basket: own.page.valuation, outlook: own.page.outlook },
-      { key: 'b', label: otherLabel, basket: other.page.valuation, outlook: other.page.outlook },
-    ],
-  };
-}
-
-// The ratio the decomposition must track (basket-view.js): the page's
-// index-weighted basket over the S&P 500's (a sub-industry: over its sector's).
-// Not the SPDR fund: its single-name caps and dividends differ from the sector
-// for reasons that have nothing to do with which names it holds.
-export function referenceOf(own, other, isSector) {
-  const r = own.page?.relative;
-  if (!r?.dates?.length) return null;
-  if (isSector) return { dates: r.dates, ratio: r.basket, label: 'the index-weighted basket' };
-  const s = other.page?.relative;
-  if (!s?.dates?.length) return null;
-  const parent = alignTo(r.dates, s.dates, s.basket);
-  return {
-    dates: r.dates,
-    ratio: r.basket.map((v, i) => (finite(v) && finite(parent[i]) && parent[i] !== 0 ? v / parent[i] : null)),
-    label: 'the index-weighted baskets',
+    valuation: page.valuation ?? null,
+    outlook: page.outlook ?? null,
+    history: page.history ?? null,
   };
 }

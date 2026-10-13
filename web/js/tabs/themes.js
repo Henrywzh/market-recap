@@ -11,6 +11,8 @@ import { render } from '../charts.js';
 import { tickerHref } from '../routes.js';
 import { spark } from '../spark.js';
 import { stateTone, stateWhy, breadthText, revisionText, valuationText, quadrantTone, splitWidths } from '../themes-board.js';
+import { valuationBlock } from '../valuation-block.js';
+import { pageValuation } from '../sectors-model.js';
 
 const KIND_TONE = { earnings: 'warn', macro: 'info', data: 'up' };
 const KIND_LABEL = { earnings: 'EARN', macro: 'MACRO', data: 'DATA' };
@@ -920,6 +922,44 @@ export function themeBlocks(key, data, { title = true } = {}) {
   return blocks;
 }
 
+// --- VALUATION: a theme's bellwethers against the S&P 500 ----------------------------
+
+// The S&P 500's page: the benchmark each theme's valuation is set against. When
+// it will not load, the error is kept so the section can say so in one line.
+async function marketPage(ctx) {
+  if (!ctx.loadArtifact) return { page: null, error: 'the page cannot load its history' };
+  try {
+    return { page: (await ctx.loadArtifact('sectors/MARKET')) || null, error: null };
+  } catch (error) {
+    return { page: null, error: error.message };
+  }
+}
+
+// One line on how a theme's valuation basket is built: its names, and any
+// bellwether left out (a foreign listing with no filings, say). With no basket,
+// the build's own reason.
+export function valuationNote(group) {
+  if (!group.valuation) return group.valuation_note || 'No P/E basket for this theme in this build.';
+  const names = group.valuation_names || [];
+  const missing = group.valuation_missing || [];
+  const built = names.length ? `Built from ${names.join(', ')}, weighted by market value` : 'Weighted by market value';
+  return `${built}${missing.length ? `. Left out: ${missing.join(', ')}` : ''}.`;
+}
+
+// The VALUATION section for a theme: the same one a sector page draws, set
+// against the S&P 500 (`market` is {page, error} from marketPage). A theme with
+// no basket shows its reason in one line.
+export function themeValuation(group, market) {
+  if (!group.valuation && !group.outlook && !group.history) {
+    return [gap(group.valuation_note || `${group.label}: no valuation in this build.`)];
+  }
+  return [
+    ...valuationBlock({ name: group.label, benchmark: 'S&P 500', own: pageValuation(group), other: pageValuation(market?.page) }),
+    market?.error ? gap(`S&P 500's history is unavailable: ${market.error}.`) : null,
+    el('div', { class: 'field-note', text: valuationNote(group) }),
+  ].filter(Boolean);
+}
+
 export default async function renderThemes(root, data, _manifest, ctx = {}) {
   root.append(sectionTitle('THEMES', 'WHAT IS COMING, BY WHAT TRADES TOGETHER'));
   if (!data.groups?.length) {
@@ -937,9 +977,11 @@ export default async function renderThemes(root, data, _manifest, ctx = {}) {
   const wanted = String(ctx.arg || '').toLowerCase();
   let active = data.groups.some((g) => g.key === wanted) ? wanted : data.groups[0].key;
   const pick = (key) => { active = key; ctx.setArg?.(key); draw(); };
+  const market = await marketPage(ctx);
   const draw = () => {
     boardHost.replaceChildren(data.groups.every((g) => g.board) ? boardCard(data, active, pick) : overviewStrip(data, active, pick));
-    host.replaceChildren(...themeBlocks(active, data));
+    // The valuation sits under the theme's board and above its own cards.
+    host.replaceChildren(...themeValuation(data.groups.find((g) => g.key === active), market), ...themeBlocks(active, data));
   };
   root.append(boardHost);
   root.append(host);

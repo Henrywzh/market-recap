@@ -226,3 +226,45 @@ test('K-SHAPE: the ratio and valuation charts are drawn, the legs, P/E and EPS c
     assert.ok(after.folded >= 3, 'the legs chart, the P/E charts and the EPS chart are drawn on opening');
   });
 });
+
+// All the text under a node, as one string.
+function textOf(node) {
+  if (node.nodeType === 3) return node.text;
+  return [node.textContent || '', ...(node.children || []).map(textOf)].join(' ');
+}
+
+test('SIZE & STYLE and K-SHAPE: the VALUATION block names the two arms, and an arm with no filings gives the page\'s reason', async () => {
+  await withBrowser(async () => {
+    const sizek = await import('../../web/js/tabs/sizek.js');
+    const kshape = await import('../../web/js/tabs/kshape.js');
+    const size = new FakeNode('div');
+    sizek.default(size, sizekData(), {}, {});
+    await flush();
+    assert.match(textOf(size), /VALUATION\s+VALUE against GROWTH/);
+
+    const kshapeRoot = new FakeNode('div');
+    kshape.default(kshapeRoot, kshapeData(), {}, {});
+    await flush();
+    assert.match(textOf(kshapeRoot), /VALUATION\s+TOP against BOTTOM/);
+
+    const missing = sizekData();
+    missing.views[0].fundamentals = { missing: 'IWF holdings could not be fetched.' };
+    const reason = new FakeNode('div');
+    sizek.default(reason, missing, {}, {});
+    await flush();
+    assert.match(textOf(reason), /VALUATION\s+VALUE against GROWTH: what the market pays, what the business earns\s+IWF holdings could not be fetched\./);
+    assert.doesNotMatch(textOf(reason), /no filings history, so no valuation/, 'the block\'s own line is not used in place of the reason');
+  });
+});
+
+test('K-SHAPE: a leg left out for lack of filings is named under the valuation block', async () => {
+  await withBrowser(async () => {
+    const kshape = await import('../../web/js/tabs/kshape.js');
+    const data = kshapeData();
+    data.views[0].fundamentals.arms[1].note = 'Left out for lack of a filings history: CCL.';
+    const root = new FakeNode('div');
+    kshape.default(root, data, {}, {});
+    await flush();
+    assert.match(textOf(root), /Left out for lack of a filings history: CCL\./);
+  });
+});

@@ -450,6 +450,10 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             meta.setdefault(row.yahoo_symbol, {"name": company_name(row.name), "sector": row.sector,
                                                "sub_sector": getattr(row, "sub_sector", None)})
             indices.setdefault(row.yahoo_symbol, []).append(key)
+    # Names outside every index list take their classification from the config.
+    for extra in ctx.config["financials"].get("extra_names") or []:
+        meta.setdefault(str(extra["ticker"]).upper(), {"name": extra.get("name"), "sector": extra.get("sector"),
+                                                      "sub_sector": extra.get("sub_sector")})
 
     if use_cache:
         sec.check_filings(cik_for(symbol, cik_map) for symbol in symbols)

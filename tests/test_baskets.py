@@ -90,3 +90,26 @@ def test_outlook_totals_forward_multiples_and_growth():
 def test_outlook_needs_coverage():
     rows = {"A": {"price": 10.0, "market_cap": 10.0, "eps_ntm": 1.0}, "B": {"price": 10.0, "market_cap": 90.0}}
     assert B.outlook(rows, {"A": 10.0, "B": 90.0})["forward_pe"] is None
+
+
+def _statement(years, revenue, gross, ebit):
+    return {"columns": [{"fiscal_year": y} for y in years], "values": {"revenue": revenue, "gross_profit": gross, "ebit": ebit}}
+
+
+def test_fundamentals_history_totals_by_fiscal_year():
+    statements = {
+        "A": _statement([2023, 2024, 2025], [100.0, 110.0, 121.0], [50.0, 55.0, 60.5], [20.0, 22.0, 30.0]),
+        "B": _statement([2023, 2024, 2025], [300.0, 300.0, 330.0], [None, None, None], [30.0, 30.0, 33.0]),
+    }
+    out = B.fundamentals_history(statements, {"A": 1.0, "B": 1.0}, min_coverage=0.8)
+    assert out["years"] == [2023, 2024, 2025]
+    assert out["revenue_growth"][0] is None
+    assert out["revenue_growth"][1] == pytest.approx((410 / 400 - 1) * 100, abs=0.05)
+    # B has neither gross profit nor cost of revenue: A alone is 110 of 410 revenue, too little.
+    assert out["gross_margin"] == [None, None, None]
+    partial = dict(statements, B=_statement([2023, 2024], [300.0, 300.0], [None, None], [30.0, 30.0]))
+    # B has not reported 2025 yet: A's 121 against 121 + 300 is too little to stand for the basket.
+    assert B.fundamentals_history(partial, {"A": 1.0, "B": 1.0})["operating_margin"][-1] is None
+    assert out["operating_margin"][2] == pytest.approx(63 / 451 * 100, abs=0.05)
+    half = B.fundamentals_history(statements, {"A": 1.0, "B": 0.5})
+    assert half["operating_margin"][0] == pytest.approx((20 + 15) / (100 + 150) * 100, abs=0.05)

@@ -8,7 +8,7 @@
 
 import { el, card, table, num, pct, dirClass, sectionTitle, gap, tag, DASH } from '../fmt.js';
 import { render } from '../charts.js';
-import { renderPeHistory } from './valuation.js';
+import { valuationBlock, companyBasket, companyHistory } from '../valuation-block.js';
 import { renderStatements } from './financials.js';
 import { renderSingleTicker } from './technicals.js';
 import { eventCard, outcomeCard, timelineCard, loadEvents, historyCard, revisionsCard, sinceCard, filingsCard, storyCard, situation } from '../event-card.js';
@@ -296,6 +296,42 @@ function valuationCard(symbol, row, data) {
   ]);
 }
 
+// What the market expects of one company, in the VALUATION block's terms: forward
+// P/E and TTM revenue growth from the valuation build's row, and the consensus EPS
+// growth for the next fiscal year from the two fiscal-year EPS the row carries. A
+// growth rate measured from a loss is not one, so it is left out.
+export function companyOutlook(row) {
+  const or = (v) => (present(v) ? v : null);
+  const eps0 = row?.eps_fy0;
+  const eps1 = row?.eps_fy1;
+  return {
+    forward_pe: or(row?.pe_forward),
+    eps_growth_next: present(eps0) && eps0 > 0 && present(eps1) ? (eps1 / eps0 - 1) * 100 : null,
+    revenue_growth: or(row?.revenue_growth),
+  };
+}
+
+// The company's VALUATION block, against its sector's page. Each part comes from
+// its own artifact and is null where that artifact does not cover the name, so
+// the block shows what it has and says what it lacks. A sector page without its
+// price and earnings series cannot be split into the comparison cards, so only
+// its strip and history are given.
+export async function companyValuation(ctx, symbol, row, sectors) {
+  const sectorKey = sectors?.sectors?.find((s) => s.label === row.sector)?.key;
+  const [own, statement, sectorPage] = await Promise.all([
+    optional(ctx, `valuation/${encodeURIComponent(symbol)}`),
+    optional(ctx, `financials/${encodeURIComponent(symbol)}`),
+    sectorKey ? optional(ctx, `sectors/${sectorKey}`) : null,
+  ]);
+  const peer = sectorPage?.valuation?.price ? sectorPage.valuation : null;
+  return valuationBlock({
+    name: symbol,
+    benchmark: row.sector || null,
+    own: { valuation: companyBasket(own), outlook: companyOutlook(row), history: companyHistory(statement) },
+    other: sectorPage ? { valuation: peer, outlook: sectorPage.outlook, history: sectorPage.history } : null,
+  });
+}
+
 // Draws one section, turning its failure into a note inside the section.
 async function section(root, title, draw) {
   const host = el('div', {});
@@ -310,8 +346,8 @@ async function section(root, title, draw) {
 }
 
 export default async function renderTicker(root, valuation, _manifest, ctx) {
-  const [monitor, technicals, financials, dcf, crossListing, evidence, events, themes, chain] = await Promise.all(
-    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events', 'themes', 'chain'].map((name) => optional(ctx, name)),
+  const [monitor, technicals, financials, dcf, crossListing, evidence, events, themes, chain, sectors] = await Promise.all(
+    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events', 'themes', 'chain', 'sectors'].map((name) => optional(ctx, name)),
   );
   const rows = valuation?.rows || [];
   const universe = new Map(rows.map((r) => [r.ticker, r.name]));
@@ -375,11 +411,13 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
   } else {
     root.append(card('PRICE & TREND', null, gap(`${symbol} has no baked price history in this build.`)));
   }
+  // A failure here blanks this block only, as the other sections of this page do.
   if (row) {
-    await section(root, 'P/E AGAINST ITS OWN 10 YEARS', (host) => {
-      if (!row.pe_history) throw new Error(`${symbol} has no P/E history in this build (a loss, too little history, or no EPS filed)`);
-      return renderPeHistory(host, symbol, valuation);
-    });
+    try {
+      root.append(...await companyValuation(ctx, symbol, row, sectors));
+    } catch (error) {
+      root.append(card('VALUATION', null, gap(error.message)));
+    }
   }
   if (company) root.append(valuationCard(symbol, row, valuation));
   add(eventPayload ? storyCard(eventPayload) : null, chain ? chainCard(chain, symbol, { compact: true }) : null);

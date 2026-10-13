@@ -243,8 +243,8 @@ def test_the_histories_are_read_once_however_many_arms_share_a_name(monkeypatch)
 
 # --- the panel, end to end on fakes -----------------------------------------------------
 
-def _panel(monkeypatch, pairs, rows, holdings, inputs="valuation"):
-    monkeypatch.setattr(P, "FINANCIALS_ARTIFACT_DIR", NO_FINANCIALS)
+def _panel(monkeypatch, pairs, rows, holdings, inputs="valuation", financials=NO_FINANCIALS):
+    monkeypatch.setattr(P, "FINANCIALS_ARTIFACT_DIR", financials)
     idx = pd.bdate_range("2021-01-04", periods=900)
     cfg = {**load_config(), "sizek": {"history_years": 25, "price_periods": ["1M", "1Y", "10Y"], "gap_period": "1Y", "pairs": pairs}}
     ctx = _Ctx(cfg, as_of=idx[-1].date().isoformat())
@@ -359,3 +359,97 @@ def test_a_name_without_consensus_eps_lowers_the_coverage_so_the_outlook_has_no_
     # Half the value has an estimate: below the 80% the outlook asks for, so every figure is None.
     assert reason is None and arm["outlook"]["names"] == 2
     assert arm["outlook"]["forward_pe"] is None and arm["outlook"]["eps_growth_this"] is None
+
+
+# --- each arm's history: revenue growth and margins by fiscal year ---------------------
+
+def _filings(revenue, ebit, gross, years=(2023, 2024)):
+    """A FINANCIALS artifact as far as the history reads it: revenue, gross profit and operating profit by fiscal year."""
+    return {"columns": [{"fiscal_year": y} for y in years],
+            "values": {"revenue": list(revenue), "ebit": list(ebit), "gross_profit": list(gross)}}
+
+
+@pytest.fixture
+def filings(tmp_path):
+    """Two names with filings for 2023 and 2024: A on revenue 100 and 120, B on 300 and 330."""
+    for ticker, body in {"A": _filings([100.0, 120.0], [20.0, 24.0], [50.0, 60.0]),
+                         "B": _filings([300.0, 330.0], [30.0, 33.0], [120.0, 132.0])}.items():
+        (tmp_path / f"{ticker}.json").write_text(json.dumps(body))
+    return KP.Statements(tmp_path)
+
+
+def test_a_cap_weighted_arm_holds_each_name_whole_so_its_history_is_the_plain_total(monkeypatch, filings):
+    _histories(monkeypatch, {"A": flat(5.0), "B": flat(10.0)})
+    rows = {"A": row("A", cap=300.0), "B": row("B", cap=100.0)}
+    arm, reason = P._arm("big", "index:SPX", None, rows, KP.Histories(), {}, _Ctx(), 10, no_revenue(), filings)
+    assert reason is None
+    history = arm["history"]
+    assert history["years"] == [2023, 2024]
+    assert history["revenue_growth"] == [None, 12.5]                              # 450 over 400
+    assert history["gross_margin"][1] == pytest.approx(192 / 450 * 100, abs=0.05)
+    assert history["operating_margin"][1] == pytest.approx(57 / 450 * 100, abs=0.05)
+
+
+def test_an_equal_weight_arm_holds_each_name_at_one_over_its_market_cap(monkeypatch, filings):
+    _histories(monkeypatch, {"A": flat(5.0), "B": flat(10.0)})
+    rows = {"A": row("A", cap=300.0), "B": row("B", cap=100.0)}
+    arm, _ = P._arm("small", "index:SPX:equal", None, rows, KP.Histories(), {}, _Ctx(), 10, no_revenue(), filings)
+    # Shares 1/300 and 1/100: A's 120 counts a third as much as B's 330 is a whole, and the scale cancels.
+    assert arm["history"]["revenue_growth"][1] == pytest.approx(11.0, abs=0.05)
+    assert arm["history"]["gross_margin"][1] == pytest.approx((60 / 300 + 132 / 100) / (120 / 300 + 330 / 100) * 100, abs=0.05)
+    assert arm["history"]["operating_margin"][1] == pytest.approx((24 / 300 + 33 / 100) / (120 / 300 + 330 / 100) * 100, abs=0.05)
+
+
+def test_a_fund_arm_holds_its_weight_over_each_market_cap(monkeypatch, filings):
+    _histories(monkeypatch, {"A": flat(5.0), "B": flat(10.0)})
+    monkeypatch.setattr(P.ishares, "fetch_holdings", lambda ticker, **k: (_holdings([("A", 0.5), ("B", 0.3)]), "2026-10-09", "u"))
+    rows = {"A": row("A", cap=300.0), "B": row("B", cap=100.0)}
+    arm, reason = P._arm("big", "holdings:IWD", None, rows, KP.Histories(), {}, _Ctx(), 10, no_revenue(), filings)
+    assert reason is None
+    share_a, share_b = 0.5 / 300, 0.3 / 100
+    assert arm["history"]["revenue_growth"][1] == pytest.approx(
+        ((120 * share_a + 330 * share_b) / (100 * share_a + 300 * share_b) - 1) * 100, abs=0.05)
+    assert arm["history"]["operating_margin"][1] == pytest.approx(
+        (24 * share_a + 33 * share_b) / (120 * share_a + 330 * share_b) * 100, abs=0.05)
+
+
+def test_an_arm_without_statements_has_no_history_and_a_name_without_a_cap_is_named(monkeypatch, filings):
+    _histories(monkeypatch, {"A": flat(5.0), "B": flat(10.0)})
+    rows = {"A": row("A", cap=None), "B": row("B", cap=100.0)}
+    plain, _ = P._arm("small", "index:SPX:equal", None, rows, KP.Histories(), {}, _Ctx(), 10, no_revenue())
+    assert plain["history"] is None and plain["note"] is None
+    arm, _ = P._arm("small", "index:SPX:equal", None, rows, KP.Histories(), {}, _Ctx(), 10, no_revenue(), filings)
+    assert arm["history"]["revenue_growth"][1] == pytest.approx(10.0, abs=0.05)          # B alone: 330 over 300
+    assert arm["note"] == "Left out of the fundamentals history for lack of a market cap: A."
+    assert arm["basket"]["names"] == 2                                                    # A stays in the basket
+
+
+def test_the_panel_gives_each_arm_its_history_from_the_filings_on_disk(monkeypatch, tmp_path, filings):
+    # The filings fixture wrote A and B to the directory; C has none, so it is absent from the history alone.
+    _histories(monkeypatch, {"A": flat(5.0), "B": flat(10.0), "C": flat(8.0)})
+    rows = [row("A", cap=300.0), row("B", cap=100.0), row("C", cap=100.0, indices=("SPX", "NDX"))]
+    holdings = {"IWD": _holdings([("A", 0.6), ("B", 0.4)]), "IWF": _holdings([("C", 1.0)])}
+    pairs = [{"key": "sp", "label": "SP", "big": "SPY", "small": "RSP", "big_basket": "index:SPX", "small_basket": "index:SPX:equal"}]
+    panel, _ = _panel(monkeypatch, pairs, rows, holdings, financials=tmp_path)
+    big, small = panel["views"][0]["fundamentals"]["arms"]
+    assert big["history"]["years"] == [2023, 2024] and small["history"]["years"] == [2023, 2024]
+    assert big["history"]["revenue_growth"] == [None, 12.5]                              # A and B whole: 450 over 400
+    assert small["history"]["revenue_growth"][1] == pytest.approx(11.0, abs=0.05)         # shares 1/300 and 1/100
+    json.dumps(panel, allow_nan=False)
+
+
+def test_validate_checks_each_arm_history_has_one_entry_per_fiscal_year_and_numbers_or_nulls():
+    config = {"sizek": {"pairs": [{"key": "sp", "big_basket": "index:SPX", "small_basket": "index:SPX:equal"}]}}
+    good = {"years": [2023, 2024], "revenue_growth": [None, 12.5], "gross_margin": [40.0, None], "operating_margin": [10.0, 12.7]}
+    payload = {"views": [{"key": "sp", "fundamentals": {"arms": [
+        {"key": "big", "outlook": {}, "history": good}, {"key": "small", "outlook": {}, "history": None}]}}]}
+    assert V._check_sizek(config, payload) == []
+    short = {**good, "operating_margin": [10.0]}
+    text = {**good, "gross_margin": ["40", None]}
+    unordered = {**good, "years": [2024, 2023]}
+    for bad, detail in ((short, "history operating_margin does not have one entry per fiscal year"),
+                        (text, "history gross_margin holds '40', not a number or null"),
+                        (unordered, "history years are not an increasing list of fiscal years")):
+        payload["views"][0]["fundamentals"]["arms"][0]["history"] = bad
+        findings = [f.as_dict() for f in V._check_sizek(config, payload)]
+        assert findings == [{"severity": "error", "check": "sizek", "detail": f"sp big arm: {detail}"}], detail

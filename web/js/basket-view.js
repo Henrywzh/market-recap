@@ -16,6 +16,13 @@ import { sliceWindow, alignTo, baseIndex, availableWindows } from './windows.js'
 
 export { sliceWindow };
 
+// 1st, 2nd, 3rd, 4th ... 11th, 12th, 13th, 21st.
+function ordinalOf(v) {
+  const n = Math.round(v);
+  const tail = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th');
+  return `${n}${tail}`;
+}
+
 const present = (v) => v !== null && v !== undefined && Number.isFinite(v);
 const signed = (v, digits = 1, unit = '%') => (present(v) ? `${v > 0 ? '+' : ''}${num(v, digits)}${unit}` : DASH);
 
@@ -124,7 +131,8 @@ export function attributionRows(joined, reference) {
 
 // --- The P/E premium against its own history ----------------------------------
 // A's P/E over B's as a premium in percent, over the longest window (10Y down to
-// 1Y) where today's names track the real ratio; with no reference, all of it.
+// 1Y) where today's names track the real ratio; with no reference (a fixed list
+// of names), all of its history.
 // Null when no window of a year or more tracks: then only today's premium is fair.
 const PREMIUM_WINDOWS = ['10Y', '5Y', '3Y', '1Y'];
 
@@ -139,7 +147,7 @@ export function premiumView(joined, reference) {
   const covered = availableWindows(joined.dates);
   const window = reference?.dates?.length
     ? PREMIUM_WINDOWS.find((w) => covered.includes(w) && tracking(joined, reference, w)?.ok)
-    : (PREMIUM_WINDOWS.find((w) => covered.includes(w)) || 'MAX');
+    : 'MAX';
   const premium = joined.peRatio.map((v) => (present(v) ? (v - 1) * 100 : null));
   const lastIndex = premium.map((v, i) => (present(v) ? i : -1)).filter((i) => i >= 0).pop();
   const now = lastIndex === undefined ? null : premium[lastIndex];
@@ -232,7 +240,7 @@ export function outlookCells(arms, names, view) {
     { label: 'FORWARD P/E', value: present(a.forward_pe) && present(b.forward_pe) ? `${num(a.forward_pe, 1)}× vs ${num(b.forward_pe, 1)}×` : DASH,
       note: present(fwdPremium) ? `${names[0]} at a ${num(Math.abs(fwdPremium), 0)}% ${fwdPremium >= 0 ? 'premium' : 'discount'} · next 12 months` : 'consensus too thin' },
     { label: 'TRAILING P/E PREMIUM', value: present(view.now) ? signed(view.now, 0) : DASH,
-      note: view.window ? `${num(view.percentile, 0)}th pctl of ${view.window} · median ${signed(view.median, 0)}` : 'too little comparable history to rank' },
+      note: view.window ? `${ordinalOf(view.percentile)} pctl of ${view.window === 'MAX' ? 'its history' : view.window} · median ${signed(view.median, 0)}` : 'too little comparable history to rank' },
     { label: 'EPS GROWTH NEXT FY', value: gapCell(a.eps_growth_next, b.eps_growth_next, 0, '%'), note: 'consensus, the arm\'s total earnings' },
     { label: 'REVENUE GROWTH · TTM', value: gapCell(a.revenue_growth, b.revenue_growth, 0, '%'), note: 'year on year, from filings' },
   ];
@@ -246,15 +254,18 @@ function stripOf(cells) {
   ].filter(Boolean))));
 }
 
-// The valuation block for a pair: a strip of what the market pays and expects
-// today, the P/E premium against its own history, and what moved the ratio in
-// each window. `labels` names the arms as the page does; `reference` is the
-// real ratio {dates, ratio} the rebuilt arms must track (see tracking).
-export function valuationSection(fundamentals, labels = null, reference = null, referenceLabel = 'the real ratio') {
+// The two comparison cards for a pair -- the P/E premium against its own history
+// and why the ratio moved -- with the note on how the arms are rebuilt.
+// `reference` (the real ratio, {dates, ratio}) is given only where an arm's
+// membership changes over time (a fund that reconstitutes, an index's
+// equal-weight twin): only there can today's names stand for a past that was
+// not theirs. Fixed lists of names (a sector, a theme, a K-SHAPE leg, one
+// company) pass none and are shown over all their history.
+export function relativeCards(fundamentals, labels = null, reference = null, referenceLabel = 'the real ratio') {
   if (!fundamentals || !Array.isArray(fundamentals.arms) || fundamentals.arms.length !== 2
       || !fundamentals.arms.every((a) => a.basket?.dates?.length)) {
     const why = fundamentals?.missing || 'No filings history for both arms.';
-    return [card('VALUATION', null, [gap(why)])];
+    return { view: { window: null, now: null }, nodes: [card('AGAINST ITS BENCHMARK', null, [gap(why)])] };
   }
   const names = labels || fundamentals.arms.map((a) => a.label);
   const joined = joinArms(fundamentals);
@@ -270,24 +281,33 @@ export function valuationSection(fundamentals, labels = null, reference = null, 
     if (rows.length) attributionChart(splitNode, rows);
   });
   const skipped = all.filter((r) => !r.ok).map((r) => r.window);
-  return [
-    stripOf(outlookCells(fundamentals.arms, names, view)),
+  const nodes = [
     el('div', { class: 'grid two' }, [
-      card(`P/E PREMIUM · ${names[0]} OVER ${names[1]}`, el('span', { class: 'dim', text: view.window ? `trailing · ${view.window} · band 25th–75th` : 'today only' }), [
+      card(`P/E PREMIUM · ${names[0]} OVER ${names[1]}`, el('span', { class: 'dim', text: view.window ? `trailing · ${view.window === 'MAX' ? 'all its history' : view.window} · band 25th–75th` : 'today only' }), [
         view.window ? premiumNode : gap(`Today's names do not track ${referenceLabel} over a year or more, so their P/E history would not be the arms' own. Today: ${signed(view.now, 0)}.`),
       ]),
       card(`WHY ${names[0]} ÷ ${names[1]} MOVED`, el('span', { class: 'dim', text: 'percentage points of the ratio\'s change · bars add up to ◆' }), [
         rows.length ? splitNode : gap(all.length ? `In no window do today's names track ${referenceLabel} within ${TRACKING_PP} pp.` : 'Too few weeks with a P/E for both arms.'),
         el('div', { class: 'field-note', text: [
           'Amber: the part earnings did. Blue: the part a change in the P/E did (a re-rating).',
-          skipped.length ? `Not shown: in ${skipped.join(', ')} today's names moved the ratio more than ${TRACKING_PP} pp away from ${referenceLabel} (their membership changed, or some names have no filings history), so the split would explain a history that did not happen.` : null,
+          skipped.length ? `Not shown: in ${skipped.join(', ')} today's names moved the ratio more than ${TRACKING_PP} pp away from ${referenceLabel} (the arm's membership changed since), so the split would explain a history that did not happen.` : null,
         ].filter(Boolean).join(' ') }),
       ]),
     ]),
     el('div', { class: 'field-note', text: [
-      'Each arm is rebuilt from its names\' filings and split-adjusted closes at today\'s weights: price only, no dividends, today\'s members throughout.',
+      'Each side is rebuilt from its names\' filings and split-adjusted closes at today\'s weights: price only, no dividends, today\'s members throughout.',
       ...(fundamentals.notes || []),
       ...fundamentals.arms.map((a) => a.note).filter(Boolean),
     ].join(' ') }),
   ];
+  return { view, nodes };
+}
+
+// The valuation block for a pair: the strip of what the market pays and expects
+// today, then the comparison cards.
+export function valuationSection(fundamentals, labels = null, reference = null, referenceLabel = 'the real ratio') {
+  const names = labels || (fundamentals?.arms || []).map((a) => a.label);
+  const { view, nodes } = relativeCards(fundamentals, names, reference, referenceLabel);
+  if (!fundamentals?.arms?.length) return nodes;
+  return [stripOf(outlookCells(fundamentals.arms, names, view)), ...nodes];
 }

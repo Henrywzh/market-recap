@@ -20,6 +20,12 @@ Two groups carry industry data (docs/information_architecture.md):
 
 Each source is optional: one that fails leaves its section's reason on the
 page and the rest renders.
+
+Every group also gets its expectations as a basket of its bellwethers that
+VALUATION covers (``valuation``, ``outlook``, ``history``, with the names used
+and left out): cap-weighted at VALUATION's market caps, as the SECTORS pages are.
+A group with fewer than two such names has none of those fields and a
+``valuation_note`` saying why.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ import json
 
 import pandas as pd
 
+from ..compute import baskets as B
 from ..compute import capex as X
 from ..compute import events as E
 from ..compute import rotation as R
@@ -39,12 +46,17 @@ from ..compute import themes as T
 from .. import cache
 from ..sources import adata, alfred, altdata, dart, eia, estimates, fred, korea_customs, mops, motie, pcpartpicker, releases, sec, yahoo
 from ..sources import expectations as expectations_source
-from ..config import PERIOD_TRADING_DAYS
+from ..config import FINANCIALS_ARTIFACT_DIR, PERIOD_TRADING_DAYS
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, describe_error, history_payload
 from .financials import cik_for
+# The valuation readers shared with SECTORS, SIZE & STYLE and K-SHAPE: a name's history and statements read once per build.
+from .kshape import Histories, Revenues, Statements, outlook_payload
 
 INPUTS = ("catalysts", "evidence", "valuation")
 BN = 1e9
+# A theme's valuation basket needs at least this many bellwethers with a VALUATION history and market cap.
+MIN_VALUATION_NAMES = 2
+VALUATION_YEARS = 10
 
 
 # --- groups -------------------------------------------------------------------
@@ -139,6 +151,45 @@ def _board(ctx, settings: dict, proxy_price: pd.Series, market: pd.Series, symbo
         "valuation": val,
         "state": {"key": key, "label": cfg["labels"].get(key) if key else None,
                   "relative_3m": run_in.get("vs_spx_3m"), "relative_pp": float(cfg["relative_pp"])},
+    }
+
+
+def _valuation_fields(bellwethers: list[dict], rows: dict[str, dict], histories: Histories, statements: Statements,
+                      revenues: Revenues) -> dict:
+    """A theme's P/E, expectations and fundamentals as baskets of its bellwethers that VALUATION covers.
+
+    Each name is held at its market cap, as the SECTORS pages hold theirs. A name is
+    used when it is in the universe, has a market cap and a VALUATION history; the
+    rest are listed as missing (foreign listings, mostly). Fewer than two usable names
+    gives none of the basket fields, only the reason in ``valuation_note``.
+    """
+    symbols = [b["symbol"] for b in bellwethers]
+    if not symbols:
+        return {"valuation_note": "This theme names no bellwethers, so it has no basket."}
+    if not rows:
+        return {"valuation_note": "VALUATION was not built this session, so this theme has no basket."}
+    caps = {}
+    for b in bellwethers:
+        cap = (rows.get(b["symbol"]) or {}).get("market_cap")
+        if b.get("in_universe") and cap:
+            caps[b["symbol"]] = float(cap)
+    closes, yields = histories.frames(list(caps))
+    names = [t for t in caps if t in closes.columns]
+    missing = [s for s in symbols if s not in names]
+    if len(names) < MIN_VALUATION_NAMES:
+        left = f" Left out: {', '.join(missing)}." if missing else ""
+        return {"valuation_note": f"{len(names)} of {len(symbols)} bellwethers have a VALUATION history and a market cap; "
+                                  f"{MIN_VALUATION_NAMES} are needed for a basket.{left}"}
+    caps = {t: caps[t] for t in names}
+    basket = B.payload(B.basket(closes, yields, caps), years=VALUATION_YEARS)
+    if basket is None:
+        return {"valuation_note": "None of its bellwethers has a P/E with positive earnings in their VALUATION history, so there is no basket."}
+    return {
+        "valuation": basket,
+        "outlook": outlook_payload(B.outlook({t: rows[t] for t in names}, caps, revenues.of(names))),
+        "history": B.fundamentals_history(statements.of(names), {t: 1.0 for t in names}),
+        "valuation_names": names,
+        "valuation_missing": missing,
     }
 
 
@@ -1133,6 +1184,10 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         trends = {}
     groups = [_group(ctx, spec, settings, catalysts, evidence, excess, market, as_of, krx, trends, valuation_rows)
               for spec in settings["groups"]]
+    histories, statements = Histories(), Statements(FINANCIALS_ARTIFACT_DIR)
+    revenues = Revenues(FINANCIALS_ARTIFACT_DIR, statements)
+    for group in groups:
+        group.update(_valuation_fields(group["bellwethers"], valuation_rows, histories, statements, revenues))
 
     cloud = {
         "capex": _section(lambda: _capex(ctx, settings)),

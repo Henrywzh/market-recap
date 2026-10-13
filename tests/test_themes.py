@@ -1,14 +1,18 @@
 """THEMES: the new sources' parsers, capex quarters, and the theme helpers."""
 
+import json
 from datetime import date
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from market_recap import validate as V
 from market_recap.compute import capex as X
 from market_recap.compute import png
 from market_recap.compute import themes as T
+from market_recap.panels import kshape as K
+from market_recap.panels import themes as TH
 from market_recap.sources import adata, korea_customs, mops, pcpartpicker
 
 
@@ -495,3 +499,86 @@ def test_a_pair_carries_both_returns_the_gap_and_the_ratio():
     assert out["ratio_percentile"] == 100.0                 # a steadily rising ratio is at its high
     assert out["ratio"]["values"][-1] == 1.0
     assert not panel._pair({"a": "KO", "b": "XYZ"}, closes)["available"]
+
+
+# --- the valuation basket of a theme: its bellwethers that VALUATION covers -------------
+
+def _valuation_history(ey: float, n: int = 80) -> dict:
+    """A VALUATION artifact as far as the basket reads it: a flat price of 100 and a flat earnings yield (percent)."""
+    dates = pd.date_range("2021-01-08", periods=n, freq="W-FRI")
+    return {"dates": [d.strftime("%Y-%m-%d") for d in dates], "close": [100.0] * n, "ey": [float(ey)] * n}
+
+
+def _valued_row(ticker: str, cap, eps: float, growth: float, *, nxt: float, prev: float) -> dict:
+    """A VALUATION row at a price of 100: consensus EPS last year, this year and next, and TTM revenue growth."""
+    return {"ticker": ticker, "market_cap": cap, "price": 100.0, "eps_ntm": eps, "eps_fy_prev": prev,
+            "eps_fy0": eps, "eps_fy1": nxt, "revenue_growth": growth}
+
+
+def _statement(revenue, ebit, years=(2023, 2024)):
+    return {"columns": [{"fiscal_year": y} for y in years], "values": {"revenue": list(revenue), "ebit": list(ebit)}}
+
+
+def _theme_inputs(monkeypatch, tmp_path, histories: dict, filings: dict):
+    monkeypatch.setattr(K, "_read_history", lambda ticker: histories.get(ticker))
+    for ticker, body in filings.items():
+        (tmp_path / f"{ticker}.json").write_text(json.dumps(body))
+    statements = K.Statements(tmp_path)
+    return K.Histories(), statements, K.Revenues(tmp_path, statements)
+
+
+def test_a_theme_is_a_cap_weighted_basket_of_the_bellwethers_valuation_covers_and_names_the_rest(monkeypatch, tmp_path):
+    histories, statements, revenues = _theme_inputs(
+        monkeypatch, tmp_path, {"A": _valuation_history(5.0), "B": _valuation_history(10.0)},
+        {"A": _statement([100.0, 120.0], [20.0, 24.0]), "B": _statement([300.0, 330.0], [30.0, 33.0])})
+    rows = {"A": _valued_row("A", 300.0, 5.0, 20.0, nxt=5.5, prev=4.0),
+            "B": _valued_row("B", 100.0, 10.0, 10.0, nxt=11.0, prev=9.0)}
+    bellwethers = [{"symbol": "A", "in_universe": True}, {"symbol": "B", "in_universe": True},
+                   {"symbol": "KS", "in_universe": False}]
+    fields = TH._valuation_fields(bellwethers, rows, histories, statements, revenues)
+    assert fields["valuation_names"] == ["A", "B"] and fields["valuation_missing"] == ["KS"]
+    # Value 300 and 100 at earnings yields of 5 and 10 percent: 400 over 25 is 16 on every week.
+    assert fields["valuation"]["pe"][-1] == 16.0 and fields["valuation"]["names"] == 2
+    # Forward 400 over 25 as well; consensus EPS up 10% next year; revenue growth weighted by each name's sales.
+    assert fields["outlook"]["forward_pe"] == 16.0 and fields["outlook"]["eps_growth_next"] == 10.0
+    assert fields["outlook"]["revenue_growth"] == 12.7                    # (20 x 120 + 10 x 330) over 450
+    assert fields["history"]["years"] == [2023, 2024] and fields["history"]["revenue_growth"] == [None, 12.5]
+    assert "valuation_note" not in fields
+
+
+def test_a_theme_with_fewer_than_two_usable_names_has_no_basket_fields_only_the_reason(monkeypatch, tmp_path):
+    histories, statements, revenues = _theme_inputs(
+        monkeypatch, tmp_path, {"A": _valuation_history(5.0)}, {"A": _statement([100.0, 120.0], [20.0, 24.0])})
+    rows = {"A": _valued_row("A", 300.0, 5.0, 20.0, nxt=5.5, prev=4.0), "B": _valued_row("B", None, 10.0, 10.0, nxt=11.0, prev=9.0)}
+    bellwethers = [{"symbol": "A", "in_universe": True}, {"symbol": "B", "in_universe": True}, {"symbol": "KS", "in_universe": False}]
+    fields = TH._valuation_fields(bellwethers, rows, histories, statements, revenues)
+    assert set(fields) == {"valuation_note"}
+    assert fields["valuation_note"] == ("1 of 3 bellwethers have a VALUATION history and a market cap; 2 are needed for a basket. "
+                                        "Left out: B, KS.")
+
+
+def test_a_theme_says_why_it_has_no_basket_when_it_names_none_or_valuation_was_not_built(monkeypatch, tmp_path):
+    histories, statements, revenues = _theme_inputs(monkeypatch, tmp_path, {}, {})
+    assert TH._valuation_fields([], {}, histories, statements, revenues) == {"valuation_note": "This theme names no bellwethers, so it has no basket."}
+    one = [{"symbol": "A", "in_universe": True}]
+    assert TH._valuation_fields(one, {}, histories, statements, revenues) == {
+        "valuation_note": "VALUATION was not built this session, so this theme has no basket."}
+
+
+def test_the_validator_takes_a_theme_basket_or_a_note_and_refuses_a_group_with_neither(monkeypatch):
+    history = {"years": [2023, 2024], "revenue_growth": [None, 7.1], "gross_margin": [None, 42.0], "operating_margin": [None, 20.0]}
+    basket = {"key": "ai", "valuation": {"pe": [16.0]}, "valuation_names": ["A", "B"], "valuation_missing": [],
+              "outlook": {"forward_pe": 16.0}, "history": history}
+    thin = {"key": "energy", "valuation_note": "1 of 3 bellwethers have a VALUATION history and a market cap; 2 are needed."}
+    assert V._check_themes({"groups": [basket]}) == []
+    assert [(f.severity, f.detail) for f in V._check_themes({"groups": [thin]})] == [
+        ("notice", "energy: 1 of 3 bellwethers have a VALUATION history and a market cap; 2 are needed.")]
+    findings = V._check_themes({"groups": [{"key": "x"}, {**basket, "key": "y", "outlook": None,
+                                                          "history": {**history, "years": [2024, 2023]}},
+                                           {**basket, "key": "z", "valuation_names": []}]})
+    assert [(f.severity, f.detail) for f in findings] == [
+        ("error", "x: no valuation basket and no valuation_note saying why"),
+        ("error", "y: a valuation basket has no outlook"),
+        ("error", "y: history years are not an increasing list of fiscal years"),
+        ("error", "z: a valuation basket names no bellwethers"),
+    ]

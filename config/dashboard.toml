@@ -1615,6 +1615,18 @@ published_base_url = "https://market-recap-b5p.pages.dev"
 # CORS header. IFRS filers (ASML, ARM) are listed as skipped, with the reason.
 indices = ["SPX", "NDX"]
 history_years = 10
+# Names outside the S&P 500 and Nasdaq-100 that K-SHAPE and THEMES read. They
+# get filings and prices as members do, but carry no index membership, so no
+# index figure counts them. An IFRS filer among them is skipped, as above.
+extra = ["VIK", "TOL", "CZR", "ALLY"]
+# Their GICS sector and sub-industry and name, which no index list gives them: the
+# sector picks a bank's below-the-line earnings basis and ranks each within it.
+extra_names = [
+  { ticker = "VIK", name = "Viking Holdings", sector = "Consumer Discretionary", sub_sector = "Hotels, Resorts & Cruise Lines" },
+  { ticker = "TOL", name = "Toll Brothers", sector = "Consumer Discretionary", sub_sector = "Homebuilding" },
+  { ticker = "CZR", name = "Caesars Entertainment", sector = "Consumer Discretionary", sub_sector = "Casinos & Gaming" },
+  { ticker = "ALLY", name = "Ally Financial", sector = "Financials", sub_sector = "Consumer Finance" },
+]
 
 [dcf]
 # Fundamentals are baked at build time: data.sec.gov sends no CORS header, so

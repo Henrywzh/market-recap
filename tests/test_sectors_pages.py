@@ -350,3 +350,89 @@ def test_expectations_are_weighted_as_the_aggregate_is_and_the_index_needs_the_s
     assert _read(pages, "XLP")["outlook"] == {"forward_pe": 25.0, "eps_growth_this": 6.0, "eps_growth_next": 15.4,
                                               "revenue_growth": 3.4, "names": 3}
     assert _read(pages, "MARKET")["outlook"]["names"] == 4          # CVX has no VALUATION market cap, so it is out
+
+
+# --- each page's fundamentals history: revenue growth and margins by fiscal year ---
+
+def _statement(revenue, ebit, years=(2023, 2024)):
+    """A FINANCIALS artifact as far as the history reads it: annual revenue and operating profit by fiscal year."""
+    return {"columns": [{"fiscal_year": y} for y in years], "values": {"revenue": list(revenue), "ebit": list(ebit)}}
+
+
+def _write_financials(directory: Path, statements: dict[str, dict]) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    for ticker, body in statements.items():
+        (directory / f"{ticker}.json").write_text(json.dumps(body))
+
+
+def _build_with_filings(_isolated_artifacts, statements: dict[str, dict]) -> dict:
+    histories = _isolated_artifacts / "valuation"
+    _histories(histories, {"KO": (100.0, 4.0), "PEP": (100.0, 5.0), "PM": (100.0, 2.0),
+                           "XOM": (100.0, 10.0), "CVX": (100.0, 8.0)})
+    _write_financials(_isolated_artifacts / "financials", statements)
+    closes, etf = _prices()
+    return panel.build(_ctx(CONFIG, closes, etf), {"heatmaps": _heatmaps(), "valuation": _valuation_rows(),
+                                                  "industries": None, "rotation": None, "monitor": None, "themes": None})
+
+
+FILINGS = {
+    "KO": _statement([100.0, 110.0], [20.0, 22.0]),
+    "PEP": _statement([200.0, 210.0], [40.0, 42.0]),
+    "PM": _statement([50.0, 55.0], [10.0, 11.0]),
+    "XOM": _statement([300.0, 330.0], [30.0, 36.0]),
+}
+
+
+def test_each_page_carries_its_history_over_the_names_it_values_each_at_its_whole_value(_isolated_artifacts):
+    _build_with_filings(_isolated_artifacts, FILINGS)
+    pages = _isolated_artifacts / "sectors"
+
+    staples = _read(pages, "XLP")["history"]
+    assert staples["years"] == [2023, 2024]
+    # KO, PEP and PM whole: revenue 375 against 350; operating profit 75 on 375. CVX has no market cap, and no filings.
+    assert staples["revenue_growth"] == [None, 7.1]
+    assert staples["operating_margin"] == [20.0, 20.0]                                   # 70 on 350, then 75 on 375
+    assert _read(pages, "XLP-T")["history"]["revenue_growth"] == [None, 10.0]           # tobacco is PM alone: 55 over 50
+    energy = _read(pages, "XLE")["history"]
+    assert energy["revenue_growth"] == [None, 10.0] and energy["operating_margin"] == [10.0, 10.9]   # XOM alone: 330 on 300
+    market = _read(pages, "MARKET")["history"]
+    # KO, PEP, PM and XOM: revenue 705 against 650; operating profit 111 on 705.
+    assert market["revenue_growth"] == [None, 8.5] and market["operating_margin"] == [15.4, 15.7]   # 2023: 100 on 650
+    assert all(page.get("history") is not None for page in (_read(pages, "MARKET"), _read(pages, "XLE")))
+
+
+def test_each_statement_is_read_once_per_build_however_many_pages_list_the_name(_isolated_artifacts, monkeypatch):
+    from collections import Counter
+    from market_recap.compute import baskets as B
+
+    reads = []
+    original = B.read_statements
+    monkeypatch.setattr(B, "read_statements", lambda directory, ticker: reads.append(ticker) or original(directory, ticker))
+    _build_with_filings(_isolated_artifacts, FILINGS)
+    counts = Counter(reads)
+    assert counts and max(counts.values()) == 1
+    assert counts["KO"] == 1 and counts["XOM"] == 1                    # listed on the index, a sector, a sub-industry and the market page
+
+
+def test_without_filings_every_history_is_null_and_the_pages_still_build(_isolated_artifacts):
+    out = _build_with_filings(_isolated_artifacts, {})
+    pages = _isolated_artifacts / "sectors"
+    assert _read(pages, "XLP")["history"] is None and _read(pages, "MARKET")["history"] is None
+    assert findings_of_errors(out) == []
+    assert _read(pages, "XLP")["valuation"] is not None                 # the rest of the page is unaffected
+
+
+def test_the_validator_checks_each_page_history_is_one_entry_per_year_and_says_when_a_page_has_none(tmp_path):
+    good = {"history": {"years": [2023, 2024], "revenue_growth": [None, 7.1], "gross_margin": [None, 42.0],
+                        "operating_margin": [None, 20.0]}}
+    short = {"history": {**good["history"], "operating_margin": [20.0]}}
+    (tmp_path / "XLP.json").write_text(json.dumps(good))
+    (tmp_path / "XLE.json").write_text(json.dumps(short))
+    (tmp_path / "XLK.json").write_text(json.dumps({"key": "XLK"}))
+    (tmp_path / "BAD.json").write_text("{not json")
+    findings = [(f.severity, f.detail) for f in validate._check_sector_pages(tmp_path)]
+    assert sorted(findings) == sorted([
+        ("error", "XLE page: history operating_margin does not have one entry per fiscal year"),
+        ("error", "XLK: page has no history block"),
+        ("error", "BAD: page file is not readable JSON"),
+    ])

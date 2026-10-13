@@ -17,13 +17,16 @@ STATEMENT_LABELS = {"income": "INCOME STATEMENT", "balance": "BALANCE SHEET", "c
 
 
 def universe(ctx) -> list[str]:
-    """Members of every index the contract names for this tab, deduplicated."""
+    """Members of every index the contract names for this tab, plus the
+    contract's extra names, deduplicated. VALUATION reads this same list."""
     keys = list(ctx.config["financials"]["indices"])
     symbols: set[str] = set()
     for key in keys:
         frame = ctx.members.get(key)
         if frame is not None:
             symbols.update(frame["yahoo_symbol"])
+    # Extras get filings but no index membership: they are never added to ctx.members.
+    symbols.update(str(s).upper() for s in ctx.config["financials"].get("extra") or [])
     return sorted(symbols)
 
 

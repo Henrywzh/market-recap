@@ -250,9 +250,13 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
     #    name the index does not hold is not part of its breadth.
     watchlist_specs = list(config.get("watchlist") or [])
     watchlist_symbols = [str(s["ticker"]).upper() for s in watchlist_specs]
+    # The [financials] extras need prices for their multiples, so they ride the
+    # same download; like the watchlist they are never added to a basket.
+    financials_extra = [str(s).upper() for s in config["financials"].get("extra") or []]
     symbols = sorted(
         set(watchlist_symbols).union(
-            *(set(frame["yahoo_symbol"]) for frame in ctx.members.values())
+            *(set(frame["yahoo_symbol"]) for frame in ctx.members.values()),
+            financials_extra,
         )
     )
     # Both lines of a spin-off are priced for its factor even when the index

@@ -17,7 +17,7 @@ from datetime import datetime
 import json
 import re
 
-from .config import ARTIFACT_DIR, PERIOD_TRADING_DAYS, SESSION_COVERAGE_THRESHOLD, load_config
+from .config import ARTIFACT_DIR, PERIOD_TRADING_DAYS, SECTORS_ARTIFACT_DIR, SESSION_COVERAGE_THRESHOLD, load_config
 from .compute.catalysts import latest_completed_session
 
 # error: not publishable. warning: publishable, but --strict refuses it.
@@ -323,6 +323,33 @@ def _check_sizek(config: dict, payload: dict | None) -> list[Finding]:
             # Each arm carries its outlook beside its basket; an arm without one is a build fault, not a data gap.
             out += [Finding("error", "sizek", f"{pair['key']} {arm.get('key')} arm has no outlook")
                     for arm in view["fundamentals"].get("arms") or [] if not isinstance(arm.get("outlook"), dict)]
+            for arm in view["fundamentals"].get("arms") or []:
+                out += _check_history(f"{pair['key']} {arm.get('key')} arm", "sizek", arm.get("history"))
+    return out
+
+
+def _check_history(owner: str, check: str, history) -> list[Finding]:
+    """A fundamentals history by fiscal year: one entry per year in each series, each a number or null.
+
+    A year nobody reported is null, never filled in, so a series that does not line up with its years is a build fault.
+    """
+    if history is None:
+        return []
+    if not isinstance(history, dict):
+        return [Finding("error", check, f"{owner}: history is neither null nor an object")]
+    years = history.get("years")
+    if not isinstance(years, list) or any(isinstance(y, bool) or not isinstance(y, int) for y in years) \
+            or years != sorted(set(years)):
+        return [Finding("error", check, f"{owner}: history years are not an increasing list of fiscal years")]
+    out = []
+    for key in ("revenue_growth", "gross_margin", "operating_margin"):
+        series = history.get(key)
+        if not isinstance(series, list) or len(series) != len(years):
+            out.append(Finding("error", check, f"{owner}: history {key} does not have one entry per fiscal year"))
+            continue
+        bad = [v for v in series if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)))]
+        if bad:
+            out.append(Finding("error", check, f"{owner}: history {key} holds {bad[0]!r}, not a number or null"))
     return out
 
 
@@ -421,6 +448,43 @@ def _check_sectors(payload: dict | None) -> list[Finding]:
     return out
 
 
+def _check_themes(payload: dict | None) -> list[Finding]:
+    """Each THEMES group either carries its valuation basket with the names it used, or says why it has none."""
+    if not payload:
+        return []
+    out = []
+    for group in payload.get("groups") or []:
+        key = group.get("key")
+        if group.get("valuation") is None:
+            if group.get("valuation_note"):
+                out.append(Finding("notice", "themes", f"{key}: {group['valuation_note']}"))
+            else:
+                out.append(Finding("error", "themes", f"{key}: no valuation basket and no valuation_note saying why"))
+            continue
+        if not isinstance(group.get("valuation_names"), list) or not group["valuation_names"]:
+            out.append(Finding("error", "themes", f"{key}: a valuation basket names no bellwethers"))
+        if not isinstance(group.get("outlook"), dict):
+            out.append(Finding("error", "themes", f"{key}: a valuation basket has no outlook"))
+        out += _check_history(key, "themes", group.get("history"))
+    return out
+
+
+def _check_sector_pages(directory=SECTORS_ARTIFACT_DIR) -> list[Finding]:
+    """Each SECTORS page file carries a fundamentals history of the right shape."""
+    out = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            page = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            out.append(Finding("error", "sectors", f"{path.stem}: page file is not readable JSON"))
+            continue
+        if "history" not in page:
+            out.append(Finding("error", "sectors", f"{path.stem}: page has no history block"))
+            continue
+        out += _check_history(f"{path.stem} page", "sectors", page.get("history"))
+    return out
+
+
 def _check_sec_filings(manifest: dict) -> list[Finding]:
     """Filers whose latest 10-K / 10-Q company facts did not carry.
 
@@ -497,6 +561,9 @@ def run() -> dict:
         + _check_flow_attribution(panels.get("heatmaps"))
         + _check_industries(panels.get("industries"))
         + _check_sectors(panels.get("sectors"))
+        # The page files are only this build's when SECTORS was built this session; a skipped build leaves older ones.
+        + (_check_sector_pages() if panels.get("sectors") else [])
+        + _check_themes(panels.get("themes"))
         + _check_sec_filings(manifest)
         + _check_price_actions(manifest)
         + _check_sources(manifest)
