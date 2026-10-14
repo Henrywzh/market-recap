@@ -32,8 +32,8 @@ READINGS = ("rsp_spy", "iwm_spy", "sector_above_200", "sector_above_50", "spy_dr
 def features(closes: pd.DataFrame, *, market: str, equal_weight: str, small_caps: str, vix: str,
              sectors: Sequence[str], relative_sessions: int, high_sessions: int, long_ma: int, short_ma: int) -> pd.DataFrame:
     """The daily readings, one row per session; a reading without enough history
-    is NaN. ``rsp_spy`` and ``iwm_spy`` are the relative return in percentage
-    points over ``relative_sessions``; the sector shares are percent of the
+    is NaN. ``rsp_spy`` and ``iwm_spy`` are the percent change of the price
+    ratio (fund / market) over ``relative_sessions``, not a return gap in pp; the sector shares are percent of the
     sector funds that have a moving average yet; ``spy_drawdown`` is percent
     from the highest close of the last ``high_sessions``."""
     c = closes.sort_index()

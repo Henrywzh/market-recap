@@ -87,6 +87,16 @@ sit folded beneath. The hub keeps the rotation graph and the sector table.
 
 The plan below is the original one, kept for the record.
 
+Trial branch, 2026-10-14: the sector hub has two local views, **Rotation &
+sectors** (default, rotation first) and **Industry & valuation**. Group names
+link to the existing combined sector/sub-industry pages; aggregate sector
+valuation comparison remains in a fold rather than a fourth local tab.
+INDICES selects one recap universe at a time in contract order (SPX first),
+while live cash-index charts and SPY-based market-state context are shared.
+EUROPE opens on equal-size return tiles, not a market-cap treemap; exact
+tables and the USD history are folded. Historical overnight/intraday return
+decomposition moves to a lazy-loaded research fold on Trade Desk → Overnight.
+
 Four top-level modes plus a tools menu. Each mode has at most four views.
 
 ```

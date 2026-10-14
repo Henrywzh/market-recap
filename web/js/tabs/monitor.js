@@ -308,6 +308,7 @@ export default function renderMonitor(root, data, manifest) {
   };
 
   root.replaceChildren();
+  if (!manifest?.panels?.includes('monitor')) root.append(el('div', { class: 'note-text', text: `Same-session cached queue · ${artifact.as_of}. The latest partial build did not regenerate MONITOR.` }));
   root.append(sectionTitle('MONITOR', 'RESEARCH QUEUE · WHAT CHANGED TODAY'));
 
   const methodHost = el('div', { class: 'monitor-method-host' });

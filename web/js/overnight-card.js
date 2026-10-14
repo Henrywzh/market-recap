@@ -1,4 +1,4 @@
-// INDICES -> OVERNIGHT VS INTRADAY: each fund's growth held only from the
+// TRADE DESK -> OVERNIGHT RESEARCH: each fund's growth held only from the
 // close to the next open, only from the open to the close, and both (the fund
 // itself), with each leg's return by window and by calendar year. Drawn from
 // the overnight artifact (panels/overnight.py).

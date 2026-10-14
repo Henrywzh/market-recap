@@ -10,6 +10,7 @@ import { tickerHref } from '../routes.js';
 import { ageSeconds, ageText } from '../live-model.js';
 import { anchorScorecard, closeLevels, optionRange, priceLadder, sentimentScorecard, sizePosition, trendScorecard } from '../trade-math.js';
 import { resolveTicker } from '../routes.js';
+import { overnightCard } from '../overnight-card.js';
 
 const valid = (v) => typeof v === 'number' && Number.isFinite(v);
 const usd = (v, digits = 2) => (valid(v) ? `$${num(v, digits)}` : DASH);
@@ -382,7 +383,25 @@ export default function renderTrade(root, technicals, _manifest, ctx) {
     if (selected === tabs[0]) {
       setups(host, technicals, ctx, state);
       sizing(host, state);
-    } else if (selected === tabs[1]) overnight(host);
+    } else if (selected === tabs[1]) {
+      overnight(host);
+      const content = el('div', {});
+      const fold = el('details', { class: 'sx-fold' }, [el('summary', { text: 'Historical research · overnight vs intraday returns' }), content]);
+      let loaded = false;
+      fold.addEventListener('toggle', async () => {
+        if (!fold.open || loaded) return;
+        loaded = true;
+        content.append(info('Loading historical decomposition…'));
+        try {
+          const data = await ctx.loadArtifact('overnight');
+          if (!fold.isConnected) return;
+          content.replaceChildren(overnightCard(data) || info('No overnight history in this build.'));
+        } catch (error) {
+          if (fold.isConnected) content.replaceChildren(info(`Historical decomposition is not available in this local build: ${error.message}. The live overnight board above is separate.`));
+        }
+      });
+      host.append(fold);
+    }
     else scorecard(host, ctx);
   };
   root.append(el('div', { class: 'trade-nav' }, [periodSwitch(tabs, tabs[0], show),

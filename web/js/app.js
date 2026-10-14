@@ -1,9 +1,10 @@
-// Shell: artifact loading, tab routing, theme, clock and the provenance footer.
+// Shell: artifact loading, tab routing, build age and the provenance footer.
 
 import { el } from './fmt.js';
 import { slowestParts } from './timings.js';
 import { resizeAll, disposeAll } from './charts.js';
 import { GROUPS, parseHash, hashFor, viewById, viewsIn } from './routes.js';
+import { monitorSession } from './artifact-session.js';
 
 // View modules load on demand, stamped with the build they belong to. A
 // browser keeps an ES module in memory under its URL, so an unversioned
@@ -69,12 +70,6 @@ function startBuildAge(generatedAt, thresholds) {
   };
   tick();
   setInterval(tick, 30000);
-}
-
-function applyTheme(theme) {
-  document.documentElement.setAttribute('data-theme', theme);
-  try { localStorage.setItem('mr-theme', theme); } catch { /* private window */ }
-  if (state.active) select(state.active, { silent: true, arg: state.arg });
 }
 
 function buildTabs() {
@@ -154,12 +149,23 @@ async function select(id, { silent = false, arg = null } = {}) {
   main.append(el('div', { class: 'loading', text: `Loading ${view.label}…` }));
 
   try {
-    if (view.id === 'monitor' && !state.manifest?.panels?.includes('monitor')) {
-      throw new Error('monitor was not built for this session');
+    // A failed MONITOR build may leave no file: asking for it would be a 404
+    // (and fail the deploy's smoke test), so say so without the request.
+    if (view.id === 'monitor' && state.manifest?.errors?.monitor) {
+      main.innerHTML = '';
+      main.append(el('div', { class: 'gap', text: monitorSession(null, state.manifest).reason }));
+      return;
     }
     const [payload, render] = await Promise.all([loadPayload(view), rendererFor(view)]);
     if (state.active !== id) return;
     main.innerHTML = '';
+    if (view.id === 'monitor') {
+      const check = monitorSession(payload, state.manifest);
+      if (!check.ok) {
+        main.append(el('div', { class: 'gap', text: check.reason }));
+        return;
+      }
+    }
     await render(main, payload, state.manifest, context(view, state.arg));
   } catch (error) {
     if (state.active !== id) return;
@@ -258,12 +264,9 @@ function renderFooter(manifest) {
 export async function boot(manifest, version) {
   state.version = version || 'dev';
 
-  const themeSelect = document.getElementById('theme-select');
-  let saved = 'dark';
-  try { saved = localStorage.getItem('mr-theme') || 'dark'; } catch { /* ignore */ }
-  themeSelect.value = saved;
-  document.documentElement.setAttribute('data-theme', saved);
-  themeSelect.addEventListener('change', (event) => applyTheme(event.target.value));
+  document.documentElement.setAttribute('data-theme', 'dark');
+  // Retire only the old theme preference; keep the reader's monitor/watchlist.
+  try { localStorage.removeItem('mr-theme'); } catch { /* private window */ }
 
   buildTabs();
 

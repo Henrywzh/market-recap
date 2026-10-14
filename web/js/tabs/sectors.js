@@ -10,7 +10,7 @@
 
 import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, periodSwitch, tag, gap, DASH } from '../fmt.js';
 import { tickerHref, hashFor } from '../routes.js';
-import { render } from '../charts.js';
+import { render, resizeAll } from '../charts.js';
 import { valuationBlock } from '../valuation-block.js';
 import { WINDOWS, pickWindow, sliceWindow, windowSwitch } from '../windows.js';
 import { renderRotationGraph, renderRotationDetail } from './rotation.js';
@@ -741,30 +741,96 @@ async function renderLevel(root, data, ctx, row, isSector) {
 async function renderHub(root, data, _manifest, ctx) {
   const state = { period: DEFAULT_PERIOD, sort: { key: 'weight', direction: 'desc' } };
   const thin = data.sub_industries.filter((s) => s.thin).length;
-  // The rotation graph's charts draw on the next frame, so its host must be
-  // in the page before it renders. Its per-sector drill-down is left out: the
-  // sector pages open from the table below.
-  const rotationHost = el('div', { class: 'sectors-rotation' });
-  root.append(rotationHost);
-  try {
-    renderRotationGraph(rotationHost, await ctx.loadArtifact('rotation'), { drill: false });
-  } catch (error) {
-    rotationHost.replaceChildren(gap(`The rotation graph is unavailable: ${error.message}.`));
-  }
-
   root.append(sectionTitle('SECTORS', 'MARKET → SECTOR → SUB-INDUSTRY → NAMES'));
   root.append(metaRow(`AS OF ${data.as_of} · ${data.sectors.length} SECTORS · ${data.sub_industries.length} SUB-INDUSTRIES, ${thin} THIN · ${data.members.length} NAMES`, hubNotes(data)));
 
+  const choices = [['overview', 'Rotation & sectors'], ['industries', 'Industry & valuation']];
+  const nav = el('div', { class: 'view-switch', role: 'tablist', 'aria-label': 'Sector research views' });
+  const panes = new Map(choices.map(([key]) => [key, el('div', {
+    role: 'tabpanel', id: `sector-view-${key}`, 'aria-labelledby': `sector-tab-${key}`,
+  })]));
+  const ready = new Set(['overview']);
+  let active = 'overview';
+  const select = async (key) => {
+    active = key;
+    choices.forEach(([id]) => {
+      const picked = id === key;
+      const button = nav.querySelector(`#sector-tab-${id}`);
+      button.setAttribute('aria-selected', String(picked));
+      button.setAttribute('tabindex', picked ? '0' : '-1');
+      panes.get(id).hidden = !picked;
+    });
+    const pane = panes.get(key);
+    if (!ready.has(key)) {
+      ready.add(key);
+      const loading = el('div', { class: 'loading', text: 'Loading research view…' });
+      pane.replaceChildren(loading);
+      try {
+        await renderRotationDetail(pane, ctx, { section: 'industries', stillMounted: () => pane.isConnected, groups: data });
+        if (!pane.isConnected) return;
+        loading.remove();
+        pane.append(el('div', { class: 'field-note', text: 'Open any sector below for its combined valuation, relative performance, industries and names.' }),
+          el('div', { class: 'tag-row' }, data.sectors.map((s) => link(s.label, sectorHref(s.key), 'tag tag-dim'))));
+        const valuationHost = el('div', {});
+        const fold = el('details', { class: 'sx-fold' }, [el('summary', { text: 'Compare aggregate sector valuations' }), valuationHost]);
+        let loaded = false;
+        fold.addEventListener('toggle', async () => {
+          if (!fold.open || loaded) return;
+          loaded = true;
+          try {
+            await renderRotationDetail(valuationHost, ctx, { section: 'valuation', stillMounted: () => pane.isConnected });
+          } catch (error) {
+            loaded = false;
+            valuationHost.replaceChildren(gap(`Valuation is unavailable: ${error.message}.`));
+          }
+        });
+        pane.append(fold);
+      } catch (error) {
+        ready.delete(key); // a failed optional request can be tried again
+        pane.replaceChildren(gap(`This research view is unavailable: ${error.message}.`));
+      }
+    }
+    if (active === key) requestAnimationFrame(resizeAll);
+  };
+  choices.forEach(([key, label], i) => nav.append(el('button', {
+    type: 'button', role: 'tab', id: `sector-tab-${key}`, text: label,
+    'aria-controls': `sector-view-${key}`, 'aria-selected': String(i === 0), tabindex: i === 0 ? '0' : '-1',
+    onclick: () => select(key),
+    onkeydown: (event) => {
+      let next = i;
+      if (event.key === 'ArrowRight') next = (i + 1) % choices.length;
+      else if (event.key === 'ArrowLeft') next = (i + choices.length - 1) % choices.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = choices.length - 1;
+      else return;
+      event.preventDefault();
+      nav.children[next].focus();
+      select(choices[next][0]);
+    },
+  })));
+  root.append(nav, ...panes.values());
+  const overview = panes.get('overview');
+  panes.forEach((pane, key) => { pane.hidden = key !== 'overview'; });
+
+  const rotationHost = el('div', {});
+  overview.append(rotationHost);
+  ctx.loadArtifact('rotation').then((rotation) => {
+    if (!rotationHost.isConnected) return;
+    renderRotationGraph(rotationHost, rotation, { drill: false });
+  }).catch((error) => {
+    if (rotationHost.isConnected) rotationHost.append(gap(`Rotation is unavailable: ${error.message}.`));
+  });
+
   const tableHost = el('div');
   const draw = () => tableHost.replaceChildren(sectorTable(data, state, ctx));
-  root.append(card(`${data.sectors.length} SECTORS`, periodSwitch(PERIODS, state.period, (p) => {
+  overview.append(card(`${data.sectors.length} SECTORS`, periodSwitch(PERIODS, state.period, (p) => {
     state.period = p;
     draw();
   }), [tableHost]));
   draw();
 
   if ((data.themes || []).length) {
-    root.append(card('CROSS-SECTOR THEMES', el('span', { class: 'dim', text: `${data.themes.length} · not one sector` }), [
+    overview.append(card('CROSS-SECTOR THEMES', el('span', { class: 'dim', text: `${data.themes.length} · not one sector` }), [
       el('div', { class: 'field-note', text: 'A theme that spans sectors: its names also appear on their own sector pages.' }),
       ...data.themes.map((t) => el('div', { class: 'sx-theme' }, [
         el('div', { class: 'sx-theme-head' }, [
@@ -776,9 +842,6 @@ async function renderHub(root, data, _manifest, ctx) {
     ]));
   }
 
-  const detailHost = el('div', { class: 'sectors-detail' });
-  root.append(detailHost);
-  await renderRotationDetail(detailHost, ctx);
 }
 
 export default async function renderSectors(root, data, manifest, ctx = {}) {

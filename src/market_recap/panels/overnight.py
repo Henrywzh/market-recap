@@ -1,4 +1,4 @@
-"""INDICES -> OVERNIGHT VS INTRADAY: where each fund's return was made.
+"""TRADE DESK -> OVERNIGHT RESEARCH: where each fund's return was made.
 
 Every session split into the move from the previous close to the open and
 the move from the open to the close (compute.overnight), for the funds in

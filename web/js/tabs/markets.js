@@ -1,34 +1,33 @@
 import { el, card, table, tag, num, pct, dirClass, periodSwitch, sectionTitle, notice, DASH } from '../fmt.js';
-import { areaLine, zeroLine, multiLine } from '../charts.js';
+import { areaLine, zeroLine, multiLine, disposeWithin } from '../charts.js';
 import { mountLive } from '../live.js';
 import { mountIndexCharts } from '../live-indices.js';
-import { overnightCard } from '../overnight-card.js';
 import { spark } from '../spark.js';
-import { readingText, readingNote, outcomeCell, stateSummary, daysNow, sectorFlag } from '../market-state-model.js';
+import { readingText, readingNote, outcomeCell, stateSummary, daysNow, sectorFlag, statePresentation } from '../market-state-model.js';
 
-function drawdownStat(entry) {
-  return el('div', { class: 'stat' }, [
-    el('div', { class: 'stat-label', text: `${entry.label} DRAWDOWN` }),
-    el('div', { class: `stat-value ${dirClass(entry.drawdown_pct)}`, text: pct(entry.drawdown_pct) }),
-    el('div', { class: 'stat-note' }, [
-      `${entry.trading_days_since_high ?? DASH} TRADING DAYS (HIGH ${entry.high_date ?? DASH})`,
-    ]),
-  ]);
-}
-
-function adStat(label, ad) {
-  if (!ad) return null;
-  return el('div', { class: 'stat' }, [
-    el('div', { class: 'stat-label', text: `${label} ADV / DEC` }),
-    el('div', { class: 'stat-value' }, [
-      el('span', { class: 'up', text: ad.advancers }),
-      ' / ',
-      el('span', { class: 'down', text: ad.decliners }),
-      ' / ',
-      el('span', { class: 'dim', text: ad.unchanged }),
-    ]),
-    el('div', { class: 'stat-note', text: `RATIO ${ad.ratio ?? DASH}` }),
-  ]);
+// One row per index: how far it sits below its high, and how many members rose.
+// Side by side, so the indices compare before one is opened below.
+function indexComparison(blocks) {
+  const rows = blocks.map((block) => {
+    const drawdown = block.drawdown || {};
+    const ad = block.advance_decline;
+    return el('tr', {}, [
+      el('td', {}, [el('span', { text: block.key }), el('span', { class: 'sub', text: block.label })]),
+      el('td', {}, [
+        el('span', { class: dirClass(drawdown.drawdown_pct), text: pct(drawdown.drawdown_pct) }),
+        el('span', { class: 'sub', text: `${drawdown.trading_days_since_high ?? DASH} TRADING DAYS · HIGH ${drawdown.high_date ?? DASH}` }),
+      ]),
+      el('td', {}, ad ? [
+        el('span', { class: 'up', text: ad.advancers }),
+        ' / ',
+        el('span', { class: 'down', text: ad.decliners }),
+        ' / ',
+        el('span', { class: 'dim', text: ad.unchanged }),
+      ] : [el('span', { class: 'dim', text: DASH })]),
+      el('td', { text: ad?.ratio ?? DASH }),
+    ]);
+  });
+  return table(['INDEX', 'DRAWDOWN FROM HIGH', 'ADV / DEC / UNCH', 'RATIO'], rows, { class: 'index-compare' });
 }
 
 function moverTable(title, rows) {
@@ -128,48 +127,74 @@ function marketStateSection(state) {
     el('div', { class: 'stat-label', text: r.label }),
     el('div', { class: 'stat-value', text: readingText(r) }),
     el('div', { class: 'ms-spark' }, [spark(r.spark, { width: 120, height: 22 })]),
-    el('div', { class: 'stat-note', text: readingNote(r) || (r.unit === 'pp' ? `OVER ${state.settings.relative_period}` : r.key === 'spy_drawdown' ? `FROM ${state.settings.high_period} HIGH` : '') }),
+    el('div', { class: 'stat-note', text: readingNote(r) || (['rsp_spy', 'iwm_spy'].includes(r.key) ? `PRICE RATIO CHANGE OVER ${state.settings.relative_period}` : r.key === 'spy_drawdown' ? `FROM ${state.settings.high_period} HIGH` : '') }),
   ])));
 
   const funds = el('div', { class: 'ms-funds' }, state.sectors.map((row) => {
     const flag = sectorFlag(row);
-    return el('span', { class: `ms-fund ${flag.tone}`, title: `${row.sector}: ${row.above_50 === null ? DASH : row.above_50 ? 'above' : 'below'} its ${state.settings.short_ma}-day line` }, [
+    return el('span', { class: `ms-fund ${flag.tone}`, title: `${row.sector}: ${row.above_200 === null ? DASH : row.above_200 ? 'above' : 'below'} its ${state.settings.long_ma}-day line` }, [
       el('b', { text: row.etf }), ` ${flag.text}`,
     ]);
   }));
 
   const summary = stateSummary(state.states, state.settings.drawdown_floor_pct);
   const total = state.states.length;
-  const sentence = summary.holding.length
-    ? `${summary.holding.length} of ${total} states hold today. ${summary.detected.length
-      ? `After such days a difference is detected for ${summary.detected.map((d) => `${d.label} (${d.parts.join(', ')})`).join('; ')}. `
-      : 'None of them has a detected difference in what followed. '}${summary.undetected.length
-      ? `No difference is detected for the other ${summary.undetected.length}: ${summary.undetected.map((d) => d.label).join(', ')}.` : ''}`
-    : 'No state holds today.';
+  const riskCount = state.states.filter((st) => statePresentation(st).level === 'risk').length;
+  const sentence = `${summary.holding.length} / ${total} active · ${riskCount} caution.${summary.holding.length ? ' Click a condition for the full comparison.' : ''}`;
+  let history;
+  const board = el('div', { class: 'ms-active-list', 'aria-label': 'Active market conditions' }, state.states.filter((st) => st.active_now).map((st) => {
+    const view = statePresentation(st);
+    return el('button', { type: 'button', class: `ms-chip ms-chip-${view.tone}`, 'data-state-key': st.key, 'data-risk-level': view.level,
+      title: `${st.rule}. ${view.reason}`, 'aria-expanded': 'false', onclick: () => {
+        history.open = !history.open;
+        // Opening it from a chip far up the page would otherwise leave the table out of sight.
+        if (history.open) history.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      } }, [
+      el('span', { class: 'ms-chip-heading' }, [
+        el('span', { class: 'ms-chip-name', text: st.label }),
+        el('span', { class: 'ms-chip-meta' }, [
+          el('span', { class: 'ms-chip-status', text: view.label }),
+          el('span', { class: 'dim', text: `${st.days_now} D` }),
+        ]),
+      ]),
+      el('span', { class: 'ms-chip-rule', text: st.rule }),
+    ]);
+  }));
 
   const unit = { ret: 'pp', worst_dd: 'pp', hit: '%' };
   const rows = state.states.map((st) => {
     const cells = ['ret', 'worst_dd', 'hit'].map((key) => {
       const c = outcomeCell(key, st.outcomes?.[key], unit[key]);
-      return el('td', { class: c.tone === 'dim' ? 'dim' : c.tone, title: c.title, text: c.text });
+      const outcome = st.outcomes?.[key];
+      return el('td', { class: c.tone === 'dim' ? 'dim' : c.tone, title: c.title }, [
+        el('span', { text: c.text }),
+        el('span', { class: 'sub', text: `State ${num(outcome?.inside, 1)}% · other ${num(outcome?.outside, 1)}%` }),
+      ]);
     });
     const now = daysNow(st);
-    return el('tr', { class: st.active_now ? 'ms-active' : '' }, [
-      el('td', {}, [el('span', { class: 'ms-name', text: st.label }), el('span', { class: 'sub', text: st.rule })]),
-      el('td', {}, now ? [tag(now, 'info')] : [el('span', { class: 'dim', text: DASH })]),
+    const view = statePresentation(st);
+    return el('tr', { class: st.active_now ? `ms-active ms-row-${view.tone}` : '' }, [
+      el('td', {}, [el('span', { class: 'ms-name', text: st.label }), el('span', { class: 'sub', text: st.rule }), el('span', { class: 'sub', text: `${view.label}: ${view.reason}` })]),
+      el('td', {}, now ? [tag(now, view.tone)] : [el('span', { class: 'dim', text: DASH })]),
       el('td', { class: st.status === 'ok' ? '' : 'dim', title: `${st.days} scored days in ${st.episodes} separate episodes, ${st.first || DASH} to ${st.last || DASH}`, text: `${st.days} / ${st.episodes}` }),
       ...cells,
     ]);
   });
+  history = el('details', { class: 'sx-fold ms-history' }, [el('summary', { text: `Historical context · next ${horizon} outcomes & uncertainty` }), card(`WHAT THE MARKET DID NEXT · ${horizon} AFTER A DAY IN THE STATE, LESS THE OTHER DAYS · 95% RANGE`, null, [
+    el('div', { class: 'field-note ms-legend', text: 'CAUTION: active condition with an adverse historical difference whose 95% interval excludes zero. ACTIVE: holds today, without that evidence or with too little history. Inactive conditions are grey, not an all-clear. Historical associations, not forecasts or entry signals; intervals are not corrected for multiple tests.' }),
+    table(['STATE', 'NOW', 'DAYS / EPISODES', `${horizon} RETURN, PP`, 'WORST FALL, PP', `${state.settings.drawdown_floor_pct}%+ FALL CHANCE, PP`], rows),
+    el('div', { class: 'note-text', text: 'Outcome columns are differences in percentage points, not absolute returns or probabilities: +10 pp in fall chance means 10 points more often than on other days. Brackets are 95% intervals for that difference. Days overlap; episodes are the much smaller effective history. A stronger subsequent rebound can coexist with a deeper interim fall. Not an out-of-sample strategy test.' }),
+    el('div', { class: 'field-note', text: `Scored over ${state.inputs.scored_days} sessions from ${state.settings.history_start} to ${state.inputs.scored_through}. ${state.notes.join(' ')}` }),
+  ])]);
+  history.addEventListener('toggle', () => board.querySelectorAll('button').forEach((button) => button.setAttribute('aria-expanded', String(history.open))));
   return [
     sectionTitle('MARKET STATE', `BREADTH AND STRESS FROM FUND PRICES · THROUGH ${state.inputs.prices_through}`),
     strip,
     funds,
     el('div', { class: 'field-note ms-sentence', text: sentence }),
-    card(`WHAT THE MARKET DID NEXT · ${horizon} AFTER A DAY IN THE STATE, LESS THE OTHER DAYS · 95% RANGE`, null, [
-      table(['STATE', 'NOW', 'DAYS / EPISODES', `${horizon} RETURN, PP`, 'WORST FALL, PP', `${state.settings.drawdown_floor_pct}%+ FALL CHANCE, PP`], rows),
-      el('div', { class: 'field-note', text: `Scored over ${state.inputs.scored_days} sessions from ${state.settings.history_start} to ${state.inputs.scored_through}. ${state.notes.join(' ')}` }),
-    ]),
+    board,
+    el('div', { class: 'field-note ms-definitions', text: 'RSP / SPY: equal-weight / cap-weight S&P 500. IWM / SPY: small caps / S&P 500. Ratio change is %, not a return gap in pp. 200D: 200-session moving average. Market high: highest close in the stated window. D beside a state: consecutive trading days active.' }),
+    history,
   ];
 }
 
@@ -205,35 +230,30 @@ export default function renderMarkets(root, data, manifest, ctx = {}) {
   root.append(mountLive({ asOf: data.as_of }));
   root.append(mountIndexCharts());
 
-  root.append(el('div', { class: 'stat-strip' }, [
-    // The ETFs' closes are not repeated here: the live strip above carries
-    // the cash indices they track.
-    ...blocks.map((block) => drawdownStat({ label: block.key, ...block.drawdown })),
-    ...blocks.map((block) => adStat(block.key, block.advance_decline)),
-  ]));
-
   // How narrow or stressed the market is; built on its own, so a failure of
   // that panel leaves a named gap here and nothing else on the page.
   if (ctx.loadArtifact) {
     const stateHost = el('div', {});
     root.append(stateHost);
     mountMarketState(stateHost, ctx);
-    // Where the funds' return was made: its own artifact, so a failure there
-    // is a note here and nothing else.
-    const nightHost = el('div', {});
-    root.append(nightHost);
-    ctx.loadArtifact('overnight').then((night) => {
-      const node = overnightCard(night);
-      nightHost.replaceChildren(node || el('div', { class: 'gap', text: 'Overnight vs intraday is unavailable in this build.' }));
-    }).catch((error) => nightHost.replaceChildren(el('div', { class: 'gap', text: `Overnight vs intraday is unavailable: ${error.message}.` })));
   }
 
   // One section per index, rendered by the same function so the two read
   // identically and a reader can compare them without re-learning the layout.
-  const drawCallbacks = [];
+  const indexHost = el('div', { class: 'index-history' });
+  const labels = blocks.map((b) => b.label);
+  const drawIndex = (label) => {
+    const block = blocks.find((b) => b.label === label);
+    if (!block) return;
+    disposeWithin(indexHost);
+    indexHost.replaceChildren();
+    indexSection(block.key, block);
+  };
+  root.append(card('INDEX COMPARISON', null, indexComparison(blocks)));
+  root.append(card('INDEX HISTORY · SELECT A UNIVERSE', periodSwitch(labels, labels[0], drawIndex), indexHost));
 
   function indexSection(key, block) {
-    root.append(sectionTitle(block.label, `(${key}) · ${block.members} MEMBERS`));
+    indexHost.append(sectionTitle(block.label, `(${key}) · ${block.members} MEMBERS · AS OF ${data.as_of}`));
 
     const priceNode = el('div', { class: 'chart' });
     const pricePeriods = Object.keys(block.price_chart);
@@ -251,20 +271,21 @@ export default function renderMarkets(root, data, manifest, ctx = {}) {
       if (series) zeroLine(breadthNode, series.dates, series.values);
     };
 
-    root.append(el('div', { class: 'grid two' }, [
+    indexHost.append(el('div', { class: 'grid two' }, [
       card(`${key} — PRICE`, periodSwitch(pricePeriods, priceDefault, drawPrice), priceNode),
       card(`${key} — NET BREADTH %`, periodSwitch(breadthPeriods, breadthDefault, drawBreadth), breadthNode),
     ]));
 
-    root.append(el('div', { class: 'grid two' }, [
+    indexHost.append(el('div', { class: 'grid two' }, [
       moverTable(`TOP ${block.gainers.length} GAINERS — ${key}`, block.gainers),
       moverTable(`TOP ${block.losers.length} LOSERS — ${key}`, block.losers),
     ]));
 
-    drawCallbacks.push(() => { drawPrice(priceDefault); drawBreadth(breadthDefault); });
+    drawPrice(priceDefault);
+    drawBreadth(breadthDefault);
   }
 
-  blocks.forEach((block) => indexSection(block.key, block));
+  drawIndex(labels[0]);
 
   // --- Watchlist ---------------------------------------------------------
   const watch = data.watchlist;
@@ -331,6 +352,5 @@ export default function renderMarkets(root, data, manifest, ctx = {}) {
     ]));
   });
 
-  drawCallbacks.forEach((fn) => fn());
   drawRebased(rebasedDefault);
 }

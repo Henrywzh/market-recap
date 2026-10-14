@@ -48,3 +48,22 @@ test('days now and the sector flags read as the page shows them', () => {
   assert.deepEqual(M.sectorFlag({ above_200: false, vs_200_pct: -2.0 }), { text: '▼ -2.0%', tone: 'down' });
   assert.deepEqual(M.sectorFlag({ above_200: null, vs_200_pct: null }), { text: '—', tone: 'dim' });
 });
+
+test('state warnings require active adverse evidence, not frightening rule labels', () => {
+  const s = { active_now: true, status: 'ok', label: 'STRESS', outcomes: {} };
+  assert.deepEqual([M.statePresentation(s).level, M.statePresentation(s).label], ['active', 'ACTIVE']);
+  assert.equal(M.statePresentation({ ...s, active_now: false }).level, 'inactive');
+  assert.deepEqual([M.statePresentation({ ...s, status: 'insufficient' }).tone, M.statePresentation({ ...s, status: 'insufficient' }).label], ['warn', 'ACTIVE']);
+  assert.match(M.statePresentation({ ...s, status: 'insufficient' }).reason, /too little history/);
+  const hit = { diff: 20, lo: 7, hi: 38, detected: true };
+  assert.equal(M.statePresentation({ ...s, outcomes: { hit } }).level, 'risk');
+  assert.equal(M.statePresentation({ ...s, outcomes: { hit } }).label, 'CAUTION');
+  for (const bad of [{ ...hit, lo: -1 }, { ...hit, lo: null }, { ...hit, detected: false }, { ...hit, hi: 1 }]) {
+    assert.equal(M.statePresentation({ ...s, outcomes: { hit: bad } }).level, 'active');
+  }
+  const ret = { diff: 4, lo: 1, hi: 7, detected: true };
+  assert.equal(M.statePresentation({ ...s, outcomes: { ret } }).level, 'active');
+  assert.match(M.statePresentation({ ...s, outcomes: { ret, hit } }).reason, /stronger rebound too/);
+  assert.doesNotMatch(M.statePresentation({ ...s, outcomes: { ret: { ...ret, hi: null }, hit } }).reason, /stronger rebound too/);
+  assert.equal(M.statePresentation({ ...s, outcomes: { ret: { diff: -4, lo: -7, hi: -1, detected: true } } }).level, 'risk');
+});

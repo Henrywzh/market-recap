@@ -2,11 +2,12 @@
 // each index, with the closes that flip it tomorrow; and FINRA short interest
 // for the members, the watchlist and the broad ETFs.
 
-import { el, card, num, metaRow, table, tag, DASH } from '../fmt.js';
+import { el, card, num, metaRow, table, tag, periodSwitch, DASH } from '../fmt.js';
 import { render, timeLines } from '../charts.js';
-import { rangeSwitch, sliceRange, initialRange } from '../range.js';
+import { rangeSwitch, sliceRange, initialRange, availableRanges } from '../range.js';
 import { spark } from '../spark.js';
 import { tickerHref } from '../routes.js';
+import { availableSeries, notShownNote, putCallReading } from '../put-call-model.js';
 
 const present = (v) => v !== null && v !== undefined && Number.isFinite(v);
 const signed = (v, digits = 1, suffix = '') => (present(v) ? `${v > 0 ? '+' : ''}${num(v, digits)}${suffix}` : DASH);
@@ -30,6 +31,64 @@ function stat(label, value, note, cls = '') {
     el('div', { class: 'stat-label', text: label }),
     el('div', { class: `stat-value ${cls}` }, [].concat(value)),
     note ? el('div', { class: 'stat-note', text: note }) : null,
+  ]);
+}
+
+// Index options only: no substitution by Total P/C, SPY or QQQ.
+function putCallSection(data) {
+  const series = availableSeries(data?.series);
+  const notShown = notShownNote(data?.disabled);
+  if (!series.length) {
+    return el('div', {}, [
+      el('div', { class: 'gap', text: 'Index-specific put/call data was not built for this session.' }),
+      notShown ? el('div', { class: 'field-note dim', text: notShown }) : null,
+    ]);
+  }
+  let window = data.default_window;
+  let range = availableRanges(series[0].dates, { short: true }).includes('3M') ? '3M' : 'MAX';
+  const windows = Object.keys(series[0].windows);
+  const chart = el('div', { class: 'chart', 'aria-label': 'Index option put/call volume ratio history' });
+  const stats = el('div', { class: 'grid two pc-readings' });
+  const draw = () => {
+    const readings = series.map((row) => putCallReading(row, window, range));
+    stats.replaceChildren(...series.map((row, i) => {
+      const reading = readings[i];
+      const dated = present(reading.latest) ? `${data.as_of} · ${window}` : `no complete ${window} reading for ${data.as_of}`;
+      return el('div', {}, [
+        el('div', { class: 'stat-label', text: row.label }),
+        el('div', { class: 'stat-value', text: num(reading.latest, 2) }),
+        el('div', { class: 'stat-note', text: dated }),
+        el('div', { class: 'pc-baseline', text: `Median ${num(reading.median, 2)} · percentile ${present(reading.percentile) ? `${num(reading.percentile, 1)}%` : DASH}` }),
+        el('div', { class: 'field-note', text: `${range}: ${reading.observed} / ${reading.expected} daily sessions · ${reading.missing} missing · ${reading.dates[0] || DASH} → ${reading.dates.at(-1) || DASH}` }),
+      ]);
+    }));
+    const drawn = series.map((row, i) => ({ row, reading: readings[i] })).filter(({ reading }) => reading.observations > 0);
+    chart.hidden = !drawn.length;
+    if (!drawn.length) return;
+    // The dashed line marks the range median of the first drawn series, so the chart shows the figure the text states.
+    const first = drawn[0].reading;
+    timeLines(chart, drawn.map(({ row, reading }, i) => ({
+      name: row.label, ...reading, color: (p) => i === 0 ? p.accent : p.blue,
+    })), {
+      left: (v) => num(v, 1),
+      value: (v) => num(v, 3),
+      markY: present(first.median) ? [{ y: first.median, label: `median ${num(first.median, 2)}` }] : [],
+    });
+  };
+  requestAnimationFrame(draw);
+  return card('INDEX OPTIONS · PUT / CALL VOLUME', periodSwitch(windows, window, (label) => { window = label; draw(); }), [
+    el('div', { class: 'pc-controls' }, [el('span', { class: 'dim', text: 'HISTORY RANGE' }), rangeSwitch(series[0].dates, range, (label) => { range = label; draw(); }, { short: true })]),
+    stats, chart,
+    ...series.map((row) => el('div', { class: 'pc-source' }, [
+      el('a', { href: row.source_url, target: '_blank', rel: 'noopener', text: `${row.label} · ${row.source_label}` }),
+    ])),
+    el('details', { class: 'sx-fold' }, [el('summary', { text: 'Method, coverage & interpretation' }),
+      el('div', { class: 'note-text', text: data.method }),
+      ...series.map((row) => el('div', { class: 'note-text', text: `${row.label}: ${[row.scope, row.note].filter(Boolean).join(' ')}` })),
+      el('div', { class: 'note-text', text: '1D / 1W / 1M above select daily / 5-session / 21-session smoothing. HISTORY RANGE selects the displayed dates; median, percentile and coverage use that range only. YTD ends on the artifact date, not today.' }),
+      el('div', { class: 'note-text', text: 'Series from different providers or universes are not automatically comparable: levels and percentiles differ. High P/C is not, by itself, a bullish reversal signal.' }),
+      notShown ? el('div', { class: 'note-text dim', text: notShown }) : null,
+    ]),
   ]);
 }
 
@@ -148,40 +207,54 @@ function blackoutSection(b) {
   if (!b || b.unavailable) {
     return card('BUYBACK BLACKOUT', null, el('div', { class: 'gap', text: `Not built this session${b?.unavailable ? `: ${b.unavailable}` : ''}.` }));
   }
-  const node = el('div', { class: 'chart' });
-  const today = b.dates.indexOf(b.as_of);
+  const node = el('div', { class: 'chart', 'aria-label': 'Estimated share of current S&P 500 weight in buyback blackout' });
+  // Momentum counts only when it was built for this artifact date; otherwise its cells show a dash.
+  const momentum = b.momentum?.as_of === b.as_of ? b.momentum : {};
+  const key = momentum.default_window || DASH;
+  const w = (momentum.windows || []).find((row) => row.key === momentum.default_window);
+  const strip = el('div', { class: 'stat-strip blackout-momentum' }, [
+    stat('IN BLACKOUT NOW', present(b.now_pct) ? `${num(b.now_pct, 1)}%` : DASH, `% of current weight · as of ${b.as_of}`),
+    stat(`PAST ${key} CHANGE`, signed(w?.now_delta_pp, 1, ' pp'), 'change in estimated covered weight'),
+    stat(`NEXT ${key} SCHEDULED`, signed(w?.ahead_delta_pp, 1, ' pp'), 'calendar + projected report dates'),
+    stat('PEAK AHEAD', present(b.peak_pct) ? `${num(b.peak_pct, 1)}%` : DASH, `on ${b.peak_date || DASH}`),
+  ]);
   requestAnimationFrame(() => render(node, (option, p) => ({
     ...option,
-    grid: { ...option.grid, left: 48, bottom: 44 },
+    grid: { ...option.grid, left: 48, bottom: 64 },
     legend: { bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9 },
-    tooltip: { ...option.tooltip, valueFormatter: (v) => (present(v) ? `${num(v, 0)}% of S&P 500 weight` : DASH) },
+    tooltip: { ...option.tooltip, valueFormatter: (x) => (present(x) ? `${num(x, 1)}%` : DASH) },
     xAxis: { ...option.xAxis, data: b.dates },
-    yAxis: { ...option.yAxis, min: 0, max: 100, axisLabel: { ...option.yAxis.axisLabel, formatter: (v) => `${v}%` } },
+    yAxis: { ...option.yAxis, min: 0, max: 100, axisLabel: { ...option.yAxis.axisLabel, formatter: (x) => `${num(x, 1)}%` } },
     series: [
       {
-        name: 'in blackout (report dates known)', type: 'line', showSymbol: false, step: 'end',
-        data: b.share_pct.map((v, i) => (i <= today ? v : null)),
-        lineStyle: { width: 1.4, color: p.accent }, areaStyle: { color: p.accent, opacity: 0.12 },
-        markLine: { silent: true, symbol: 'none', data: [{ xAxis: b.as_of }, { yAxis: 50 }],
-          lineStyle: { color: p.faint, type: 'dashed' }, label: { color: p.dim, fontSize: 9, formatter: (m) => (m.value === 50 ? '50%' : 'today') } },
+        name: 'reconstructed history', type: 'line', showSymbol: false, step: 'end',
+        data: (b.share_pct || []).map((x, i) => (b.dates[i] <= b.as_of ? x : null)),
+        itemStyle: { color: p.accent },
+        lineStyle: { width: 1.4, color: p.accent },
+        areaStyle: { color: p.accent, opacity: 0.12 },
+        markLine: {
+          silent: true, symbol: 'none',
+          data: [{ xAxis: b.as_of, label: { formatter: 'artifact date' } }, { yAxis: 50, label: { formatter: '50%', position: 'insideEndTop' } }],
+          lineStyle: { color: p.faint, type: 'dashed' }, label: { color: p.dim, fontSize: 9 },
+        },
       },
       {
-        name: 'ahead (calendar + projected dates)', type: 'line', showSymbol: false, step: 'end',
-        data: b.share_pct.map((v, i) => (i >= today ? v : null)),
-        lineStyle: { width: 1.4, color: p.blue, type: 'dashed' }, areaStyle: { color: p.blue, opacity: 0.08 },
+        name: 'ahead · calendar + projected', type: 'line', showSymbol: false, step: 'end',
+        data: (b.share_pct || []).map((x, i) => (b.dates[i] >= b.as_of ? x : null)),
+        itemStyle: { color: p.blue },
+        lineStyle: { width: 1.4, color: p.blue, type: 'dashed' },
       },
     ],
   })));
-  const tone = b.now_pct >= 50 ? 'down' : b.now_pct >= 25 ? 'warn' : 'up';
-  return el('div', {}, [
-    el('div', { class: 'stat-strip' }, [
-      stat('IN BLACKOUT NOW', [tag(`${num(b.now_pct, 0)}%`, tone)], 'of S&P 500 weight'),
-      stat('PEAK AHEAD', b.peak_pct === null ? DASH : `${num(b.peak_pct, 0)}%`, b.peak_date ? `on ${b.peak_date}` : ''),
-      stat('NEXT DATES', `${b.scheduled} scheduled`, `${b.projected} projected · ${b.missing} unknown`),
-      stat('WINDOW', `−${b.before_days}d → +${b.after_days}d`, 'around each report'),
+  return el('div', { class: 'blackout-section' }, [
+    card('S&P 500 WEIGHT IN AN ESTIMATED BUYBACK BLACKOUT', el('span', { class: 'dim', text: `as of ${b.as_of}` }), [
+      strip, node,
+      el('details', { class: 'sx-fold' }, [el('summary', { text: 'Method & limits' }),
+        el('div', { class: 'note-text', text: `A proxy for potentially reduced discretionary repurchase demand, not observed buyback flow or a price forecast. Each member counts from ${b.before_days} calendar days before each report to ${b.after_days} days after, weighted by today's S&P 500 weight. Report dates come from the member's past filings, the next one from the earnings calendar, or a projection from its usual gap (${b.projected} names). A convention, not any company's policy: prearranged 10b5-1 plans may keep buying through a blackout.` }),
+        el('div', { class: 'note-text', text: `Windows are calendar days, not trading sessions. Dashed values after ${b.as_of} are schedule scenarios, not observed changes. Report-date coverage is ${present(b.weight_covered_pct) ? `${num(b.weight_covered_pct, 1)}%` : DASH} of current weight: ${b.scheduled} scheduled, ${b.projected} projected, ${b.missing} unknown next dates.` }),
+        el('div', { class: 'note-text', text: 'Not point-in-time: current constituents and weights are applied backwards, and historical report-date coverage is not audited per day. Roughly one year is too short for a credible OOS or causal backtest; high blackout is not a sell signal.' }),
+      ]),
     ]),
-    card('S&P 500 WEIGHT IN AN ESTIMATED BUYBACK BLACKOUT', el('span', { class: 'dim', text: 'a year back, 60 days ahead' }), [node,
-      el('div', { class: 'note-text', text: `Companies usually stop discretionary buybacks from a few weeks before earnings until just after them, so the index loses its steadiest buyer when this share is high. Each member counts from ${b.before_days} days before each report to ${b.after_days} days after, weighted by today's S&P 500 weight. Report dates: past releases from the member's own filings, the next one from the earnings calendar, or projected from its usual gap (${b.projected} names). A convention, not any company's policy: 10b5-1 plans can keep buying through a blackout.` })]),
   ]);
 }
 
@@ -273,12 +346,13 @@ export default function renderPositioning(root, data) {
     ...data.trend.map((t) => stat(`${t.label.toUpperCase()} TREND`, [tag(t.state || DASH, STATE_TONE[t.state] || 'dim')], `score ${signed(t.score, 2)}`)),
     stat('S&P 500 SHORT VALUE', last ? `$${num(last.short_value_bn, 0)}bn` : DASH, change === null ? '' : `${signed(change, 1, '%')} vs prior round`, change > 0 ? 'down' : change < 0 ? 'up' : ''),
     stat('MEDIAN DAYS TO COVER', last ? num(last.median_days_to_cover, 1) : DASH, last ? `${last.names} members · ${last.date}` : ''),
-    stat('BUYBACK BLACKOUT', present(data.blackout?.now_pct) ? `${num(data.blackout.now_pct, 0)}%` : DASH, 'of S&P 500 weight, estimated',
-      data.blackout?.now_pct >= 50 ? 'down' : ''),
+    stat('BUYBACK BLACKOUT', present(data.blackout?.now_pct) ? `${num(data.blackout.now_pct, 0)}%` : DASH, 'estimated weight · not observed flow'),
     stat('INSIDER CLUSTERS', data.insiders?.clusters ? String(data.insiders.clusters.length) : DASH,
       data.insiders?.coverage ? `${data.insiders.window_days} days · ${data.insiders.coverage.complete ? 'all filings read' : 'filling in'}` : ''),
   ]));
 
+  root.append(el('h2', { class: 'section-title', text: 'INDEX PUT / CALL' }));
+  root.append(putCallSection(data.index_put_call));
   root.append(el('h2', { class: 'section-title', text: 'TREND FOLLOWERS' }));
   root.append(el('div', { class: 'grid two' }, data.trend.map(trendCard)));
   root.append(el('h2', { class: 'section-title', text: 'SHORT INTEREST' }));

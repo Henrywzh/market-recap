@@ -120,6 +120,9 @@ def test_panel_assembles_without_inventing_and_marks_what_holds_now():
     # the stress days are the last 30, so none is scored: the state has no days to measure and says so
     assert states["stress"]["days"] == 0 and states["stress"]["status"] == "insufficient" and states["stress"]["outcomes"] is None
     assert {r["key"] for r in p["readings"]} == set(M.READINGS) and all(len(r["spark"]) == 252 for r in p["readings"])
+    assert all(r['unit'] == '%' for r in p['readings'] if r['key'] in ('rsp_spy', 'iwm_spy'))
+    assert 'ratio change' in P._rule_text([{'reading': 'rsp_spy', 'op': 'lt', 'value': -2}], cfg())
+    assert P._rule_text([{'reading': 'rsp_spy', 'op': 'lt', 'value': -2}], cfg()).endswith('-2%')
     assert {s["etf"] for s in p["sectors"]} == {"XLK", "XLF", "XLE"}
     assert sorted(p["sectors"], key=lambda r: -r["vs_200_pct"]) == p["sectors"]
 

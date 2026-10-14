@@ -94,6 +94,16 @@ def test_blackout_counts_weight_inside_the_window_and_projects_missing_dates():
     assert out["dates"][0] == "2026-08-29" and out["dates"][-1] == "2026-11-27"
 
 
+def test_blackout_without_any_index_weight_keeps_values_missing():
+    ctx = _ctx([{"yahoo_symbol": "AAA", "weight": 0.0, "name": "A"}])
+    out = panel._blackout(ctx, {"blackout_history_days": 15, "blackout_days_ahead": 7,
+                              "blackout_change_calendar_days": [1, 7]}, None, None)
+    assert out["now_pct"] is None
+    assert out["peak_pct"] is None and out["peak_date"] is None
+    assert out["weight_covered_pct"] is None
+    assert out["momentum"]["windows"][0]["now_delta_pp"] is None
+
+
 def test_insider_scan_reads_new_filings_within_budget_and_reports_coverage(tmp_path, monkeypatch):
     from market_recap import cache
     from market_recap.sources import sec

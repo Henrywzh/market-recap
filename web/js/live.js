@@ -143,11 +143,12 @@ function createController({ asOf } = {}) {
     }
     toggle.setAttribute('aria-expanded', String(more));
     rest.hidden = !more;
-    if (title) title.textContent = `LIVE · ${newYorkDayLabel(now)}`;
+    if (title) title.textContent = `${body?.session?.open === true ? 'LIVE · REGULAR SESSION' : body?.session?.open === false ? 'MARKET CLOSED · LAST QUOTES' : 'QUOTES · SESSION UNKNOWN'} · ${newYorkDayLabel(now)}`;
     const minutes = Math.round((body?.refresh_seconds ?? 60) / 60);
     foot.textContent = 'Live, intraday, unofficial (Yahoo; Treasury yields are Cboe\'s yield indexes through Yahoo), '
       + `every ${minutes === 1 ? 'minute' : `${minutes} minutes`} while the session is open. `
       + 'Change vs the previous close. '
+      + 'Age beside each price is the quote age; the header reports the last fetch. '
       + (asOf ? `Everything below is the build's close of ${asOf}.` : 'Everything below is the build\'s close.');
   }
 

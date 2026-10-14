@@ -401,15 +401,17 @@ export default function renderOverview(root, data) {
     el('div', { class: 'ov-col' }, [
       stocksCard(data.stocks, data.contributions),
       sectorHeatCard(data.sectors),
-      bankBookCard(data.bank_book),
       ratesCard(data.rates, data.fed, data.rates_history),
-      printsCard(data.prints),
     ].filter(Boolean)),
     el('div', { class: 'ov-col' }, [
-      performanceCard(data.performance, data.equal_vs_cap),
-      breadthCard(data.breadth, data.breadth_history, data.distribution),
-      crossCard(data.cross_asset, data.vol),
       aheadCard(data.ahead),
+      breadthCard(data.breadth, data.breadth_history, data.distribution),
+      performanceCard(data.performance, data.equal_vs_cap),
     ].filter(Boolean)),
+  ]));
+  root.append(el('details', { class: 'ov-context' }, [
+    el('summary', { text: 'More context · commodities, macro prints & bank valuations' }),
+    el('div', { class: 'grid two' }, [crossCard(data.cross_asset, data.vol), printsCard(data.prints)]),
+    bankBookCard(data.bank_book),
   ]));
 }

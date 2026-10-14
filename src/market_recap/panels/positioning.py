@@ -31,10 +31,15 @@ import pandas as pd
 from .. import cache
 from ..compute import evidence as V
 from ..compute import positioning as P
+from ..compute.blackout import calendar_momentum
 from ..sources import finra, sec
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, company_name, history_payload, to_iso_date
+from .index_put_call import build_component
 
 # Same-session artifacts this panel reads (build.optional_panel).
+# The index put/call SPX series also reads RISK's cached Cboe files, but RISK is
+# not declared here (loading its artifact would add nothing). A POSITIONING-only
+# build uses whatever RISK last cached; missing sessions stay blank.
 INPUTS = ("catalysts", "evidence")
 
 
@@ -211,9 +216,9 @@ def _blackout(ctx, settings, catalysts, evidence) -> dict:
         inside = sum(w for w, spans in windows if any(a <= day <= b for a, b in spans))
         share.append(round(100 * inside / total, 1) if total else None)
     series = pd.Series(share, index=pd.to_datetime(days))
-    now = float(series.loc[pd.Timestamp(as_of)])
+    now = clean_float(series.loc[pd.Timestamp(as_of)], 1)
     future = series[series.index > pd.Timestamp(as_of)]
-    peak_day = future.idxmax() if not future.empty else None
+    peak_day = future.idxmax() if future.notna().any() else None
     return {
         "as_of": ctx.as_of, "before_days": before, "after_days": after,
         "dates": [d.isoformat() for d in days], "share_pct": share,
@@ -222,6 +227,8 @@ def _blackout(ctx, settings, catalysts, evidence) -> dict:
         "peak_date": to_iso_date(peak_day),
         "members": int(len(members)), "scheduled": scheduled, "projected": projected, "missing": missing,
         "weight_covered_pct": clean_float(100 * sum(w for w, _ in windows) / total, 1) if total else None,
+        "momentum": calendar_momentum([d.isoformat() for d in days], share, ctx.as_of,
+                                      settings.get("blackout_change_calendar_days", [])),
     }
 
 
@@ -365,6 +372,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         "insiders": insiders,
         "fund_flows": _ici_flows(),
         "lookbacks": P.LOOKBACKS,
+        "index_put_call": build_component(ctx.as_of, settings["index_put_call"], ctx.log) if settings.get("index_put_call") else None,
     }
 
 

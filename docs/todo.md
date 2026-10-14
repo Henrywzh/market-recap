@@ -695,3 +695,47 @@ position reading for memory (contract price momentum from ADATA / TrendForce;
 one DDR4 kit in PCPartPicker's index: +95% over twelve months, -2.4% over one); a claims ledger for the numbers prices lean on (OpenAI's reported
 revenue and its basis, CXMT's share) beyond the three events entered.
 
+## 18. Technicals mean-reversion evidence and relative rotation (2026-10-14)
+
+Recorded at Henry's request; deferred, not implemented or scheduled. Discussion
+prompt: https://guolaoxing.com/archives/84246 (mechanism hypotheses, not a
+validated signal). Improve the existing Technicals view, not another dashboard.
+
+- **Stretch versus repair.** Keep the current long-window price Z-score as
+  distance, not a Gaussian reversal probability. Research short-window
+  deviations, ATR-normalized distance and historical percentiles. Treat first
+  entry into an extreme and re-entry into the normal range as separate events;
+  parameter choices belong in config, with period definitions shared.
+- **State statistics versus event studies.** The existing table already has
+  count, mean, median and positive-return share, but counts consecutive state
+  days with overlapping outcomes. Keep it labelled descriptive; add independent
+  episodes and explicit overlap handling for inference, rather than calling
+  each day a new independent signal.
+- **Horizons and distributions.** Research 3/5/7/10/15/20-session outcomes:
+  mean, median, P25/P75, absolute positive-return probability, benchmark
+  outperformance probability, adverse path, target-hit probability and time to
+  repair. Show mature sample counts, uncertainty and an unconditional or
+  regime-matched baseline. A Z-score can normalize because its moving average
+  falls: measure actual returns and a target frozen at the signal as well.
+- **Relative rotation.** Apply the same engine to configured A/B pairs,
+  particularly XLP/XLK and XLP/SPY, not just single-name prices. Distinguish
+  absolute rebounds from merely falling less. Do not assume a price ratio is
+  stationary or has a stable mean-reversion half-life.
+- **Validation before promotion.** Separate market trend, breadth and volatility
+  environments using information available at the signal. Freeze rules before
+  chronological holdouts/walk-forward tests; previously inspected periods are
+  exploratory, not untouched OOS. Executable tests enter after confirmation,
+  report costs and reuse existing event/window definitions. Do not invent
+  probabilities for thin or missing samples.
+- **Secondary context, not dealer monitoring.** Reuse Monitor's separate
+  price/evidence states and Trade Desk's IV/skew/implied range. Optional
+  strike/expiry OI concentration or gamma scenarios must name their coverage
+  and position assumptions. Current snapshots omit 0DTE/1DTE and lack signed
+  dealer positions, participant types and open/close flow; they cannot confirm
+  dealer buying, CTA covering or a gamma squeeze. Check redistribution rights
+  before adding any external position/flow feed.
+
+Priority: the Technicals event/relative evidence first; options scenarios second.
+No change to the anchor, automatic trading, paid feed or deployment is approved
+by this TODO entry.
+

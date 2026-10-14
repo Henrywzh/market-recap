@@ -67,6 +67,23 @@ export function daysNow(state) {
   return state?.active_now ? `NOW · ${state.days_now} D` : null;
 }
 
+// Colour current conditions by adverse historical evidence, not the rule's
+// alarming name. Require the reported flag AND a finite, adverse 95% range.
+export function statePresentation(state) {
+  if (!state?.active_now) return { tone: 'dim', level: 'inactive', label: 'NOT ACTIVE', reason: 'Rule does not hold on this artifact date.' };
+  if (state.status !== 'ok') return { tone: 'warn', level: 'active', label: 'ACTIVE', reason: 'Rule holds; too little history to assess subsequent risk.' };
+  const adverse = [];
+  for (const [key, label] of [['ret', 'lower return'], ['worst_dd', 'deeper drawdown'], ['hit', 'higher fall probability']]) {
+    const o = state.outcomes?.[key];
+    if (!o?.detected || ![o.diff, o.lo, o.hi].every(finite) || o.lo > o.hi) continue;
+    if (key === 'hit' ? o.diff > 0 && o.lo > 0 : o.diff < 0 && o.hi < 0) adverse.push(label);
+  }
+  if (!adverse.length) return { tone: 'warn', level: 'active', label: 'ACTIVE', reason: 'Rule holds; no clear adverse historical difference.' };
+  const ret = state.outcomes?.ret;
+  const rebound = ret?.detected && [ret.lo, ret.hi, ret.diff].every(finite) && ret.lo <= ret.hi && ret.lo > 0 && ret.diff > 0;
+  return { tone: 'down', level: 'risk', label: 'CAUTION', reason: `${adverse.join(' · ')}${rebound ? '; stronger rebound too' : ''}.` };
+}
+
 // A sector fund against its 200-day line.
 export function sectorFlag(row) {
   if (row.above_200 === null || row.above_200 === undefined) return { text: DASH, tone: 'dim' };

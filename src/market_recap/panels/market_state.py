@@ -22,7 +22,7 @@ from ..context import YAHOO_URL
 from ..sources import yahoo
 from ..util import SourceRecord, clean_float, to_iso_date
 
-UNITS = {"rsp_spy": "pp", "iwm_spy": "pp", "sector_above_200": "%", "sector_above_50": "%", "spy_drawdown": "%", "vix": "pts"}
+UNITS = {"rsp_spy": "%", "iwm_spy": "%", "sector_above_200": "%", "sector_above_50": "%", "spy_drawdown": "%", "vix": "pts"}
 OUTCOMES = {"ret": "RETURN", "worst_dd": "WORST FALL", "hit": "FELL BY THE FLOOR OR MORE"}
 NOTES = (
     "Days in a state overlap: neighbouring days share most of their forward window, so the count of separate "
@@ -36,7 +36,7 @@ NOTES = (
 
 def _rule_text(conditions: list[dict], cfg: dict) -> str:
     names = {
-        "rsp_spy": f"RSP less SPY over {cfg['relative_period']}", "iwm_spy": f"IWM less SPY over {cfg['relative_period']}",
+        "rsp_spy": f"RSP / SPY ratio change over {cfg['relative_period']}", "iwm_spy": f"IWM / SPY ratio change over {cfg['relative_period']}",
         "sector_above_200": f"sector funds above {cfg['long_ma']}D", "sector_above_50": f"sector funds above {cfg['short_ma']}D",
         "spy_drawdown": f"market from its {cfg['high_period']} high", "vix": "VIX",
     }

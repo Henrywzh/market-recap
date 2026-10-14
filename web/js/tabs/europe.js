@@ -2,12 +2,42 @@
 // funds. Returns are in local currency and, for the indices, in dollars (the
 // local return compounded with the currency's move). Prices are Yahoo's.
 
-import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, gap, DASH } from '../fmt.js';
+import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, gap, periodSwitch, DASH } from '../fmt.js';
 import { multiLine } from '../charts.js';
 import { spark } from '../spark.js';
 import { flagText } from '../europe-model.js';
 
 const present = (v) => v !== null && v !== undefined && Number.isFinite(v);
+
+function heatmap(data, kind) {
+  const indices = kind === 'indices';
+  const rows = data[kind];
+  let period = '1M';
+  let mode = indices ? 'LOCAL' : 'RETURN';
+  const modes = indices ? ['LOCAL', 'USD'] : ['RETURN', 'VS STOXX 600'];
+  const periods = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y'].filter((p) => rows.some((r) => Object.hasOwn(r.returns || {}, p)));
+  const grid = el('div', { class: 'eu-heatmap' });
+  const note = el('div', { class: 'field-note' });
+  const draw = () => {
+    const relative = mode === 'VS STOXX 600';
+    const field = relative ? 'relative' : mode === 'USD' ? 'returns_usd' : 'returns';
+    const scale = Math.max(1, ...rows.map((r) => Math.abs(r[field]?.[period] ?? 0)));
+    grid.replaceChildren(...rows.map((r) => {
+      const value = r[field]?.[period];
+      const tint = present(value) ? `background:color-mix(in srgb, var(${value >= 0 ? '--up' : '--down'}) ${Math.round(8 + 25 * Math.min(Math.abs(value) / scale, 1))}%, var(--panel))` : '';
+      return el('div', { class: `eu-heat-tile ${present(value) ? '' : 'dim'}`, style: tint, title: `${r.symbol} · ${r.date || data.inputs.prices_through}` }, [
+        el('div', { class: 'eu-heat-name', text: r.label }),
+        el('div', { class: `eu-heat-value ${dirClass(value)}`, text: present(value) ? `${value > 0 ? '+' : ''}${num(value, 1)}${relative ? ' pp' : '%'}` : DASH }),
+        el('div', { class: 'field-note', text: `${period} · ${relative ? 'vs STOXX 600' : mode === 'USD' ? 'USD' : r.currency}` }),
+      ]);
+    }));
+    note.textContent = `Equal-size tiles, not market-cap weights. Color intensity is scaled within this view. ${relative ? 'Fund return less the STOXX 600 fund return, in percentage points.' : 'Price returns; local currencies and USD are not interchangeable.'} As of ${data.as_of}.`;
+  };
+  draw();
+  return card(indices ? 'EUROPE INDICES · PERFORMANCE MAP' : 'EUROPE SECTORS · PERFORMANCE MAP', periodSwitch(periods, period, (p) => { period = p; draw(); }), [
+    el('div', { class: 'pc-controls' }, [periodSwitch(modes, mode, (m) => { mode = m; draw(); })]), grid, note,
+  ]);
+}
 
 function stat(label, value, note, cls = '') {
   return el('div', { class: 'stat' }, [
@@ -75,5 +105,13 @@ export default function renderEurope(root, data) {
   }
   root.append(sectionTitle('EUROPE', 'INDICES AND SECTORS'));
   root.append(metaRow(`AS OF ${data.as_of} · PRICES THROUGH ${data.inputs.prices_through}${data.inputs.no_prices?.length ? ` · NO PRICES: ${data.inputs.no_prices.join(', ')}` : ''}`, data.notes));
-  root.append(strip(data), indexTable(data), chartCard(data), sectorTable(data));
+  root.append(strip(data), heatmap(data, 'indices'), heatmap(data, 'sectors'));
+  const details = el('details', { class: 'sx-fold' }, [el('summary', { text: 'Exact readings, trend flags & dollar history' })]);
+  let loaded = false;
+  details.addEventListener('toggle', () => {
+    if (!details.open || loaded) return;
+    loaded = true;
+    details.append(indexTable(data), chartCard(data), sectorTable(data));
+  });
+  root.append(details);
 }

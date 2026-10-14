@@ -508,7 +508,7 @@ spy_drawdown = "MARKET FROM 1Y HIGH"
 vix = "VIX"
 
 # Each state is a rule: every condition must hold. Readings: rsp_spy and
-# iwm_spy (relative return, percentage points over relative_period),
+# iwm_spy (relative price-ratio return, percent over relative_period),
 # sector_above_200 / sector_above_50 (percent of the sector funds),
 # spy_drawdown (percent from the high), vix.
 [[market_state.states]]
@@ -1244,6 +1244,8 @@ blackout_days_before = 30
 blackout_days_after = 2
 blackout_history_days = 365
 blackout_days_ahead = 60
+# Finite differences of calendar-day coverage, not trading-session returns.
+blackout_change_calendar_days = [1, 7]
 # Insider buying: strict Form 4 purchases (evidence.strict_form4_buys) over
 # ``window_days``; each build reads at most ``max_new_filings`` filings it has
 # not parsed before, newest day first, within ``budget_seconds``.
@@ -1253,6 +1255,35 @@ insider_budget_seconds = 420
 insider_cluster_min_value = 250000
 insider_recent_days = 30
 insider_top = 20
+
+[positioning.index_put_call]
+# Uses the daily files already collected by RISK: no extra HTTP requests.
+sessions = 400
+windows = ["1D", "1W", "1M"]
+default_window = "1W"
+
+[[positioning.index_put_call.series]]
+key = "spx"
+label = "SPX + SPXW"
+provider = "cboe_cache"
+volume_key = "SPX + SPXW"
+source_label = "Cboe daily options statistics"
+source_url = "https://www.cboe.com/us/options/market_statistics/daily/"
+scope = "SPX and SPXW index-option volume; all expiries, including 0DTE. Not SPY or Total P/C."
+
+[[positioning.index_put_call.series]]
+key = "ndx"
+label = "NDX family"
+provider = "licensed_csv"
+underlying = "NDX"
+csv_path = "data/private/index-put-call/ndx.csv"
+source_label = "OCC underlying-level volume (authorized import)"
+source_url = "https://www.theocc.com/market-data/market-data-reports/volume-and-open-interest/volume-query"
+scope = "All option roots reported under underlying NDX, across accounts and exchanges. Not Nasdaq Composite or QQQ."
+# Public availability is not a redistribution license. Both are required;
+# the reference must cover this dataset and this site's public display.
+publish_allowed = false
+permission_reference = ""
 
 [etf_detail]
 # ETF PRICE & PUBLISHED FLOWS: funds listed first in the picker (the first is

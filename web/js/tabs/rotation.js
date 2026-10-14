@@ -392,16 +392,21 @@ export function renderRotationGraph(root, data, { drill = true } = {}) {
   renderRotationSection(root, data, { drill });
 }
 
-export async function renderRotationDetail(root, ctx = {}) {
+export async function renderRotationDetail(root, ctx = {}, { section = 'all', stillMounted = () => true, groups = null } = {}) {
   // The typical member of each group with the evidence beside it. A view has
   // at most four tabs (docs/information_architecture.md), so this is a section
   // of SECTORS rather than a view of its own.
-  const industries = await ctx.loadArtifact?.('industries').catch(() => null);
-  const industriesHost = el('div', { class: 'sectors-industries' });
-  root.append(industriesHost);
-  if (industries && industries.as_of) renderIndustries(industriesHost, industries);
-  else industriesHost.append(sectionTitle('INDUSTRIES', 'MEDIAN MEMBER'), el('div', { class: 'gap', text: 'The industry scorecard was not built for this session.' }));
+  if (section !== 'valuation') {
+    const industries = await ctx.loadArtifact?.('industries').catch(() => null);
+    if (!stillMounted()) return;
+    const industriesHost = el('div', { class: 'sectors-industries' });
+    root.append(industriesHost);
+    if (industries && industries.as_of) renderIndustries(industriesHost, industries, groups);
+    else industriesHost.append(sectionTitle('INDUSTRIES', 'MEDIAN MEMBER'), el('div', { class: 'gap', text: 'The industry scorecard was not built for this session.' }));
+  }
+  if (section === 'industries') return;
   const valuation = await ctx.loadArtifact?.('valuation').catch(() => null);
+  if (!stillMounted()) return;
   const host = el('div', { class: 'sectors-valuation' });
   root.append(sectionTitle('VALUATION', 'P/E AGAINST OWN 10 YEARS'), host);
   if (!renderAggregates(host, valuation)) {
@@ -449,7 +454,7 @@ function renderRotationSection(root, data, { drill = true } = {}) {
         (data.benchmark.cap[view.window] ?? 0) >= 0 ? 'up' : 'down'),
       stat('STRONGEST', short(strongest.label), `${signed(strongest[view.scheme].windows[view.window].excess, 1)} pp vs S&P`, 'up'),
       stat('WEAKEST', short(weakest.label), `${signed(weakest[view.scheme].windows[view.window].excess, 1)} pp vs S&P`, 'down'),
-      stat('LEADING NOW', `${leading.length} of ${groups.length}`, leading.map((g) => short(g.label)).join(' · ') || 'none'),
+      stat('WEEKLY RRG · LEADING', `${leading.length} of ${groups.length}`, leading.map((g) => short(g.label)).join(' · ') || 'none'),
       stat('NAMES BEATING S&P', beat.length ? `${Math.round((100 * beating) / beat.length)}%` : DASH, `${beating} of ${beat.length} · ${view.window} · vs ${view.scheme === 'cap' ? 'cap' : 'equal'}-wtd`),
     );
 

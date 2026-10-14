@@ -9,7 +9,7 @@
 // a threshold the build took from config.
 
 import { el, table, num, pct, dirClass, sectionTitle, notice, metaRow, periodSwitch, tag, DASH } from '../fmt.js';
-import { tickerHref } from '../routes.js';
+import { tickerHref, hashFor } from '../routes.js';
 import { LEVELS, FILTERS, applyFilters, sortRows, evidenceTags, sectorsOf } from '../industries-model.js';
 
 const COLUMNS = [
@@ -58,11 +58,11 @@ function memberTable(row) {
   return table(['NAME', 'WT %', '1M', '3M', '6M', 'FROM 1Y HIGH', 'TREND', 'EPS 30D', 'EPS 90D', 'FWD P/E', 'P/E PCTL'], rows, { class: 'industries-members' });
 }
 
-function cells(row, settings) {
+function cells(row, settings, href) {
   const sold = row.evidence.sold_off === true;
   return [
     el('td', {}, [
-      el('span', { text: row.label, title: row.best ? `best ${row.best.ticker} ${pct(row.best.return, 1)} · worst ${row.worst.ticker} ${pct(row.worst.return, 1)}` : null }),
+      el(href ? 'a' : 'span', { href, text: row.label, onclick: href ? (event) => event.stopPropagation() : null, title: row.best ? `best ${row.best.ticker} ${pct(row.best.return, 1)} · worst ${row.worst.ticker} ${pct(row.worst.return, 1)}` : null }),
       row.thin ? el('span', { class: 'dim', text: ' thin', title: `fewer than ${settings.thin_below} names: a median of this few is noise` }) : null,
       row.kind === 'sub_industry' ? el('div', { class: 'dim', text: row.sector }) : null,
     ]),
@@ -82,7 +82,7 @@ function cells(row, settings) {
   ];
 }
 
-export default function renderIndustries(root, data) {
+export default function renderIndustries(root, data, groups = null) {
   const settings = data.settings;
   root.append(sectionTitle('INDUSTRIES', 'MEDIAN MEMBER, WITH THE EVIDENCE BESIDE IT'));
   if ((data.missing || []).length) {
@@ -100,7 +100,7 @@ export default function renderIndustries(root, data) {
       `Tags are evidence, not a verdict. SOLD OFF: median 1M at or below ${settings.sold_off_return_pct}% with at least ${Math.round(settings.sold_off_down_share * 100)}% of names down. `
         + `EST CUT / EST HELD: median revision below ${settings.estimates_cut_30d_pct}% (30d) or ${settings.estimates_cut_90d_pct}% (90d), or not. P/E LOW: percentile at or below ${settings.cheap_percentile}. `
         + 'Estimates cover this fiscal year only: a fall the estimates do not explain can still be a fall about the years after it.',
-      `A sub-industry with fewer than ${settings.thin_below} names is thin and left off this table; its page is under SECTORS. Click a group to see its names; hover its name for its best and worst.`,
+      `A sub-industry with fewer than ${settings.thin_below} names is thin and left off this table; its page is under SECTORS. ${groups ? 'Click a group name for its combined valuation / industry page; click elsewhere in the row to expand names.' : 'Click a group to see its names.'} Hover its name for its best and worst.`,
     ],
   ));
 
@@ -144,10 +144,13 @@ export default function renderIndustries(root, data) {
     const body = [];
     rows.forEach((row) => {
       const id = `${row.kind}:${row.sector}:${row.label}`;
+      const sector = groups?.sectors.find((s) => s.label === (row.kind === 'sector' ? row.label : row.sector));
+      const group = row.kind === 'sector' ? sector : groups?.sub_industries.find((s) => s.label === row.label && s.sector_key === sector?.key);
+      const href = group ? `#${hashFor('sectors', group.key)}` : null;
       const tr = el('tr', { class: row.member_rows ? 'clickable' : null, onclick: row.member_rows ? () => {
         if (state.open.has(id)) state.open.delete(id); else state.open.add(id);
         draw();
-      } : null }, cells(row, settings));
+      } : null }, cells(row, settings, href));
       body.push(tr);
       if (row.member_rows && state.open.has(id)) {
         body.push(el('tr', {}, [el('td', { colspan: String(COLUMNS.length) }, [memberTable(row)])]));

@@ -83,6 +83,15 @@ export function disposeAll() {
   registry.clear();
 }
 
+export function disposeWithin(host) {
+  registry.forEach((chart, node) => {
+    if (host.contains(node)) {
+      chart.dispose();
+      registry.delete(node);
+    }
+  });
+}
+
 // --- Chart recipes -------------------------------------------------------
 
 export function areaLine(node, dates, values, color) {
