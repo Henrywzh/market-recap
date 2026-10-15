@@ -2,7 +2,22 @@
 // from the same CSS variables as the tables so a theme switch cannot leave a
 // chart on the old palette.
 
+import { formatTick, formatValue, niceStepFromRange } from './axis-format.js';
+
 const registry = new Map();
+
+// Value-axis labels carry the decimals their tick spacing needs (axis-format.js).
+// ECharts gives an axisLabel formatter only (value, tick index), not the axis
+// extent, so the default is tagged `adaptive` and render() replaces it, once the
+// axis has drawn its ticks, with one that knows the step.
+function tickLabels(step = null) {
+  const label = (v) => formatTick(v, step);
+  label.adaptive = true;
+  return label;
+}
+
+// Tooltip numbers: at most three decimals, unless a chart sets its own valueFormatter.
+const tooltipValue = (v) => (v === null || v === undefined || typeof v === 'number' ? formatValue(v) : v);
 
 function css(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -41,6 +56,7 @@ function baseOption(p) {
       borderWidth: 1,
       textStyle: { color: p.text, fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace' },
       axisPointer: { type: 'line', lineStyle: { color: p.faint, type: 'dashed' } },
+      valueFormatter: tooltipValue,
     },
     xAxis: {
       type: 'category',
@@ -55,7 +71,7 @@ function baseOption(p) {
       scale: true,
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: p.dim, fontSize: 10 },
+      axisLabel: { color: p.dim, fontSize: 10, formatter: tickLabels() },
       splitLine: { lineStyle: { color: p.border, opacity: 0.45 } },
     },
   };
@@ -67,9 +83,33 @@ export function render(node, build) {
   if (chart) chart.dispose();
   chart = window.echarts.init(node, null, { renderer: 'canvas' });
   const p = palette();
-  chart.setOption(build(baseOption(p), p), true);
+  const option = build(baseOption(p), p);
+  chart.setOption(option, true);
+  fitTickLabels(chart, option);
   registry.set(node, chart);
   return chart;
+}
+
+// Each adaptive value axis takes the step ECharts drew it with: the spacing of
+// its ticks, or the nice step of its extent when it has fewer than two ticks. The
+// step is known only after the first draw, so the labels are set again here;
+// setOption is synchronous, so the axis scale read below is the drawn one.
+// Without the model (an ECharts without this API) the default formatter stays.
+function fitTickLabels(chart, option) {
+  const model = chart.getModel?.();
+  const patch = [].concat(option.yAxis || []).map((axis, index) => {
+    if (!axis?.axisLabel?.formatter?.adaptive) return {};
+    const scale = model?.getComponent('yAxis', index)?.axis?.scale;
+    return scale ? { axisLabel: { formatter: tickLabels(tickStep(scale)) } } : {};
+  });
+  if (patch.some((entry) => entry.axisLabel)) chart.setOption({ yAxis: patch });
+}
+
+function tickStep(scale) {
+  const ticks = scale.getTicks().map((tick) => tick.value);
+  if (ticks.length > 1 && ticks[1] !== ticks[0]) return Math.abs(ticks[1] - ticks[0]);
+  const [min, max] = scale.getExtent();
+  return niceStepFromRange(min, max, 5);
 }
 
 export function resizeAll() {
@@ -188,9 +228,10 @@ export function multiLine(node, dates, seriesMap, options = {}) {
 export function timeLines(node, lines, options = {}) {
   return render(node, (option, p) => {
     const colorOf = (line, i) => (typeof line.color === 'function' ? line.color(p) : line.color) || SERIES_COLORS[i % SERIES_COLORS.length];
+    // No formatter given: the adaptive default stays, so the decimals follow the ticks.
     const axis = (formatter, extra = {}) => ({
       ...option.yAxis,
-      axisLabel: { ...option.yAxis.axisLabel, formatter: formatter || undefined },
+      axisLabel: { ...option.yAxis.axisLabel, formatter: formatter || option.yAxis.axisLabel.formatter },
       ...extra,
     });
     const twoAxes = lines.some((l) => l.axis === 1);
@@ -207,7 +248,7 @@ export function timeLines(node, lines, options = {}) {
           const rows = [].concat(items).map((it) => {
             const line = lines[it.seriesIndex];
             const v = it.value?.[1];
-            const text = v === null || v === undefined ? '—' : options.value ? options.value(v, line) : String(v);
+            const text = options.value && v !== null && v !== undefined ? options.value(v, line) : formatValue(v);
             return `${it.marker}${it.seriesName} <b>${text}</b>`;
           });
           const first = [].concat(items)[0];

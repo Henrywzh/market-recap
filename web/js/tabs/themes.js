@@ -13,6 +13,7 @@ import { spark } from '../spark.js';
 import { stateTone, stateWhy, breadthText, revisionText, valuationText, quadrantTone, splitWidths } from '../themes-board.js';
 import { valuationBlock } from '../valuation-block.js';
 import { pageValuation } from '../sectors-model.js';
+import { openrouterCharts } from '../openrouter-chart.js';
 
 const KIND_TONE = { earnings: 'warn', macro: 'info', data: 'up' };
 const KIND_LABEL = { earnings: 'EARN', macro: 'MACRO', data: 'DATA' };
@@ -35,14 +36,6 @@ function pctCell(value, digits = 1) {
 
 function link(symbol) {
   return el('a', { href: tickerHref(symbol), text: symbol });
-}
-
-function rolling(values, n) {
-  return values.map((_, i) => {
-    if (i + 1 < n) return null;
-    const window = values.slice(i + 1 - n, i + 1);
-    return Math.round((window.reduce((a, b) => a + (b || 0), 0) / n) * 10) / 10;
-  });
 }
 
 // --- every theme -----------------------------------------------------------------
@@ -281,25 +274,24 @@ function twRevenueCard(title, series, note) {
   ]);
 }
 
+// The OpenRouter card: the charts (revenue, then tokens, one shared control
+// bar), the latest week by model author, and what the numbers are not.
 function openrouterCard(or) {
-  if (or.unavailable) return card('OPENROUTER · TOKENS & ESTIMATED REVENUE', null, unavailable(or));
-  const common = { dates: or.dates, views: VIEWS.daily(), tail: 150 };
-  const revenue = viewChart({ ...common, title: 'ESTIMATED REVENUE / DAY · 7D AVG', fmt: (v) => `$${num(v, 0)}k`,
-    series: or.providers.map((p) => ({ name: p.name, values: rolling(p.revenue_k, 7) })) });
-  const tokens = viewChart({ ...common, title: 'TOKENS / DAY · 7D AVG', fmt: (v) => `${num(v, 0)}B`,
-    series: or.providers.map((p) => ({ name: p.name, values: rolling(p.tokens_b, 7) })) });
+  const title = 'OPENROUTER · TOKENS & ESTIMATED REVENUE';
+  if (!or || or.unavailable || !Array.isArray(or.providers)) {
+    return card(title, null, unavailable(or) || gap('Not built this time: no OpenRouter data in the artifact'));
+  }
   const rows = [...or.providers].sort((a, b) => b.week_revenue_k - a.week_revenue_k).map((p) => el('tr', {}, [
     el('td', { text: p.name }),
-    el('td', { text: `$${num(p.week_revenue_k / 1000, 2)}M` }),
-    el('td', { class: 'dim', text: p.revenue_share_pct === null ? DASH : `${num(p.revenue_share_pct, 1)}%` }),
-    pctCell(p.revenue_vs_4w_pct),
-    el('td', { text: `${num(p.week_tokens_b / 1000, 2)}T` }),
-    pctCell(p.tokens_vs_4w_pct),
+    el('td', { text: p.week_revenue_k == null ? DASH : `$${num(p.week_revenue_k / 1000, 2)}M` }),
+    el('td', { class: 'dim', text: p.revenue_share_pct == null ? DASH : `${num(p.revenue_share_pct, 1)}%` }),
+    el('td', { text: p.week_tokens_b == null ? DASH : `${num(p.week_tokens_b / 1000, 2)}T` }),
   ]));
-  return card('OPENROUTER · TOKENS & ESTIMATED REVENUE BY MODEL AUTHOR', el('span', { class: 'dim', text: `through ${or.dates[or.dates.length - 1]}${or.commit ? ` · alternative-data ${or.commit.sha.slice(0, 7)}` : ''}` }), [
-    el('div', { class: 'grid two' }, [revenue, tokens]),
-    table(['AUTHOR', 'LAST 7D REVENUE', 'SHARE', 'VS PRIOR 4W', 'LAST 7D TOKENS', 'VS PRIOR 4W'], rows),
-    el('div', { class: 'field-note', text: 'OpenRouter\'s routed traffic only -- a slice of each lab\'s demand, not its revenue. Revenue is alternative-data\'s estimate: observed tokens at the model\'s list price at the time. Today\'s partial day is left out. WoW / 4W compare the 7-day average with the one 7 / 28 days earlier.' }),
+  const through = or.dates?.at(-1) ?? DASH;
+  return card(`${title} BY MODEL AUTHOR`, el('span', { class: 'dim', text: `through ${through}${or.commit ? ` · alternative-data ${or.commit.sha.slice(0, 7)}` : ''}` }), [
+    openrouterCharts(or),
+    table(['AUTHOR', 'LAST 7D REVENUE', 'SHARE', 'LAST 7D TOKENS'], rows),
+    el('div', { class: 'field-note', text: 'OpenRouter\'s routed traffic only -- a slice of each lab\'s demand, not the lab\'s revenue or ARR. Revenue is alternative-data\'s estimate: observed tokens at the model\'s list price at the time. MONTHLY ARR annualises that estimate (a month\'s mean day times 365, over the days with data), so it is an OpenRouter-routed run-rate, never a company\'s ARR. Hollow markers are partial months: not every calendar day has data. Today\'s partial day is left out.' }),
   ]);
 }
 
@@ -867,7 +859,7 @@ function industry(key, data) {
     const c = data.cloud;
     return [capexCard(c.capex), guidanceCard(c.guidance), nvdaCard(c.nvda),
       twRevenueCard('AI SERVER MAKERS · MONTHLY REVENUE', c.odm, 'Quanta, Wiwynn and Wistron build most hyperscaler AI servers; their revenue is capex being delivered, reported by the 10th of the next month. Foxconn is left out: iPhone assembly dominates it.'),
-      openrouterCard(c.openrouter), rampCard(c.ramp)];
+      rampCard(c.ramp)];
   }
   if (key === 'semis') {
     const s = data.semis;
@@ -876,6 +868,7 @@ function industry(key, data) {
       koreaFlashCard(s.korea_flash)]),
     koreaCard(s.korea),
     el('div', { class: 'grid two' }, [memoryExportsCard(s.memory_exports), chipPricesCard(s.chip_prices)]),
+    openrouterCard(s.openrouter),
     adataCard(s.adata), pcppCard(s.pcpp)];
   }
   if (key === 'energy' && data.energy) {

@@ -14,9 +14,12 @@ export const VIEWS = [
   // One hub for every sector, sub-industry and its names; the cross-sector themes beside it.
   { id: 'sectors', label: 'SECTORS', group: 'sectors', artifact: 'sectors', module: 'sectors', takesArg: true },
   { id: 'themes', label: 'THEMES', group: 'sectors', artifact: 'themes', module: 'themes', takesArg: true },
-  { id: 'kshape', label: 'K-SHAPE', group: 'sectors', artifact: 'kshape', module: 'kshape', takesArg: true },
-  { id: 'sizek', label: 'SIZE & STYLE', group: 'sectors', artifact: 'sizek', module: 'sizek', takesArg: true },
+  // One menu entry, two pages: a switch at the top of each moves between them. SIZE & STYLE is
+  // reached from that switch, so it is hidden from the menu and highlights its parent (`menu`).
+  { id: 'kshape', label: 'RELATIVE VALUE', group: 'sectors', artifact: 'kshape', module: 'kshape', takesArg: true },
+  { id: 'sizek', label: 'SIZE & STYLE', group: 'sectors', artifact: 'sizek', module: 'sizek', takesArg: true, hidden: true, menu: 'kshape' },
   // Every company's multiples in one table: reached from links (a ticker's P/E), not the menu.
+  { id: 'chain', label: 'AI CHAIN', group: 'sectors', artifact: 'chain', module: 'chain', takesArg: true },
   { id: 'valuation', label: 'SCREEN', group: 'sectors', artifact: 'valuation', module: 'valuation', takesArg: true, hidden: true },
   { id: 'risk', label: 'RISK', group: 'risk', artifact: ['risk', 'anchor'], module: 'risk' },
   { id: 'rates', label: 'RATES & MACRO', group: 'risk', artifact: ['fixed_income', 'macro'], module: 'rates' },
@@ -29,7 +32,6 @@ export const VIEWS = [
   { id: 'catalysts', label: 'CALENDAR', group: 'calendar', artifact: 'catalysts', module: 'catalysts' },
   { id: 'earnings', label: 'EARNINGS', group: 'calendar', artifact: 'earnings', module: 'earnings' },
   { id: 'scenarios', label: 'SCENARIOS', group: 'calendar', artifact: 'scenarios', module: 'scenarios', takesArg: true },
-  { id: 'chain', label: 'AI CHAIN', group: 'calendar', artifact: 'chain', module: 'chain', takesArg: true },
   { id: 'technicals', label: 'TECHNICALS', group: 'tools', artifact: 'technicals', module: 'technicals', takesArg: true },
   { id: 'trade', label: 'TRADE DESK', group: 'tools', artifact: 'technicals', module: 'trade', takesArg: true },
   { id: 'xray', label: 'ETF X-RAY', group: 'tools', artifact: 'xray', module: 'xray' },

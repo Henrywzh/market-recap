@@ -60,10 +60,10 @@ no record of **decisions** to review against outcomes.
 
 ```
 MARKET     Overview · Indices · Heat maps · Europe
-SECTORS    Sectors (hub) · Themes · K-shape · Size & style
+SECTORS    Sectors (hub) · Themes · Relative value (K-shape | Size & style) · AI chain
 RISK       Risk · Rates & macro · Priced path · Positioning
 NAMES      Monitor · Ticker · Europe names · Cross-listing
-CALENDAR   Calendar · Earnings · Scenarios · AI chain
+CALENDAR   Calendar · Earnings · Scenarios
 TOOLS      Technicals · Trade desk · ETF X-Ray · DCF
 ```
 
@@ -600,7 +600,7 @@ The phased build put too much in front of the reader. After looking at it:
   themes a name belongs to: named in the config, or trading with the
   theme's proxy (daily excess-return correlation >= 0.55 over a year).
   Groups live in `[[themes.groups]]` in the config.
-- **AI CHAIN** (CATALYSTS → AI CHAIN, `#chain/<key>`): the AI supply chain
+- **AI CHAIN** (SECTORS → AI CHAIN, `#chain/<key>`; it was under CALENDAR until 2026-10-15): the AI supply chain
   as a board, one column per layer from IP and tools to the hyperscalers
   (67 companies, US, Korea, Taiwan, Japan, the Netherlands, France,
   Germany), each company marked by this season's report (EPS against

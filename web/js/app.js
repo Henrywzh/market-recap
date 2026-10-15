@@ -95,7 +95,7 @@ function subTabs(view) {
     class: 'subtab',
     role: 'tab',
     text: item.label,
-    'aria-selected': String(item.id === view.id),
+    'aria-selected': String(item.id === (view.menu || view.id)),
     onclick: () => select(item.id),
   })));
 }

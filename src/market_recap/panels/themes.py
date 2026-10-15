@@ -11,12 +11,12 @@ Two groups carry industry data (docs/information_architecture.md):
 
 - CLOUD & AI CAPEX: quarterly capex of the five largest cloud spenders from
   their 10-Q/10-K XBRL (compute.capex); monthly revenue of three Taiwanese
-  AI-server makers (MOPS); OpenRouter tokens and estimated revenue by model
-  author, and Ramp's AI adoption and spend per employee (both read from
-  alternative-data's published files).
+  AI-server makers (MOPS); Ramp's AI adoption and spend per employee (read
+  from alternative-data's published files).
 - SEMICONDUCTORS & MEMORY: TSMC and Nanya monthly revenue (MOPS), Korean IC
-  exports (Korea Customs), the memory, DRAM and flash lines inside them, BLS semiconductor price indexes (FRED), ADATA's monthly memory note, and UK retail prices
-  of memory kits and CPUs read from PCPartPicker's trend charts.
+  exports (Korea Customs), the memory, DRAM and flash lines inside them, BLS semiconductor price indexes (FRED), ADATA's monthly memory note, UK retail prices
+  of memory kits and CPUs read from PCPartPicker's trend charts, and OpenRouter tokens and estimated revenue by model
+  author (read from alternative-data's published files).
 
 Each source is optional: one that fails leaves its section's reason on the
 page and the rest renders.
@@ -417,21 +417,21 @@ def _openrouter(settings: dict, as_of: date) -> dict:
         if rows["tokens"].notna().sum() == 0:
             continue
         tokens, revenue = rows["tokens"].fillna(0), rows["revenue"].fillna(0)
-        last7_t, prev28_t = tokens.iloc[-7:].sum(), tokens.iloc[-35:-7].sum() / 4
-        last7_r, prev28_r = revenue.iloc[-7:].sum(), revenue.iloc[-35:-7].sum() / 4
+        last7_t, last7_r = tokens.iloc[-7:].sum(), revenue.iloc[-7:].sum()
         providers.append({
             "slug": slug, "name": rows["provider_name"].dropna().iloc[-1] if rows["provider_name"].notna().any() else slug,
             "tokens_b": [round(v / 1e9, 2) for v in tokens], "revenue_k": [round(v / 1e3, 1) for v in revenue],
             "week_tokens_b": round(last7_t / 1e9, 1), "week_revenue_k": round(last7_r / 1e3, 1),
-            "tokens_vs_4w_pct": round(100 * (last7_t / prev28_t - 1), 1) if prev28_t else None,
-            "revenue_vs_4w_pct": round(100 * (last7_r / prev28_r - 1), 1) if prev28_r else None,
             "revenue_share_pct": round(100 * last7_r / totals["revenue"].iloc[-7:].sum(), 1) if totals["revenue"].iloc[-7:].sum() else None,
         })
+    # The authors drawn first: openrouter_default's slugs that have data, in its order.
+    present = {p["slug"] for p in providers}
+    default = [slug for slug in (settings.get("openrouter_default") or []) if slug in present]
     return {
         "dates": [pd.Timestamp(d).strftime("%Y-%m-%d") for d in dates],
         "total_tokens_b": [round(v / 1e9, 1) for v in totals["tokens"]],
         "total_revenue_k": [round(v / 1e3, 1) for v in totals["revenue"]],
-        "providers": providers, "commit": commit,
+        "providers": providers, "default_slugs": default, "commit": commit,
     }
 
 
@@ -1098,11 +1098,11 @@ def _drivers(cloud: dict, semis: dict, energy: dict | None = None, housing: dict
     out.append(_driver("nvda_dc", "NVIDIA data-center revenue, y/y", ["cloud", "semis"], "yoy", "pct",
                        [{"period": q.get("filed"), "available": q.get("filed"), "value": q.get("dc_yoy_pct")}
                         for q in (cloud.get("nvda") or {}).get("quarters") or []]))
-    router = cloud.get("openrouter") or {}
+    router = semis.get("openrouter") or {}
     if router.get("dates"):
         tokens = pd.Series(router["total_tokens_b"], index=pd.to_datetime(router["dates"])).rolling(7).sum().dropna()
         weekly = tokens.iloc[::-7][::-1]
-        out.append(_driver("openrouter_tokens", "OpenRouter tokens, trailing 7 days", ["cloud"], "level", "bn",
+        out.append(_driver("openrouter_tokens", "OpenRouter tokens, trailing 7 days", ["semis"], "level", "bn",
                            [{"period": d.strftime("%Y-%m-%d"), "available": (d + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
                              "value": round(float(v), 1)} for d, v in weekly.items()]))
     ramp = cloud.get("ramp") or {}
@@ -1200,11 +1200,11 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         "guidance": _section(lambda: _guidance(settings)),
         "nvda": _section(lambda: _nvda(settings)),
         "odm": _section(lambda: _tw_revenue(settings["tw_cloud"], int(settings.get("tw_months", 37)), as_of)),
-        "openrouter": _section(lambda: _openrouter(settings, as_of)),
         "ramp": _section(_ramp),
     }
     semis = {
         "tw": _section(lambda: _tw_revenue(settings["tw_semis"], int(settings.get("tw_months", 37)), as_of)),
+        "openrouter": _section(lambda: _openrouter(settings, as_of)),
         "korea": _section(lambda: _korea(as_of)),
         "korea_flash": _section(lambda: _korea_flash(as_of)),
         "adata": _section(lambda: {"notes": adata.fetch_recent(as_of, 6)}),
@@ -1381,7 +1381,7 @@ def _log(ctx, cloud: dict, semis: dict) -> None:
     record("mops_revenue", "Taiwan monthly revenue (MOPS)", mops.PAGE_URL, odm if isinstance(odm, dict) else {},
            None if isinstance(odm, dict) else max((s["months"][-1]["month"] + "-01" for s in odm if s["months"]), default=None),
            "monthly_release", 0 if isinstance(odm, dict) else _count(odm, "months"))
-    orr = cloud["openrouter"]
+    orr = semis["openrouter"]
     record("altdata_openrouter", "OpenRouter tokens & estimated revenue (alternative-data)", altdata.OPENROUTER_URL, orr,
            None if "unavailable" in orr else (orr["dates"][-1] if orr["dates"] else None), "daily_close", len(orr.get("dates") or []))
     ramp = cloud["ramp"]

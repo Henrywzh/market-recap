@@ -474,10 +474,10 @@ def test_theme_sources_record_how_many_observations_they_carry():
         "capex": {"companies": [{"quarters": [{"end": "2026-06-30"}] * 3}, {"quarters": [{"end": "2026-06-30"}] * 2}]},
         "nvda": {"quarters": [{"filed": "2026-08-26"}] * 4},
         "odm": [{"months": months(3)}, {"months": months(2)}],
-        "openrouter": {"dates": ["2026-10-01", "2026-10-02"]},
         "ramp": {"months": ["2026-07", "2026-08"]},
     }
     semis = {
+        "openrouter": {"dates": ["2026-10-01", "2026-10-02"]},
         "korea": {"months": months(5)}, "korea_flash": {"months": months(2)}, "adata": {"notes": [{"month": "2026-09"}]},
         "memory_exports": {"series": [{"months": months(4)}, {"months": months(4)}], "failed": []},
         "chip_prices": {"series": [{"months": months(6), "page": "https://fred.stlouisfed.org/series/IZ3344"}, {"months": months(3)}], "failed": []},
@@ -488,6 +488,33 @@ def test_theme_sources_record_how_many_observations_they_carry():
     assert rows == {"sec_capex": 5, "sec_releases": 4, "mops_revenue": 5, "altdata_openrouter": 2, "altdata_ramp": 2,
                     "korea_customs": 5, "motie_trade": 2, "adata_market_watch": 1, "korea_customs_memory": 8,
                     "fred_chip_prices": 9, "pcpartpicker": 33}
+
+
+def test_openrouter_default_slugs_are_configured_and_present_in_config_order(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from market_recap.sources import altdata
+
+    end = datetime.now(timezone.utc).date() - timedelta(days=2)     # before today's file
+    days = pd.date_range(end=pd.Timestamp(end), periods=10, freq="D")
+    rows = []
+    for i, day in enumerate(days):
+        for slug, name, tokens in (("openai", "OpenAI", 3e9), ("anthropic", "Anthropic", 2e9), ("qwen", "Qwen", 1e9)):
+            rows.append({"usage_date": day, "provider_slug": slug, "provider_name": name,
+                         "tokens": tokens * (i + 1), "revenue": 1e4 * (i + 1)})
+    frame = pd.DataFrame(rows)
+    monkeypatch.setattr(altdata, "openrouter_daily", lambda as_of, months=7, use_cache=True: (frame, None))
+    settings = {"openrouter_providers": ["anthropic", "openai", "google", "qwen"],
+                "openrouter_default": ["openai", "google", "anthropic", "deepseek"], "openrouter_months": 13}
+
+    out = TH._openrouter(settings, end)
+
+    assert [p["slug"] for p in out["providers"]] == ["anthropic", "openai", "qwen"]     # google has no data
+    assert out["default_slugs"] == ["openai", "anthropic"]        # config order; deepseek is not configured
+    assert len(out["dates"]) == 10
+    openai = next(p for p in out["providers"] if p["slug"] == "openai")
+    assert openai["week_tokens_b"] == 147.0                      # 3e9 x (4 + 5 + ... + 10) over the last 7 days
+    for p in out["providers"]:
+        assert "tokens_vs_4w_pct" not in p and "revenue_vs_4w_pct" not in p
 
 
 def test_a_pair_carries_both_returns_the_gap_and_the_ratio():

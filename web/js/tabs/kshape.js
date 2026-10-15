@@ -10,6 +10,7 @@
 // full-history. The page shows the divergence and what has been paid for it;
 // it does not say which leg is right.
 
+import { relativeSwitch } from '../relative-switch.js';
 import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, periodSwitch, gap, DASH } from '../fmt.js';
 import { areaLine, multiLine } from '../charts.js';
 import { pickWindow, windowSwitch } from '../windows.js';
@@ -145,6 +146,7 @@ export default function renderKshape(root, data, _manifest, ctx = {}) {
     return;
   }
   root.append(sectionTitle('K-SHAPE', 'HIGH-INCOME AGAINST LOW-INCOME, WITHIN AN INDUSTRY'));
+  root.append(relativeSwitch('kshape', ctx));
   root.append(metaRow(`AS OF ${data.as_of} · PRICES THROUGH ${data.inputs.prices_through}${data.inputs.valuation_built ? '' : ' · NO VALUATION IN THIS BUILD: P/E AND EPS HISTORY ABSENT'}`, data.notes));
   const wanted = String(ctx.arg || '').toLowerCase();
   const keys = data.views.map((v) => v.key);

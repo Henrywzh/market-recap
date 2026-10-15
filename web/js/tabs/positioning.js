@@ -70,7 +70,6 @@ function putCallSection(data) {
     timeLines(chart, drawn.map(({ row, reading }, i) => ({
       name: row.label, ...reading, color: (p) => i === 0 ? p.accent : p.blue,
     })), {
-      left: (v) => num(v, 1),
       value: (v) => num(v, 3),
       markY: present(first.median) ? [{ y: first.median, label: `median ${num(first.median, 2)}` }] : [],
     });
@@ -105,8 +104,6 @@ function trendCard(t) {
       { name: 'trend score (left)', ...s, color: (p) => p.accent, width: 1.4 },
       { name: `${t.label} (right)`, ...c, axis: 1, color: (p) => p.faint, width: 1 },
     ], {
-      left: (v) => v.toFixed(1),
-      right: (v) => num(v, 0),
       value: (v, line) => (line.axis === 1 ? num(v, 0) : num(v, 2)),
       markY: [{ y: 0 }],
     });
@@ -353,8 +350,6 @@ export default function renderPositioning(root, data) {
 
   root.append(el('h2', { class: 'section-title', text: 'INDEX PUT / CALL' }));
   root.append(putCallSection(data.index_put_call));
-  root.append(el('h2', { class: 'section-title', text: 'TREND FOLLOWERS' }));
-  root.append(el('div', { class: 'grid two' }, data.trend.map(trendCard)));
   root.append(el('h2', { class: 'section-title', text: 'SHORT INTEREST' }));
   root.append(shortSection(si));
   root.append(el('h2', { class: 'section-title', text: 'BUYBACK BLACKOUT' }));
@@ -377,4 +372,7 @@ export default function renderPositioning(root, data) {
       el('div', { class: 'field-note', text: flows.note }),
     ]));
   }
+
+  root.append(el('h2', { class: 'section-title', text: 'TREND FOLLOWERS' }));
+  root.append(el('div', { class: 'grid two' }, data.trend.map(trendCard)));
 }

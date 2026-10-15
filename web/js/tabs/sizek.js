@@ -11,6 +11,7 @@
 // The stat strip is full-history. The page shows the divergence; it does not
 // say which arm is right.
 
+import { relativeSwitch } from '../relative-switch.js';
 import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, periodSwitch, gap, DASH } from '../fmt.js';
 import { areaLine, multiLine, zeroLine } from '../charts.js';
 import { pickWindow, windowSwitch } from '../windows.js';
@@ -126,6 +127,7 @@ export default function renderSizek(root, data, _manifest, ctx = {}) {
     return;
   }
   root.append(sectionTitle('SIZE & STYLE', 'ONE ARM AGAINST ANOTHER'));
+  root.append(relativeSwitch('sizek', ctx));
   root.append(metaRow(`AS OF ${data.as_of} · PRICES THROUGH ${data.inputs.prices_through}${data.inputs.no_prices.length ? ` · NO PRICES: ${data.inputs.no_prices.join(', ')}` : ''}`, data.notes));
   const wanted = String(ctx.arg || '').toLowerCase();
   const keys = data.views.map((v) => v.key);

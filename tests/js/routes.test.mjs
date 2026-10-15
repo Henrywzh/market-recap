@@ -92,3 +92,18 @@ test('a dotted share class resolves to the build\'s dashed symbol, nothing else 
 test('a pair key with an underscore survives the hash', () => {
   assert.deepEqual(R.parseHash("#sizek/value_growth"), { id: "sizek", arg: "VALUE_GROWTH" });
 });
+
+test('RELATIVE VALUE is one menu entry: SIZE & STYLE is reached from its switch and highlights its parent', () => {
+  const sizek = R.viewById('sizek');
+  assert.equal(sizek.hidden, true);
+  assert.equal(R.viewById(sizek.menu).group, sizek.group);
+  assert.ok(R.viewsIn('sectors').some((v) => v.id === sizek.menu));
+  assert.ok(!R.viewsIn('sectors').some((v) => v.id === 'sizek'));
+  assert.deepEqual(R.parseHash('#sizek/uk'), { id: 'sizek', arg: 'UK' });        // bookmarks to either page keep working
+  assert.deepEqual(R.parseHash('#kshape/cruise'), { id: 'kshape', arg: 'CRUISE' });
+});
+
+test('AI CHAIN is a SECTORS view, not a CALENDAR one', () => {
+  assert.equal(R.viewById('chain').group, 'sectors');
+  assert.ok(!R.viewsIn('calendar').some((v) => v.id === 'chain'));
+});

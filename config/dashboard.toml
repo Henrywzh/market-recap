@@ -969,9 +969,12 @@ etfs = ["SMH", "KRE", "XRT", "ITB"]
 tw_cloud = { "2382" = "Quanta", "6669" = "Wiwynn", "3231" = "Wistron" }
 tw_semis = { "2330" = "TSMC", "2408" = "Nanya" }
 tw_months = 37
-# OpenRouter model authors shown (alternative-data's daily provider economics).
+# OpenRouter model authors available (alternative-data's daily provider economics);
+# every listed author can be shown, openrouter_default are the ones drawn first.
 openrouter_providers = ["anthropic", "openai", "google", "x-ai", "deepseek", "qwen", "moonshotai", "z-ai"]
-openrouter_months = 7
+# Authors drawn by default, in this order (each must be in openrouter_providers).
+openrouter_default = ["openai", "anthropic", "deepseek", "google"]
+openrouter_months = 13
 capex_filers = ["MSFT", "GOOGL", "AMZN", "META", "ORCL"]
 capex_quarters = 12
 nvda_quarters = 8
