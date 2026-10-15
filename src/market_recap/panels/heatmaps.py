@@ -229,6 +229,38 @@ def _constituents(priced: pd.DataFrame, closes: pd.DataFrame, periods: list[str]
     return nodes
 
 
+def _fund_map(ctx, spec: dict, closes: pd.DataFrame, periods: list[str]) -> dict:
+    """A map for an index the dashboard does not otherwise cover (the Dow),
+    sized by its SPDR fund's published weights. Its members must already be
+    priced members of a covered index, which also gives their GICS labels; a
+    name that is not is left off and listed, never priced on the side."""
+    fund = spec["holdings_etf"]
+    out = {"key": spec["key"], "label": spec["label"], "weight_source": fund, "note": spec.get("note"),
+           "constituents": [], "missing": []}
+    try:
+        holdings, as_of, url = ssga.fetch_holdings(fund)
+    except Exception as exc:  # an optional map: its failure is a note, not the page's
+        ctx.log.add(SourceRecord(f"ssga_{fund.lower()}_map", f"{fund} daily holdings", "", None,
+                                 status="partial", error=str(exc)[:300]))
+        return out
+    known = pd.concat([ctx.priced(s.key) for s in ctx.indices]).drop_duplicates("yahoo_symbol").set_index("yahoo_symbol")
+    rows = []
+    for row in holdings.itertuples():
+        symbol = ssga.to_yahoo_symbol(row.ticker)
+        if symbol in known.index:
+            member = known.loc[symbol]
+            rows.append({"yahoo_symbol": symbol, "name": member["name"], "sector": member["sector"],
+                         "sub_sector": member["sub_sector"], "weight": row.weight})
+        else:
+            out["missing"].append(row.ticker)
+    out["constituents"] = _constituents(pd.DataFrame(rows), closes, periods) if rows else []
+    out["holdings_as_of"] = as_of
+    ctx.log.add(SourceRecord(f"ssga_{fund.lower()}_map", f"{fund} daily holdings", url, as_of,
+                             rows=len(rows), status="partial" if out["missing"] else "ok",
+                             error=f"not priced here: {', '.join(out['missing'])}" if out["missing"] else None))
+    return out
+
+
 def build(ctx) -> dict:
     closes = ctx.closes
     periods = list(ctx.config["periods"]["heatmap"])
@@ -245,6 +277,7 @@ def build(ctx) -> dict:
          "constituents": _constituents(ctx.priced(spec.key), closes, periods)}
         for spec in ctx.indices if not spec.primary
     ]
+    index_maps += [_fund_map(ctx, spec, closes, periods) for spec in ctx.config.get("heatmap_maps", [])]
     index_maps = [m for m in index_maps if m["constituents"]]
 
     # --- ETF treemap -------------------------------------------------------

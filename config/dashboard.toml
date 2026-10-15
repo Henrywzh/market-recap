@@ -267,6 +267,16 @@ home_close_lead_hours = 14
 "Materials" = "XLB"
 "Real Estate" = "XLRE"
 
+# HEAT MAPS: maps for indices the dashboard does not otherwise cover, beside
+# the S&P 500 and the Nasdaq 100. Sized by the SPDR fund's published weights
+# (the Dow is price-weighted, so DIA's weights follow the share prices); its
+# members must be priced members of a covered index.
+[[heatmap_maps]]
+key = "DJI"
+label = "Dow Jones"
+holdings_etf = "DIA"
+note = "Price-weighted: a tile's size follows its share price, not the company's value."
+
 [etf_heatmap]
 # ticker = group. Sized by AUM, coloured by estimated net flow.
 SPY = "Broad Equity"

@@ -117,14 +117,16 @@ export default function renderHeatmaps(root, data) {
   };
 
   const stockSwitch = periodSwitch(stockPeriods, defaultPeriod, (period) => { picked = true; drawStocks(period); });
+  const mapNote = el('div', { class: 'field-note' });
   const mapSwitch = maps.length > 1 ? periodSwitch(maps.map((m) => m.label), map.label, (label) => {
     map = maps.find((m) => m.label === label) || maps[0];
     nameMap();
+    mapNote.textContent = [map.note, map.missing?.length ? `Not shown (not priced here): ${map.missing.join(', ')}.` : null].filter(Boolean).join(' ');
     stockCard.querySelector('.card-title').textContent = `${map.label.toUpperCase()} CONSTITUENTS (${map.constituents.length} NAMES)`;
     drawStocks(stockPeriod);
   }) : null;
   const stockCard = card(`${map.label.toUpperCase()} CONSTITUENTS (${map.constituents.length} NAMES)`,
-    el('div', { class: 'tag-row' }, [mapSwitch, stockSwitch]), [liveNote, stockNode]);
+    el('div', { class: 'tag-row' }, [mapSwitch, stockSwitch]), [mapNote, liveNote, stockNode]);
   nameMap();
   root.append(stockCard);
   const feed = createFeed('api/quotes?board=heatmap', {
