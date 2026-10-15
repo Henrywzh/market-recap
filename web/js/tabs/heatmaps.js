@@ -60,12 +60,23 @@ export default function renderHeatmaps(root, data) {
   // The shortest window the artifact carries, whatever it is called.
   const [defaultPeriod] = periods;
 
-  // ---------------- S&P 500 by official weight --------------------------
+  // ---------------- Index members by official weight --------------------
+  // The S&P 500 first, then each other index map the build carries (the
+  // Nasdaq 100), each sized by its own tracking fund's published weights.
   // LIVE colours the tiles by today's move so far (the quote function's
   // heat-map board, every few minutes); the other windows are the build's
   // closes. During the session LIVE is shown first unless the reader has
   // picked a window; after the close the page opens on the close.
-  root.append(sectionTitle('S&P 500 HEAT MAP', 'SIZED BY OFFICIAL SPY WEIGHT · COLOURED BY RETURN'));
+  // An older build carries no `primary`: its map was the S&P 500 by SPY weight.
+  const maps = [{ key: 'SPX', label: 'S&P 500', weight_source: 'SPY', ...data.primary, constituents: data.constituents },
+    ...(data.index_maps || []).filter((m) => m.constituents?.length)];
+  let map = maps[0];
+  const heading = sectionTitle('INDEX HEAT MAP', '');
+  const headingNote = heading.querySelector('.muted') || heading.appendChild(el('span', { class: 'muted' }));
+  const nameMap = () => {
+    headingNote.textContent = ` ${map.label.toUpperCase()} · SIZED BY OFFICIAL ${map.weight_source} WEIGHT · COLOURED BY RETURN`;
+  };
+  root.append(heading);
   const stockNode = el('div', { class: 'treemap' });
   const liveNote = el('div', { class: 'field-note' });
   const stockPeriods = [LIVE, ...periods];
@@ -78,7 +89,7 @@ export default function renderHeatmaps(root, data) {
   const drawStocks = (period) => {
     stockPeriod = period;
     const bySector = new Map();
-    data.constituents.forEach((row) => {
+    map.constituents.forEach((row) => {
       const ret = valueOf(row, period);
       if (!bySector.has(row.sector)) bySector.set(row.sector, []);
       bySector.get(row.sector).push({
@@ -106,8 +117,15 @@ export default function renderHeatmaps(root, data) {
   };
 
   const stockSwitch = periodSwitch(stockPeriods, defaultPeriod, (period) => { picked = true; drawStocks(period); });
-  const stockCard = card(`S&P 500 CONSTITUENTS (${data.constituents.length} NAMES)`,
-    el('div', { class: 'tag-row' }, [stockSwitch]), [liveNote, stockNode]);
+  const mapSwitch = maps.length > 1 ? periodSwitch(maps.map((m) => m.label), map.label, (label) => {
+    map = maps.find((m) => m.label === label) || maps[0];
+    nameMap();
+    stockCard.querySelector('.card-title').textContent = `${map.label.toUpperCase()} CONSTITUENTS (${map.constituents.length} NAMES)`;
+    drawStocks(stockPeriod);
+  }) : null;
+  const stockCard = card(`${map.label.toUpperCase()} CONSTITUENTS (${map.constituents.length} NAMES)`,
+    el('div', { class: 'tag-row' }, [mapSwitch, stockSwitch]), [liveNote, stockNode]);
+  nameMap();
   root.append(stockCard);
   const feed = createFeed('api/quotes?board=heatmap', {
     node: stockNode,

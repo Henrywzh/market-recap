@@ -209,17 +209,11 @@ def _build_published_flow(
     }
 
 
-def build(ctx) -> dict:
-    closes = ctx.closes
-    periods = list(ctx.config["periods"]["heatmap"])
-    ma_windows = list(ctx.config["technicals"]["ma_periods"])
-    chart_sessions = period_sessions(ctx.config["periods"]["chart_window"])
-    priced = ctx.priced(ctx.primary.key)
-
-    # --- Constituent treemap: area = issuer-published weight ---------------
+def _constituents(priced: pd.DataFrame, closes: pd.DataFrame, periods: list[str]) -> list[dict]:
+    """One tile per priced member, heaviest first."""
     nodes = []
     for row in priced.itertuples():
-        series = closes[row.yahoo_symbol]
+        series = closes[row.yahoo_symbol].dropna()
         nodes.append(
             {
                 "ticker": row.yahoo_symbol,
@@ -227,11 +221,31 @@ def build(ctx) -> dict:
                 "sector": row.sector,
                 "sub_sector": row.sub_sector,
                 "weight": clean_float(row.weight, 4),
-                "price": clean_float(series.dropna().iloc[-1], 2) if not series.dropna().empty else None,
-                "returns": _returns_for(series, periods),
+                "price": clean_float(series.iloc[-1], 2) if not series.empty else None,
+                "returns": _returns_for(closes[row.yahoo_symbol], periods),
             }
         )
     nodes.sort(key=lambda n: n["weight"] or 0, reverse=True)
+    return nodes
+
+
+def build(ctx) -> dict:
+    closes = ctx.closes
+    periods = list(ctx.config["periods"]["heatmap"])
+    ma_windows = list(ctx.config["technicals"]["ma_periods"])
+    chart_sessions = period_sessions(ctx.config["periods"]["chart_window"])
+    priced = ctx.priced(ctx.primary.key)
+
+    # --- Constituent treemaps: area = issuer-published weight --------------
+    nodes = _constituents(priced, closes, periods)
+    # The other indices (the Nasdaq 100) get the same map, sized by their own
+    # tracking fund's weights; the page switches between them.
+    index_maps = [
+        {"key": spec.key, "label": spec.label, "weight_source": spec.holdings_etf,
+         "constituents": _constituents(ctx.priced(spec.key), closes, periods)}
+        for spec in ctx.indices if not spec.primary
+    ]
+    index_maps = [m for m in index_maps if m["constituents"]]
 
     # --- ETF treemap -------------------------------------------------------
     etf_groups = dict(ctx.config["etf_heatmap"])
@@ -400,6 +414,8 @@ def build(ctx) -> dict:
         "holdings_as_of": ctx.holdings_as_of,
         "periods": periods,
         "constituents": nodes,
+        "primary": {"key": ctx.primary.key, "label": ctx.primary.label, "weight_source": ctx.primary.holdings_etf},
+        "index_maps": index_maps,
         "etfs": etf_nodes,
         "flow_coverage": {"published": sorted(published), "unpublished": sorted(unpublished), "detail": detail},
         "flow_sources": {k: sorted(v) for k, v in by_source.items()},

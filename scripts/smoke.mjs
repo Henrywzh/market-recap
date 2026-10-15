@@ -218,6 +218,13 @@ for (const route of list) {
         if (BAD_TEXT.test(await map.innerText())) throw new Error('Europe currency / relative toggle shows invalid text');
       }
     }
+    if (route === 'heatmaps' && (await artifact('heatmaps'))?.index_maps?.length) {
+      const map = page.locator('.card').filter({ has: page.locator('.treemap') }).first();
+      for (const m of (await artifact('heatmaps')).index_maps) {
+        await map.locator('.card-head').getByRole('button', { name: m.label, exact: true }).click();
+        if (!(await map.locator('.card-title').innerText()).includes(`(${m.constituents.length} NAMES)`)) throw new Error(`${m.label} heat map did not switch`);
+      }
+    }
     if (route === 'overview') {
       const context = page.locator('details.ov-context');
       if (await context.getAttribute('open') !== null) throw new Error('Overview context should start collapsed');

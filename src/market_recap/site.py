@@ -157,6 +157,11 @@ def build(*, dist: Path | None = None) -> dict:
         heatmap = json.loads((ARTIFACT_DIR / "heatmaps.json").read_text())
         weighted_names = [r["ticker"] for r in sorted(heatmap["constituents"],
                           key=lambda r: r.get("weight") or 0, reverse=True) if r.get("ticker")]
+        # The other index maps' members go after, so LIVE colours them too;
+        # the pre-market scan still reads the heaviest S&P 500 names first.
+        for extra in heatmap.get("index_maps") or []:
+            weighted_names += [r["ticker"] for r in extra.get("constituents", []) if r.get("ticker")]
+        weighted_names = list(dict.fromkeys(weighted_names))
     except (OSError, ValueError, KeyError, TypeError):
         weighted_names = None
     (dist / "live.json").write_text(json.dumps(live_contract(weighted_names=weighted_names), indent=1), encoding="utf-8")
