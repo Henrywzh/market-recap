@@ -478,6 +478,7 @@ def test_theme_sources_record_how_many_observations_they_carry():
     }
     semis = {
         "openrouter": {"dates": ["2026-10-01", "2026-10-02"]},
+        "ramp_tokenomics": {"weeks": ["2026-09-06", "2026-09-13", "2026-09-20"], "latest_week": "2026-09-20"},
         "korea": {"months": months(5)}, "korea_flash": {"months": months(2)}, "adata": {"notes": [{"month": "2026-09"}]},
         "memory_exports": {"series": [{"months": months(4)}, {"months": months(4)}], "failed": []},
         "chip_prices": {"series": [{"months": months(6), "page": "https://fred.stlouisfed.org/series/IZ3344"}, {"months": months(3)}], "failed": []},
@@ -486,6 +487,7 @@ def test_theme_sources_record_how_many_observations_they_carry():
     panel._log(ctx, cloud, semis)
     rows = {r.source_id: r.rows for r in records}
     assert rows == {"sec_capex": 5, "sec_releases": 4, "mops_revenue": 5, "altdata_openrouter": 2, "altdata_ramp": 2,
+                    "altdata_ramp_tokenomics": 3,
                     "korea_customs": 5, "motie_trade": 2, "adata_market_watch": 1, "korea_customs_memory": 8,
                     "fred_chip_prices": 9, "pcpartpicker": 33}
 

@@ -435,6 +435,107 @@ def _openrouter(settings: dict, as_of: date) -> dict:
     }
 
 
+RAMP_UNITS = {"token_volume": ("billion tokens", 1e9), "token_spend": ("USD million", 1e6)}
+RAMP_TOKEN_TYPES = ("all_tokens", "uncached_input", "output")
+
+
+def _ramp_metric(activity: pd.DataFrame, metric: str, weeks: pd.DatetimeIndex, names: dict, top: int,
+                 meta: pd.DataFrame) -> dict:
+    """One metric's weekly totals: all makers, the top models, and the total over every reported series."""
+    frame = activity.loc[activity["metric_key"].eq(metric)]
+    unit, scale = RAMP_UNITS[metric]
+
+    def weekly(by: str | None) -> pd.DataFrame | pd.Series:
+        # A week with no observation stays NaN (None on the page); a reported zero stays 0.
+        if by is None:
+            return frame.groupby("period_end")["metric_value"].sum(min_count=1).reindex(weeks)
+        return frame.groupby(["period_end", by])["metric_value"].sum(min_count=1).unstack(by).reindex(weeks)
+
+    def ranked(wide: pd.DataFrame) -> list[str]:
+        present = [c for c in wide.columns if wide[c].notna().any()]
+        return wide[present].iloc[-13:].sum().sort_values(ascending=False, kind="stable").index.tolist()
+
+    makers_wide, models_wide = weekly("maker"), weekly("key")
+    maker_order, model_order = ranked(makers_wide), ranked(models_wide)[:top]
+    total = weekly(None)
+
+    def values(series: pd.Series) -> list:
+        return [clean_float(v / scale, 3) for v in series]
+
+    return {
+        "unit": unit,
+        "total": values(total),
+        "makers": [{"key": m, "name": names.get(m, m), "values": values(makers_wide[m])} for m in maker_order],
+        "models": [{"key": k, "maker": meta.at[k, "maker"],
+                    "label": meta.at[k, "series_label"] if isinstance(meta.at[k, "series_label"], str) else meta.at[k, "series_key"],
+                    "values": values(models_wide[k])} for k in model_order],
+    }
+
+
+def _ramp_prices(prices: pd.DataFrame, names: dict) -> dict:
+    """Effective USD per million tokens by maker: the sum of cost over the sum of tokens, per day."""
+    if prices.empty:
+        return {"unit": "USD per million tokens", "dates": [], "types": {t: [] for t in RAMP_TOKEN_TYPES}}
+    frame = prices.copy()
+    frame["usage_date"] = pd.to_datetime(frame["usage_date"], utc=True).dt.tz_localize(None)
+    columns = ["token_cost_usd_7d", "token_count_7d"]
+    for column in columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    days = pd.date_range(frame["usage_date"].min(), frame["usage_date"].max(), freq="D", name="usage_date")
+    types = {}
+    for token_type in RAMP_TOKEN_TYPES:
+        rows = frame.loc[frame["token_type"].eq(token_type)]
+        grouped = rows.groupby(["usage_date", "model_maker"])[columns].sum(min_count=1)
+        count = grouped["token_count_7d"].where(grouped["token_count_7d"].gt(0))   # zero tokens: no price
+        wide = (grouped["token_cost_usd_7d"] / count * 1_000_000).unstack("model_maker").reindex(days)
+        makers = [m for m in wide.columns if wide[m].notna().any()]
+        types[token_type] = [{"key": m, "name": names.get(m, m), "values": [clean_float(v, 4) for v in wide[m]]}
+                             for m in sorted(makers)]
+    return {"unit": "USD per million tokens", "dates": [d.strftime("%Y-%m-%d") for d in days], "types": types}
+
+
+def _ramp_tokenomics(settings: dict) -> dict:
+    """Ramp Token Spend Management (alternative-data): weekly tokens and spend by model, and effective prices.
+
+    Shares are the page's to compute: each value over ``total``, which sums every reported series,
+    shipped or not. Model keys are maker plus Ramp's raw series key; labels are never used to merge.
+    """
+    tables, commit = altdata.ramp_tokenomics()
+    activity, prices = tables["activity"], tables["prices"]
+    if activity.empty:
+        raise RuntimeError("no Ramp tokenomics files read")
+    activity = activity.copy()
+    activity["period_end"] = pd.to_datetime(activity["period_end"], utc=True).dt.tz_localize(None)
+    activity["metric_value"] = pd.to_numeric(activity["metric_value"], errors="coerce")
+    activity["maker"] = activity["model_maker"].astype(str)
+    activity["series_key"] = activity["series_key"].astype(str)
+    activity["key"] = activity["maker"] + " · " + activity["series_key"]
+    weeks = pd.date_range(activity["period_end"].min(), activity["period_end"].max(), freq="W-SUN", name="period_end")
+    latest = activity["period_end"].max()
+    # One row per series (maker and raw key, never the label): its most recent row supplies the label.
+    meta = (activity.sort_values("period_end", kind="stable").drop_duplicates("key", keep="last")
+            .set_index("key")[["maker", "series_key", "series_label"]])
+    names = settings.get("ramp_tokenomics_names") or {}
+    top = int(settings.get("ramp_tokenomics_models", 25))
+    volume = _ramp_metric(activity, "token_volume", weeks, names, top, meta)
+    spend = _ramp_metric(activity, "token_spend", weeks, names, top, meta)
+    shown_makers = {m["key"] for m in volume["makers"]}
+    reported = activity.loc[activity["metric_value"].notna(), ["maker", "series_key"]].drop_duplicates()
+    captured = pd.to_datetime(activity["scraped_at"], utc=True, errors="coerce").max()
+    today = datetime.now(timezone.utc).date()
+    return {
+        "weeks": [w.strftime("%Y-%m-%d") for w in weeks],
+        "volume": volume, "spend": spend,
+        "prices": _ramp_prices(prices, names),
+        "default_makers": [m for m in settings.get("ramp_tokenomics_default_makers") or [] if m in shown_makers],
+        "models_shown": len(volume["models"]), "models_total": len(reported),
+        "latest_week": latest.strftime("%Y-%m-%d"),
+        "captured_at": captured.isoformat() if pd.notna(captured) else None,
+        "stale_days": (today - latest.date()).days,
+        "commit": commit,
+    }
+
+
 def _latest_vintage(frame: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
     """Ramp republishes history; keep each row's latest scrape."""
     return frame.sort_values("scraped_at").drop_duplicates(keys, keep="last")
@@ -1205,6 +1306,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     semis = {
         "tw": _section(lambda: _tw_revenue(settings["tw_semis"], int(settings.get("tw_months", 37)), as_of)),
         "openrouter": _section(lambda: _openrouter(settings, as_of)),
+        "ramp_tokenomics": _section(lambda: _ramp_tokenomics(settings)),
         "korea": _section(lambda: _korea(as_of)),
         "korea_flash": _section(lambda: _korea_flash(as_of)),
         "adata": _section(lambda: {"notes": adata.fetch_recent(as_of, 6)}),
@@ -1384,6 +1486,9 @@ def _log(ctx, cloud: dict, semis: dict) -> None:
     orr = semis["openrouter"]
     record("altdata_openrouter", "OpenRouter tokens & estimated revenue (alternative-data)", altdata.OPENROUTER_URL, orr,
            None if "unavailable" in orr else (orr["dates"][-1] if orr["dates"] else None), "daily_close", len(orr.get("dates") or []))
+    rt = semis["ramp_tokenomics"]
+    record("altdata_ramp_tokenomics", "Ramp Token Spend Management tokenomics (alternative-data)", altdata.RAMP_TOKENOMICS_URL, rt,
+           None if "unavailable" in rt else rt["latest_week"], "weekly_release", len(rt.get("weeks") or []))
     ramp = cloud["ramp"]
     record("altdata_ramp", "Ramp AI Index (alternative-data)", altdata.RAMP_URL, ramp,
            None if "unavailable" in ramp else (ramp["months"][-1] + "-01" if ramp["months"] else None), "monthly_release",

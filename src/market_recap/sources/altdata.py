@@ -10,6 +10,10 @@ normalized Parquet files on GitHub instead:
 - Ramp AI Index: the share of US businesses on Ramp paying for AI tools,
   and AI spend per employee per month (PEPM), overall, by sector and by
   vendor (``ramp/*.parquet``).
+- Ramp Token Spend Management tokenomics: weekly token volume and spend by
+  model, and daily effective token prices for OpenAI and Anthropic
+  (``ramp/ramp_ai_token_*.parquet``). Ramp's sample of connected businesses,
+  not its total AI spend and not a provider's revenue.
 
 Each read records the commit that last touched the file (GitHub API; the
 workflow's token is used when present, so the limit is not the anonymous
@@ -34,6 +38,7 @@ API = f"https://api.github.com/repos/{REPO}/commits"
 HOME_URL = f"https://github.com/{REPO}"
 NAMESPACE = "altdata"
 RAMP_URL = "https://ramp.com/data/ai-index"
+RAMP_TOKENOMICS_URL = "https://ramp.com/data/ai-index?metric=token-spend&detail=maker&mode=volume"
 OPENROUTER_URL = "https://openrouter.ai/rankings"
 
 
@@ -112,3 +117,13 @@ def ramp(*, use_cache: bool = True) -> tuple[dict[str, pd.DataFrame], dict | Non
     }
     tables = {key: read(path, use_cache=use_cache) for key, path in paths.items()}
     return tables, commit(paths["pepm"], use_cache=use_cache)
+
+
+def ramp_tokenomics(*, use_cache: bool = True) -> tuple[dict[str, pd.DataFrame], dict | None]:
+    """Ramp Token Spend Management: weekly token volume and spend by model, and daily effective prices."""
+    paths = {
+        "activity": "ramp/ramp_ai_token_activity.parquet",
+        "prices": "ramp/ramp_ai_token_prices.parquet",
+    }
+    tables = {key: read(path, use_cache=use_cache) for key, path in paths.items()}
+    return tables, commit(paths["activity"], use_cache=use_cache)

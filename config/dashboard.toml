@@ -975,6 +975,14 @@ openrouter_providers = ["anthropic", "openai", "google", "x-ai", "deepseek", "qw
 # Authors drawn by default, in this order (each must be in openrouter_providers).
 openrouter_default = ["openai", "anthropic", "deepseek", "google"]
 openrouter_months = 13
+# Ramp Token Spend Management (alternative-data's ramp token files): makers with
+# data are drawn in this order; the others are on the legend.
+ramp_tokenomics_default_makers = ["openai", "anthropic", "google", "xai", "deepseek"]
+# Model series shipped per metric: the top N by their last 13 weeks' sum. Totals and
+# shares are computed over every reported series, shipped or not.
+ramp_tokenomics_models = 25
+# Display names for model makers; a maker not listed shows its raw key.
+ramp_tokenomics_names = { openai = "OpenAI", anthropic = "Anthropic", xai = "xAI", nvidia = "NVIDIA", google = "Google", meta = "Meta", deepseek = "DeepSeek", alibaba = "Alibaba", minimax = "MiniMax", moonshot = "Moonshot AI", zhipu = "Zhipu AI" }
 capex_filers = ["MSFT", "GOOGL", "AMZN", "META", "ORCL"]
 capex_quarters = 12
 nvda_quarters = 8
@@ -1393,8 +1401,8 @@ label = "CPI"
 importance = "high"
 expect_within_days = 40
 prints = [
-  { series = "CPIAUCSL", transform = "yoy", label = "CPI y/y", unit = "%", decimals = 1 },
-  { series = "CPILFESL", transform = "yoy", label = "Core y/y", unit = "%", decimals = 1 },
+  { series = "CPIAUCNS", transform = "yoy", label = "CPI y/y", unit = "%", decimals = 1 },
+  { series = "CPILFENS", transform = "yoy", label = "Core y/y", unit = "%", decimals = 1 },
 ]
 expect = ["cpi_yoy", "core_cpi_yoy", "cpi_mom", "core_cpi_mom"]
 
@@ -1744,6 +1752,34 @@ beta_min_weeks = 52
 releases = 12
 # Years of each inflation series carried for its chart.
 history_years = 10
+
+[macro.cpi]
+history_years = 10
+percentile_min_months = 60
+# Partition for attribution: no parent and its children in the same sum.
+contribution_keys = ["food", "energy", "core"]
+components = [
+  { key = "headline", label = "Headline CPI", bls = "All items", series_id = "CPIAUCSL" },
+  { key = "core", label = "Core CPI", bls = "All items less food and energy", series_id = "CPILFESL" },
+  { key = "food", label = "Food", bls = "Food", series_id = "CPIUFDSL" },
+  { key = "energy", label = "Energy", bls = "Energy", series_id = "CPIENGSL" },
+  { key = "core_goods", label = "Core goods", bls = "Commodities less food and energy commodities", series_id = "CUSR0000SACL1E" },
+  { key = "core_services", label = "Services ex energy", bls = "Services less energy services", series_id = "CUSR0000SASLE" },
+  { key = "shelter", label = "Shelter", bls = "Shelter", series_id = "CUSR0000SAH1" },
+  { key = "rent", label = "Rent", bls = "Rent of primary residence", series_id = "CUSR0000SEHA" },
+  { key = "oer", label = "Owners’ equivalent rent", bls = "Owners' equivalent rent of residences", series_id = "CUSR0000SEHC" },
+  { key = "gasoline", label = "Gasoline", bls = "Gasoline (all types)", series_id = "CUSR0000SETB01" },
+  { key = "new_vehicles", label = "New vehicles", bls = "New vehicles", series_id = "CUSR0000SETA01" },
+  { key = "used_vehicles", label = "Used vehicles", bls = "Used cars and trucks", series_id = "CUSR0000SETA02" },
+  { key = "medical", label = "Medical services", bls = "Medical care services", series_id = "CUSR0000SAM2" },
+  { key = "airfares", label = "Airfares", bls = "Airline fares", series_id = "CUSR0000SETG01" },
+]
+persistence = [
+  { key = "sticky", label = "Sticky CPI", series_id = "STICKCPIM159SFRBATL", unit = "YoY %", display = "level" },
+  { key = "core_sticky", label = "Core sticky CPI", series_id = "CORESTICKM159SFRBATL", unit = "YoY %", display = "level" },
+  { key = "median", label = "Median CPI", series_id = "MEDCPIM158SFRBCLE", unit = "1M ann. %", display = "level" },
+  { key = "trimmed", label = "16% trimmed-mean CPI", series_id = "TRMMEANCPIM158SFRBCLE", unit = "1M ann. %", display = "level" },
+]
 
 [fixed_income]
 # Calendar days back for each curve comparison. Calendar, not trading days:

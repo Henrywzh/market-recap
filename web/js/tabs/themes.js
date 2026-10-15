@@ -14,6 +14,7 @@ import { stateTone, stateWhy, breadthText, revisionText, valuationText, quadrant
 import { valuationBlock } from '../valuation-block.js';
 import { pageValuation } from '../sectors-model.js';
 import { openrouterCharts } from '../openrouter-chart.js';
+import { ramptokenomicsCharts } from '../ramp-tokenomics-chart.js';
 
 const KIND_TONE = { earnings: 'warn', macro: 'info', data: 'up' };
 const KIND_LABEL = { earnings: 'EARN', macro: 'MACRO', data: 'DATA' };
@@ -293,6 +294,19 @@ function openrouterCard(or) {
     table(['AUTHOR', 'LAST 7D REVENUE', 'SHARE', 'LAST 7D TOKENS'], rows),
     el('div', { class: 'field-note', text: 'OpenRouter\'s routed traffic only -- a slice of each lab\'s demand, not the lab\'s revenue or ARR. Revenue is alternative-data\'s estimate: observed tokens at the model\'s list price at the time. MONTHLY ARR annualises that estimate (a month\'s mean day times 365, over the days with data), so it is an OpenRouter-routed run-rate, never a company\'s ARR. Hollow markers are partial months: not every calendar day has data. Today\'s partial day is left out.' }),
   ]);
+}
+
+// The RAMP TOKENOMICS card: token volume and spend by maker or model, observed
+// prices, one control bar for the chart and the latest week's table, and what the
+// figures are not (the notes sit in the body, under the table).
+function rampTokenomicsCard(payload) {
+  const title = 'RAMP TOKENOMICS · TOKEN VOLUME, SPEND AND PRICES';
+  if (!payload || payload.unavailable) {
+    return card(title, null, unavailable(payload) || gap('Not built this time: no Ramp tokenomics data in the artifact'));
+  }
+  const through = payload.latest_week ?? DASH;
+  const sha = payload.commit?.sha ? ` · alternative-data ${String(payload.commit.sha).slice(0, 7)}` : '';
+  return card(title, el('span', { class: 'dim', text: `through ${through}${sha}` }), [ramptokenomicsCharts(payload)]);
 }
 
 function rampCard(ramp) {
@@ -868,6 +882,7 @@ function industry(key, data) {
       koreaFlashCard(s.korea_flash)]),
     koreaCard(s.korea),
     el('div', { class: 'grid two' }, [memoryExportsCard(s.memory_exports), chipPricesCard(s.chip_prices)]),
+    rampTokenomicsCard(s.ramp_tokenomics),
     openrouterCard(s.openrouter),
     adataCard(s.adata), pcppCard(s.pcpp)];
   }
