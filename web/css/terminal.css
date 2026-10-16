@@ -1252,3 +1252,14 @@ table.data.ppi-momentum-table a { word-break: normal; }
 @media (max-width: 1000px) { .eu-heatmap { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 700px) { .eu-heatmap { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 480px) { .eu-heatmap { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* MOVES: market / sector / own parts of a session's move on one scale. */
+.move-parts { display: grid; gap: 6px; margin: 12px 0 4px; max-width: 640px; }
+.move-part { display: grid; grid-template-columns: 64px 1fr 72px 56px; align-items: center; gap: 10px; font-size: 12px; }
+.move-part-label { color: var(--text-dim); }
+.move-part-track { height: 10px; background: var(--panel-alt); position: relative; }
+.move-part-fill { position: absolute; top: 0; bottom: 0; left: 0; }
+.move-part-fill.up { background: color-mix(in srgb, var(--up) 70%, transparent); }
+.move-part-fill.down { background: color-mix(in srgb, var(--down) 70%, transparent); }
+.move-part-value { text-align: right; font-variant-numeric: tabular-nums; }
+.move-part-beta { font-size: 11px; }

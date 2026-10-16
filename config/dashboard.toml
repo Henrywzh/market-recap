@@ -277,6 +277,21 @@ label = "Dow Jones"
 holdings_etf = "DIA"
 note = "Price-weighted: a tile's size follows its share price, not the company's value."
 
+# MOVES (HEAT MAPS' unusual-move list and each ticker page): every covered
+# stock's last session in units of its own volatility. All estimates use the
+# sessions before the one measured.
+[moves]
+market = "SPY"
+threshold_sigma = 2.0
+vol_sessions = 60
+beta_sessions = 252
+volume_sessions = 20
+# The next-sessions range: the stock's own past returns over range_sessions,
+# each scaled by the volatility known when it started (about 5 years of them).
+range_sessions = 5
+range_history_sessions = 1260
+range_quantiles = [0.05, 0.16, 0.5, 0.84, 0.95]
+
 [etf_heatmap]
 # ticker = group. Sized by AUM, coloured by estimated net flow.
 SPY = "Broad Equity"

@@ -3,9 +3,13 @@ import { drawTreemap, returnColor } from '../treemap.js';
 import { render, multiLine } from '../charts.js';
 import { tickerHref } from '../routes.js';
 import { createFeed } from '../live-feed.js';
+import { unusualCard } from '../moves-card.js';
 
 const ETF_BASE = 'artifacts/etfs';
 const LIVE = 'LIVE';
+// Colour by each stock's own part of the session's move, in its own σ (MOVES).
+const SIGMA = 'OWN σ';
+const SIGMA_CAP = 3;
 
 function clock(seconds) {
   if (typeof seconds !== 'number') return DASH;
@@ -55,7 +59,7 @@ function rowsHtml(values, periods, fmt) {
   }).join('');
 }
 
-export default function renderHeatmaps(root, data) {
+export default function renderHeatmaps(root, data, manifest, ctx = {}) {
   const periods = data.periods;
   // The shortest window the artifact carries, whatever it is called.
   const [defaultPeriod] = periods;
@@ -79,12 +83,19 @@ export default function renderHeatmaps(root, data) {
   root.append(heading);
   const stockNode = el('div', { class: 'treemap' });
   const liveNote = el('div', { class: 'field-note' });
-  const stockPeriods = [LIVE, ...periods];
+  // Asked for only when this build made it: a missing file is a 404 the
+  // smoke test (rightly) fails on.
+  const hasMoves = Boolean(manifest?.panels?.includes('moves') && ctx.loadArtifact);
+  let moves = new Map();
+  const stockPeriods = [LIVE, ...periods, ...(hasMoves ? [SIGMA] : [])];
   let stockPeriod = defaultPeriod;
   let picked = false;
   let live = new Map();
 
-  const valueOf = (row, period) => (period === LIVE ? live.get(row.ticker)?.change_pct ?? null : row.returns[period]);
+  const valueOf = (row, period) => (period === LIVE ? live.get(row.ticker)?.change_pct ?? null
+    : period === SIGMA ? moves.get(row.ticker)?.z_own ?? null : row.returns[period]);
+  const shown = (v, period) => (v === null || v === undefined ? DASH
+    : period === SIGMA ? `${v > 0 ? '+' : ''}${num(v, 1)}σ` : pct(v));
 
   const drawStocks = (period) => {
     stockPeriod = period;
@@ -95,9 +106,10 @@ export default function renderHeatmaps(root, data) {
       bySector.get(row.sector).push({
         key: row.ticker,
         value: row.weight || 0,
-        color: returnColor(ret, period === defaultPeriod || period === LIVE ? RETURN_COLOUR_CAP.day : RETURN_COLOUR_CAP.period),
+        color: returnColor(ret, period === SIGMA ? SIGMA_CAP
+          : period === defaultPeriod || period === LIVE ? RETURN_COLOUR_CAP.day : RETURN_COLOUR_CAP.period),
         label: row.ticker,
-        sublabel: ret === null || ret === undefined ? DASH : pct(ret),
+        sublabel: shown(ret, period),
         payload: row,
       });
     });
@@ -107,7 +119,7 @@ export default function renderHeatmaps(root, data) {
         const now = live.get(row.ticker);
         const head = valueOf(row, period);
         showTooltip(
-          `<div class="t-head">${row.ticker} <span class="${dirClass(head)}">${pct(head)}</span>${period === LIVE ? ' <span class="dim">LIVE</span>' : ''}</div>
+          `<div class="t-head">${row.ticker} <span class="${dirClass(head)}">${shown(head, period)}</span>${period === LIVE ? ' <span class="dim">LIVE</span>' : period === SIGMA ? ' <span class="dim">own part, in its own σ</span>' : ''}</div>
            <div class="t-meta">${row.name}<br>${row.sector} · ${row.sub_sector}<br>weight ${num(row.weight, 2)}% · close $${num(row.price)}`
           + (now && now.price !== null && now.price !== undefined ? `<br>live $${num(now.price)} · ${pct(now.change_pct)} · ${clock(now.time)}` : '')
           + `</div><table>${rowsHtml(row.returns, periods, (v) => pct(v))}</table>`, event);
@@ -129,6 +141,16 @@ export default function renderHeatmaps(root, data) {
     el('div', { class: 'tag-row' }, [mapSwitch, stockSwitch]), [mapNote, liveNote, stockNode]);
   nameMap();
   root.append(stockCard);
+  if (hasMoves) {
+    const movesHost = el('div', {});
+    root.append(movesHost);
+    ctx.loadArtifact('moves').then((data) => {
+      moves = new Map((data.rows || []).map((r) => [r.ticker, r]));
+      const node = unusualCard(data);
+      if (node) movesHost.replaceChildren(node);
+      if (stockPeriod === SIGMA) drawStocks(SIGMA);
+    }).catch((error) => movesHost.replaceChildren(el('div', { class: 'gap', text: `Unusual moves are unavailable: ${error.message}.` })));
+  }
   const feed = createFeed('api/quotes?board=heatmap', {
     node: stockNode,
     onData: (body) => {

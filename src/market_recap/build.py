@@ -16,7 +16,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalyst_log, catalysts, chain, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, sizek, themes, valuation, xray
+from .panels import anchor, catalyst_log, catalysts, chain, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, moves, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, sizek, themes, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -69,6 +69,8 @@ PANELS = {
     "industries": industries.build,
     # SECTORS reads this session's INDUSTRIES and MONITOR (names, sectors, the fund returns), so after them.
     "sectors": sectors.build,
+    # Reads this session's calendar (which names reported) and the cached opens.
+    "moves": moves.build,
     # OVERVIEW reads this session's other panels and so runs last.
     "overview": overview.build,
 }
@@ -187,6 +189,8 @@ def run(
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in sizek.INPUTS})
                 elif name == "themes":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in themes.INPUTS})
+                elif name == "moves":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in moves.INPUTS})
                 elif name == "chain":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in chain.INPUTS})
                 else:

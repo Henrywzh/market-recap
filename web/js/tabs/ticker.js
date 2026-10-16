@@ -14,6 +14,7 @@ import { renderSingleTicker } from './technicals.js';
 import { eventCard, outcomeCard, timelineCard, loadEvents, historyCard, revisionsCard, sinceCard, filingsCard, storyCard, situation } from '../event-card.js';
 import { resolveTicker } from '../routes.js';
 import { chainCard } from '../chain-card.js';
+import { moveCard } from '../moves-card.js';
 
 const BILLION = 1e9;
 // The multiples shown in the header block, in this order. The full set is on
@@ -349,9 +350,11 @@ async function section(root, title, draw) {
   }
 }
 
-export default async function renderTicker(root, valuation, _manifest, ctx) {
-  const [monitor, technicals, financials, dcf, crossListing, evidence, events, themes, chain, sectors] = await Promise.all(
-    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events', 'themes', 'chain', 'sectors'].map((name) => optional(ctx, name)),
+export default async function renderTicker(root, valuation, manifest, ctx) {
+  const [monitor, technicals, financials, dcf, crossListing, evidence, events, themes, chain, sectors, moves] = await Promise.all(
+    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events', 'themes', 'chain', 'sectors', 'moves']
+      // MOVES is new: asked for only when this build made it (a 404 fails the smoke test).
+      .map((name) => (name === 'moves' && !manifest?.panels?.includes('moves') ? null : optional(ctx, name))),
   );
   const rows = valuation?.rows || [];
   const universe = new Map(rows.map((r) => [r.ticker, r.name]));
@@ -385,7 +388,8 @@ export default async function renderTicker(root, valuation, _manifest, ctx) {
 
   // What is new: a report the last session traded on, the evidence listed for
   // and against, the industry data since the last report, recent filings.
-  add(group('RECENT'), eventPayload ? outcomeCard(eventPayload) : null, company ? noteCard(mon) : null);
+  const move = moves ? moveCard((moves.rows || []).find((r) => r.ticker === symbol), moves) : null;
+  add(group('RECENT'), move, eventPayload ? outcomeCard(eventPayload) : null, company ? noteCard(mon) : null);
   const recent = [company ? evidenceCard(mon, ev) : null, eventPayload ? filingsCard(eventPayload) : null].filter(Boolean);
   if (recent.length) add(recent.length > 1 ? el('div', { class: 'grid two' }, recent) : recent[0]);
   add(eventPayload ? sinceCard(eventPayload) : null);
