@@ -1,13 +1,13 @@
 // The RAMP TOKENOMICS card's body: one control bar (metric, breakdown or token
-// type, display, scale, range) shared by the chart and the table, one full-width
-// line chart, the latest week's table, and what the numbers are not. The
-// arithmetic lives in ramp-tokenomics-model.js; this file only draws it.
+// type, display, scale, range, mode) shared by the chart and the table, one
+// full-width line chart, the latest week's table, and what the numbers are not.
+// The arithmetic lives in ramp-tokenomics-model.js; this file only draws it.
 
 import { el, notice, gap, table, periodSwitch, DASH } from './fmt.js';
 import { render, SERIES_COLORS } from './charts.js';
 import {
-  RANGES, pickSeries, rangeStartIndex, shareSeries, logValues, defaultVisible,
-  latestIndex, latestRows, formatVolume, formatSpend, formatPrice, formatPriceValue, formatShare,
+  RANGES, MODES, pickSeries, rangeStartIndex, shareSeries, logValues, defaultVisible,
+  latestIndex, latestRows, modeAvailable, monthlyView, formatVolume, formatSpend, formatPrice, formatPriceValue, formatShare,
 } from './ramp-tokenomics-model.js';
 
 const METRICS = ['VOLUME', 'SPEND', 'PRICE'];
@@ -35,6 +35,20 @@ const SHARE_TITLE = {
   VOLUME: 'TOKEN VOLUME · SHARE OF REPORTED SAMPLE',
   SPEND: 'SPEND · SHARE OF REPORTED SAMPLE',
 };
+// MONTHLY ARR titles. The monthly share titles say the shares are by month.
+const MONTHLY_TITLE = {
+  VOLUME: 'AVERAGE TOKENS · BY MONTH, PER DAY',
+  SPEND: 'MONTHLY ARR · $ PER YEAR, ANNUALISED',
+};
+const MONTHLY_SHARE_TITLE = {
+  VOLUME: 'TOKEN VOLUME · SHARE OF REPORTED SAMPLE, BY MONTH',
+  SPEND: 'SPEND · SHARE OF REPORTED SAMPLE, BY MONTH',
+};
+// The table header's unit, per metric, when the table shows a month.
+const MONTHLY_UNIT = { VOLUME: 'BILLION TOKENS A DAY', SPEND: 'USD MILLION A YEAR, ANNUALISED' };
+// What MONTHLY ARR means for spend. Tokens are not annualised, so their note says so.
+const NOTE_SPEND = 'MONTHLY ARR annualises Ramp\'s weekly sample spend: each week\'s total is spread evenly over its seven days, a month\'s mean day is multiplied by 365, over the days with data. It is a run-rate of Ramp\'s Token Spend Management sample, never a provider\'s ARR or Ramp\'s total AI spend. Hollow markers are months with fewer days of data than the month has.';
+const NOTE_VOLUME = 'MONTHLY ARR for tokens is the average day in each month, not annualised: each week\'s tokens are spread evenly over its seven days, and a month\'s average is taken over the days with data. It describes Ramp\'s Token Spend Management sample, not any provider\'s total usage. Hollow markers are months with fewer days of data than the month has.';
 
 function control(label, node) {
   return el('span', { class: 'tag-row' }, [el('span', { class: 'dim', text: label }), node]);
@@ -42,21 +56,23 @@ function control(label, node) {
 
 // The axis tooltip: the date, then each series' own figure (the raw level, not
 // the log-safe copy). In LEVEL mode a volume or spend figure also gives its
-// share of the reported sample when there is one.
-function tooltipOf(series, dates, { weekly, share, fmt }) {
+// share of the reported sample when there is one. A partial month says so.
+// `kind` is 'week', 'day' or 'month': it words the date.
+function tooltipOf(series, dates, { kind, share, fmt }) {
   const byName = new Map(series.map((s) => [s.name, s]));
   return (params) => {
     const list = [].concat(params);
     if (!list.length) return '';
     const i = list[0].dataIndex;
     const date = dates[i];
-    const head = date === undefined ? '' : weekly ? `week ending ${date}` : String(date);
+    const head = date === undefined ? '' : kind === 'week' ? `week ending ${date}` : String(date);
     const rows = list.map((q) => {
       const s = byName.get(q.seriesName);
       if (!s) return '';
       const level = s.raw[i];
       const sharePart = !share && isNum(level) && isNum(s.shares[i]) ? ` · ${formatShare(s.shares[i])} of sample` : '';
-      return `${q.marker}${esc(q.seriesName)} ${share ? formatShare(s.shares[i]) : fmt(level)}${sharePart}`;
+      const partial = s.partial && s.partial[i] ? ' (partial)' : '';
+      return `${q.marker}${esc(q.seriesName)} ${share ? formatShare(s.shares[i]) : fmt(level)}${sharePart}${partial}`;
     });
     return [esc(head), ...rows].join('<br/>');
   };
@@ -64,7 +80,7 @@ function tooltipOf(series, dates, { weekly, share, fmt }) {
 
 export function ramptokenomicsCharts(payload) {
   const p = payload !== null && typeof payload === 'object' ? payload : {};
-  const state = { metric: 'VOLUME', breakdown: 'BY MAKER', display: 'LEVEL', scale: 'RAW', tokenType: 'ALL', range: '6M' };
+  const state = { metric: 'VOLUME', breakdown: 'BY MAKER', display: 'LEVEL', scale: 'RAW', tokenType: 'ALL', range: '6M', mode: MODES[0] };
   // The legend's selection, per series group (metric and breakdown, or token
   // type), so a toggle survives a switch to another group and back.
   const selections = new Map();
@@ -75,6 +91,7 @@ export function ramptokenomicsCharts(payload) {
   const tokenNode = periodSwitch(TOKEN_TYPES, state.tokenType, (v) => { state.tokenType = v; draw(); });
   const scaleNode = periodSwitch(SCALES, state.scale, (v) => { state.scale = v; draw(); });
   const rangeNode = periodSwitch(RANGES, state.range, (v) => { state.range = v; draw(); });
+  const modeNode = periodSwitch(MODES, state.mode, (v) => { state.mode = v; draw(); });
   const controls = {
     metric: control('METRIC', metricNode),
     breakdown: control('BREAKDOWN', breakdownNode),
@@ -82,6 +99,7 @@ export function ramptokenomicsCharts(payload) {
     token: control('TOKEN TYPE', tokenNode),
     scale: control('SCALE', scaleNode),
     range: control('RANGE', rangeNode),
+    mode: control('MODE', modeNode),
   };
   const bar = el('div', { class: 'chart-head' }, [el('span', { class: 'tag-row' }, Object.values(controls))]);
 
@@ -102,41 +120,69 @@ export function ramptokenomicsCharts(payload) {
     'Spend and volume have different coverage, so spend divided by volume is not a price. Prices are observed effective prices (rolling 7-day cost / tokens), not list prices; the all-token price also moves with the mix of input, output and cached tokens; only OpenAI and Anthropic are covered, with no model-level prices.',
     'Missing weeks are gaps; reported zeros are zeros.',
   ].map((text) => el('div', { class: 'field-note', text }));
+  // Shown only in MONTHLY ARR mode; its text depends on the metric (see draw).
+  const monthlyNote = el('div', { class: 'field-note' });
+  monthlyNote.style.display = 'none';
 
   const draw = () => {
     const isPrice = state.metric === 'PRICE';
+    // MONTHLY ARR is offered for VOLUME and SPEND; a price has no monthly view.
+    const monthly = modeAvailable(state.metric) && state.mode === MODES[1];
     const share = !isPrice && state.display === 'SHARE';
     const log = !share && state.scale === 'LOG';
 
-    // Controls that do not apply to this metric are hidden; SCALE is off for SHARE.
+    // Controls that do not apply to this metric are hidden; SCALE is off for SHARE;
+    // RANGE is off for MONTHLY ARR, which shows every month.
+    controls.mode.style.display = modeAvailable(state.metric) ? '' : 'none';
     controls.breakdown.style.display = isPrice ? 'none' : '';
     controls.display.style.display = isPrice ? 'none' : '';
     controls.token.style.display = isPrice ? '' : 'none';
     for (const b of scaleNode.querySelectorAll('button')) b.disabled = share;
     controls.scale.style.opacity = share ? '0.35' : '';
     controls.scale.title = share ? 'Share is always linear' : '';
+    for (const b of rangeNode.querySelectorAll('button')) b.disabled = monthly;
+    controls.range.style.opacity = monthly ? '0.35' : '';
+    controls.range.title = monthly ? 'MONTHLY ARR shows every month' : '';
+    monthlyNote.style.display = monthly ? '' : 'none';
+    monthlyNote.textContent = state.metric === 'SPEND' ? NOTE_SPEND : NOTE_VOLUME;
 
     const picked = pickSeries(p, { metric: state.metric, breakdown: state.breakdown, tokenType: state.tokenType });
-    const start = rangeStartIndex(picked.dates, state.range);
-    const dates = picked.dates.slice(start);
     const group = isPrice ? `PRICE|${state.tokenType}` : `${state.metric}|${state.breakdown}`;
     if (!selections.has(group)) {
       const visible = defaultVisible(picked.series, p, isPrice ? 'BY MAKER' : state.breakdown);
       selections.set(group, Object.fromEntries(picked.series.map((s) => [s.name, visible.has(s.key)])));
     }
 
+    // Weekly: the weeks inside the range. Monthly: every month, on one shared axis.
+    const start = monthly ? 0 : rangeStartIndex(picked.dates, state.range);
+    const view = monthly ? monthlyView(picked.dates, picked.series, picked.total, state.metric) : null;
+    const axis = monthly ? view.months : picked.dates.slice(start);
+    // Monthly shares are the model's own (over the days the total reports); weekly shares are value / total.
+    const basis = monthly
+      ? view.series
+      : picked.series.map((s) => ({
+        key: s.key,
+        name: s.name,
+        values: s.values.slice(start),
+        partial: null,
+        shares: shareSeries(s.values, picked.total).slice(start),
+      }));
+
     // Colours follow each series' index in the full list, not the visible list.
-    const series = picked.series.map((s, index) => {
-      const raw = s.values.slice(start);
-      const shares = shareSeries(s.values, picked.total).slice(start);
+    const series = basis.map((s, index) => {
+      const raw = s.values;
+      const shares = s.shares;
       const plotted = share ? shares : raw;
-      return { name: s.name, index, raw, shares, plotted: log ? logValues(plotted) : plotted };
+      return { name: s.name, index, raw, shares, partial: s.partial, plotted: log ? logValues(plotted) : plotted };
     });
 
-    title.textContent = share ? SHARE_TITLE[state.metric] : TITLE[state.metric];
-    hint.textContent = share ? 'linear · shares of every reported series' : log ? 'log scale' : 'linear';
+    const titles = monthly ? (share ? MONTHLY_SHARE_TITLE : MONTHLY_TITLE) : (share ? SHARE_TITLE : TITLE);
+    title.textContent = titles[state.metric];
+    const shareText = share ? 'linear · shares of every reported series' : log ? 'log scale' : 'linear';
+    hint.textContent = monthly ? `${shareText} · hollow marker = partial month` : shareText;
 
     const onLegend = (selected) => selections.set(group, { ...selected });
+    const kind = monthly ? 'month' : isPrice ? 'day' : 'week';
     const chart = render(node, (option, pal) => ({
       ...option,
       grid: { left: 64, right: 16, top: 52, bottom: 26 },
@@ -149,8 +195,8 @@ export function ramptokenomicsCharts(payload) {
         itemHeight: 2,
         selected: selections.get(group),
       },
-      tooltip: { ...option.tooltip, trigger: 'axis', formatter: tooltipOf(series, dates, { weekly: !isPrice, share, fmt: share ? formatShare : LEVEL[state.metric] }) },
-      xAxis: { ...option.xAxis, data: dates },
+      tooltip: { ...option.tooltip, trigger: 'axis', formatter: tooltipOf(series, axis, { kind, share, fmt: share ? formatShare : LEVEL[state.metric] }) },
+      xAxis: { ...option.xAxis, data: axis },
       yAxis: {
         ...option.yAxis,
         type: log ? 'log' : 'value',
@@ -163,10 +209,11 @@ export function ramptokenomicsCharts(payload) {
         return {
           name: s.name,
           type: 'line',
-          data: s.plotted,
-          // Weekly points are few enough to mark, so a lone week between gaps still shows.
+          // A partial month is a hollow marker. Weekly points are few enough to
+          // mark, so a lone week between gaps still shows.
+          data: monthly ? s.plotted.map((v, i) => ({ value: v, symbol: s.partial[i] ? 'emptyCircle' : 'circle' })) : s.plotted,
           showSymbol: !isPrice,
-          symbolSize: 4,
+          symbolSize: monthly ? 6 : 4,
           connectNulls: false,
           lineStyle: { width: 1.4, color },
           itemStyle: { color },
@@ -175,20 +222,29 @@ export function ramptokenomicsCharts(payload) {
     }));
     if (chart) chart.on('legendselectchanged', (e) => onLegend(e.selected));
 
-    // The table: the latest week (latest day for prices) with any figure, every
-    // series of the breakdown, and no change columns.
-    const idx = latestIndex(picked.series);
-    const when = idx < 0 ? DASH : picked.dates[idx] ?? DASH;
-    tableCaption.textContent = isPrice
-      ? `LATEST DAY WITH DATA · ${when}`
-      : `LATEST WEEK WITH DATA · WEEK ENDING ${when} · ${String(picked.unitLabel).toUpperCase()}`;
+    // The table: the latest week (or month, or day for prices) with any figure,
+    // every series of the breakdown, and no change columns.
+    const tableSeries = monthly ? view.series : picked.series;
+    const tableTotal = monthly ? view.total : picked.total;
+    const idx = latestIndex(tableSeries);
+    const when = idx < 0 ? DASH : (monthly ? view.months[idx] : picked.dates[idx]) ?? DASH;
+    if (monthly) {
+      const partial = idx >= 0 && view.series.some((s) => isNum(s.values[idx]) && s.partial[idx]);
+      tableCaption.textContent = `LATEST MONTH WITH DATA · ${when}${partial ? ' (partial)' : ''} · ${MONTHLY_UNIT[state.metric]}`;
+    } else {
+      tableCaption.textContent = isPrice
+        ? `LATEST DAY WITH DATA · ${when}`
+        : `LATEST WEEK WITH DATA · WEEK ENDING ${when} · ${String(picked.unitLabel).toUpperCase()}`;
+    }
     if (!picked.series.length) {
       tableHost.replaceChildren(gap('No series in this build for this selection.'));
     } else {
-      const rows = latestRows(picked.series, picked.total).map((r) => el('tr', {}, [
+      // A monthly share is the series' own (see monthlyView); the weekly share is value / total.
+      const monthShare = new Map(monthly ? view.series.map((s) => [s.key, s.shares[idx]]) : []);
+      const rows = latestRows(tableSeries, tableTotal).map((r) => el('tr', {}, [
         el('td', { text: r.name }),
         el('td', { text: LEVEL[state.metric](r.value) }),
-        ...(isPrice ? [] : [el('td', { class: 'dim', text: formatShare(r.share) })]),
+        ...(isPrice ? [] : [el('td', { class: 'dim', text: formatShare(monthly ? monthShare.get(r.key) ?? null : r.share) })]),
       ]));
       const headers = isPrice ? ['SERIES', 'VALUE'] : ['SERIES', 'VALUE', 'SHARE OF REPORTED SAMPLE'];
       tableHost.replaceChildren(table(headers, rows));
@@ -205,5 +261,6 @@ export function ramptokenomicsCharts(payload) {
     tableHost,
     stale,
     ...notes,
+    monthlyNote,
   ]);
 }

@@ -218,3 +218,136 @@ export function formatPrice(v) {
 export function formatShare(v) {
   return isNumber(v) ? `${fixed(v, digitsFor(Math.abs(v)))}%` : DASH;
 }
+
+// MONTHLY ARR: the weekly figures re-cut by calendar month.
+// A spend month is annualised by this many days.
+export const ANNUAL_DAYS = 365;
+// The mode control's labels. MONTHLY ARR is not offered for PRICE.
+export const MODES = ['WEEKLY', 'MONTHLY ARR'];
+
+// Whether the mode control applies: VOLUME and SPEND have a monthly view; PRICE is already a price per token.
+export function modeAvailable(metric) {
+  return metric !== 'PRICE';
+}
+
+// The calendar days in a 'YYYY-MM' month.
+function daysIn(month) {
+  const [y, m] = month.split('-').map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+// Every 'YYYY-MM' from `first` to `last`, both included, gaps included.
+function monthsBetween(first, last) {
+  const out = [];
+  for (let m = first; m <= last; ) {
+    out.push(m);
+    const [y, mo] = m.split('-').map(Number);
+    m = mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`;
+  }
+  return out;
+}
+
+// Each reported weekly value spread over the seven calendar days that end on its
+// week-ending date, as a map from 'YYYY-MM-DD' to that day's share. A null week
+// has no days in the map.
+function dayValues(weeks, values) {
+  const vals = arr(values);
+  const out = new Map();
+  arr(weeks).forEach((week, i) => {
+    const v = vals[i];
+    const end = Date.parse(week);
+    if (!isNumber(v) || !Number.isFinite(end)) return;
+    for (let k = 0; k < 7; k += 1) out.set(new Date(end - k * DAY_MS).toISOString().slice(0, 10), v / 7);
+  });
+  return out;
+}
+
+// Each weekly value spread over the seven calendar days that end on its
+// week-ending date, so a week that straddles a month boundary splits by days. A
+// null week covers no days (a gap). A reported zero covers its days with 0. Per
+// calendar month, from the first covered day's month to the last's: perDay is
+// the sum of the covered days' shares over the number of covered days (null when
+// there are none), and partial is true when fewer days are covered than the
+// month has. A month between two others with no covered days stays listed.
+// Returns { months, perDay, daysCovered, daysInMonth, partial }.
+export function monthlyFromWeekly(weeks, values) {
+  const share = dayValues(weeks, values);
+  const days = [...share.keys()].sort();
+  if (!days.length) return { months: [], perDay: [], daysCovered: [], daysInMonth: [], partial: [] };
+  const months = monthsBetween(days[0].slice(0, 7), days[days.length - 1].slice(0, 7));
+  const rows = months.map((month) => {
+    let sum = 0;
+    let covered = 0;
+    for (const day of days) {
+      if (day.startsWith(month)) {
+        sum += share.get(day);
+        covered += 1;
+      }
+    }
+    return { perDay: covered ? sum / covered : null, covered, total: daysIn(month) };
+  });
+  return {
+    months,
+    perDay: rows.map((r) => r.perDay),
+    daysCovered: rows.map((r) => r.covered),
+    daysInMonth: rows.map((r) => r.total),
+    partial: rows.map((r) => r.covered < r.total),
+  };
+}
+
+// A block's series on one shared month axis: the widest span of any series' own
+// months (and the total's), where a month a series does not cover is a gap.
+// SPEND is annualised (perDay * ANNUAL_DAYS, $M a year); VOLUME stays the mean day.
+// The total is put on the same axis. A null total gives null shares.
+// Shares: each series' share of the month's total, in percent. The numerator
+// is the series' figures on the days it and the total both report; the
+// denominator is the total on every day the total reports that month. Where a
+// series reports every week the total does, this is its monthly value over the
+// monthly total. A gap counts for nothing in the numerator, so a month with gaps
+// reads low (the partial marker flags it), and the shares never sum past 100.
+// Null when the series shares no day with the total that month.
+// Returns { months, series: [{key, name, values, partial, shares}], total: values | null }.
+export function monthlyView(weeks, series, total, metric) {
+  const list = arr(series).filter(isObject);
+  const parts = list.map((s) => monthlyFromWeekly(weeks, s.values));
+  const totalPart = total === null || total === undefined ? null : monthlyFromWeekly(weeks, total);
+  const spanned = [...parts, totalPart].filter((p) => p && p.months.length);
+  const months = spanned.length
+    ? monthsBetween(spanned.map((p) => p.months[0]).sort()[0], spanned.map((p) => p.months.at(-1)).sort().at(-1))
+    : [];
+  const scale = metric === 'SPEND' ? ANNUAL_DAYS : 1;
+  const onAxis = (part) => {
+    const at = new Map(part ? part.months.map((m, i) => [m, i]) : []);
+    const cells = months.map((m) => {
+      const i = at.get(m);
+      if (i === undefined) return { value: null, partial: true };
+      const perDay = part.perDay[i];
+      return { value: perDay === null ? null : perDay * scale, partial: part.partial[i] };
+    });
+    return { values: cells.map((c) => c.value), partial: cells.map((c) => c.partial) };
+  };
+  // The total's day shares, and each series' over the same days.
+  const totalDays = dayValues(weeks, total);
+  const sharesOf = (values) => {
+    const days = dayValues(weeks, values);
+    return months.map((m) => {
+      let num = 0;
+      let den = 0;
+      let shared = 0;
+      for (const [day, t] of totalDays) {
+        if (!day.startsWith(m)) continue;
+        den += t;
+        if (days.has(day)) {
+          num += days.get(day);
+          shared += 1;
+        }
+      }
+      return shared && den > 0 ? (num * 100) / den : null;
+    });
+  };
+  return {
+    months,
+    series: list.map((s, k) => ({ key: s.key, name: s.name, ...onAxis(parts[k]), shares: sharesOf(s.values) })),
+    total: totalPart ? onAxis(totalPart).values : null,
+  };
+}

@@ -289,3 +289,133 @@ test('formatters never print more than three decimals', () => {
     }
   }
 });
+
+// MONTHLY ARR. Weeks end on Sundays; a week covers the seven days ending on it.
+const SEPT_WEEKS = ['2026-09-06', '2026-09-13', '2026-09-20', '2026-09-27', '2026-10-04'];
+
+test('monthlyFromWeekly: a week that straddles a month boundary splits by days (5 days to July, 2 to August)', () => {
+  const m = M.monthlyFromWeekly(['2026-08-02'], [70]);
+  assert.deepEqual(m.months, ['2026-07', '2026-08']);
+  assert.deepEqual(m.daysCovered, [5, 2]);
+  assert.deepEqual(m.perDay, [10, 10]);
+  assert.deepEqual(m.daysInMonth, [31, 31]);
+  assert.deepEqual(m.partial, [true, true]);
+  // Two weeks: July's 12 covered days are 7 at 20 a day and 5 at 10 a day.
+  const two = M.monthlyFromWeekly(['2026-07-26', '2026-08-02'], [140, 70]);
+  assert.deepEqual(two.daysCovered, [12, 2]);
+  assert.equal(two.perDay[0], 190 / 12);
+  assert.equal(two.perDay[1], 10);
+});
+
+test('monthlyFromWeekly: a null week covers no days and leaves its month partial; perDay averages only the covered days', () => {
+  // Week to 6 Sep covers 31 Aug to 6 Sep at 10 a day; the week to 13 Sep is null; the week to 20 Sep covers 14 to 20 Sep at 20 a day.
+  const m = M.monthlyFromWeekly(['2026-09-06', '2026-09-13', '2026-09-20'], [70, null, 140]);
+  assert.deepEqual(m.months, ['2026-08', '2026-09']);
+  assert.deepEqual(m.daysCovered, [1, 13]);
+  assert.equal(m.perDay[1], 200 / 13);
+  assert.deepEqual(m.partial, [true, true]);
+});
+
+test('monthlyFromWeekly: a reported zero covers its days with 0, so it is not a gap', () => {
+  const m = M.monthlyFromWeekly(['2026-08-02'], [0]);
+  assert.deepEqual(m.daysCovered, [5, 2]);
+  assert.deepEqual(m.perDay, [0, 0]);
+});
+
+test('monthlyFromWeekly: a history that starts or ends mid-month is partial at that end; a whole month is not', () => {
+  // Covers 14 to 30 Sep (17 days) and 1 to 4 Oct (4 days).
+  const edges = M.monthlyFromWeekly(['2026-09-20', '2026-09-27', '2026-10-04'], [70, 70, 70]);
+  assert.deepEqual(edges.months, ['2026-09', '2026-10']);
+  assert.deepEqual(edges.daysCovered, [17, 4]);
+  assert.deepEqual(edges.perDay, [10, 10]);
+  assert.deepEqual(edges.partial, [true, true]);
+  // The five weeks cover every day of September.
+  const whole = M.monthlyFromWeekly(SEPT_WEEKS, [70, 70, 70, 70, 70]);
+  assert.deepEqual(whole.months, ['2026-08', '2026-09', '2026-10']);
+  assert.deepEqual(whole.daysCovered, [1, 30, 4]);
+  assert.deepEqual(whole.partial, [true, false, true]);
+});
+
+test('monthlyFromWeekly: the month in progress is partial', () => {
+  // The latest week ends on 11 October, so the month has 11 of its 31 days.
+  const m = M.monthlyFromWeekly(['2026-10-04', '2026-10-11'], [70, 70]);
+  assert.deepEqual(m.months, ['2026-09', '2026-10']);
+  assert.deepEqual(m.daysCovered, [3, 11]);
+  assert.deepEqual(m.partial, [true, true]);
+});
+
+test('monthlyFromWeekly: a month between two with data, and no covered day, is listed with a null perDay', () => {
+  const m = M.monthlyFromWeekly(['2026-06-07', '2026-09-27'], [70, 70]);
+  assert.deepEqual(m.months, ['2026-06', '2026-07', '2026-08', '2026-09']);
+  assert.deepEqual(m.perDay, [10, null, null, 10]);
+  assert.deepEqual(m.daysCovered, [7, 0, 0, 7]);
+  assert.deepEqual(m.partial, [true, true, true, true]);
+});
+
+test('monthlyFromWeekly: leading gaps do not start the axis; no figures give empty lists', () => {
+  assert.deepEqual(M.monthlyFromWeekly(['2026-06-07', '2026-09-27'], [null, 70]).months, ['2026-09']);
+  assert.deepEqual(M.monthlyFromWeekly(['2026-06-07'], [null]), { months: [], perDay: [], daysCovered: [], daysInMonth: [], partial: [] });
+  assert.deepEqual(M.monthlyFromWeekly(undefined, undefined), { months: [], perDay: [], daysCovered: [], daysInMonth: [], partial: [] });
+});
+
+test('monthlyView: SPEND is the mean day times 365 ($M a year); VOLUME stays the mean day', () => {
+  const values = [70, 140, 140, 140, 70];   // Sep's 30 days: 17 a day on average; Aug and Oct: 10 a day
+  const spend = M.monthlyView(SEPT_WEEKS, [{ key: 'a', name: 'A', values }], null, 'SPEND');
+  assert.equal(M.ANNUAL_DAYS, 365);
+  assert.deepEqual(spend.months, ['2026-08', '2026-09', '2026-10']);
+  assert.deepEqual(spend.series[0].values, [3650, 6205, 3650]);
+  const volume = M.monthlyView(SEPT_WEEKS, [{ key: 'a', name: 'A', values }], null, 'VOLUME');
+  assert.deepEqual(volume.series[0].values, [10, 17, 10]);
+  assert.deepEqual(volume.series[0].partial, [true, false, true]);
+});
+
+test('monthlyView: shares of the month sum to 100 over the series that report with the total', () => {
+  const a = [70, 140, 140, 140, 70];
+  const b = [70, 70, 70, 70, 70];
+  const total = a.map((v, i) => v + b[i]);
+  const view = M.monthlyView(SEPT_WEEKS, [{ key: 'a', name: 'A', values: a }, { key: 'b', name: 'B', values: b }], total, 'VOLUME');
+  assert.deepEqual(view.total, [20, 27, 20]);
+  const shares = view.series.map((s) => s.shares);
+  assert.deepEqual(shares[0].map((x) => Math.round(x * 1e6) / 1e6), [50, 62.962963, 50]);
+  view.months.forEach((_, i) => {
+    assert.ok(Math.abs(shares[0][i] + shares[1][i] - 100) < 1e-9, `month ${view.months[i]}`);
+  });
+  // With no total, shares are gaps.
+  const none = M.monthlyView(SEPT_WEEKS, [{ key: 'a', name: 'A', values: a }], null, 'VOLUME');
+  assert.equal(none.total, null);
+  assert.deepEqual(M.shareSeries(none.series[0].values, none.total), [null, null, null]);
+});
+
+test('monthlyView: a share is the series over the month\'s total; a gap in the series counts for nothing, so it reads low, never above 100', () => {
+  // The total is 70, 140, 140, 140, 70 a week. The series has the same figures
+  // except the week to 13 Sep, which it does not report. September's total is
+  // 510 (30 days); the series reports 370 of it, so its share is 370 / 510.
+  const total = [70, 140, 140, 140, 70];
+  const series = [70, null, 140, 140, 70];
+  const view = M.monthlyView(SEPT_WEEKS, [{ key: 'a', name: 'A', values: series }], total, 'VOLUME');
+  assert.deepEqual(view.months, ['2026-08', '2026-09', '2026-10']);
+  assert.equal(view.series[0].shares[0], 100);
+  assert.ok(Math.abs(view.series[0].shares[1] - 3700 / 51) < 1e-9);
+  assert.equal(view.series[0].shares[2], 100);
+  // A series that shares no day with the total in a month has a null share.
+  const none = M.monthlyView(['2026-06-07'], [{ key: 'a', name: 'A', values: [null] }], [70], 'VOLUME');
+  assert.deepEqual(none.series[0].shares, [null]);
+});
+
+test('monthlyView: one month axis for every series, so a series with no figure in a month reads as a gap', () => {
+  const view = M.monthlyView(['2026-06-07', '2026-09-27'], [
+    { key: 'a', name: 'A', values: [70, 70] },
+    { key: 'b', name: 'B', values: [null, 70] },
+  ], null, 'VOLUME');
+  assert.deepEqual(view.months, ['2026-06', '2026-07', '2026-08', '2026-09']);
+  assert.deepEqual(view.series[0].values, [10, null, null, 10]);
+  assert.deepEqual(view.series[1].values, [null, null, null, 10]);
+  assert.deepEqual(view.series[1].partial, [true, true, true, true]);
+});
+
+test('modeAvailable: the monthly view is offered for VOLUME and SPEND, not for PRICE', () => {
+  assert.equal(M.modeAvailable('VOLUME'), true);
+  assert.equal(M.modeAvailable('SPEND'), true);
+  assert.equal(M.modeAvailable('PRICE'), false);
+  assert.deepEqual(M.MODES, ['WEEKLY', 'MONTHLY ARR']);
+});
