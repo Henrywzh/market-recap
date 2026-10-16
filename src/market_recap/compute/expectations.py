@@ -62,6 +62,7 @@ CATALOG = {
     },
     "core_cpi_mom": {
         "label": "Core CPI m/m", "unit": "%", "decimals": 2,
+        "tv": r"^core inflation rate mom$",
         "kalshi": {"series": "KXCPICORE", "yoy": False}, "cleveland": "core_cpi_mom",
     },
     "pce_yoy": {

@@ -1781,6 +1781,45 @@ persistence = [
   { key = "trimmed", label = "16% trimmed-mean CPI", series_id = "TRMMEANCPIM158SFRBCLE", unit = "1M ann. %", display = "level" },
 ]
 
+[macro.release_ledger]
+published_base_url = "https://market-recap-b5p.pages.dev"
+
+[macro.ppi]
+history_years = 10
+percentile_min_months = 60
+# SA index levels only. These overlap; no diffusion score or sum is implied.
+momentum = [
+  { key = "ex_trade", label = "Ex food, energy & trade", code = "FD:49116", series_id = "WPSFD49116", basis = "SA" },
+  { key = "core_goods", label = "Goods ex food & energy", code = "FD:413", series_id = "WPSFD413", basis = "SA" },
+  { key = "other_services", label = "Services ex trade & transport", code = "FD:421", series_id = "PPITWS", basis = "SA" },
+  { key = "transport", label = "Transport & warehousing", code = "FD:422", series_id = "PPIAWS", basis = "SA" },
+]
+# Official final-demand groupings, not the five AI-related industry indexes.
+components = [
+  { key = "headline", label = "Final demand", code = "FD:4" },
+  { key = "core", label = "Ex food & energy", code = "FD:49104" },
+  { key = "ex_trade", label = "Ex food, energy & trade", code = "FD:49116" },
+  { key = "goods", label = "Goods", code = "FD:41" },
+  { key = "services", label = "Services", code = "FD:42" },
+  { key = "construction", label = "Construction", code = "FD:43" },
+  { key = "food", label = "Food", code = "FD:411" },
+  { key = "energy", label = "Energy", code = "FD:412" },
+  { key = "core_goods", label = "Goods ex food & energy", code = "FD:413" },
+  { key = "trade", label = "Trade services · margins", code = "FD:423" },
+  { key = "transport", label = "Transport & warehousing", code = "FD:422" },
+  { key = "other_services", label = "Other services", code = "FD:421" },
+]
+# Same five observation targets as alternative-data's semiconductor_memory
+# registry. All NSA, broad US industries, not pure AI prices or volume demand.
+# No synthetic weighted basket and no imported custom research weights.
+ai_series = [
+  { key = "components", label = "Semis & electronic components", series_id = "PCU33443344", detail = "Broad semiconductor and other electronic component manufacturing; not just AI chips or HBM." },
+  { key = "network", label = "Communications equipment", series_id = "PCU33423342", detail = "Broad communications equipment manufacturing; not just data-center networking." },
+  { key = "power", label = "Switchgear & switchboards", series_id = "PCU335313335313", detail = "Switchgear and switchboard apparatus manufacturing; power infrastructure, not an electricity tariff." },
+  { key = "compute", label = "Electronic computers", series_id = "PCU334111334111", detail = "Electronic computer manufacturing, including non-AI products; not a GPU server price quote." },
+  { key = "storage", label = "Computer storage devices", series_id = "PCU3341123341121", detail = "Storage devices excluding parts, attachments and accessories; not NAND or DRAM spot prices." },
+]
+
 [fixed_income]
 # Calendar days back for each curve comparison. Calendar, not trading days:
 # Treasury publishes the curve on a calendar schedule, and "1 week ago" for a

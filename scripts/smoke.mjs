@@ -142,6 +142,20 @@ for (const route of list) {
         if (BAD_TEXT.test(await panel.innerText())) throw new Error(`${name} shows invalid text`);
       }
     }
+    if (route === 'rates') {
+      // Each of the three views must draw its own content, not just switch on.
+      for (const name of ['Treasury rates', 'CPI & macro', 'PPI · AI prices']) {
+        await page.getByRole('tab', { name, exact: true }).click();
+        const panel = page.getByRole('tabpanel', { name, exact: true });
+        await panel.waitFor({ state: 'visible', timeout: RENDER_WAIT_MS });
+        await page.waitForFunction((name) => {
+          const button = [...document.querySelectorAll('.view-switch button')].find((b) => b.textContent === name);
+          const panel = document.getElementById(button?.getAttribute('aria-controls'));
+          return panel && panel.innerText.length > 120 && !panel.querySelector('.loading');
+        }, name, { timeout: RENDER_WAIT_MS });
+        if (BAD_TEXT.test(await panel.innerText())) throw new Error(`${name} shows invalid text`);
+      }
+    }
     if (route === 'positioning' && (await artifact('positioning'))?.index_put_call) {
       const pc = page.locator('.card').filter({ hasText: 'INDEX OPTIONS · PUT / CALL VOLUME' });
       for (const window of ['1D', '1W', '1M']) {

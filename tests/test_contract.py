@@ -224,6 +224,9 @@ def test_a_lagging_series_leaves_a_blank_instead_of_shifting_a_month(monkeypatch
 
     monkeypatch.setattr(fred, "fetch_series", fake_series)
     monkeypatch.setattr(yahoo, "fetch_closes", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(macro.cpi, "build", lambda ctx: {"status": "unavailable", "reason": "not part of this test"})
+    monkeypatch.setattr(macro.ppi, "build", lambda ctx: {"status": "unavailable", "reason": "not part of this test"})
+    monkeypatch.setattr(macro.inflation_state, "load_previous", lambda *a, **k: {})
 
     cfg = config.load_config()
     cfg = dict(cfg)

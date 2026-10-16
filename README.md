@@ -53,6 +53,38 @@ audit and its limitations are documented in `docs/blackout_audit.md`.
 The trial UI is dark-only. The theme selector and light palette are removed;
 old `mr-theme` preferences are retired without clearing monitor/watchlist data.
 
+**CPI view (2026-10-15).** RATES & MACRO opens on **Treasury rates**, with
+**CPI & macro** and **PPI · AI prices** as the other views. The latest official BLS headline/core
+MoM SA and YoY NSA prints sit against retrospective calendar consensus,
+followed by official food/energy/core contributions, a 6M/1Y/2Y component
+heatmap (raw MoM or prior-only percentile), weights and historical reference
+bands, and core 3M/6M annualized, sticky, median and trimmed-mean measures.
+Each heatmap row now keeps an always-visible weight percentage and blue
+0–100% bar, independently of inflation colors. The existing PCE and commodities remain below. Each source keeps its own date;
+missing or delayed measures remain gaps/pending. No research prediction model
+or release-window live service is included. See [the CPI contract](docs/cpi.md).
+
+The adjacent **PPI · AI prices** view adds official headline/core release
+prints against retrospective consensus, five separately dated AI-related
+industry PPI histories matching alternative-data's observation targets
+(semis/electronic components, communications equipment, switchgear,
+electronic computers, storage), and final-demand group weights/change detail.
+The industry series are broad **NSA** price indexes, not an AI-only demand
+index. No custom weighted proxy, headline industry weights, forecasts or
+inferred contributions are manufactured. FRED lag stays pending with the last
+actual month. See [the PPI contract](docs/ppi.md); `scripts/preview_ppi.py`
+refreshes only this local section without moving other artifact dates.
+
+PPI also shows four **SA** final-demand groups' 3M/6M compounded annualized
+momentum, independently dated from the release and the NSA industries. CPI
+and PPI retain an observed-release ledger inside `macro.json`: changed parsed
+BLS/calendar values append a version, never replace an earlier one. This starts
+with what this build actually observed, not reconstructed first prints or
+pre-release consensus. Prior-month revisions are compared only with an earlier
+observation captured before the new publication. Normal CI restores the published
+ledger (and refuses to reset it on restore failure); the existing run archive
+also saves `macro.json`. No new schedule or prediction model is introduced.
+
 MARKET STATE shows only active conditions in a compact ACTIVE / CAUTION grid,
 with bold names, each artifact's exact rule visible, and a shared term glossary;
 clicking a condition opens the full seven-state historical comparison and
@@ -148,7 +180,7 @@ The panels, as each is built:
 | **CALENDAR → SCENARIOS** (`scenarios.json`) | What each data release has done to rates and stocks, measured over its past releases with the count shown, never forecast. For each configured line (core CPI, CPI, PPI, core PCE, payrolls, unemployment, hourly earnings, claims, JOLTs, retail sales, ISM manufacturing): releases above / in line with / below TradingView's forecast (a miss of more than 0.7 robust standard deviations of its own surprises, or any miss for a line published to one decimal), the 2-year and 10-year yield, SPY, IWM and KRE and sector moves on those days with standard errors, the response per standard deviation by era and when rates drive the market, and whether the sector ordering found before 2022 held after it (a permutation test: the sectors are not independent samples). Beside them: the 60-session correlation of SPY with the 10-year yield's change (negative: rates drive stocks), FOMC days against other days, the next release with its forecast, each line's release-day size (2-year yield and SPY in its own volatility) against other days, and how the stock reaction to a hawkish surprise and to the 2-year yield's move differs between rates-driven and growth-driven markets (HC1 t, a permutation p for the difference, and a fit before 2022 scored after it). No nowcast of sectors from the day's moves: tested out of sample it explained little beyond energy (see docs/todo.md, item 10). A class or era with too few releases shows its count and no figure; most effects on stocks are not detectable at these sample sizes and the panel says so. FRED's yields lag the close by a day: a session after its last reading has no yield move, not a zero one Sources: TradingView's economic calendar (release days, forecasts and actuals, from 2016), FRED DGS10 / DGS2, Yahoo daily closes |
 | **HEAT MAPS** | Index treemap with an S&P 500 / Nasdaq 100 / Dow Jones switch, each sized by its own fund's **issuer-published weight** (SPY, QNDX, DIA; the Dow is price-weighted, so its tiles follow share prices) and coloured by return (LIVE colours all three; the Dow's names are all S&P 500 members); US ETF treemap sized by AUM and coloured by estimated net flow |
 | **RATES & MACRO → FIXED INCOME** | Published par yield curve vs. 1 week / 1 month / start of year, level and bps change by tenor, 10Y−2Y and 10Y−3M spreads; under the table, MOVE (Treasury option volatility) as RISK shows it, with ten years of weekly closes |
-| **RATES & MACRO → MACRO** | Commodity futures/ETF proxies with multi-period returns, last 12 monthly inflation releases as a heat table |
+| **RATES & MACRO → CPI & MACRO** | Official CPI prints vs calendar consensus; BLS weights/effects and non-overlapping contribution waterfall; component history/percentiles; core, sticky and robust inflation persistence; commodity proxies and the existing PCE/income/spending heat table. No forecast model; updates with the normal build |
 | **TECHNICALS** | Any A/B relative-strength ratio with its moving averages and MACD over a chosen period; single-ticker price with **your own MA periods, slope window and period**, a ±1.5σ band, z-score regime, SMA slope, and forward return by z-score band. Every indicator is computed in the browser from the baked close history, by one module tested against pandas |
 | **ETF X-RAY** | Every fund on the ETF heat map looked through to its holdings, from the **issuer's own file** (State Street, iShares and Invesco daily, Vanguard monthly): concentration (top-10 weight, effective N), sector and country weights against SPY, the top 25 holdings with each one's contribution to the day, overlap with every other fund, and a **valuation look-through** (P/E, P/B, ROE, FCF and dividend yield, growth, margin) aggregated like an index and joined to the VALUATION rows, with the share of the fund it covers. Bond funds show duration, yield to maturity, coupon and maturity buckets. Funds with no usable holdings file (the commodity funds) are listed with the reason, never proxied |
 | **CROSS-LISTING** | A US line against its home-market line at the depositary ratio, with the diagnostics that say whether the series measures a dislocation or a session gap |

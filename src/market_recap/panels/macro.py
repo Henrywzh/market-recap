@@ -2,16 +2,42 @@
 
 from __future__ import annotations
 
+import os
+
 import pandas as pd
 
+from ..config import ARTIFACT_DIR
+from ..compute import inflation_releases
 from ..compute import periods as P
 from ..compute import returns as R
-from ..sources import fred, yahoo
+from ..sources import fred, yahoo, inflation_state
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, history_payload, to_iso_date
+from . import cpi, ppi
+
+
+def _restore_release_history(ctx, config: dict) -> dict:
+    """The previous release ledgers, or {} (no carried history) when they cannot be read.
+
+    A failed MACRO build publishes no macro.json, so a restore that raised
+    would fail every later build too, and commodities and PCE would go down
+    with CPI/PPI history. The failure is logged instead and the ledgers start
+    again from this build's observation.
+    """
+    base_url = (config['macro']['release_ledger']['published_base_url']
+                if os.environ.get('INFLATION_PUBLISHED_STATE') == '1' else None)
+    try:
+        return inflation_state.load_previous(ARTIFACT_DIR / 'macro.json', published_base_url=base_url)
+    except Exception as exc:
+        # Named cpi_* so validate.py's optional (cpi|ppi)_fred_* pattern covers it.
+        ctx.log.add(SourceRecord('cpi_fred_release_state', 'Inflation release history restore',
+                                 base_url or str(ARTIFACT_DIR / 'macro.json'), status='partial',
+                                 error=str(exc)[:ERROR_DETAIL_CHARS], policy='monthly_release'))
+        return {}
 
 
 def build(ctx) -> dict:
     config = ctx.config
+    previous = _restore_release_history(ctx, config)
     releases = int(config["macro"]["releases"])
     history_years = int(config["macro"].get("history_years", 10))
     periods = list(config["periods"]["commodities"])
@@ -112,10 +138,12 @@ def build(ctx) -> dict:
             # of borrowing the month above it.
             row["latest_month"] = series.index[-1].strftime("%Y-%m") if len(series) else None
 
-    return {
+    return inflation_releases.attach({
         "as_of": to_iso_date(closes.index[-1]) if not closes.empty else None,
         "commodities": {"periods": periods, "rows": commodity_rows},
         "inflation": {"months": months, "releases": releases, "rows": inflation_rows},
+        "cpi": cpi.build(ctx),
+        "ppi": ppi.build(ctx),
         "note": (
             "Commodity prices are Yahoo front-month futures or ETF proxies, not LBMA/EIA spot "
             "prints. Inflation figures are the current FRED vintage: they reflect revisions "
@@ -124,4 +152,4 @@ def build(ctx) -> dict:
             "month axis, so a series its publisher has not updated yet shows a blank in the last "
             "column rather than being shifted a month to fill it."
         ),
-    }
+    }, previous)

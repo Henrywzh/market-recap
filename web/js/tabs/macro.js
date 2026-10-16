@@ -2,6 +2,7 @@ import { el, card, table, num, pct, dirClass, sectionTitle, DASH } from '../fmt.
 import { timeLines } from '../charts.js';
 import { rangeSwitch, sliceRange, initialRange } from '../range.js';
 import { createManualFeed } from '../live-feed.js';
+import renderCpi from './cpi.js';
 
 const HEAT_WARM = [185, 28, 28];
 const HEAT_COOL = [30, 64, 175];
@@ -56,6 +57,7 @@ function pickedChart(rows, { title, preferred = '1Y', line, marks = () => [], va
 
 export default function renderMacro(root, data) {
   root.append(sectionTitle('MACRO'));
+  renderCpi(root, data.cpi);
 
   const cols = data.commodities.periods;
   const commodityChart = pickedChart(data.commodities.rows, {
@@ -109,7 +111,7 @@ export default function renderMacro(root, data) {
   });
   drawTable();
   root.append(el('div', { class: 'grid two' }, [
-    card('COMMODITIES', el('div', { class: 'live-controls' }, [el('span', { class: 'dim', text: 'click a row to plot it' }), feed.controls]),
+    card('COMMODITIES', el('div', { class: 'live-controls' }, [el('span', { class: 'dim', text: `close ${data.as_of || DASH} · click a row to plot it` }), feed.controls]),
       [tableHost, liveNote]),
     commodityChart.card,
   ]));
@@ -152,7 +154,7 @@ export default function renderMacro(root, data) {
     return tr;
   });
 
-  root.append(card(`INFLATION — LAST ${data.inflation.releases ?? data.inflation.months.length} MONTHLY RELEASES`, el('span', { class: 'dim', text: 'click a row to plot it' }), [
+  root.append(card(`PCE, INCOME & SPENDING — LAST ${data.inflation.releases ?? data.inflation.months.length} MONTHLY RELEASES`, el('span', { class: 'dim', text: 'click a row to plot it' }), [
     table(header, inflationRows),
   ]));
   root.append(inflationChart.card);

@@ -5,7 +5,9 @@
 import { el, card } from '../fmt.js';
 import renderFixedIncome from './fixed-income.js';
 import renderMacro from './macro.js';
+import renderPpi from './ppi.js';
 import { tileNode, historyChart } from './risk.js';
+import { resizeAll } from '../charts.js';
 
 // MOVE under the Treasury table: how much the market expects those yields to
 // move. It is RISK's own tile (read after the page is up; RISK is the larger
@@ -23,18 +25,53 @@ function moveCard(risk) {
 }
 
 export default async function renderRates(root, [fixedIncome, macro], _manifest, ctx = {}) {
-  for (const [label, render, data] of [['FIXED INCOME', renderFixedIncome, fixedIncome], ['MACRO', renderMacro, macro]]) {
-    const host = el('div', {});
-    root.append(host);
-    try {
-      if (data?.unavailable) throw new Error(data.unavailable);
-      await render(host, data);
-    } catch (error) {
-      host.replaceChildren(el('div', { class: 'gap', text: `${label} is unavailable: ${error.message}.` }));
+  // Treasury rates opens first: it is the page's standing view; the macro prints are one click away.
+  const choices = [['yields', 'Treasury rates', renderFixedIncome, fixedIncome], ['macro', 'CPI & macro', renderMacro, macro], ['ppi', 'PPI · AI prices', renderPpi, macro?.ppi]];
+  const nav = el('div', { class: 'view-switch', role: 'tablist', 'aria-label': 'Rates and macro views' });
+  const panes = new Map(choices.map(([key]) => [key, el('div', { role: 'tabpanel',
+    id: `rates-view-${key}`, 'aria-labelledby': `rates-tab-${key}`, hidden: key !== 'yields' ? '' : null })]));
+  const ready = new Set();
+  const select = async (key) => {
+    for (const [id] of choices) {
+      const button = nav.querySelector(`#rates-tab-${id}`);
+      button.setAttribute('aria-selected', String(id === key));
+      button.tabIndex = id === key ? 0 : -1;
+      panes.get(id).hidden = id !== key;
     }
-  }
-  const risk = await ctx.loadArtifact?.('risk').catch(() => null);
-  const node = moveCard(risk);
-  const yields = [...root.querySelectorAll('.card')].find((c) => c.querySelector('.card-title')?.textContent.startsWith('TREASURY YIELDS'));
-  if (node && yields) yields.after(node);
+    const host = panes.get(key);
+    if (!ready.has(key)) {
+      ready.add(key);
+      const [, label, draw, data] = choices.find(([id]) => id === key);
+      try {
+        if ((!data && key !== 'ppi') || data?.unavailable) throw new Error(data?.unavailable || 'artifact missing');
+        await draw(host, data);
+        if (key === 'yields') {
+          const risk = await ctx.loadArtifact?.('risk').catch(() => null);
+          if (!host.isConnected) return;
+          const node = moveCard(risk);
+          const yields = [...host.querySelectorAll('.card')].find((c) => c.querySelector('.card-title')?.textContent.startsWith('TREASURY YIELDS'));
+          if (node && yields) yields.after(node);
+        }
+      } catch (error) {
+        host.replaceChildren(el('div', { class: 'gap', text: `${label} is unavailable: ${error.message}.` }));
+      }
+    }
+    requestAnimationFrame(resizeAll);
+  };
+  choices.forEach(([key, label], index) => nav.append(el('button', {
+    type: 'button', role: 'tab', id: `rates-tab-${key}`, text: label,
+    'aria-controls': `rates-view-${key}`, 'aria-selected': String(index === 0), tabindex: index === 0 ? '0' : '-1',
+    onclick: () => select(key), onkeydown: (event) => {
+      let next;
+      if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') next = (index + (event.key === 'ArrowRight' ? 1 : -1) + choices.length) % choices.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = choices.length - 1;
+      else return;
+      event.preventDefault();
+      nav.children[next].focus();
+      select(choices[next][0]);
+    },
+  })));
+  root.append(nav, ...panes.values());
+  await select('yields');
 }

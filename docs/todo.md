@@ -739,3 +739,44 @@ Priority: the Technicals event/relative evidence first; options scenarios second
 No change to the anchor, automatic trading, paid feed or deployment is approved
 by this TODO entry.
 
+## 19. Market-implied expectations: improve existing dashboard views (2026-10-15)
+
+Deferred at Henry's request: TODO only, not implemented or scheduled. Keep the
+scope simple and reuse Priced path, Rates & macro, DCF and catalyst views;
+do not create another dashboard or a composite expectations score.
+
+- **Macro:** distinguish survey consensus, futures-implied policy paths and
+  inflation compensation. Consider a compact release-before/after comparison
+  with observation times and matched horizons. Breakevens include risk and
+  liquidity premiums; they are not next-month CPI forecasts. Daily changes
+  must not be presented as intraday or causal event effects.
+- **Stocks:** consider a reverse mode in the existing DCF: what growth and
+  margins would justify today's price under explicit discount-rate and terminal
+  assumptions, with sensitivity rather than a single purported market forecast.
+- **Data first:** audit existing coverage and redistribution rights before
+  choosing the smallest useful enhancement. Missing pre-release snapshots stay
+  missing; retrospective calendar consensus is not a frozen pre-release record.
+  Analyst consensus, market-implied quantities and positioning stay separate.
+
+Requires a fresh scope decision before implementation; no new collection,
+forecast-model integration or trading rules are authorized by this entry.
+
+## 20. Narrative cycle: future research framework / trade rules (2026-10-15)
+
+Longer-term goal, deferred at Henry's request. Not a dashboard feature to build
+now, not an automatic stage classifier or trading signal.
+
+- Develop a research/trade-plan checklist: facts already verified, expectations
+  still unverified, assumptions needed for the price, next catalyst and evidence
+  that would invalidate the thesis. Separate a price dislocation with intact
+  fundamentals from a trade that requires a business turnaround.
+- Treat discovery, validation, adoption, crowding and reset as possible
+  descriptions, not a mandatory seven-stage price path. Allow mixed or unknown
+  states; news attention does not establish positioning or full pricing.
+- If later converted into entry/exit, sizing or review rules, define observable
+  criteria and preserve dated evidence first, then validate before use. Do not
+  infer a buying opportunity merely from a low P/E or a large drawdown.
+
+No change to the current anchor, positions or execution. Any implementation or
+backtest needs a separate user request.
+
