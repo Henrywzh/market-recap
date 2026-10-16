@@ -291,6 +291,55 @@ volume_sessions = 20
 range_sessions = 5
 range_history_sessions = 1260
 range_quantiles = [0.05, 0.16, 0.5, 0.84, 0.95]
+# What is known at a shock's close, for its tags: a repeat is a same-sign shock
+# in the repeat_sessions before; VIX is high above its median of the
+# vix_median_sessions before (the market's own trend uses its 200-session average).
+vix = "^VIX"
+vix_median_sessions = 252
+# 11, not 10: the research's rolling window (rolling(10 + 1).shift(1)) looked at
+# the 11 sessions before, and the table's statistics come from that code.
+repeat_sessions = 11
+# Shocks' forward range is scaled around zero by one factor, the first that
+# applies: reported, then a drop that repeats, a drop with VIX high, a drop
+# without a report; otherwise 1.0. From quantamental-lab
+# docs/sigma_move_states_v3.md section C (the band covered 86-87% on those
+# drops and 93% after a report, against 90% intended).
+range_factors = { reported = 0.87, down_repeat = 1.12, down_vix_high = 1.14, down_no_report = 1.11 }
+# The frozen research table beside a shock (scripts/export_move_states_table.py
+# in the quantamental-lab research worktree writes it); the card omits it if absent.
+states_file = "config/move_states_v1.json"
+
+# A technology-only sell-off session (research v6, quantamental-lab
+# docs/sigma_move_states_v6.md): the fund's own part against the market at or
+# below fund_z_max while the market itself is above market_z_floor, both in
+# units of their own 60-session volatility. The history is v6's descriptive
+# result, constants copied from it (basis points, from the next open, own
+# part, bottom 20% of the sector's names less the rest; 95% intervals by day).
+[moves.sector_selloff]
+fund = "XLK"
+sector = "Information Technology"
+fund_z_max = -2.0
+market_z_floor = -2.0
+loser_share = 0.2
+
+[moves.sector_selloff.history]
+days = 78
+since = "2015-01"
+until = "2026-05"
+five_day = { bp = 75, lo = 24, hi = 125 }
+twenty_day = { bp = 111, lo = 2, hi = 227 }
+# 5-day differences where the recovery sat, and where it did not (v6, "Where it lives").
+strongest = [
+  { label = "falls made during the session", bp = 116 },
+  { label = "names without a report", bp = 81 },
+  { label = "high sector beta", bp = 91 },
+  { label = "semiconductors", bp = 110 },
+  { label = "hardware", bp = 137 },
+]
+absent = [
+  { label = "falls that came as a gap at the open", bp = -45 },
+  { label = "the same names on market-wide sell-offs", bp = 3 },
+]
 
 [etf_heatmap]
 # ticker = group. Sized by AUM, coloured by estimated net flow.

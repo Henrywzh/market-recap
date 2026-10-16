@@ -49,10 +49,49 @@ function stat(label, value, note, cls = '') {
   ]);
 }
 
+// "What shocks like this did next" (research v1/v2): the frozen table's rows a
+// shock belongs to, the whole direction first. A row matches when every tag it
+// names holds exactly; an unknown (null) tag matches nothing, never a guess.
+export function stateRows(row, states) {
+  if (!row?.direction || !row.tags || !states?.rows) return [];
+  const mine = states.rows.filter((r) => r.direction === row.direction);
+  const holds = (r) => Object.entries(r.match || {}).every(([key, want]) => row.tags[key] === want);
+  return [...mine.filter((r) => !Object.keys(r.match || {}).length), ...mine.filter((r) => Object.keys(r.match || {}).length && holds(r))];
+}
+
+// Mean / median in basis points (the table stores fractions of price).
+export const bpPair = (s) => (s && valid(s.mean) ? `${signed(s.mean * 1e4, 0, '')} / ${signed(s.median * 1e4, 0, '')}` : DASH);
+
+export function statesTable(row, states) {
+  const rows = stateRows(row, states);
+  if (!rows.length) return null;
+  const cut = (r) => r.stats?.h5 || {};
+  const line = (r) => el('tr', {}, [
+    el('td', { text: r.label }),
+    ...['h1', 'h5', 'h20'].map((h) => el('td', { text: bpPair(r.stats?.[h]) })),
+    el('td', { text: valid(cut(r).positive_share) ? `${num(100 * cut(r).positive_share, 0)}%` : DASH }),
+    el('td', { text: valid(cut(r).n) ? num(cut(r).n, 0) : DASH }),
+    el('td', { class: 'dim', text: valid(cut(r).lo) ? `${signed(cut(r).lo * 1e4, 0, '')} to ${signed(cut(r).hi * 1e4, 0, '')}` : DASH }),
+  ]);
+  const head = ['SHOCKS THAT WERE', '1D · MEAN / MEDIAN', '5D', '20D', '5D UP', 'N', '5D 95% INTERVAL'];
+  return el('div', { class: 'move-states', style: 'margin-top:14px' }, [
+    el('div', { class: 'stat-label', text: 'WHAT SHOCKS LIKE THIS DID NEXT · OWN PART, FROM THE NEXT OPEN (bp)' }),
+    table(head, rows.map(line)),
+    el('div', { class: 'field-note', text: `History since ${(states.since || '').slice(0, 4) || '2015'} for S&P 500 members; descriptive, not a forecast.` }),
+  ]);
+}
+
+// The range cell's note: the band's basis, and the factor that scaled it for a shock.
+export function rangeNote(row, range) {
+  const base = `90% of its own history · ${range.widePrices}`;
+  return valid(row.range_factor) && row.range_factor !== 1 ? `${base} · ×${num(row.range_factor, 2)}, ${row.range_reason}` : base;
+}
+
 export function moveCard(row, data) {
   if (!row) return null;
   const settings = data.settings || {};
   const range = rangeText(row.range);
+  const rawRange = row.range_raw && row.range_factor !== 1 ? rangeText(row.range_raw) : null;
   const bars = el('div', { class: 'move-parts' }, partRows(row).map((p) => el('div', { class: 'move-part' }, [
     el('span', { class: 'move-part-label', text: p.label }),
     el('span', { class: 'move-part-track' }, [el('span', { class: `move-part-fill ${p.negative ? 'down' : 'up'}`, style: `width:${p.width}%` })]),
@@ -65,13 +104,64 @@ export function moveCard(row, data) {
       stat('OWN PART', signed(row.own_pct), `${sigma(row.z_own)} after market and sector`, tone(row.own_pct)),
       stat('GAP / SESSION', `${signed(row.gap_pct, 1)} / ${signed(row.intraday_pct, 1)}`, 'close→open / open→close'),
       stat('VOLUME', valid(row.volume_ratio) ? `${num(row.volume_ratio, 1)}×` : DASH, `of its ${settings.volume_sessions}-session median`),
-      stat(`NEXT ${settings.range_sessions} SESSIONS`, range ? range.wide : DASH, range ? `90% of its own history · ${range.widePrices}` : 'too little history'),
+      stat(`NEXT ${settings.range_sessions} SESSIONS`, range ? range.wide : DASH, range ? rangeNote(row, range) : 'too little history'),
     ]),
     bars,
+    statesTable(row, data.move_states),
     el('details', { class: 'sx-fold' }, [el('summary', { text: 'Method & caveats' }),
       el('div', { class: 'note-text', text: data.note }),
+      rawRange ? el('div', { class: 'note-text', text: `Before the calibration: ${rawRange.wide}.` }) : null,
       range?.narrow ? el('div', { class: 'note-text', text: `68% range: ${range.narrow}. Ranges are the stock's own past ${settings.range_sessions}-session moves scaled to today's volatility, with the past average removed: a spread of outcomes, not a direction.` }) : null,
     ]),
+  ]);
+}
+
+// A technology-only sell-off (research v6): one sentence of what followed such
+// days, from the constants the panel carries. Basis points, own part against
+// the rest of the sector, from the next open; descriptive.
+export function selloffHistoryText(h) {
+  if (!h || !h.five_day) return null;
+  const bp = (v) => signed(v, 0, '');
+  const span = (d) => `${bp(d.bp)} bp [${bp(d.lo)}, ${bp(d.hi)}]`;
+  const list = (items) => (items || []).map((i) => `${i.label} (${bp(i.bp)})`).join(', ');
+  const parts = [
+    `On ${h.days} such days since ${(h.since || '').slice(0, 4)} the hardest-hit technology names ended the next 5 sessions ${span(h.five_day)} ahead of the rest of the sector`
+      + (h.twenty_day ? ` and the next 20 ${span(h.twenty_day)}` : ''),
+    h.strongest?.length ? `most in ${list(h.strongest)}` : null,
+    h.absent?.length ? `none in ${list(h.absent)}` : null,
+  ];
+  return `${parts.filter(Boolean).join('; ')}.`;
+}
+
+// Names that fit the profile first, the hardest-hit first within each group.
+export function selloffOrder(losers) {
+  return [...(losers || [])].sort((a, b) => (Number(b.fits_profile) - Number(a.fits_profile)) || (a.ret_pct - b.ret_pct));
+}
+
+// A tag when it holds, plain dim words when it does not, a dash when unknown.
+const flag = (on, yes, no) => (on === null || on === undefined ? el('span', { class: 'dim', text: DASH })
+  : on ? tag(yes, 'info') : el('span', { class: 'dim', text: no }));
+
+// Only on a technology-only sell-off session; nothing otherwise.
+export function selloffBanner(data) {
+  const s = data?.sector_selloff;
+  if (!s?.active || !s.losers?.length) return null;
+  const line = (r) => el('tr', {}, [
+    el('td', {}, [el('a', { href: tickerHref(r.ticker), text: r.ticker }), el('span', { class: 'sub', text: r.name })]),
+    el('td', { class: 'dim', text: r.sub_sector || DASH }),
+    el('td', { class: tone(r.ret_pct), text: signed(r.ret_pct) }),
+    el('td', { text: valid(r.beta_sector) ? num(r.beta_sector, 2) : DASH }),
+    el('td', {}, [el('span', { class: 'tag-row' }, [
+      flag(r.high_beta, 'HIGH β', 'lower β'), flag(r.session_led, 'SESSION-LED', 'gap-led'), flag(r.reported, 'REPORTED', 'no report')])]),
+    el('td', {}, [r.fits_profile ? tag('FITS PROFILE', 'warn') : null]),
+  ]);
+  const head = ['NAME', 'SUB-INDUSTRY', 'RETURN', 'SECTOR β', 'TAGS', ''];
+  const beta = valid(s.beta_median) ? ` (above ${num(s.beta_median, 2)}, the median of the sector's ${s.members} names)` : '';
+  return card(`TECHNOLOGY-ONLY SELL-OFF · ${s.fund} ${sigma(s.z)} beyond ${s.market}`, null, [
+    el('div', { class: 'field-note', text: selloffHistoryText(s.history) }),
+    table(head, selloffOrder(s.losers).map(line)),
+    el('div', { class: 'field-note', text: `The sector's hardest-hit fifth by return this session. Fits the profile: high sector beta${beta}, a fall made during the session rather than at the open, and no report.` }),
+    el('div', { class: 'dim', text: s.history?.days ? `${s.history.days} such days since ${(s.history.since || '').slice(0, 4)}; history, not a forecast.` : 'History, not a forecast.' }),
   ]);
 }
 

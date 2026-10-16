@@ -1,0 +1,685 @@
+{
+ "version": 1,
+ "exported_at": "2026-10-16T14:13:42Z",
+ "provenance": {
+  "repository": "quantamental-lab",
+  "branch": "research/sigma-move-states",
+  "commit": "43f7cfbe418fa51f9dcfea4532c53eed80eeb431",
+  "v1": {
+   "run": "20261016T124459Z",
+   "config_sha256": "bb792eb3b71e08ed4e20de03522ad1ceed26c4c064307a4b2301c8e00d634995",
+   "input_files_sha256": {
+    "open.parquet": "b9daace12c9d420bc29c84f05963d82d25021bd5eb637216e5913df9cc30000d",
+    "high.parquet": "dba5adc767d86dbd5e3b0ea15ca11704a87826a489ea1447942c99e2490b9ea7",
+    "low.parquet": "dbed483201f6aee5d60a65d1b4c442b8acb6b511065a87f67885d9b93f371108",
+    "close.parquet": "f75c48eb82511c282932e0c1a9df7c4fb13eb0022d7b361e341dcfcaaf30da2d",
+    "volume.parquet": "f6f4521b7c7f41e2cbc11078054ee3f83646dd7c80cd379d5caadcf4633b210e"
+   },
+   "summary_sha256": "684508ddf62958186132df84d223a72527587f5eef603b434d42a150d9ef1b45"
+  },
+  "v2": {
+   "run": "20261016T125930Z",
+   "config_sha256": "ae3918ffa319825ee0f2da81a6cc39a23ba8073f56b18851eb3ea928e6c51a80",
+   "base_contract_sha256": "bb792eb3b71e08ed4e20de03522ad1ceed26c4c064307a4b2301c8e00d634995",
+   "events_sha256": "6c612cab3f971e7c04066431538c7ce42e3776e92eb8f730f1dbda07c8a2a497"
+  },
+  "docs": [
+   "docs/sigma_move_states_v1.md",
+   "docs/sigma_move_states_v2.md",
+   "docs/sigma_move_states_summary.md"
+  ],
+  "bootstrap": "month-clustered, 95%, 1000 resamples, seed 20261016 (interaction cells; the other rows are v1's)"
+ },
+ "universe": "S&P 500 members while the index held them, 2015-01 to 2026-05",
+ "since": "2015-01",
+ "units": "fractions of price (0.001 = 10 bp); the card shows basis points",
+ "outcome": "own_part_from_next_open",
+ "horizons": [
+  1,
+  5,
+  20
+ ],
+ "threshold_sigma": 2.0,
+ "definitions": {
+  "shock": "An S&P 500 member's own part of a session -- its return less what its market (SPY) and sector-fund betas explain -- at least 2 of its own volatilities, down or up. Volatility from the 60 sessions before, betas from the 252 before; nothing is estimated with the day itself or later.",
+  "outcome": "The own part from the next session's open to the close 1, 5 or 20 sessions after the shock, so a reader could have acted on it. Mean and median across the group's shocks; positive share is the share of shocks that ended above zero; the interval is a 95% bootstrap resampling whole months.",
+  "reported": "The company's earnings report fell in that session's reaction (before the open, or after the previous close).",
+  "gap_led": "The gap from the previous close to the open was at least as large as the move from the open to the close.",
+  "repeat": "Another shock of the same sign in the 10 sessions before.",
+  "vix_high": "VIX closed above its median of the 252 sessions before.",
+  "stock_above_200d": "The stock closed above its 200-session average.",
+  "market_above_200d": "SPY closed above its 200-session average."
+ },
+ "rows": [
+  {
+   "direction": "down",
+   "key": "all",
+   "condition": null,
+   "label": "All down shocks",
+   "match": {},
+   "stats": {
+    "h1": {
+     "mean": -0.00017471934402837135,
+     "lo": -0.0008003808725570349,
+     "hi": 0.0003502264594393159,
+     "median": 0.00012383541801042525,
+     "positive_share": 0.5049554013875124,
+     "n": 32288
+    },
+    "h5": {
+     "mean": 0.0003298991069611217,
+     "lo": -0.00040762013227736357,
+     "hi": 0.00110220135951487,
+     "median": 0.0004307755838653801,
+     "positive_share": 0.5062734285448743,
+     "n": 32279
+    },
+    "h20": {
+     "mean": -0.000279862877641892,
+     "lo": -0.0024837801619568343,
+     "hi": 0.0019558495724879676,
+     "median": -9.998276314399958e-05,
+     "positive_share": 0.49931850566879377,
+     "n": 32282
+    }
+   }
+  },
+  {
+   "direction": "down",
+   "key": "earnings=yes",
+   "condition": "earnings",
+   "label": "Report",
+   "match": {
+    "reported": true
+   },
+   "stats": {
+    "h1": {
+     "mean": 0.00030843803769716973,
+     "lo": -0.0003856523921328281,
+     "hi": 0.00098400811197382,
+     "median": 0.00010562088004841078,
+     "positive_share": 0.502643350955673,
+     "n": 4918
+    },
+    "h5": {
+     "mean": -0.001120060189009045,
+     "lo": -0.0025109367846144373,
+     "hi": 0.0003338205385114354,
+     "median": -0.001135839234665626,
+     "positive_share": 0.4825132167547784,
+     "n": 4918
+    },
+    "h20": {
+     "mean": -0.0025899265312907408,
+     "lo": -0.005638604702484663,
+     "hi": 0.0004772159214476018,
+     "median": -0.0035775936773585204,
+     "positive_share": 0.47366280252186294,
+     "n": 4917
+    }
+   }
+  },
+  {
+   "direction": "down",
+   "key": "earnings=no",
+   "condition": "earnings",
+   "label": "No report",
+   "match": {
+    "reported": false
+   },
+   "stats": {
+    "h1": {
+     "mean": -0.00026153585858175877,
+     "lo": -0.000971666158579169,
+     "hi": 0.0003431619798297924,
+     "median": 0.00012665752711627995,
+     "positive_share": 0.5053708439897698,
+     "n": 27370
+    },
+    "h5": {
+     "mean": 0.0005905218845489762,
+     "lo": -0.00019216415907761432,
+     "hi": 0.001504339358201337,
+     "median": 0.0006838493628252389,
+     "positive_share": 0.5105442052556559,
+     "n": 27361
+    },
+    "h20": {
+     "mean": 0.0001352141545156593,
+     "lo": -0.0025644772177649817,
+     "hi": 0.0022464526859959436,
+     "median": 0.0005839391250362994,
+     "positive_share": 0.5039283756623424,
+     "n": 27365
+    }
+   }
+  },
+  {
+   "direction": "down",
+   "key": "composition=yes",
+   "condition": "composition",
+   "label": "Gap at the open",
+   "match": {
+    "gap_led": true
+   },
+   "stats": {
+    "h1": {
+     "mean": -0.0007846122148805605,
+     "lo": -0.0020700950643454514,
+     "hi": 0.0003231066935916414,
+     "median": -0.000217843979301121,
+     "positive_share": 0.4930588798468167,
+     "n": 8356
+    },
+    "h5": {
+     "mean": -0.0017215533133445582,
+     "lo": -0.0039824477140300366,
+     "hi": 0.00027142411567820376,
+     "median": -0.0005612194320147564,
+     "positive_share": 0.49090256164711515,
+     "n": 8354
+    },
+    "h20": {
+     "mean": -0.0024721586938677743,
+     "lo": -0.00530850293809743,
+     "hi": 0.0006568543418397511,
+     "median": -0.0018485884620408205,
+     "positive_share": 0.48713345302214245,
+     "n": 8355
+    }
+   }
+  },
+  {
+   "direction": "down",
+   "key": "composition=no",
+   "condition": "composition",
+   "label": "Made during the session",
+   "match": {
+    "gap_led": false
+   },
+   "stats": {
+    "h1": {
+     "mean": 3.822837571259864e-05,
+     "lo": -0.0003819549530827476,
+     "hi": 0.00042659575537858476,
+     "median": 0.00022163879537413496,
+     "positive_share": 0.5091091425706168,
+     "n": 23932
+    },
+    "h5": {
+     "mean": 0.0010462139875978469,
+     "lo": 0.00012003838004778882,
+     "hi": 0.0020667955696664986,
+     "median": 0.0008099885543754459,
+     "positive_share": 0.5116405433646813,
+     "n": 23925
+    },
+    "h20": {
+     "mean": 0.00048565856443472637,
+     "lo": -0.001582992179721961,
+     "hi": 0.0026984004014545524,
+     "median": 0.0004902996190799952,
+     "positive_share": 0.503573368997367,
+     "n": 23927
+    }
+   }
+  },
+  {
+   "direction": "down",
+   "key": "repeat=yes",
+   "condition": "repeat",
+   "label": "Repeat shock",
+   "match": {
+    "repeat": true
+   },
+   "stats": {
+    "h1": {
+     "mean": -0.0006263681411700629,
+     "lo": -0.002008071104654837,
+     "hi": 0.0005567564098226637,
+     "median": 7.603796407596938e-05,
+     "positive_share": 0.5025163802108062,
+     "n": 10531
+    },
+    "h5": {
+     "mean": 0.002112367995984931,
+     "lo": 0.000683361466320776,
+     "hi": 0.00354692709681551,
+     "median": 0.0013042659196914029,
+     "positive_share": 0.5183320668693009,
+     "n": 10528
+    },
+    "h20": {
+     "mean": 0.0017535983173444403,
+     "lo": -0.001993574019347437,
+     "hi": 0.005839792013593589,
+     "median": 0.0014900632853269422,
+     "positive_share": 0.5102564102564102,
+     "n": 10530
+    }
+   }
+  },
+  {
+   "direction": "down",
+   "key": "repeat=no",
+   "condition": "repeat",
+   "label": "First shock",
+   "match": {
+    "repeat": false
+   },
+   "stats": {
+    "h1": {
+     "mean": 4.389137816214909e-05,
+     "lo": -0.00033427993305236626,
+     "hi": 0.0003690569257927286,
+     "median": 0.00015117762424112858,
+     "positive_share": 0.5061359562439675,
+     "n": 21757
+    },
+    "h5": {
+     "mean": -0.0005328581209200175,
+     "lo": -0.0014619986230351907,
+     "hi": 0.000405895899812029,
+     "median": 1.7773708204951505e-05,
+     "positive_share": 0.5004367615282056,
+     "n": 21751
+    },
+    "h20": {
+     "mean": -0.001264248055244231,
+     "lo": -0.0030097998155417306,
+     "hi": 0.0005402686154945366,
+     "median": -0.0008222302572131295,
+     "positive_share": 0.49402353806546523,
+     "n": 21752
+    }
+   }
+  },
+  {
+   "direction": "up",
+   "key": "all",
+   "condition": null,
+   "label": "All up shocks",
+   "match": {},
+   "stats": {
+    "h1": {
+     "mean": -0.00016932039203915172,
+     "lo": -0.0005311416747287384,
+     "hi": 0.00014498468793752573,
+     "median": -6.367581543533012e-05,
+     "positive_share": 0.49814826439018267,
+     "n": 31862
+    },
+    "h5": {
+     "mean": -0.0015453065098072214,
+     "lo": -0.0028735262379269324,
+     "hi": -0.00031121130731326206,
+     "median": -0.0009466318919558285,
+     "positive_share": 0.4854073073418994,
+     "n": 31831
+    },
+    "h20": {
+     "mean": -0.0030218904019726264,
+     "lo": -0.006520370328695907,
+     "hi": -0.00011450256892370403,
+     "median": -0.0015607803638286628,
+     "positive_share": 0.4873195229127433,
+     "n": 31860
+    }
+   }
+  },
+  {
+   "direction": "up",
+   "key": "earnings=yes",
+   "condition": "earnings",
+   "label": "Report",
+   "match": {
+    "reported": true
+   },
+   "stats": {
+    "h1": {
+     "mean": -8.178690898772909e-05,
+     "lo": -0.0007116762210733161,
+     "hi": 0.000550784832747829,
+     "median": 0.0001010653282989501,
+     "positive_share": 0.5034615384615385,
+     "n": 5200
+    },
+    "h5": {
+     "mean": -1.5442471670635794e-06,
+     "lo": -0.001162082841030607,
+     "hi": 0.00113737149025713,
+     "median": 0.0001751971872866907,
+     "positive_share": 0.5030769230769231,
+     "n": 5200
+    },
+    "h20": {
+     "mean": 0.00014164830854444024,
+     "lo": -0.0017310912931892421,
+     "hi": 0.001973870598638497,
+     "median": 0.00021676903472544855,
+     "positive_share": 0.5019230769230769,
+     "n": 5200
+    }
+   }
+  },
+  {
+   "direction": "up",
+   "key": "earnings=no",
+   "condition": "earnings",
+   "label": "No report",
+   "match": {
+    "reported": false
+   },
+   "stats": {
+    "h1": {
+     "mean": -0.00018639240883711885,
+     "lo": -0.0005260467123172724,
+     "hi": 0.00017216871424031703,
+     "median": -8.743949623688657e-05,
+     "positive_share": 0.4971119945990548,
+     "n": 26662
+    },
+    "h5": {
+     "mean": -0.0018467433227593757,
+     "lo": -0.0034747840365705308,
+     "hi": -0.00045565334616383824,
+     "median": -0.0011238734497306733,
+     "positive_share": 0.48195711764485,
+     "n": 26631
+    },
+    "h20": {
+     "mean": -0.0036389347116008606,
+     "lo": -0.007598170653166234,
+     "hi": -0.0005561711531134452,
+     "median": -0.0019808150917771045,
+     "positive_share": 0.48447111777944485,
+     "n": 26660
+    }
+   }
+  },
+  {
+   "direction": "up",
+   "key": "vix_level=yes",
+   "condition": "vix_level",
+   "label": "VIX above its 1-year median",
+   "match": {
+    "vix_high": true
+   },
+   "stats": {
+    "h1": {
+     "mean": -0.00039687578519832887,
+     "lo": -0.0009713169021018208,
+     "hi": 0.00010005258402443531,
+     "median": -8.288623784365873e-05,
+     "positive_share": 0.49777295568752855,
+     "n": 17512
+    },
+    "h5": {
+     "mean": -0.002833934722115713,
+     "lo": -0.004790108892862044,
+     "hi": -0.0008358775036772754,
+     "median": -0.0014778309569489084,
+     "positive_share": 0.47668897660316917,
+     "n": 17481
+    },
+    "h20": {
+     "mean": -0.004507310871059579,
+     "lo": -0.010783007679260218,
+     "hi": 0.00016900601810432335,
+     "median": -0.0017635090209301525,
+     "positive_share": 0.485208452312964,
+     "n": 17510
+    }
+   }
+  },
+  {
+   "direction": "up",
+   "key": "vix_level=no",
+   "condition": "vix_level",
+   "label": "VIX below its median",
+   "match": {
+    "vix_high": false
+   },
+   "stats": {
+    "h1": {
+     "mean": 0.00010837647520847967,
+     "lo": -0.00027400787059190417,
+     "hi": 0.0005037492138879414,
+     "median": -3.9234174361679145e-05,
+     "positive_share": 0.4986062717770035,
+     "n": 14350
+    },
+    "h5": {
+     "mean": 2.448511244816122e-05,
+     "lo": -0.0009276478576791078,
+     "hi": 0.0010929801130604125,
+     "median": -0.00023261844639730337,
+     "positive_share": 0.4960278745644599,
+     "n": 14350
+    },
+    "h20": {
+     "mean": -0.001209366888821925,
+     "lo": -0.0034083055067177744,
+     "hi": 0.0009405019859526504,
+     "median": -0.001303478098654394,
+     "positive_share": 0.48989547038327524,
+     "n": 14350
+    }
+   }
+  },
+  {
+   "direction": "up",
+   "key": "stock_trend=yes",
+   "condition": "stock_trend",
+   "label": "Stock above its 200-day",
+   "match": {
+    "stock_above_200d": true
+   },
+   "stats": {
+    "h1": {
+     "mean": -6.427385311531771e-05,
+     "lo": -0.0003317601772235356,
+     "hi": 0.00022309186721503434,
+     "median": -3.4008164274572546e-05,
+     "positive_share": 0.4987346517949199,
+     "n": 21338
+    },
+    "h5": {
+     "mean": -0.0003723602390042146,
+     "lo": -0.0011535294820769182,
+     "hi": 0.0005207421818189467,
+     "median": -0.0002341377059990749,
+     "positive_share": 0.49613166408777604,
+     "n": 21327
+    },
+    "h20": {
+     "mean": -0.0013227982176995169,
+     "lo": -0.002886295496344599,
+     "hi": 0.0003807885083450656,
+     "median": -0.0010620885039564912,
+     "positive_share": 0.49011061117360327,
+     "n": 21336
+    }
+   }
+  },
+  {
+   "direction": "up",
+   "key": "stock_trend=no",
+   "condition": "stock_trend",
+   "label": "Stock below its 200-day",
+   "match": {
+    "stock_above_200d": false
+   },
+   "stats": {
+    "h1": {
+     "mean": -0.0003823081388613457,
+     "lo": -0.0011117323632887732,
+     "hi": 0.0002448841522742697,
+     "median": -0.00012674085250112608,
+     "positive_share": 0.49695933105283163,
+     "n": 10524
+    },
+    "h5": {
+     "mean": -0.003926820706057766,
+     "lo": -0.006776091153176594,
+     "hi": -0.0010327683705822442,
+     "median": -0.0025412286137922006,
+     "positive_share": 0.4636329017517136,
+     "n": 10504
+    },
+    "h20": {
+     "mean": -0.006466572162106707,
+     "lo": -0.014614208422387696,
+     "hi": 0.0006925253436248657,
+     "median": -0.0027474925937295506,
+     "positive_share": 0.48166096541239073,
+     "n": 10524
+    }
+   }
+  },
+  {
+   "direction": "up",
+   "key": "earnings=yes|market=above",
+   "condition": "earnings x market_trend",
+   "label": "Rally, report, market above its 200-day",
+   "match": {
+    "reported": true,
+    "market_above_200d": true
+   },
+   "stats": {
+    "h1": {
+     "mean": -0.0004543083589675526,
+     "lo": -0.0010883579780398733,
+     "hi": 0.0001844170344374278,
+     "median": -0.0002693921322780143,
+     "positive_share": 0.49187661878973393,
+     "n": 4247
+    },
+    "h5": {
+     "mean": -0.0005267115131747035,
+     "lo": -0.0017447355104169633,
+     "hi": 0.0007440403986458367,
+     "median": 8.692787686375575e-06,
+     "positive_share": 0.5001177301624676,
+     "n": 4247
+    },
+    "h20": {
+     "mean": -0.0007327322309629955,
+     "lo": -0.0029312056900771878,
+     "hi": 0.001328999401023956,
+     "median": -0.00024449505162906643,
+     "positive_share": 0.49682128561337413,
+     "n": 4247
+    }
+   }
+  },
+  {
+   "direction": "up",
+   "key": "earnings=yes|market=below",
+   "condition": "earnings x market_trend",
+   "label": "Rally, report, market below its 200-day",
+   "match": {
+    "reported": true,
+    "market_above_200d": false
+   },
+   "stats": {
+    "h1": {
+     "mean": 0.0015783375380891973,
+     "lo": 0.00034519171423089915,
+     "hi": 0.0027630095571969976,
+     "median": 0.0025190695497132837,
+     "positive_share": 0.5550891920251836,
+     "n": 953
+    },
+    "h5": {
+     "mean": 0.0023388391512951055,
+     "lo": -0.0003336079708286883,
+     "hi": 0.004842301047021832,
+     "median": 0.0012308574432616133,
+     "positive_share": 0.5162644281217209,
+     "n": 953
+    },
+    "h20": {
+     "mean": 0.004038284353967397,
+     "lo": -0.00018866721517505266,
+     "hi": 0.00800142630813984,
+     "median": 0.0031670880688341673,
+     "positive_share": 0.5246589716684156,
+     "n": 953
+    }
+   }
+  },
+  {
+   "direction": "up",
+   "key": "earnings=no|market=above",
+   "condition": "earnings x market_trend",
+   "label": "Rally, no report, market above its 200-day",
+   "match": {
+    "reported": false,
+    "market_above_200d": true
+   },
+   "stats": {
+    "h1": {
+     "mean": -0.0001553525821988151,
+     "lo": -0.00047749506168184256,
+     "hi": 0.00018735464106532873,
+     "median": -0.00015274291174172876,
+     "positive_share": 0.49445894695365217,
+     "n": 20303
+    },
+    "h5": {
+     "mean": -0.0006506478231255884,
+     "lo": -0.001602823135776681,
+     "hi": 0.00029816804233269564,
+     "median": -0.000828257228280047,
+     "positive_share": 0.4865331491712707,
+     "n": 20272
+    },
+    "h20": {
+     "mean": -0.001939050325897361,
+     "lo": -0.0036433607562376628,
+     "hi": -5.544472082186987e-05,
+     "median": -0.001697339319181937,
+     "positive_share": 0.48603517068124724,
+     "n": 20301
+    }
+   }
+  },
+  {
+   "direction": "up",
+   "key": "earnings=no|market=below",
+   "condition": "earnings x market_trend",
+   "label": "Rally, no report, market below its 200-day",
+   "match": {
+    "reported": false,
+    "market_above_200d": false
+   },
+   "stats": {
+    "h1": {
+     "mean": -0.0002854962931329955,
+     "lo": -0.0015723003118047452,
+     "hi": 0.0007265388053095612,
+     "median": 0.00022479055580106738,
+     "positive_share": 0.5055826387796823,
+     "n": 6359
+    },
+    "h5": {
+     "mean": -0.005659803232898727,
+     "lo": -0.009575950784044522,
+     "hi": -0.0006863522072092519,
+     "median": -0.0024255074427484563,
+     "positive_share": 0.4673690831891807,
+     "n": 6359
+    },
+    "h20": {
+     "mean": -0.009065786876118358,
+     "lo": -0.01908674934758819,
+     "hi": 0.001764724091694829,
+     "median": -0.003327960145020712,
+     "positive_share": 0.4794779053310269,
+     "n": 6359
+    }
+   }
+  }
+ ]
+}

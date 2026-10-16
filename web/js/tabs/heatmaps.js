@@ -3,7 +3,7 @@ import { drawTreemap, returnColor } from '../treemap.js';
 import { render, multiLine } from '../charts.js';
 import { tickerHref } from '../routes.js';
 import { createFeed } from '../live-feed.js';
-import { unusualCard } from '../moves-card.js';
+import { unusualCard, selloffBanner } from '../moves-card.js';
 
 const ETF_BASE = 'artifacts/etfs';
 const LIVE = 'LIVE';
@@ -147,7 +147,8 @@ export default function renderHeatmaps(root, data, manifest, ctx = {}) {
     ctx.loadArtifact('moves').then((data) => {
       moves = new Map((data.rows || []).map((r) => [r.ticker, r]));
       const node = unusualCard(data);
-      if (node) movesHost.replaceChildren(node);
+      const nodes = [selloffBanner(data), node].filter(Boolean);  // the sell-off flag sits above the unusual moves
+      if (nodes.length) movesHost.replaceChildren(...nodes);
       if (stockPeriod === SIGMA) drawStocks(SIGMA);
     }).catch((error) => movesHost.replaceChildren(el('div', { class: 'gap', text: `Unusual moves are unavailable: ${error.message}.` })));
   }
