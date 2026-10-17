@@ -1263,3 +1263,20 @@ table.data.ppi-momentum-table a { word-break: normal; }
 .move-part-fill.down { background: color-mix(in srgb, var(--down) 70%, transparent); }
 .move-part-value { text-align: right; font-variant-numeric: tabular-nums; }
 .move-part-beta { font-size: 11px; }
+
+/* THEMES: the DATA sub-tab's chips, one per industry-data card, and All. */
+.theme-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
+.theme-chip { font: inherit; font-size: 11px; letter-spacing: 0.04em; color: var(--text-dim); background: var(--panel); border: 1px solid var(--border-strong); padding: 4px 9px; cursor: pointer; }
+.theme-chip[aria-pressed="true"] { color: var(--text); border-color: var(--accent); box-shadow: inset 0 -2px var(--accent); }
+
+/* CALENDAR: expiry tags. Quad witching is the largest expiry, so its row and tag carry more weight. */
+.cat-expiry-tag { color: var(--accent); border-color: var(--accent-dim); }
+.cat-expiry-quad { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.cat-item.is-quad > summary .cat-title { color: var(--accent); font-weight: 700; }
+.cat-tag-amber { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.cat-expiry-watch { margin-bottom: 4px; }
+.cat-watch-line { font-size: 11px; line-height: 1.5; margin: 0 0 4px 88px; padding-left: 8px; border-left: 1px solid var(--accent-dim); }
+.cat-zero-dte { font-size: 11px; margin: 0 0 6px; }
+@media (max-width: 700px) {
+  .cat-watch-line { margin-left: 0; }
+}

@@ -22,6 +22,12 @@ from ..config import MARKET_TIMEZONE
 MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY = range(7)
 QUARTER_END_MONTHS = (3, 6, 9, 12)
 VIX_EXPIRY_DAYS_BEFORE = 30
+# Where SPX's settlement rule is published; the monthly and quarterly expiries share it.
+SPX_OPTIONS_URL = "https://www.cboe.com/tradable_products/sp_500/spx_options/"
+# Why an expiry morning can differ from the close: SPX AM settlement uses the opening prints.
+SETTLEMENT = ("SPX standard options settle on the OPENING prices that morning (SET, AM-settled); "
+              "SPXW and most ETF/equity options settle at the close.")
+EXPIRY_RULES = ("monthly_opex", "quad_witching")
 
 
 def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
@@ -145,6 +151,20 @@ def _months(start: date, end: date):
         year, month = (year + 1, 1) if month == 12 else (year, month + 1)
 
 
+EXPIRY_RULES_SHOWN = ("monthly_opex", "quad_witching", "vix_expiry")
+
+
+def next_expiries(after: date) -> list[dict]:
+    """The next monthly options expiry, quad witching and VIX expiry after
+    ``after``, however far out: a reminder the calendar's window can't hide."""
+    events = [e for e in rule_events(after + timedelta(days=1), after + timedelta(days=130))
+              if e["rule"] in EXPIRY_RULES_SHOWN]
+    first = {}
+    for event in sorted(events, key=lambda e: e["date"]):
+        first.setdefault(event["rule"], event)
+    return [first[r] for r in EXPIRY_RULES_SHOWN if r in first]
+
+
 def _week_shift(day: date) -> date:
     """A weekly release moves to the next session when its day is a holiday."""
     while not is_session(day):
@@ -165,15 +185,16 @@ def rule_events(start: date, end: date) -> list[dict]:
         expiry = monthly_expiry(year, month)
         if month in QUARTER_END_MONTHS:
             add(expiry, "quad_witching", "Quarterly options & futures expiry (quad witching)", "16:00",
-                "Index futures, index options and single-stock options expire together.",
-                "https://www.cboe.com/about/hours/")
+                "Index futures, index options and single-stock options expire together. " + SETTLEMENT
+                + " Index futures (ES/NQ) settle on the opening quotation; heavier volume, roll and "
+                "rebalancing flows.", SPX_OPTIONS_URL)
             add(expiry, "sp_rebalance", "S&P 500 quarterly rebalance effective after the close", "16:00",
                 "Share and float changes take effect after this close; the index deletes and adds "
                 "announced beforehand trade in the closing auction.",
                 "https://www.spglobal.com/spdji/en/governance/")
         else:
             add(expiry, "monthly_opex", "Monthly options expiry", "16:00",
-                "Standard equity and index options expire.", "https://www.cboe.com/about/hours/")
+                "Standard equity and index options expire. " + SETTLEMENT, SPX_OPTIONS_URL)
         # VIX: the Wednesday 30 days before the next month's standard expiry.
         next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
         vix = monthly_expiry(next_year, next_month) - timedelta(days=VIX_EXPIRY_DAYS_BEFORE)
@@ -268,3 +289,57 @@ def theme_importance(share: float | None, high: float, medium: float) -> str:
     if share is None:
         return "low"
     return "high" if share >= high else "medium" if share >= medium else "low"
+
+
+# --- Expiry after a large move ---------------------------------------------------
+
+def recent_shock(closes: pd.DataFrame, session: date, *, funds: list[str], lookback: int, window: int,
+                 z_limit: float) -> dict | None:
+    """The largest close-to-close move by any of ``funds`` in the last ``lookback``
+    sessions up to ``session`` that is beyond ``z_limit`` of that fund's own volatility.
+
+    The volatility is the standard deviation of the ``window`` daily returns before
+    the move, so a move does not count itself. A missing close leaves its return
+    and the next one unknown, and a window with a gap in it is not used.
+    """
+    best, best_z = None, 0.0
+    for fund in funds:
+        if fund not in closes.columns:
+            continue
+        close = closes[fund]
+        close = close[[d <= session for d in pd.to_datetime(close.index).date]]
+        returns = close / close.shift(1) - 1
+        for position in range(max(0, len(returns) - lookback), len(returns)):
+            day_return = returns.iloc[position]
+            past = returns.iloc[max(0, position - window):position].dropna()
+            if pd.isna(day_return) or len(past) < window:
+                continue
+            sigma = float(past.std())
+            if not sigma > 0:
+                continue
+            z = float(day_return) / sigma
+            # Compare the unrounded z: the stored one is rounded, and a tie should keep the first fund.
+            if abs(z) > z_limit and (best is None or abs(z) > abs(best_z)):
+                best_z = z
+                best = {"fund": fund, "date": pd.Timestamp(returns.index[position]).strftime("%Y-%m-%d"),
+                        "return_pct": round(float(day_return) * 100, 2), "z": round(z, 2)}
+    return best
+
+
+def expiry_watch(events: list[dict], closes: pd.DataFrame, session: date, settings: dict) -> None:
+    """Flag each monthly or quarterly expiry within the next few sessions when a
+    large move in the broad market came just before it, with the move that did it.
+
+    Descriptive only: the flag tells a reader what the market has just done, and
+    the page says that expiry is not a directional signal.
+    """
+    shock = recent_shock(closes, session, funds=list(settings["expiry_watch_funds"]),
+                         lookback=int(settings["expiry_shock_lookback_sessions"]),
+                         window=int(settings["expiry_shock_window_sessions"]),
+                         z_limit=float(settings["expiry_shock_z"]))
+    if shock is None:
+        return
+    soon = {d.isoformat() for d in next_sessions(session, int(settings["expiry_watch_sessions"]))}
+    for event in events:
+        if event.get("rule") in EXPIRY_RULES and event["date"] in soon:
+            event["expiry_watch"] = dict(shock)

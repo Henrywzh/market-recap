@@ -1435,6 +1435,16 @@ earnings_medium_weight = 0.25
 # weights come from, and is the second largest company in the semiconductor group.
 earnings_theme_high_share = 0.15
 earnings_theme_medium_share = 0.05
+# An expiry (monthly, or quarterly quad witching) within expiry_watch_sessions is
+# flagged AFTER A LARGE MOVE when SPY or QQQ had a session in the last
+# expiry_shock_lookback_sessions whose close-to-close move was beyond
+# expiry_shock_z times its own volatility over the expiry_shock_window_sessions
+# before it, in either direction. Descriptive: the page says expiry is not a signal.
+expiry_watch_funds = ["SPY", "QQQ"]
+expiry_watch_sessions = 3
+expiry_shock_lookback_sessions = 5
+expiry_shock_window_sessions = 60
+expiry_shock_z = 2.0
 
 # Scheduled events shown, matched by a regular expression against the title in
 # the source's own calendar; anything unmatched is left off. ``prints`` names
@@ -1632,9 +1642,16 @@ importance = "high"
 
 [[catalysts.releases]]
 source = "rule"
-match = "^(ISM Services|Quarterly options)"
+match = "^ISM Services"
 label = ""
 importance = "medium"
+
+# Quad witching: the quarter's largest options and futures expiry, the one to watch most.
+[[catalysts.releases]]
+source = "rule"
+match = "^Quarterly options"
+label = ""
+importance = "high"
 
 [[catalysts.releases]]
 source = "rule"

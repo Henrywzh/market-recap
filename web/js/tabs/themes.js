@@ -7,7 +7,7 @@
 import { el, card, num, pct, tag, table, dirClass, sectionTitle, gap, metaRow, periodSwitch, DASH } from '../fmt.js';
 import { viewChart, VIEWS } from '../viewchart.js';
 import { availableRanges, sliceRange } from '../range.js';
-import { render } from '../charts.js';
+import { render, resizeAll } from '../charts.js';
 import { tickerHref } from '../routes.js';
 import { spark } from '../spark.js';
 import { stateTone, stateWhy, breadthText, revisionText, valuationText, quadrantTone, splitWidths } from '../themes-board.js';
@@ -667,7 +667,7 @@ function sensitivityCard(title, s, note) {
 }
 
 function housingCards(h) {
-  if (!h || h.unavailable) return [card('HOUSING DATA', null, unavailable(h))];
+  if (!h || h.unavailable) return [item('Housing', card('HOUSING DATA', null, unavailable(h)))];
   const s = h.series;
   const ok = (id) => s[id] && !s[id].unavailable;
   const mortgage = ok('MORTGAGE30US') ? (() => {
@@ -695,9 +695,9 @@ function housingCards(h) {
   const latest = (id) => (ok(id) ? s[id].values[s[id].values.length - 1] : null);
   const right = el('span', { class: 'dim', text: [latest('HOUST') !== null ? `starts ${num(latest('HOUST'), 0)}k` : null,
     latest('HSN1F') !== null ? `new sales ${num(latest('HSN1F'), 0)}k` : null, latest('MSACSR') !== null ? `${num(latest('MSACSR'), 1)} months' supply` : null].filter(Boolean).join(' · ') });
-  return [mortgage, pickerCard('HOUSING ACTIVITY & PRICES · MONTHLY', right, entries,
+  return [item('Mortgage rate', mortgage), item('Housing charts', pickerCard('HOUSING ACTIVITY & PRICES · MONTHLY', right, entries,
     'Census (starts, permits, new home sales, months\' supply; SAAR, thousands) and S&P CoreLogic Case-Shiller (not seasonally adjusted), via FRED -- the current vintage, so revised months show their revised value. '
-    + 'Release days are on the calendar above.')].filter(Boolean);
+    + 'Release days are on the calendar above.'))].filter((x) => x.node);
 }
 
 // --- BANKS & CONSUMER ---------------------------------------------------------------
@@ -735,8 +735,8 @@ const STEP = { daily: 'd/d', weekly: 'w/w', monthly: 'm/m', quarterly: 'q/q' };
 // One stat per series (latest, its change on the prior print and on a year
 // earlier), then each series' chart behind a picker. `tone(id, x)` colours a
 // stat: 'up' when it helps the names, 'down' when it hurts, '' when neutral.
-function fredCards(section, order, title, chartTitle, note, tone, right) {
-  if (!section || section.unavailable) return [card(title, null, unavailable(section))];
+function fredCards(section, order, title, chartTitle, note, tone, right, [statsLabel, chartsLabel]) {
+  if (!section || section.unavailable) return [item(statsLabel, card(title, null, unavailable(section)))];
   const s = section.series || {};
   const ids = order.filter((id) => s[id] && !s[id].unavailable);
   const failed = order.filter((id) => s[id]?.unavailable);
@@ -754,8 +754,8 @@ function fredCards(section, order, title, chartTitle, note, tone, right) {
       fmt: (v) => fredValue(x.unit, v), series: [{ name: x.label, values: x.values, color: (p) => p.text, width: 1.6 }] }) };
   });
   return [
-    card(title, right, [strip, failed.length ? gap(`Not built this time: ${failed.join(', ')}`) : null]),
-    pickerCard(chartTitle, null, entries, note),
+    item(statsLabel, card(title, right, [strip, failed.length ? gap(`Not built this time: ${failed.join(', ')}`) : null])),
+    item(chartsLabel, pickerCard(chartTitle, null, entries, note)),
   ];
 }
 
@@ -785,7 +785,7 @@ function banksCards(b) {
     'Fed H.8 (all commercial banks, seasonally adjusted; Fridays 16:15 ET for the week ended nine days before), Treasury curve spreads (FRED T10Y2Y, T10Y3M), ICE BofA US high-yield OAS, '
     + 'call-report delinquency rates (quarterly, about two months after the quarter) and the Senior Loan Officer Survey (net % of banks tightening C&I standards; positive is tightening), via FRED -- the current vintage. '
     + 'Green helps the banks (loans and deposits growing, a positive curve, spreads, delinquencies and standards easing on the year), red hurts.',
-    bankTone, el('span', { class: 'dim', text: `next H.8: ${next.h8 || DASH}${next.sloos ? ` · loan officer survey ~${next.sloos}` : ''}` }));
+    bankTone, el('span', { class: 'dim', text: `next H.8: ${next.h8 || DASH}${next.sloos ? ` · loan officer survey ~${next.sloos}` : ''}` }), ['Bank stats', 'Bank charts']);
 }
 
 function consumerCards(c) {
@@ -794,7 +794,7 @@ function consumerCards(c) {
     'Census advance retail sales (nominal, about the 16th of the next month), BEA real PCE and saving rate (end of the next month), Fed G.19 consumer credit (about the 8th, two months on), '
     + 'University of Michigan sentiment (final, late in the month -- FRED carries it a month behind) and Labor Department claims (Thursdays 08:30), via FRED -- the current vintage. '
     + 'Pump prices are on ENERGY. Green: up on the year (claims: down).',
-    consumerTone, el('span', { class: 'dim', text: `next claims: ${next.claims || DASH}` }));
+    consumerTone, el('span', { class: 'dim', text: `next claims: ${next.claims || DASH}` }), ['Consumer stats', 'Consumer charts']);
 }
 
 // --- Release days ------------------------------------------------------------------
@@ -868,54 +868,87 @@ function studyCard(study, failed) {
   ]);
 }
 
+// Every industry-data card of a theme, in the order the page draws them, each with
+// the short name its DATA chip carries. `row` puts two cards side by side on the
+// SECTORS pages (a `grid two`), as the page always has.
+function item(label, node, row = null) {
+  return { label, node, row };
+}
+
 function industry(key, data) {
   if (key === 'cloud') {
     const c = data.cloud;
-    return [capexCard(c.capex), guidanceCard(c.guidance), nvdaCard(c.nvda),
-      twRevenueCard('AI SERVER MAKERS · MONTHLY REVENUE', c.odm, 'Quanta, Wiwynn and Wistron build most hyperscaler AI servers; their revenue is capex being delivered, reported by the 10th of the next month. Foxconn is left out: iPhone assembly dominates it.'),
-      rampCard(c.ramp)];
+    return [item('Capex', capexCard(c.capex)), item('Guidance', guidanceCard(c.guidance)), item('NVIDIA', nvdaCard(c.nvda)),
+      item('AI servers', twRevenueCard('AI SERVER MAKERS · MONTHLY REVENUE', c.odm, 'Quanta, Wiwynn and Wistron build most hyperscaler AI servers; their revenue is capex being delivered, reported by the 10th of the next month. Foxconn is left out: iPhone assembly dominates it.')),
+      item('Ramp', rampCard(c.ramp))];
   }
   if (key === 'semis') {
     const s = data.semis;
-    return [el('div', { class: 'grid two' }, [
-      twRevenueCard('TSMC & NANYA · MONTHLY REVENUE', s.tw, 'TSMC: leading-edge foundry demand. Nanya: commodity DRAM, the purest listed read on DRAM pricing. Published by the 10th of the next month.'),
-      koreaFlashCard(s.korea_flash)]),
-    koreaCard(s.korea),
-    el('div', { class: 'grid two' }, [memoryExportsCard(s.memory_exports), chipPricesCard(s.chip_prices)]),
-    rampTokenomicsCard(s.ramp_tokenomics),
-    openrouterCard(s.openrouter),
-    adataCard(s.adata), pcppCard(s.pcpp)];
+    return [
+      item('TSMC & Nanya', twRevenueCard('TSMC & NANYA · MONTHLY REVENUE', s.tw, 'TSMC: leading-edge foundry demand. Nanya: commodity DRAM, the purest listed read on DRAM pricing. Published by the 10th of the next month.'), 'semis-pair-1'),
+      item('Korea flash', koreaFlashCard(s.korea_flash), 'semis-pair-1'),
+      item('Korea exports', koreaCard(s.korea)),
+      item('Memory exports', memoryExportsCard(s.memory_exports), 'semis-pair-2'),
+      item('Chip prices', chipPricesCard(s.chip_prices), 'semis-pair-2'),
+      item('Ramp tokens', rampTokenomicsCard(s.ramp_tokenomics)),
+      item('OpenRouter', openrouterCard(s.openrouter)),
+      item('ADATA', adataCard(s.adata)),
+      item('PCPartPicker', pcppCard(s.pcpp)),
+    ];
   }
   if (key === 'energy' && data.energy) {
     const e = data.energy;
-    return [eiaCard(e), pricesCard(e), sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', e.sensitivity,
-      'Correlation and beta of each name\'s daily return beyond the S&P 500 with the driver\'s daily change. Producers trade on crude; refiners also on the crack; services on neither as much. History, not a forecast.'), chokepointCard(e)].filter(Boolean);
+    return [item('EIA stocks', eiaCard(e)), item('Prices', pricesCard(e)),
+      item('Sensitivity', sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', e.sensitivity,
+        'Correlation and beta of each name\'s daily return beyond the S&P 500 with the driver\'s daily change. Producers trade on crude; refiners also on the crack; services on neither as much. History, not a forecast.')),
+      item('Chokepoints', chokepointCard(e))];
   }
   if (key === 'housing' && data.housing) {
     const h = data.housing;
-    return [...housingCards(h), sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', h.sensitivity,
-      'Correlation and beta (% per 1bp) of each name\'s daily return beyond the S&P 500 with the daily change in the 10-year Treasury yield (FRED DGS10). Negative: the names fall when rates rise.')].filter(Boolean);
+    return [...housingCards(h), item('Sensitivity', sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', h.sensitivity,
+      'Correlation and beta (% per 1bp) of each name\'s daily return beyond the S&P 500 with the daily change in the 10-year Treasury yield (FRED DGS10). Negative: the names fall when rates rise.'))];
   }
   if (key === 'banks' && data.banks) {
-    return [...banksCards(data.banks), sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', data.banks.sensitivity,
-      'Correlation and beta (% per 1bp) of each name\'s daily return beyond the S&P 500 with the daily change in the 2s10s curve, the 10-year yield and the high-yield spread. History, not a forecast.')].filter(Boolean);
+    return [...banksCards(data.banks), item('Sensitivity', sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', data.banks.sensitivity,
+      'Correlation and beta (% per 1bp) of each name\'s daily return beyond the S&P 500 with the daily change in the 2s10s curve, the 10-year yield and the high-yield spread. History, not a forecast.'))];
   }
   if (key === 'consumer' && data.consumer) {
-    return [...consumerCards(data.consumer), sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', data.consumer.sensitivity,
-      'Correlation and beta of each name\'s daily return beyond the S&P 500 with the daily change in the 10-year yield (per 1bp), RBOB gasoline futures (per 1%) and the high-yield spread (per 1bp). History, not a forecast.')].filter(Boolean);
+    return [...consumerCards(data.consumer), item('Sensitivity', sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', data.consumer.sensitivity,
+      'Correlation and beta of each name\'s daily return beyond the S&P 500 with the daily change in the 10-year yield (per 1bp), RBOB gasoline futures (per 1%) and the high-yield spread (per 1bp). History, not a forecast.'))];
   }
   // A group whose drivers are in the config: the table the build made, with its own note.
   const driven = data[key]?.sensitivity;
-  if (driven) return [sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', driven, driven.note || 'History, not a forecast.')];
-  if (data[key]?.unavailable) return [card('WHAT MOVES THE NAMES', null, [gap(`Unavailable: ${data[key].unavailable}`)])];
+  if (driven) return [item('Sensitivity', sensitivityCard('WHAT MOVES THE NAMES · LAST 252 SESSIONS', driven, driven.note || 'History, not a forecast.'))];
+  if (data[key]?.unavailable) return [item('Sensitivity', card('WHAT MOVES THE NAMES', null, [gap(`Unavailable: ${data[key].unavailable}`)]))];
   return [];
 }
-
-function themeCards(key, data) {
+// The release-day study is the last card of every theme that has one.
+function studyItem(data, key) {
   const failed = data.studies?.unavailable ? data.studies : null;
-  return [...industry(key, data), studyCard(failed ? null : data.studies?.[key], failed)].filter(Boolean);
+  return item('Release days', studyCard(failed ? null : data.studies?.[key], failed));
 }
-
+function themeItems(key, data) {
+  return [...industry(key, data), studyItem(data, key)].filter((x) => x.node);
+}
+// Cards in order, with each run of items sharing a `row` joined in one `grid two`.
+function layoutItems(items) {
+  const groups = [];
+  items.forEach((x) => {
+    const last = groups[groups.length - 1];
+    if (x.row && last?.row === x.row) last.items.push(x);
+    else groups.push({ row: x.row, items: [x] });
+  });
+  return groups.map((g) => (g.row ? el('div', { class: 'grid two' }, g.items.map((x) => x.node)) : g.items[0].node));
+}
+function themeCards(key, data) {
+  return layoutItems(themeItems(key, data));
+}
+// The overview of a theme: its calendar and relative chart, bellwethers and pairs.
+export function themeOverview(g, data) {
+  return [el('div', { class: 'grid two' }, [calendarCard(g, data.as_of, data.calendar_days), relativeCard(g)]),
+    bellwetherCard(g),
+    ...(g.pairs || []).map((pair) => pairCard(pair))];
+}
 // The SECTORS hub draws a mapped theme's blocks on the sector or sub-industry
 // page through this function, so both pages show the same cards in the same order.
 export function themeBlocks(key, data, { title = true } = {}) {
@@ -923,13 +956,17 @@ export function themeBlocks(key, data, { title = true } = {}) {
   if (!g) return [];
   const blocks = [];
   if (title) blocks.push(el('h2', { class: 'section-title' }, [g.label, el('span', { class: 'muted', text: ` proxy ${g.proxy}` })]));
-  blocks.push(el('div', { class: 'grid two' }, [calendarCard(g, data.as_of, data.calendar_days), relativeCard(g)]));
-  blocks.push(bellwetherCard(g));
-  (g.pairs || []).forEach((pair) => blocks.push(pairCard(pair)));
+  themeOverview(g, data).forEach((node) => blocks.push(node));
   themeCards(g.key, data).forEach((node) => blocks.push(node));
   return blocks;
 }
-
+// The DATA sub-tab's cards: each with its chip id (its label in capitals, spaces as dashes).
+export function themeDataCards(key, data) {
+  return themeItems(key, data).map((x) => ({ id: chipId(x.label), label: x.label, node: x.node }));
+}
+function chipId(label) {
+  return label.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
 // --- VALUATION: a theme's bellwethers against the S&P 500 ----------------------------
 
 // The S&P 500's page: the benchmark each theme's valuation is set against. When
@@ -968,6 +1005,33 @@ export function themeValuation(group, market) {
   ].filter(Boolean);
 }
 
+// --- The page: the status board picks a theme; its three sub-tabs hold the rest.
+// The hash keeps the theme, the sub-tab and the DATA chip: #themes/CLOUD.DATA.RAMP.
+const VIEW_TABS = [['overview', 'OVERVIEW'], ['valuation', 'VALUATION'], ['data', 'DATA']];
+const ALL_CHIP = 'ALL';
+
+// The hash's argument (already upper-cased) -> { key, view, chip }. An unknown theme
+// is the first; an unknown view is OVERVIEW; a chip is read only in DATA.
+export function themeArg(arg, groups) {
+  const [keyPart, viewPart, chipPart] = String(arg || '').toUpperCase().split('.');
+  const group = groups.find((g) => g.key.toUpperCase() === keyPart) || groups[0];
+  const tab = VIEW_TABS.find(([, label]) => label === viewPart);
+  const view = tab ? tab[0] : 'overview';
+  return { key: group.key, view, chip: view === 'data' && chipPart ? chipPart : null };
+}
+
+// The inverse of themeArg: the argument for a theme, sub-tab and chip. A chip of null
+// is the first card, so the hash leaves it out.
+export function themeArgFor({ key, view = 'overview', chip = null }) {
+  const label = VIEW_TABS.find(([id]) => id === view)?.[1] || 'OVERVIEW';
+  const parts = [key.toUpperCase()];
+  if (view !== 'overview') parts.push(label);
+  if (view === 'data' && chip) parts.push(chip);
+  return parts.join('.');
+}
+
+// A sub-tab's panel is built the first time it is shown, so a chart is drawn at its
+// real size; switching back resizes the charts (a hidden node has no size).
 export default async function renderThemes(root, data, _manifest, ctx = {}) {
   root.append(sectionTitle('THEMES', 'WHAT IS COMING, BY WHAT TRADES TOGETHER'));
   if (!data.groups?.length) {
@@ -979,19 +1043,102 @@ export default async function renderThemes(root, data, _manifest, ctx = {}) {
     'Bellwether reports: scheduled on the Nasdaq calendar, or projected from the company\'s own report rhythm (median gap between past reports) and marked so.',
     'Data dates: when each monthly series is due -- Taiwan revenue by the 10th, Korea\'s confirmed customs figures around the 15th; a series past due is marked late.',
   ]));
-  const boardHost = el('div', {});
-  const host = el('div', {});
-  // The hash argument is upper-cased like a ticker (#themes/SEMIS).
-  const wanted = String(ctx.arg || '').toLowerCase();
-  let active = data.groups.some((g) => g.key === wanted) ? wanted : data.groups[0].key;
-  const pick = (key) => { active = key; ctx.setArg?.(key); draw(); };
   const market = await marketPage(ctx);
-  const draw = () => {
-    boardHost.replaceChildren(data.groups.every((g) => g.board) ? boardCard(data, active, pick) : overviewStrip(data, active, pick));
-    // The valuation sits under the theme's board and above its own cards.
-    host.replaceChildren(...themeValuation(data.groups.find((g) => g.key === active), market), ...themeBlocks(active, data));
+  const state = themeArg(ctx.arg, data.groups);
+  const titleHost = el('div', {});
+  const boardHost = el('div', {});
+  const nav = el('div', { class: 'view-switch', role: 'tablist', 'aria-label': 'Theme views' });
+  const panes = new Map(VIEW_TABS.map(([id]) => [id, el('div', {
+    role: 'tabpanel', id: `theme-view-${id}`, 'aria-labelledby': `theme-tab-${id}`,
+  })]));
+  const built = new Set();
+  const group = () => data.groups.find((g) => g.key === state.key);
+
+  const writeArg = () => ctx.setArg?.(themeArgFor(state));
+
+  const buildPane = (id) => {
+    const g = group();
+    if (id === 'overview') return themeOverview(g, data);
+    if (id === 'valuation') return themeValuation(g, market);
+    return dataPane(g);
   };
-  root.append(boardHost);
-  root.append(host);
-  draw();
+  // The DATA sub-tab: a row of chips, one per industry-data card, and "All". The
+  // first card shows until another chip is picked.
+  const dataPane = (g) => {
+    const cards = themeDataCards(g.key, data);
+    if (!cards.length) return [gap('No industry data for this theme in this build.')];
+    if (state.chip !== ALL_CHIP && !cards.some((c) => c.id === state.chip)) state.chip = null;
+    const chosen = () => state.chip || cards[0].id;
+    const buttonOf = new Map();
+    const paint = () => {
+      cards.forEach((c) => { c.node.hidden = chosen() !== ALL_CHIP && chosen() !== c.id; });
+      buttonOf.forEach((b, id) => b.setAttribute('aria-pressed', String(id === chosen())));
+    };
+    const pickChip = (id) => {
+      state.chip = id;
+      paint();
+      writeArg();
+      requestAnimationFrame(resizeAll);
+    };
+    const chips = el('div', { class: 'theme-chips', role: 'group', 'aria-label': `${g.label} industry data` });
+    [...cards.map((c) => [c.id, c.label]), [ALL_CHIP, 'All']].forEach(([id, label]) => {
+      const button = el('button', { type: 'button', class: 'theme-chip', text: label, 'aria-pressed': 'false', onclick: () => pickChip(id) });
+      buttonOf.set(id, button);
+      chips.append(button);
+    });
+    paint();
+    return [chips, el('div', { class: 'theme-cards' }, cards.map((c) => c.node))];
+  };
+
+  const showView = (id) => {
+    state.view = id;
+    [...nav.children].forEach((button, i) => {
+      const picked = VIEW_TABS[i][0] === id;
+      button.setAttribute('aria-selected', String(picked));
+      button.setAttribute('tabindex', picked ? '0' : '-1');
+    });
+    panes.forEach((pane, key) => { pane.hidden = key !== id; });
+    if (!built.has(id)) {
+      built.add(id);
+      panes.get(id).replaceChildren(...buildPane(id));
+    }
+    requestAnimationFrame(resizeAll);
+  };
+
+  const drawBoard = () => {
+    titleHost.replaceChildren(el('h2', { class: 'section-title' }, [group().label, el('span', { class: 'muted', text: ` proxy ${group().proxy}` })]));
+    boardHost.replaceChildren(data.groups.every((g) => g.board) ? boardCard(data, state.key, pick) : overviewStrip(data, state.key, pick));
+  };
+  // A new theme keeps the sub-tab the reader is on, and its DATA starts at the first card.
+  const pick = (key) => {
+    state.key = key;
+    state.chip = null;
+    built.clear();
+    panes.forEach((pane) => pane.replaceChildren());
+    drawBoard();
+    showView(state.view);
+    writeArg();
+  };
+
+  VIEW_TABS.forEach(([id, label], i) => nav.append(el('button', {
+    type: 'button', role: 'tab', id: `theme-tab-${id}`, text: label,
+    'aria-controls': `theme-view-${id}`, 'aria-selected': String(id === state.view), tabindex: id === state.view ? '0' : '-1',
+    onclick: () => { showView(id); writeArg(); },
+    onkeydown: (event) => {
+      let next = i;
+      if (event.key === 'ArrowRight') next = (i + 1) % VIEW_TABS.length;
+      else if (event.key === 'ArrowLeft') next = (i + VIEW_TABS.length - 1) % VIEW_TABS.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = VIEW_TABS.length - 1;
+      else return;
+      event.preventDefault();
+      nav.children[next].focus();
+      showView(VIEW_TABS[next][0]);
+      writeArg();
+    },
+  })));
+
+  drawBoard();
+  root.append(boardHost, titleHost, nav, ...panes.values());
+  showView(state.view);
 }

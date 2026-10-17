@@ -107,3 +107,13 @@ test('AI CHAIN is a SECTORS view, not a CALENDAR one', () => {
   assert.equal(R.viewById('chain').group, 'sectors');
   assert.ok(!R.viewsIn('calendar').some((v) => v.id === 'chain'));
 });
+
+test('THEMES deep links keep their sub-view through the hash', async () => {
+  const { parseHash, cleanThemeArg } = await import('../../web/js/routes.js');
+  assert.equal(parseHash('#themes/CLOUD.DATA.OPENROUTER').arg, 'CLOUD.DATA.OPENROUTER');
+  assert.equal(parseHash('#themes/semis.data.korea-exports').arg, 'SEMIS.DATA.KOREA-EXPORTS');
+  assert.equal(parseHash('#themes/CONSUMER.VALUATION').arg, 'CONSUMER.VALUATION');
+  assert.equal(parseHash('#themes/CLOUD').arg, 'CLOUD');
+  assert.equal(cleanThemeArg('<script>'), null);
+  assert.equal(parseHash('#ticker/NVDA').arg, 'NVDA');
+});

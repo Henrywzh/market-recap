@@ -65,6 +65,13 @@ export const DEFAULT_VIEW = 'overview';
 // Underscores too: SIZE & STYLE pairs are keyed value_growth, ff_hml.
 const TICKER_PATTERN = /^[A-Z0-9^][A-Z0-9._\-=]{0,14}$/;
 
+const THEME_ARG_PATTERN = /^[A-Z][A-Z0-9_]{0,23}(\.[A-Z]+(\.[A-Z0-9-]{1,32})?)?$/;
+
+export function cleanThemeArg(value) {
+  const text = String(value || '').trim().toUpperCase();
+  return THEME_ARG_PATTERN.test(text) ? text : null;
+}
+
 export function cleanTicker(value) {
   const text = String(value || '').trim().toUpperCase();
   return TICKER_PATTERN.test(text) ? text : null;
@@ -90,7 +97,9 @@ export function parseHash(hash, search = '') {
   const view = VIEWS.find((v) => v.id === id);
   if (!view) return { id: DEFAULT_VIEW, arg: null };
   if (!view.takesArg) return { id, arg: null };
-  const fromHash = cleanTicker(rest.join('/'));
+  // THEMES carries its sub-view in the argument (CLOUD.DATA.OPENROUTER), longer
+  // than any ticker; it gets its own pattern so the deep link survives a reload.
+  const fromHash = id === 'themes' ? cleanThemeArg(rest.join('/')) : cleanTicker(rest.join('/'));
   const fromQuery = cleanTicker(new URLSearchParams(search).get('ticker'));
   return { id, arg: fromHash || fromQuery || null };
 }

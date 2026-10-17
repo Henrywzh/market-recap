@@ -87,9 +87,12 @@ or an artifact that a slice does not hold, is read from the full file as before.
 The result is the same JSON either way. `scripts/check_mcp.mjs` runs every tool
 both ways (every ticker, sector, theme and macro kind; a sample of searches and
 fetches) and fails if the results differ or if a slice call parses more than
-300 KB. It also fails if `index.json`'s hashes do not match the artifacts beside
-them. `catalysts` is not sliced: it reads about 296 KB and is the closest call to
-the budget, so a larger calendar is the first thing to slice.
+600 KB (about 2.5 ms of CPU at ~4 ms per MB; the free plan allows ~10 ms). It
+also fails if `index.json`'s hashes do not match the artifacts beside them.
+`catalysts` is not sliced: it reads about 330 KB in earnings season. A single
+named value that is missing (a data gap the page also shows as a dash) is a
+warning, not a failure; a broken shape, a whole section gone or an oversized
+call still fails the deploy.
 
 ## The stable-contract rule
 

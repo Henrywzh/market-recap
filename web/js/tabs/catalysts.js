@@ -33,6 +33,8 @@ const SHORT_TITLE = {
   'Housing starts & permits': 'Housing starts',
   'Industrial production': 'Ind. production',
   'Monthly options expiry': 'OpEx',
+  'Quarterly options & futures expiry (quad witching)': 'Quad witching',
+  'VIX options & futures expiry': 'VIX expiry',
   'US midterm elections': 'Midterms',
 };
 
@@ -102,6 +104,43 @@ function weekdaysAfter(day, count) {
     if (weekday !== 0 && weekday !== 6) out.push(cursor);
   }
   return out;
+}
+
+// --- Expiry ---------------------------------------------------------------------
+
+const EXPIRY_TAG = { monthly_opex: 'MONTHLY OPEX', quad_witching: 'QUAD WITCHING', vix_expiry: 'VIX EXPIRY' };
+
+// One line under the header: the next monthly expiry, quad witching and VIX
+// expiry, whatever the calendar's window, with calendar days to go.
+export function nextExpiriesText(expiries, asOf) {
+  if (!expiries?.length) return null;
+  const days = (d) => Math.round((Date.parse(d) - Date.parse(asOf)) / 86400000);
+  return expiries.map((e) => `${EXPIRY_TAG[e.rule] || e.title} ${e.date} (${days(e.date)}d)`).join(' · ');
+}
+
+function nextExpiriesLine(expiries, asOf) {
+  const text = nextExpiriesText(expiries, asOf);
+  if (!text) return null;
+  return el('div', { class: 'field-note next-expiries' }, [
+    el('b', { text: 'NEXT EXPIRIES · ' }), text,
+    el('span', { class: 'dim', text: ' · monthly SPX options settle on the opening prints, SPXW at the close; quarterly index futures on the opening quotation' }),
+  ]);
+}
+
+// The expiry a rule event is, by its name in the build: MONTHLY OPEX, QUAD WITCHING or VIX EXPIRY.
+export function expiryTag(event) {
+  return EXPIRY_TAG[event?.rule] || null;
+}
+
+// Said under an expiry flagged AFTER A LARGE MOVE: what the expiry does, and what it does not show.
+export const EXPIRY_WATCH_LINE = 'Expiry can change hedging and flows: watch the open and close and liquidity. History shows heavier volume, not reliably bigger ranges; not a directional signal.';
+// Said once under the macro lane when an expiry is listed: SPX has daily expiries now, so these dates are the large ones.
+export const ZERO_DTE_LINE = 'SPX options now expire every session (0DTE); these dates mark the larger monthly and quarterly expiries.';
+
+// The reading behind the flag, for the tooltip and the opened row: the fund's move and how many of its sigmas it was.
+export function expiryWatchTitle(watch) {
+  const sign = watch.return_pct >= 0 ? '+' : '';
+  return `${watch.fund} ${sign}${num(watch.return_pct, 2)}% on ${watch.date}: ${num(Math.abs(watch.z), 1)}σ against its own recent volatility`;
 }
 
 // --- Numbers ----------------------------------------------------------------------
@@ -237,6 +276,7 @@ function macroDetail(event, labels) {
 
 function macroRow(event, labels) {
   const { expectation, previous } = headline(event);
+  const expiry = expiryTag(event);
   const figures = [];
   if (event.actuals?.length) figures.push(...actualSpans(event));
   else {
@@ -250,11 +290,19 @@ function macroRow(event, labels) {
       importanceDot(event.importance),
       el('span', { class: 'cat-title', text: event.title }),
       event.reference_period ? el('span', { class: 'dim', text: ` · ${event.reference_period}` }) : null,
-      certaintyTag(event, labels),
+      expiry
+        ? el('span', { class: `cat-tag cat-expiry-tag${event.rule === 'quad_witching' ? ' cat-expiry-quad' : ''}`, text: expiry })
+        : certaintyTag(event, labels),
+      event.expiry_watch ? el('span', { class: 'cat-tag cat-tag-amber', title: expiryWatchTitle(event.expiry_watch), text: 'AFTER A LARGE MOVE' }) : null,
     ]),
     el('span', { class: 'cat-figures' }, figures),
   ]);
-  return el('details', { class: 'cat-item' }, [summary, macroDetail(event, labels)]);
+  const row = el('details', { class: `cat-item${event.rule === 'quad_witching' ? ' is-quad' : ''}` }, [summary, macroDetail(event, labels)]);
+  if (!event.expiry_watch) return row;
+  return el('div', { class: 'cat-expiry-watch' }, [
+    row,
+    el('div', { class: 'cat-watch-line dim', text: EXPIRY_WATCH_LINE }),
+  ]);
 }
 
 function earningsRow(event) {
@@ -473,6 +521,7 @@ function laneColumn(title, events, weekEnd, render) {
     column.append(el('div', { class: 'dim', text: 'Nothing matches the filter.' }));
     return column;
   }
+  if (events.some((e) => expiryTag(e))) column.append(el('div', { class: 'dim cat-zero-dte', text: ZERO_DTE_LINE }));
   let dividerShown = false;
   const days = [...new Set(events.map((e) => e.date))];
   days.forEach((day) => {
@@ -495,6 +544,7 @@ function methodNotes(data) {
     'F = the headline forecast (a survey where one exists, else a prediction market, else a nowcast); P = the previous print on the same measure. Open a release for every source, its range and open interest, and the source link.',
     'KEY RELEASES shows the next six high-importance releases. The Kalshi bar spans the market\'s 10th–90th percentile with the dot at its median.',
     'LAST SESSION: reported before that session\'s open, or after the previous close, is a reaction in that session; an after-close report trades the next one. Actuals are TradingView\'s print against its forecast; the agency release is authoritative.',
+    'EXPIRY: standard monthly options expire on the third Friday (the Thursday before when it is a holiday); quad witching is the quarter\'s, with index futures. AFTER A LARGE MOVE: SPY or QQQ moved more than two of its own recent sigmas in the last five sessions, and the expiry is within three. Descriptive, not a signal.',
     `Date sources: ${Object.entries(data.certainty_labels || {}).map(([k, v]) => `${k.replace('_', ' ')} = ${v}`).join('; ')}.`,
     failed.length ? `Not fetched this build: ${failed.map(([s, why]) => `${s} (${why})`).join('; ')}.` : null,
     expected.length ? `Not found in its agency's calendar, so likely renamed and missing: ${expected.join('; ')}.` : null,
@@ -533,6 +583,8 @@ export default async function renderCatalysts(root, data, _manifest, ctx = {}) {
     [`AS OF ${data.as_of}`, horizon, 'TIMES ET', failed.length ? `${failed.length} SOURCE${failed.length === 1 ? '' : 'S'} NOT FETCHED: ${failed.join(', ').toUpperCase()}` : null].filter(Boolean).join(' · '),
     methodNotes(data),
   ));
+  const expiries = nextExpiriesLine(data.next_expiries, data.as_of);
+  if (expiries) root.append(expiries);
   if ((data.expected_missing || []).length) {
     root.append(gap(`Likely renamed at its agency, so missing below: ${data.expected_missing.join('; ')}`));
   }

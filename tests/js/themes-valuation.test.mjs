@@ -28,6 +28,7 @@ const fakeDocument = () => ({
   createElement: (tag) => new FakeNode(tag),
   createTextNode: (text) => ({ nodeType: 3, text: String(text) }),
   documentElement: new FakeNode('html'),
+  body: { contains: () => true },
 });
 
 // Installs the fake DOM, ECharts and the frame clock for one test, then restores them.
@@ -132,9 +133,9 @@ test('a theme whose S&P 500 page will not load keeps its own section and says wh
   assert.ok(nodes.some((n) => textOf(n) === "S&P 500's history is unavailable: HTTP 500."));
 }));
 
-test('a theme with a basket draws its VALUATION section against the S&P 500 and names its bellwethers', () => withBrowser(async () => {
+test('a theme with a basket draws its VALUATION sub-tab against the S&P 500 and names its bellwethers', () => withBrowser(async () => {
   const root = new FakeNode('div');
-  await renderThemes(root, data, {}, ctxWith(''));
+  await renderThemes(root, data, {}, ctxWith('CRUISE.VALUATION'));
   await flush();
   const title = root.children.flatMap((n) => n.children || []).find((n) => n.tagName === 'H2' && textOf(n).startsWith('VALUATION'));
   assert.ok(title, 'the VALUATION section is on the theme page');
@@ -144,7 +145,7 @@ test('a theme with a basket draws its VALUATION section against the S&P 500 and 
 
 test('the theme with too few names shows its reason in one line, and no VALUATION section', () => withBrowser(async () => {
   const root = new FakeNode('div');
-  await renderThemes(root, data, {}, ctxWith('defense'));
+  await renderThemes(root, data, {}, ctxWith('DEFENSE.VALUATION'));
   await flush();
   const text = textOf(root);
   assert.match(text, /Fewer than two names with filings in this build, so no P\/E basket\./);

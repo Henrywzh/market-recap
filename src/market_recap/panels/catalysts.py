@@ -160,6 +160,8 @@ def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool) -> tupl
             "importance": release["importance"],
             "source_id": event["source_id"],
             "source_url": event["url"],
+            # The rule's name (monthly_opex, quad_witching, vix_expiry...) tags expiry rows on the page.
+            "rule": event.get("rule"),
             "reference_period": event.get("reference_period"),
             "detail": detail,
             "prints": _prints(release.get("prints"), use_cache, series_cache),
@@ -406,6 +408,8 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         [e for e in macro + earnings if e["date"] > session.isoformat()],
         key=lambda e: (e["date"], e.get("time") or "99:99", e["lane"], e["title"]),
     )
+    # An expiry is flagged only when the broad market moved hard just before it: the reading is in the event.
+    C.expiry_watch(upcoming, ctx.etf_closes, session, settings)
     week_sessions = C.next_sessions(session, int(settings["week_sessions"]))
     return {
         "as_of": ctx.as_of,
@@ -416,6 +420,8 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         "week": _week(week_sessions, upcoming, session),
         "heatmap": _heatmap(upcoming, session, int(settings.get("heatmap_days", 21))),
         "events": upcoming,
+        "next_expiries": [{k: e[k] for k in ("rule", "title", "date", "time", "detail", "url")}
+                          for e in C.next_expiries(session)],
         "recent": _recent(ctx, macro, earnings, session, previous, use_cache),
         "expected_missing": expected_missing,
         "failed_sources": {**failed, **({"nasdaq": f"dates not fetched: {', '.join(earnings_failed)}"} if earnings_failed else {})},
