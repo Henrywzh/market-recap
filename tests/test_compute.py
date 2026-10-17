@@ -161,3 +161,10 @@ def test_period_changes_match_by_date_across_a_month_never_published():
     yoy = periods.transform(series, "yoy")
     assert yoy["2026-08-01"] == pytest.approx((series["2026-08-01"] / series["2025-08-01"] - 1) * 100)
     assert pd.isna(periods.transform(series, "mom")["2025-11-01"])   # its prior month was never published
+
+
+def test_pct_above_moving_average_survives_one_missing_session(prices):
+    # A session the feed missed for every name must not blank the reading.
+    gapped = prices.copy()
+    gapped.iloc[-30] = float("nan")
+    assert R.pct_above_moving_average(gapped, 200) is not None

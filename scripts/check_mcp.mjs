@@ -174,7 +174,10 @@ async function main() {
       problems.push('the slice result differs from the full-artifact result');
     }
     if (fromSlices.bytes > BYTES_LIMIT) problems.push(`${fromSlices.bytes} bytes of JSON parsed on the slice path is over ${BYTES_LIMIT}`);
-    if (problems.length) { stat.failed += 1; report(label, problems); }
+    if (problems.length) {
+      if (problems.some((p) => !p.startsWith('WARN '))) stat.failed += 1;
+      report(label, problems);
+    }
   }
   for (const [tool, stat] of perTool) {
     const ok = stat.failed === 0;

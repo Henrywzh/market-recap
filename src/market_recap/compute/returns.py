@@ -172,7 +172,9 @@ def pct_above_moving_average(closes: pd.DataFrame, window: int) -> float | None:
     """Share of names trading above their own ``window``-day simple average."""
     if closes.shape[0] < window:
         return None
-    sma = closes.rolling(window, min_periods=window).mean().iloc[-1]
+    # One missing session (a feed gap) must not blank every name's average: an
+    # average needs 90% of the window, not all of it.
+    sma = closes.rolling(window, min_periods=int(window * 0.9)).mean().iloc[-1]
     last = closes.iloc[-1]
     pair = pd.concat([last, sma], axis=1, keys=["last", "sma"]).dropna()
     if pair.empty:
