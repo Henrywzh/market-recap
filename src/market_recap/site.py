@@ -18,6 +18,7 @@ import json
 from pathlib import Path
 import shutil
 
+from . import mcp_slices
 from .config import ARTIFACT_DIR, REPO_ROOT, load_config
 
 WEB_DIR = REPO_ROOT / "web"
@@ -150,6 +151,10 @@ def build(*, dist: Path | None = None) -> dict:
         _link_or_copy(source, dist / "artifacts" / source.relative_to(ARTIFACT_DIR))
         assets += 1
 
+    # The MCP server's per-call slices, cut from the artifacts just copied, so
+    # they describe these bytes and no others (src/market_recap/mcp_slices.py).
+    mcp = mcp_slices.write(dist / "artifacts")
+
     # Beside the page rather than under artifacts/: it is the contract the
     # quote function enforces, written from config on every site build, not a
     # data product of the refresh.
@@ -204,4 +209,4 @@ def build(*, dist: Path | None = None) -> dict:
     )
 
     bytes_total = sum(p.stat().st_size for p in dist.rglob("*") if p.is_file())
-    return {"dir": str(dist), "pages": pages, "artifacts": assets, "bytes": bytes_total}
+    return {"dir": str(dist), "pages": pages, "artifacts": assets, "mcp_slices": mcp["files"], "bytes": bytes_total}

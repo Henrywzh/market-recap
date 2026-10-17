@@ -457,6 +457,8 @@ src/market_recap/
   build.py                 orchestrator, writes manifest.json
   validate.py              checks the artifacts against the contract
   snapshots/               recorded option chains and market pricing (not read by the page yet)
+functions/                 Cloudflare Pages functions: api/quotes.js (live prices), mcp.js (the MCP route)
+mcp/                       the MCP server's modules and tool adapters (docs/mcp.md)
 web/                       static site (ES modules, ECharts from CDN)
   js/technicals-math.js    every technical indicator; tested against pandas from tests/
 artifacts/                 generated JSON the site reads
@@ -680,6 +682,16 @@ A feed that cannot be built or fails its own checks (size, schema, every
 candidate pointing at an artifact this build wrote) is deleted, never left
 from an older build; the site answers a missing file with **404**
 (`web/404.html`), not with the dashboard page.
+
+## MCP server
+
+A read-only remote MCP server at `/mcp` lets an assistant (Claude, ChatGPT,
+Gemini, Claude Code) ask the dashboard questions: a market snapshot, the
+catalyst calendar, one company, unusual moves, a sector or theme, macro cards,
+and `search`/`fetch`. It answers only from the files this site publishes, with
+every result carrying its `as_of`, sources, caveats and what was unavailable.
+Tools, client setup and the rule that a panel and its adapter change together
+(`scripts/check_mcp.mjs`, run by `make smoke`) are in [`docs/mcp.md`](docs/mcp.md).
 
 ## Design rules this repo follows
 

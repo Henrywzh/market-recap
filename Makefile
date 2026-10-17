@@ -28,8 +28,9 @@ test: ## Run the test suite (Python, and the browser-side maths under node) and 
 	$(PYTHON) -m pytest tests/ -q
 	node --test 'tests/js/*.test.mjs'
 
-smoke: site ## Open every page of the built site in headless Chrome; fail on any error
+smoke: site ## Open every page in headless Chrome, then check the MCP tools against dist/; fail on any error
 	node scripts/smoke.mjs dist
+	node scripts/check_mcp.mjs dist
 
 site: ## Assemble dist/ from the artifacts already on disk
 	$(PYTHON) -m market_recap.cli site
