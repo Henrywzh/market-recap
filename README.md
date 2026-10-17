@@ -282,7 +282,26 @@ make run-now   # trigger it now (gh workflow run refresh.yml)
 Two feeds are not fetched from GitHub's machines. PCPartPicker refuses cloud IPs, so a local job runs scripts/refresh_pcpartpicker.py each morning and commits data/feeds/pcpartpicker.json; the nightly build only reads that file. DRAMeXchange's terms forbid putting its prices on this site, so scripts/refresh_dramexchange.py archives the public homepage under data/private/ and never commits it.
 
 A failed scheduled run emails the repo owner. `workflow_dispatch` takes a
-`deploy` input, so a run can build and validate without publishing.
+`deploy` input, so a run can build and validate without publishing, and a
+`mode` input, so a small fix does not pay for a full rebuild (GitHub bills each
+run's minutes, rounded up per job; the workflow is one job):
+
+| `mode` | What runs |
+|---|---|
+| `full` (default; scheduled runs and the Worker's dispatches) | Everything: fetch, `--strict` build, test, site, smoke test, deploy. |
+| `site` | No refresh. Restores the last published `artifacts/`, then test, site, smoke test, deploy. For a change to `web/` or `functions/`. |
+| `panels` | Restores the same artifacts, runs `refresh --strict --keep-cache --panels <panels>` (the `panels` input, space-separated) on top, merges the manifest, then the same test, site, smoke test, deploy. |
+
+Every full or panels run that deploys saves `artifacts/` to the Actions cache
+(free, unlike `upload-artifact`) under `published-artifacts-<run id>`; site and
+panels restore the newest. With nothing cached they fail with "run mode=full
+once". A panels run rewrites `manifest.json` with only the panels it built, so
+`scripts/merge_manifest.py` puts the other panels (and their recorded errors
+and any carried MONITOR) back and validates the whole set: a rebuilt panel
+dated to a different session than the cached ones fails there rather than
+publishing a page with two "todays". `as_of`, `generated_at`, sources and
+timings are those of the panels run. Site and panels runs are titled by their
+mode, so the fallback schedule never counts one as an evening edition.
 
 Two editions a weekday, started on time by a Cloudflare cron Worker
 ([`workers/dispatch`](workers/dispatch), `make deploy-dispatch`), which calls

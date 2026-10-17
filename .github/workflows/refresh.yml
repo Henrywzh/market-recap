@@ -6,8 +6,25 @@
 # an hour after the bell, and "evening" at 18:35, after the evening publishers. GitHub's own schedule
 # below starts two to three hours late, so it is only the fallback: it skips
 # itself when a current evening edition has passed and is actually published.
+#
+# Manual runs take a `mode` (scheduled runs and the Worker's dispatches pass
+# none, so they are "full", exactly as before):
+#   full    fetch and rebuild everything, then test, build, smoke test, deploy.
+#   site    skip the refresh: restore the artifacts of the last published build
+#           and only re-run the tests, site build, smoke test and deploy. For a
+#           change to web/ or functions/ that needs no new data.
+#   panels  restore those artifacts, rebuild just `panels` (space-separated
+#           names, as `refresh --panels`) on top of them, merge the manifest,
+#           then the same test/build/smoke/deploy. For one broken panel.
+# Every full or panels run that deploys saves artifacts/ to the Actions cache
+# (free; upload-artifact would count against storage), which is what site and
+# panels restore. A site or panels run titles itself by its mode, so the
+# guard below never mistakes it for an evening edition.
+#
+# One job, not a guard job plus a refresh job: each job is billed on its own
+# and rounded up to a whole minute, so a skipped fallback run still cost two.
 name: refresh
-run-name: refresh · ${{ github.event_name == 'schedule' && 'scheduled' || inputs.edition || 'evening' }}
+run-name: refresh · ${{ github.event_name == 'schedule' && 'scheduled' || (inputs.mode == 'site' || inputs.mode == 'panels') && inputs.mode || inputs.edition || 'evening' }}
 
 on:
   schedule:
@@ -28,6 +45,15 @@ on:
         type: choice
         options: [evening, close]
         default: evening
+      mode:
+        description: "full: rebuild everything; site: redeploy the last published data with the current code; panels: rebuild only the panels below"
+        type: choice
+        options: [full, site, panels]
+        default: full
+      panels:
+        description: "mode=panels only: space-separated panel names, e.g. 'markets risk'"
+        type: string
+        default: ""
 
 # Two overlapping runs would race on the deploy; a manual run queues instead.
 concurrency:
@@ -39,26 +65,31 @@ permissions:
   actions: read
 
 jobs:
-  # The late GitHub schedule repeats work only when the Worker's evening
-  # dispatch did not happen or did not pass.
-  guard:
+  refresh:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     env:
       PYTHONPATH: src
-    outputs:
-      run: ${{ steps.check.outputs.run }}
+      MODE: ${{ inputs.mode || 'full' }}
+      PANELS: ${{ inputs.panels }}
     steps:
       - uses: actions/checkout@v7
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: requirements.lock
+
+      # The late GitHub schedule repeats work only when the Worker's evening
+      # dispatch did not happen or did not pass. Every step below is gated on
+      # its answer: a skipped run does nothing after this point.
       # Calendar + honest HTTP client only; all transitive versions are
       # constrained by the same lock as the build itself.
       - name: Install guard dependencies
         if: github.event_name == 'schedule'
         run: python -m pip install -c requirements.lock pandas httpx
+
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
@@ -71,23 +102,8 @@ jobs:
             --created ">=$since" --json displayTitle -q '[.[] | select(.displayTitle == "refresh · evening")] | length')
           python -m market_recap.refresh_guard --successful-evenings "${done:-0}"
 
-  refresh:
-    needs: guard
-    if: needs.guard.outputs.run == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      PYTHONPATH: src
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements.lock
-
       - uses: actions/setup-node@v7
+        if: steps.check.outputs.run == 'true'
         with:
           node-version: 22
           cache: npm
@@ -95,6 +111,7 @@ jobs:
       # The lock, not pyproject's ranges: a clean machine otherwise resolves the
       # newest release that night, and an upgrade should be a commit.
       - name: Install
+        if: steps.check.outputs.run == 'true'
         run: |
           python -m pip install -r requirements.lock
           python -m pip install --no-deps -e .
@@ -102,7 +119,21 @@ jobs:
           python -m pip install pyflakes==4.0.0
           npm ci
 
+      # The panel list goes to the shell through the environment, never into
+      # the script text, and must look like panel names.
+      - name: Check mode inputs
+        if: steps.check.outputs.run == 'true' && env.MODE == 'panels'
+        run: |
+          if ! printf '%s' "$PANELS" | grep -Eq '^[a-z_]+( +[a-z_]+)*$'; then
+            echo "::error::mode=panels needs 'panels' as space-separated panel names (got '$PANELS')"
+            exit 1
+          fi
+          # build.run silently drops a name it does not know, which would
+          # publish an unchanged page from a run that looks like it worked.
+          python -c "import os, sys; from market_recap.build import PANELS; bad = [p for p in os.environ['PANELS'].split() if p not in PANELS]; sys.exit('::error::unknown panel(s): ' + ' '.join(bad) + '; known: ' + ' '.join(PANELS)) if bad else None"
+
       - name: Test
+        if: steps.check.outputs.run == 'true'
         run: make test PYTHON=python
 
       # The cache is politeness and speed, not state: every artifact rebuilds
@@ -111,20 +142,48 @@ jobs:
       # -- but only one written by the same locked library versions. A cache
       # built by pandas 3 / yfinance 1 once put the page a session behind.
       # THEMES reads Korea's monthly trade release from its PDF.
+      # A site run fetches nothing, so it skips this and the next three steps.
       - name: Install pdftotext
+        if: steps.check.outputs.run == 'true' && env.MODE != 'site'
         run: command -v pdftotext || { sudo apt-get update -q && sudo apt-get install -y -q poppler-utils; }
 
       - name: Restore cache
+        if: steps.check.outputs.run == 'true' && env.MODE != 'site'
         uses: actions/cache/restore@v6
         with:
           path: data/cache
           key: data-cache-${{ hashFiles('requirements.lock') }}-${{ github.run_id }}
           restore-keys: data-cache-${{ hashFiles('requirements.lock') }}-
 
+      # The last published build's artifacts, saved by the Save step below. The
+      # run_id key never matches, so this always falls back to the newest
+      # published-artifacts-* entry. The Actions cache is free; artifacts/ is
+      # ignored by git, so this is the only copy a site or panels run has.
+      - name: Restore published artifacts
+        id: published
+        if: steps.check.outputs.run == 'true' && env.MODE != 'full'
+        uses: actions/cache/restore@v6
+        with:
+          path: artifacts
+          key: published-artifacts-${{ github.run_id }}
+          restore-keys: published-artifacts-
+
+      - name: Require published artifacts
+        if: steps.check.outputs.run == 'true' && env.MODE != 'full'
+        run: |
+          if [ -z "${{ steps.published.outputs.cache-matched-key }}" ] || [ ! -f artifacts/manifest.json ]; then
+            echo "::error::no published artifacts cached yet; run mode=full once"
+            exit 1
+          fi
+          echo "restored ${{ steps.published.outputs.cache-matched-key }}"
+          # What the merge below needs: the manifest the panels run overwrites.
+          cp artifacts/manifest.json "$RUNNER_TEMP/previous-manifest.json"
+
       # Recorded rates and options pricing, read by PRICED PATH and the ticker
       # page. Read-only and optional: a missing branch leaves those sections
       # saying "not recorded yet".
       - name: Check out recorded snapshots
+        if: steps.check.outputs.run == 'true' && env.MODE != 'site'
         continue-on-error: true
         env:
           REMOTE: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
@@ -135,6 +194,7 @@ jobs:
 
       - name: Refresh
         id: refresh
+        if: steps.check.outputs.run == 'true' && env.MODE != 'site'
         # A failed build is judged by the gate below, then fails the run at the end.
         continue-on-error: true
         env:
@@ -159,10 +219,27 @@ jobs:
           MARKET_RECAP_EDITION: ${{ inputs.edition || 'evening' }}
         # --strict: nobody reads an unattended run's output, so a warning is a
         # failure. A red run emails the repo owner; a stale page does not.
-        run: make refresh REFRESH_FLAGS=--strict
+        # A panels run is `refresh --panels X --keep-cache` on top of the
+        # restored artifacts, as it is locally: the other panels' files stay
+        # as they are, and no cache entry is pruned on a partial build.
+        run: |
+          if [ "$MODE" = "panels" ]; then
+            make refresh REFRESH_FLAGS="--strict --keep-cache --panels $PANELS"
+          else
+            make refresh REFRESH_FLAGS=--strict
+          fi
+
+      # The refresh wrote a manifest that lists only the panels it built; this
+      # puts the rest back (scripts/merge_manifest.py) and validates the whole.
+      # It runs after a failed refresh too, so the gate judges the merged set.
+      - name: Merge manifest
+        id: merge
+        if: steps.check.outputs.run == 'true' && env.MODE == 'panels'
+        continue-on-error: true
+        run: python scripts/merge_manifest.py "$RUNNER_TEMP/previous-manifest.json"
 
       - name: Archive monitor observations
-        if: always()
+        if: always() && steps.check.outputs.run == 'true' && env.MODE != 'site'
         uses: actions/upload-artifact@v7
         with:
           name: monitor-${{ github.run_id }}
@@ -174,7 +251,7 @@ jobs:
           retention-days: 90
 
       - name: Save cache
-        if: always()
+        if: always() && steps.check.outputs.run == 'true' && env.MODE != 'site'
         uses: actions/cache/save@v6
         with:
           path: data/cache
@@ -185,32 +262,36 @@ jobs:
       # blocks the deploy like a failed build.
       - name: Smoke test the site
         id: smoke
-        if: always()
+        if: always() && steps.check.outputs.run == 'true'
         continue-on-error: true
         run: make smoke PYTHON=python
 
       # Only a build that passed --strict is published -- or one whose sole
       # finding is a MONITOR ledger carried forward unchanged, so one panel
       # cannot freeze the whole site -- and never one dated earlier than the
-      # live page (scripts/guard_deploy.py).
+      # live page (scripts/guard_deploy.py). A site run has no refresh outcome
+      # (it was skipped), so the restored artifacts go through the same
+      # validation as a failed build's.
       - name: Deploy gate
         id: gate
+        if: steps.check.outputs.run == 'true'
         run: |
-          if [ "${{ steps.smoke.outcome }}" != "success" ]; then
+          if [ "${{ steps.smoke.outcome }}" != "success" ] || [ "${{ steps.merge.outcome }}" = "failure" ]; then
             echo "deployable=false" >> "$GITHUB_OUTPUT"
           elif [ "${{ inputs.edition }}" = "close" ] && [ "$(python -c 'import json; print(json.load(open("artifacts/manifest.json"))["as_of"])')" != "$(TZ=America/New_York date +%F)" ]; then
             # Not every close was printed yet: a close edition of yesterday's
             # session would only relabel the page. The evening build follows.
             echo "::notice::close edition found no complete session for today; not published"
             echo "deployable=false" >> "$GITHUB_OUTPUT"
-          elif [ "${{ steps.refresh.outcome }}" = "success" ]; then
+          elif [ "${{ steps.refresh.outcome }}" = "success" ] && [ "$MODE" != "panels" ]; then
             echo "deployable=true" >> "$GITHUB_OUTPUT"
           else
             python scripts/deploy_gate.py
           fi
 
       - name: Deploy
-        if: steps.gate.outputs.deployable == 'true' && (github.event_name == 'schedule' || inputs.deploy)
+        id: deploy
+        if: steps.check.outputs.run == 'true' && steps.gate.outputs.deployable == 'true' && (github.event_name == 'schedule' || inputs.deploy)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -221,19 +302,30 @@ jobs:
           fi
           make deploy-only
 
+      # What was just published, for the next site or panels run. Only a
+      # deployed build: an undeployed one is not what the site shows, and a
+      # site run saves nothing (it deployed what it restored).
+      - name: Save published artifacts
+        if: steps.deploy.outcome == 'success' && env.MODE != 'site'
+        uses: actions/cache/save@v6
+        with:
+          path: artifacts
+          key: published-artifacts-${{ github.run_id }}
+
       # A carried MONITOR was published above; the run still fails so a red
       # run emails the owner, as any failed build does.
       - name: Fail a failed build
-        if: steps.refresh.outcome != 'success' || steps.smoke.outcome != 'success'
+        if: steps.check.outputs.run == 'true' && (steps.refresh.outcome == 'failure' || steps.merge.outcome == 'failure' || steps.smoke.outcome != 'success')
         run: |
-          echo "::error::Refresh: ${{ steps.refresh.outcome }}, smoke test: ${{ steps.smoke.outcome }} (see their logs); deploy gate said '${{ steps.gate.outputs.deployable }}'"
+          echo "::error::Refresh: ${{ steps.refresh.outcome }}, merge: ${{ steps.merge.outcome }}, smoke test: ${{ steps.smoke.outcome }} (see their logs); deploy gate said '${{ steps.gate.outputs.deployable }}'"
           exit 1
 
       - name: Summary
-        if: always()
+        if: always() && steps.check.outputs.run == 'true'
         run: |
           python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
-          import json, pathlib
+          import json, os, pathlib
+          print(f"**mode** {os.environ['MODE']}" + (f" &nbsp; **panels** {os.environ['PANELS']}" if os.environ["MODE"] == "panels" else ""))
           path = pathlib.Path("artifacts/manifest.json")
           if not path.exists():
               print("No manifest was built.")

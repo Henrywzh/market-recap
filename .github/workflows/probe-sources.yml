@@ -1,16 +1,18 @@
 # Research: how reliable are the free sources of macro expectations, measured
-# from the same kind of machine the nightly build runs on? Every three hours
-# for a week, scripts/probe_expectations.py asks each source the same
-# questions and the result is kept as an artifact; `--summarize` over the
-# downloaded artifacts gives success rates and latency percentiles.
+# from the same kind of machine the nightly build runs on? scripts/probe_expectations.py
+# asks each source the same questions and the result is kept as an artifact;
+# `--summarize` over the downloaded artifacts gives success rates and latency
+# percentiles.
 #
-# It touches no build, cache or deploy. Remove the schedule once the window
-# below has passed (the job already does nothing after it).
+# The scheduled sampling (every three hours) ran for a week and was removed
+# once its window closed on PROBE_UNTIL. The job can still be started by hand,
+# but it does nothing after PROBE_UNTIL, so a manual run needs the window
+# extended first.
+#
+# It touches no build, cache or deploy.
 name: probe-sources
 
 on:
-  schedule:
-    - cron: "17 */3 * * *"
   workflow_dispatch:
 
 permissions:
