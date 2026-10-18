@@ -52,7 +52,7 @@ from .financials import cik_for
 # The valuation readers shared with SECTORS, SIZE & STYLE and K-SHAPE: a name's history and statements read once per build.
 from .kshape import Histories, Revenues, Statements, outlook_payload
 
-INPUTS = ("catalysts", "evidence", "valuation")
+INPUTS = ("catalysts", "evidence", "valuation", "credit")
 BN = 1e9
 # A theme's valuation basket needs at least this many bellwethers with a VALUATION history and market cap.
 MIN_VALUATION_NAMES = 2
@@ -565,6 +565,22 @@ def _ramp() -> dict:
                     for v, g in vendors.groupby("vendor") if g["adoption_rate_pct"].iloc[-1] >= 1},
         "commit": commit,
     }
+
+
+def _ai_credit(credit: dict | None) -> dict:
+    """The AI borrowers' equity-implied default risk, from this session's CREDIT."""
+    if not credit:
+        raise RuntimeError("CREDIT was not built this session")
+    group = (credit.get("watch") or {}).get("ai_borrowers")
+    if not group:
+        raise RuntimeError("CREDIT has no ai_borrowers group in [credit.watch]")
+    rows = {r["ticker"]: r for r in credit.get("rows") or []}
+    keys = ("ticker", "name", "dd", "pd_1y", "own_percentile", "equity_bn", "counted_debt_bn", "equity_vol",
+            "leverage", "debt_check")
+    return {"as_of": credit.get("as_of"), "method": credit.get("method"),
+            "rows": [{k: rows[s].get(k) for k in keys} for s in group["names"] if s in rows],
+            "missing": [s for s in group["names"] if s not in rows],
+            "weekly": group.get("weekly") or {}}
 
 
 def _section(build) -> dict:
@@ -1302,6 +1318,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         "nvda": _section(lambda: _nvda(settings)),
         "odm": _section(lambda: _tw_revenue(settings["tw_cloud"], int(settings.get("tw_months", 37)), as_of)),
         "ramp": _section(_ramp),
+        "ai_credit": _section(lambda: _ai_credit(inputs.get("credit"))),
     }
     semis = {
         "tw": _section(lambda: _tw_revenue(settings["tw_semis"], int(settings.get("tw_months", 37)), as_of)),

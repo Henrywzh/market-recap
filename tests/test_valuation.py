@@ -778,3 +778,49 @@ def test_a_split_lookup_gives_the_same_factor_as_filtering_the_series():
         assert V.split_factor_after(splits, date) == after(date)
     assert V.split_lookup(None)("2020-01-01") == 1.0
     assert V.split_lookup(pd.Series(np.nan, index=days))("2020-01-01") == 1.0
+
+
+# --- Debt a quarter's balance sheet does not tag in standard lines -------------------
+# Period end of _facts_with is 2026-09-30.
+
+def test_notes_and_loans_are_read_as_long_term_debt_beside_current_notes():
+    """Oracle files its debt only as LongTermNotesAndLoans and NotesPayableCurrent."""
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "LongTermNotesAndLoans": [("10-Q", "2026-09-30", 117.0, "2026-11-05")],
+        "NotesPayableCurrent": [("10-Q", "2026-09-30", 8.0, "2026-11-05")]}))
+    assert V.debt(snapshot) == (125.0, "long-term + current debt")
+
+
+def test_the_debt_notes_carrying_amount_stands_in_when_no_balance_line_is_tagged():
+    """CoreWeave's 2026 Q2: its balance-sheet debt lines are its own tags."""
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "LongTermDebtNoncurrent": [("10-Q", "2026-06-30", 17.0, "2026-08-05")],
+        "DebtInstrumentCarryingAmount": [("10-Q", "2026-09-30", 35.5, "2026-11-05")]}))
+    value, basis = V.debt(snapshot)
+    assert value == 35.5 and basis.startswith("carrying amount")
+
+
+def test_debt_by_instrument_is_summed_when_no_balance_line_is_tagged():
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "SeniorNotes": [("10-Q", "2026-09-30", 16.0, "2026-11-05")],
+        "SecuredDebt": [("10-Q", "2026-09-30", 1.0, "2026-11-05")]}))
+    assert V.debt(snapshot) == (17.0, "debt by instrument, summed (no standard balance lines)")
+
+
+def test_the_last_tagged_quarter_is_carried_within_a_year_and_said_so():
+    """Chevron, Caterpillar, T-Mobile: standard debt lines in the 10-K, own tags in the 10-Q."""
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "LongTermDebtNoncurrent": [("10-K", "2025-12-31", 40.0, "2026-02-20")],
+        "DebtCurrent": [("10-K", "2025-12-31", 10.0, "2026-02-20")]}))
+    value, basis = V.debt(snapshot)
+    assert value == 50.0 and "carried from 2025-12-31" in basis
+    # LongTermDebt already holds the current part: not added again.
+    snapshot = sec.trailing_snapshot(_facts_with({
+        "LongTermDebt": [("10-K", "2025-12-31", 40.0, "2026-02-20")],
+        "LongTermDebtCurrent": [("10-K", "2025-12-31", 10.0, "2026-02-20")]}))
+    assert V.debt(snapshot)[0] == 40.0
+
+
+def test_debt_older_than_a_year_is_not_carried():
+    snapshot = sec.trailing_snapshot(_facts_with({"LongTermDebtNoncurrent": [("10-K", "2024-12-31", 40.0, "2025-02-20")]}))
+    assert V.debt(snapshot) == (0.0, "no debt tagged")

@@ -2359,3 +2359,23 @@ reaction_sigma = 2.0
 put_call_high_pct = 90
 put_call_low_pct = 10
 history_days = 400
+
+# CREDIT: equity-implied default risk (distance to default) for every non-financial
+# name VALUATION covers. A description, not a warning: see quantamental-lab
+# docs/credit_proxy_v1.md (coincident with bond spreads, does not lead them).
+[credit]
+vol_sessions = 252
+# A filed debt figure whose period ended longer ago than this is stale.
+stale_days = 450
+# Today's reading is placed within this many past sessions of its own.
+percentile_sessions = 1260
+monthly_points = 60
+weekly_points = 104
+excluded_sectors = ["Financials"]
+# A name is flagged when its counted debt is under this share of liabilities of at least this size.
+check_debt_share = 0.05
+check_min_liabilities = 1_000_000_000
+
+[credit.watch]
+# The AI borrowers: neoclouds and the hyperscalers borrowing most for data centres.
+ai_borrowers = ["CRWV", "NBIS", "ORCL", "META", "MSFT", "AMZN", "GOOGL"]

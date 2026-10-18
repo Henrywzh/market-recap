@@ -99,6 +99,11 @@ def debt(snapshot: dict) -> tuple[float, str]:
     balance = snapshot["balance"]
     long_term, current = balance.get("total_debt"), balance.get("debt_current")
     if long_term is None and current is None:
+        # The balance sheet's debt lines are under the filer's own tags: the
+        # snapshot's fallback (sources.sec._debt_fallback) says what stands in.
+        fallback = snapshot.get("debt_fallback")
+        if fallback:
+            return float(fallback["value"]), fallback["basis"]
         return 0.0, "no debt tagged"
     if snapshot.get("debt_includes_current"):
         return float(long_term or current or 0.0), "long-term debt incl. current portion"

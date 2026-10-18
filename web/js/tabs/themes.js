@@ -7,7 +7,7 @@
 import { el, card, num, pct, tag, table, dirClass, sectionTitle, gap, metaRow, periodSwitch, DASH } from '../fmt.js';
 import { viewChart, VIEWS } from '../viewchart.js';
 import { availableRanges, sliceRange } from '../range.js';
-import { render, resizeAll } from '../charts.js';
+import { render, resizeAll, multiLine } from '../charts.js';
 import { tickerHref } from '../routes.js';
 import { spark } from '../spark.js';
 import { stateTone, stateWhy, breadthText, revisionText, valuationText, quadrantTone, splitWidths } from '../themes-board.js';
@@ -293,6 +293,45 @@ function openrouterCard(or) {
     openrouterCharts(or),
     table(['AUTHOR', 'LAST 7D REVENUE', 'SHARE', 'LAST 7D TOKENS'], rows),
     el('div', { class: 'field-note', text: 'OpenRouter\'s routed traffic only -- a slice of each lab\'s demand, not the lab\'s revenue or ARR. Revenue is alternative-data\'s estimate: observed tokens at the model\'s list price at the time. MONTHLY ARR annualises that estimate (a month\'s mean day times 365, over the days with data), so it is an OpenRouter-routed run-rate, never a company\'s ARR. Hollow markers are partial months: not every calendar day has data. Today\'s partial day is left out.' }),
+  ]);
+}
+
+// The AI borrowers' equity-implied default risk (CREDIT): a distance to default from
+// the share price, its volatility and the debt filed. Weekly paths share one date axis;
+// a name without a reading that week is a gap, not a zero.
+export function creditPaths(weekly, names) {
+  const dates = [...new Set(names.flatMap((n) => weekly?.[n]?.dates || []))].sort();
+  const series = Object.fromEntries(names.filter((n) => weekly?.[n]).map((n) => {
+    const at = new Map(weekly[n].dates.map((d, i) => [d, weekly[n].dd[i]]));
+    return [n, dates.map((d) => (at.has(d) ? at.get(d) : null))];
+  }));
+  return { dates, series };
+}
+
+function aiCreditCard(c) {
+  const title = 'AI BORROWERS · EQUITY-IMPLIED DEFAULT RISK';
+  if (!c || c.unavailable || !Array.isArray(c.rows)) return card(title, null, unavailable(c) || gap('Not built this time.'));
+  const names = c.rows.map((r) => r.ticker);
+  const { dates, series } = creditPaths(c.weekly, names);
+  const chart = el('div', { class: 'chart' });
+  const rows = c.rows.map((r) => el('tr', {}, [
+    el('td', {}, [link(r.ticker), r.debt_check ? ' ' : null, r.debt_check ? tag('CHECK DEBT', 'warn', r.debt_check) : null]),
+    el('td', { class: r.dd != null && r.dd < 2 ? 'down' : '', text: r.dd == null ? DASH : num(r.dd, 2) }),
+    el('td', { text: r.pd_1y == null ? DASH : `${num(r.pd_1y, r.pd_1y < 0.1 ? 2 : 1)}%` }),
+    el('td', { class: 'dim', text: r.own_percentile == null ? DASH : `${num(r.own_percentile, 0)}th` }),
+    el('td', { text: r.counted_debt_bn == null ? DASH : `$${num(r.counted_debt_bn, 1)}B` }),
+    el('td', { class: 'dim', text: r.equity_vol == null ? DASH : `${num(r.equity_vol, 0)}%` }),
+  ]));
+  // Log scale: the hyperscalers sit at 10-25, the neoclouds near 1-3, and the gap
+  // between 1 and 2 matters more than between 15 and 16. A reading at or under
+  // 0.3 is drawn at 0.3 (a log axis has no zero).
+  const floored = Object.fromEntries(Object.entries(series).map(([n, v]) => [n, v.map((x) => (x == null ? null : Math.max(x, 0.3)))]));
+  if (dates.length) queueMicrotask(() => multiLine(chart, dates, floored, { log: true, min: 0.3, markY: [{ y: 2, label: '2 · thin' }] }));
+  return card(title, el('span', { class: 'dim', text: `as of ${c.as_of ?? DASH} · lower is riskier` }), [
+    dates.length ? chart : null,
+    table(['NAME', 'DISTANCE TO DEFAULT', 'MODEL 1Y PD', 'OWN HISTORY', 'DEBT COUNTED', 'EQUITY VOL'], rows),
+    c.missing?.length ? el('div', { class: 'field-note dim', text: `Not measured: ${c.missing.join(', ')}.` }) : null,
+    el('div', { class: 'field-note', text: 'How far the company\'s value sits above its debt, in units of its own volatility: equity value from the share price, debt as filed in its last 10-Q or 10-K (debt due within a year plus half the long-term debt), a year of the share\'s volatility. A model reading, not a CDS or bond price: in the lab it moves with corporate bond spreads but not before them, and new borrowing counts only once it is filed. OWN HISTORY: where today sits in the name\'s last five years (low = closer to default than usual). Read it as a ranking, not a probability: CDS-implied odds include a risk premium this does not.' }),
   ]);
 }
 
@@ -884,13 +923,15 @@ const SEMIS_AI = 'AI usage';
 // CLOUD: what the hyperscalers spend, and what their suppliers deliver.
 const CLOUD_SPEND = 'Spending';
 const CLOUD_SUPPLY = 'Suppliers';
+const CLOUD_FINANCING = 'Financing';
 function industry(key, data) {
   if (key === 'cloud') {
     const c = data.cloud;
     return [item('Capex', capexCard(c.capex), null, CLOUD_SPEND), item('Guidance', guidanceCard(c.guidance), null, CLOUD_SPEND),
       item('NVIDIA', nvdaCard(c.nvda), null, CLOUD_SUPPLY),
       item('AI servers', twRevenueCard('AI SERVER MAKERS · MONTHLY REVENUE', c.odm, 'Quanta, Wiwynn and Wistron build most hyperscaler AI servers; their revenue is capex being delivered, reported by the 10th of the next month. Foxconn is left out: iPhone assembly dominates it.'), null, CLOUD_SUPPLY),
-      item('Ramp', rampCard(c.ramp))];
+      item('Ramp', rampCard(c.ramp)),
+      item('AI borrowers', aiCreditCard(c.ai_credit), null, CLOUD_FINANCING)];
   }
   if (key === 'semis') {
     const s = data.semis;

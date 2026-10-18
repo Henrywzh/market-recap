@@ -192,11 +192,14 @@ export function zeroLine(node, dates, values, color) {
   }));
 }
 
+// options: { symbols?, width?, log?: a log value axis (every value > 0), markY?: [{ y, label }] }
 export function multiLine(node, dates, seriesMap, options = {}) {
   return render(node, (option, p) => {
     const names = Object.keys(seriesMap);
+    const marks = (options.markY || []).map((m) => ({ yAxis: m.y, label: { formatter: m.label, color: p.dim, fontSize: 10 } }));
     return {
       ...option,
+      ...(options.log ? { yAxis: { ...option.yAxis, type: 'log', logBase: 10, min: options.min } } : {}),
       grid: { ...option.grid, bottom: 52 },
       legend: {
         bottom: 0,
@@ -215,6 +218,7 @@ export function multiLine(node, dates, seriesMap, options = {}) {
         symbolSize: 5,
         lineStyle: { width: options.width || 1.2, color: SERIES_COLORS[index % SERIES_COLORS.length] },
         itemStyle: { color: SERIES_COLORS[index % SERIES_COLORS.length] },
+        ...(index === 0 && marks.length ? { markLine: { silent: true, symbol: 'none', lineStyle: { color: p.dim, type: 'dashed' }, data: marks } } : {}),
       })),
     };
   });

@@ -123,9 +123,13 @@ LINE_ITEMS: tuple[LineItem, ...] = (
     # which the trailing snapshot records so EV does not count it twice.
     LineItem("total_debt", "Long-term debt", (
         "LongTermDebtNoncurrent", "LongTermDebtAndCapitalLeaseObligations", "LongTermDebt",
+        # Notes and loans (Oracle files its long-term debt only as these; Realty
+        # Income and D.R. Horton as plain notes payable).
+        "LongTermNotesAndLoans", "LongTermNotesPayable", "NotesPayable",
     ), "balance"),
     LineItem("debt_current", "Current debt", (
         "DebtCurrent", "LongTermDebtCurrent", "LongTermDebtAndCapitalLeaseObligationsCurrent",
+        "NotesPayableCurrent",
     ), "balance"),
     LineItem("minority_interest", "Non-controlling interest", ("MinorityInterest",), "balance"),
     LineItem("total_liabilities", "Total liabilities", ("Liabilities",), "balance"),
@@ -1034,6 +1038,12 @@ def _instant_near(periods: dict, end: str) -> float | None:
     return periods[(None, match)]["value"] if match else None
 
 
+DEBT_CARRYING_TAG = "DebtInstrumentCarryingAmount"
+DEBT_BY_INSTRUMENT = ("SeniorNotes", "SecuredDebt", "UnsecuredDebt", "ConvertibleDebt")
+# How old an earlier quarter's debt may be to stand in for this one's.
+DEBT_CARRY_DAYS = 370
+
+
 def trailing_snapshot(facts: dict) -> dict | None:
     """The latest reported quarter: TTM flows and balances at its end, the same a
     year earlier (for growth and averages), and a share count for market cap."""
@@ -1093,9 +1103,44 @@ def trailing_snapshot(facts: dict) -> dict | None:
         "balance_prior": balances(prior_end),
         # LongTermDebt already includes the current portion; LongTermDebtNoncurrent does not.
         "debt_includes_current": debt_tag == "LongTermDebt",
+        "debt_fallback": _debt_fallback(facts, end, periods),
         "lagged": lagged,
         **_market_shares(facts, periods["shares"], end, filed),
     }
+
+
+def _debt_fallback(facts: dict, end: str, periods: dict) -> dict | None:
+    """Debt for a quarter whose balance sheet tags none: its lines may be under the
+    filer's own tags, which SEC's company facts leave out (CoreWeave, Chevron,
+    Caterpillar and T-Mobile in 2026). In order, the first that exists:
+      - the debt note's total carrying amount at this quarter's end;
+      - this quarter's debt by kind of instrument, summed (how REITs file it);
+      - the long-term and current debt of the latest earlier quarter that tagged
+        them, within a year, said to be carried from that date.
+    Returns {value, basis} or None."""
+    gaap = facts.get("facts", {}).get("us-gaap", {})
+
+    def at_end(tag):
+        rows = [r for r in gaap.get(tag, {}).get("units", {}).get("USD", [])
+                if r.get("end") == end and "start" not in r and r.get("form") in QUARTERLY_FORMS and r.get("val") is not None]
+        return float(max(rows, key=lambda r: r.get("filed") or "")["val"]) if rows else None
+
+    if (carrying := at_end(DEBT_CARRYING_TAG)) is not None:
+        return {"value": carrying, "basis": "carrying amount of debt instruments (no standard balance lines)"}
+    parts = [v for v in (at_end(tag) for tag in DEBT_BY_INSTRUMENT) if v is not None]
+    if parts:
+        return {"value": sum(parts), "basis": "debt by instrument, summed (no standard balance lines)"}
+    tagged = sorted({e for key in ("total_debt", "debt_current") for (start, e) in periods[key]
+                     if start is None and e < end and _days(e, end) <= DEBT_CARRY_DAYS})
+    if not tagged:
+        return None
+    earlier = tagged[-1]
+    long_term, current = periods["total_debt"].get((None, earlier)), periods["debt_current"].get((None, earlier))
+    value = (long_term or {}).get("value") or 0.0
+    # LongTermDebt includes its current part; only add the current line beside a non-current one.
+    if current and not (long_term and long_term["priority"] == ITEMS_BY_KEY["total_debt"].tags.index("LongTermDebt")):
+        value += current["value"]
+    return {"value": float(value), "basis": f"long-term + current debt carried from {earlier} (no standard balance lines this quarter)"}
 
 
 def _market_shares(facts: dict, diluted: dict, end: str, filed: str | None) -> dict:
@@ -1134,6 +1179,9 @@ class Filer:
     # {end, value, filed} per fiscal quarter: the scale a release's revenue
     # guidance is checked against.
     quarterly_revenue: tuple = ()
+    # (tag, ((end, filed, value), ...)) for the debt and share series CREDIT reads
+    # (compute.credit.filed_facts), kept here so it needs no second parse.
+    credit_facts: tuple = ()
 
 
 def filer(cik: int, use_cache: bool = True) -> Filer:
@@ -1180,10 +1228,10 @@ def _record_recheck(when: datetime) -> None:
 
 @lru_cache(maxsize=1)
 def _code_version() -> str:
-    from ..compute import capex
+    from ..compute import capex, credit
 
     digest = hashlib.sha256()
-    for path in (__file__, xbrl_instance.__file__, capex.__file__):
+    for path in (__file__, xbrl_instance.__file__, capex.__file__, credit.__file__):
         digest.update(Path(path).read_bytes())
     return digest.hexdigest()[:16]
 
@@ -1269,7 +1317,14 @@ def _parse_filer(cik: int, use_cache: bool) -> Filer:
         trailing=trailing_snapshot(facts) if rows else None,
         eps_history=tuple(eps_history(facts)) if rows else (),
         quarterly_revenue=tuple(_quarterly_revenue(facts)) if rows else (),
+        credit_facts=tuple(_credit_facts(facts).items()) if rows else (),
     )
+
+
+def _credit_facts(facts: dict) -> dict:
+    from ..compute.credit import filed_facts
+
+    return filed_facts(facts)
 
 
 def _quarterly_revenue(facts: dict) -> list[dict]:

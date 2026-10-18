@@ -4,7 +4,7 @@
 // Rendered under node against a small fake DOM and a stub ECharts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import renderThemes, { themeArg, themeArgFor, themeBlocks, themeDataCards, themeOverview } from '../../web/js/tabs/themes.js';
+import renderThemes, { themeArg, themeArgFor, themeBlocks, themeDataCards, themeOverview, creditPaths } from '../../web/js/tabs/themes.js';
 
 class FakeNode {
   constructor(tag) {
@@ -130,7 +130,7 @@ test('the argument written back reads the same as the hash it came from', () => 
 test('each theme lists its DATA chips in the order the page draws them', () => withBrowser(() => {
   const cloudCards = themeDataCards('cloud', data).map((c) => [c.id, c.label]);
   assert.deepEqual(cloudCards, [
-    ['SPENDING', 'Spending'], ['SUPPLIERS', 'Suppliers'], ['RAMP', 'Ramp'], ['RELEASE-DAYS', 'Release days'],
+    ['SPENDING', 'Spending'], ['SUPPLIERS', 'Suppliers'], ['RAMP', 'Ramp'], ['FINANCING', 'Financing'], ['RELEASE-DAYS', 'Release days'],
   ]);
   // SEMIS gathers its cards under three chips by what they read, in page order.
   const semis = themeDataCards('semis', data);
@@ -181,8 +181,8 @@ test('the page opens on OVERVIEW with the first DATA card only when DATA is pick
   nav.children[2].click();                              // DATA
   const chips = pane('data').children[0];
   const cards = pane('data').children[1].children;
-  assert.equal(chips.children.length, 4 + 1, 'one chip per group of cards, plus All');
-  assert.deepEqual(cards.map((c) => c.hidden), [false, true, true, true], 'the first chip only');
+  assert.equal(chips.children.length, 5 + 1, 'one chip per group of cards, plus All');
+  assert.deepEqual(cards.map((c) => c.hidden), [false, true, true, true, true], 'the first chip only');
   assert.equal(chips.children[0].attrs['aria-pressed'], 'true');
   assert.deepEqual(ctx.calls, ['CLOUD.DATA']);
 }));
@@ -197,7 +197,7 @@ test('picking a chip shows that card; All shows every card; the hash follows', (
   const cards = pane('data').children[1].children;
   const ramp = chips.find((c) => c.textContent === 'Ramp');
   ramp.click();
-  assert.deepEqual(cards.map((c) => c.hidden), [true, true, false, true]);
+  assert.deepEqual(cards.map((c) => c.hidden), [true, true, false, true, true]);
   assert.equal(ramp.attrs['aria-pressed'], 'true');
   assert.equal(chips[0].attrs['aria-pressed'], 'false');
   assert.equal(ctx.calls.at(-1), 'CLOUD.DATA.RAMP');
@@ -250,3 +250,15 @@ test('an older link to one SEMIS card opens the chip that holds it', () => withB
   assert.equal(chips.find((c) => c.textContent === 'AI usage').attrs['aria-pressed'], 'true');
   assert.deepEqual(cards.map((c) => c.hidden), [true, true, false, true]);
 }));
+
+test('the AI borrowers chart puts every name on one weekly axis, with gaps where a name has no reading', () => {
+  const weekly = {
+    CRWV: { dates: ['2026-10-02', '2026-10-09'], dd: [1.49, 1.44] },
+    ORCL: { dates: ['2026-09-25', '2026-10-09'], dd: [3.57, 3.4] },
+  };
+  const { dates, series } = creditPaths(weekly, ['CRWV', 'ORCL', 'NBIS']);
+  assert.deepEqual(dates, ['2026-09-25', '2026-10-02', '2026-10-09']);
+  assert.deepEqual(series.CRWV, [null, 1.49, 1.44]);
+  assert.deepEqual(series.ORCL, [3.57, null, 3.4]);
+  assert.equal(series.NBIS, undefined, 'a name with no path draws no line');
+});

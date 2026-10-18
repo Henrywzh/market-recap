@@ -16,7 +16,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalyst_log, catalysts, chain, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, moves, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, sizek, themes, today, valuation, xray
+from .panels import anchor, catalyst_log, catalysts, chain, credit, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, moves, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, sizek, themes, today, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -57,6 +57,9 @@ PANELS = {
     "overnight": overnight.build,
     # Reads this session's catalysts and evidence (report dates), so after them.
     "positioning": positioning.build,
+    # Reads this session's VALUATION (names, sectors, market caps) and the parsed filers;
+    # THEMES reads it (the AI borrowers).
+    "credit": credit.build,
     # Themes first: the event cards read its industry series ("since the
     # last report"). Both read this session's report dates and reactions.
     "themes": themes.build,
@@ -76,7 +79,7 @@ PANELS = {
     # TODAY reads this session's calendar, moves, market state, risk, anchor, positioning, monitor and themes, so last.
     "today": today.build,
 }
-SEC_PANELS = {"financials", "valuation", "dcf"}
+SEC_PANELS = {"financials", "valuation", "dcf", "credit"}
 
 
 def _carry_monitor(base_url: str, ctx, exc: Exception) -> dict | None:
@@ -195,6 +198,8 @@ def run(
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in moves.INPUTS})
                 elif name == "chain":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in chain.INPUTS})
+                elif name == "credit":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in credit.INPUTS})
                 elif name == "today":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in today.INPUTS})
                 else:

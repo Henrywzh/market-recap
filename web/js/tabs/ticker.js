@@ -7,7 +7,7 @@
 // page still renders.
 
 import { el, card, table, num, pct, dirClass, sectionTitle, gap, tag, DASH } from '../fmt.js';
-import { render } from '../charts.js';
+import { render, multiLine } from '../charts.js';
 import { valuationBlock, companyBasket, companyHistory } from '../valuation-block.js';
 import { renderStatements } from './financials.js';
 import { renderSingleTicker } from './technicals.js';
@@ -291,7 +291,7 @@ function valuationCard(symbol, row, data) {
   }).filter(Boolean);
   return card(`VALUATION & QUALITY — AGAINST ${against?.toUpperCase() || 'SECTOR'} MEDIAN (${peers.length} COMPANIES)`, null, [
     table(['METRIC', symbol, kin.length >= 3 ? 'PEER MEDIAN' : 'SECTOR MEDIAN'], rows),
-    el('div', { class: 'field-note', text: `TTM to ${row.period_end} · filed ${row.filed} · full table on SCREEN` }),
+    el('div', { class: 'field-note', text: `TTM to ${row.period_end} · filed ${row.filed} · full table on SCREENER` }),
   ]);
 }
 
@@ -348,6 +348,41 @@ async function section(root, title, draw) {
   }
 }
 
+const NEW_PANELS = new Set(['moves', 'credit']);
+
+// The company's equity-implied default risk (CREDIT): its distance to default, the
+// model's probability and where today sits in its own five years. A description, not
+// a warning; the note says what it is not.
+export function creditSummary(row) {
+  if (!row) return null;
+  const pdText = row.pd_1y == null ? DASH : `${num(row.pd_1y, row.pd_1y < 0.1 ? 2 : 1)}%`;
+  return [
+    ['DISTANCE TO DEFAULT', row.dd == null ? DASH : num(row.dd, 2), 'lower is riskier; under 2 is thin'],
+    ['MODEL 1Y PD', pdText, 'the model\'s own odds, not a market price'],
+    ['OWN 5Y HISTORY', row.own_percentile == null ? DASH : `${num(row.own_percentile, 0)}th`, 'low = closer to default than usual'],
+    ['DEBT COUNTED', row.counted_debt_bn == null ? DASH : `$${num(row.counted_debt_bn, 1)}B`, 'as filed, last 10-Q/10-K'],
+  ];
+}
+
+function creditCard(symbol, credit) {
+  const title = 'CREDIT · EQUITY-IMPLIED DEFAULT RISK';
+  if (!credit) return null;
+  const row = (credit.rows || []).find((r) => r.ticker === symbol);
+  if (!row) {
+    const why = credit.skipped?.[symbol] || ((credit.excluded_sectors || []).length ? 'a bank or insurer, or not measured' : 'not measured');
+    return card(title, null, gap(`${symbol}: ${why}.`));
+  }
+  const chart = el('div', { class: 'chart short' });
+  const path = row.monthly || { dates: [], dd: [] };
+  if (path.dates.length) queueMicrotask(() => multiLine(chart, path.dates, { 'distance to default, month end': path.dd }));
+  return card(title, el('span', { class: 'dim', text: `as of ${credit.as_of}` }), [
+    el('div', { class: 'stat-strip' }, creditSummary(row).map(([label, value, note]) => stat(label, value, note))),
+    row.debt_check ? el('div', { class: 'notice', text: `Check: ${row.debt_check}.` }) : null,
+    path.dates.length ? chart : null,
+    el('div', { class: 'field-note', text: credit.method || '' }),
+  ]);
+}
+
 // The page under its header, in sub-tabs: what is new, the next report, the price
 // and the moves that made it, the valuation in full, the filed statements.
 export const TICKER_TABS = [['recent', 'RECENT'], ['report', 'NEXT REPORT'], ['price', 'PRICE'], ['valuation', 'VALUATION'], ['financials', 'FINANCIALS']];
@@ -363,10 +398,10 @@ export function tickerArgFor(symbol, view) {
 }
 
 export default async function renderTicker(root, valuation, manifest, ctx) {
-  const [monitor, technicals, financials, dcf, crossListing, evidence, events, themes, chain, sectors, moves] = await Promise.all(
-    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events', 'themes', 'chain', 'sectors', 'moves']
-      // MOVES is new: asked for only when this build made it (a 404 fails the smoke test).
-      .map((name) => (name === 'moves' && !manifest?.panels?.includes('moves') ? null : optional(ctx, name))),
+  const [monitor, technicals, financials, dcf, crossListing, evidence, events, themes, chain, sectors, moves, credit] = await Promise.all(
+    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events', 'themes', 'chain', 'sectors', 'moves', 'credit']
+      // MOVES and CREDIT are new: asked for only when this build made them (a 404 fails the smoke test).
+      .map((name) => (NEW_PANELS.has(name) && !manifest?.panels?.includes(name) ? null : optional(ctx, name))),
   );
   const rows = valuation?.rows || [];
   const universe = new Map(rows.map((r) => [r.ticker, r.name]));
@@ -450,6 +485,8 @@ export default async function renderTicker(root, valuation, manifest, ctx) {
       await section(host, 'P/E IN DETAIL — OPERATING AND REPORTED, FORWARD', (inner) => renderPeHistory(inner, symbol, valuation));
     }
     host.append(valuationCard(symbol, row, valuation));
+    const creditNode = creditCard(symbol, credit);
+    if (creditNode) host.append(creditNode);
     return null;
   };
   const financialsPane = async (host) => {
