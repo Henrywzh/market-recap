@@ -316,3 +316,23 @@ export function pageValuation(page) {
     history: page.history ?? null,
   };
 }
+
+// The 11 sectors side by side on what the market pays and expects, the S&P 500
+// first as the yardstick. `first` is the direction a column sorts on its first click.
+export const VALUE_COLUMNS = [
+  { key: 'forward_pe', label: 'FWD P/E', first: 'asc' },
+  { key: 'pe_percentile', label: 'P/E PCTL', first: 'asc' },
+  { key: 'eps_growth_this', label: 'EPS G THIS FY', first: 'desc' },
+  { key: 'eps_growth_next', label: 'EPS G NEXT FY', first: 'desc' },
+  { key: 'revenue_growth', label: 'REV G TTM', first: 'desc' },
+  { key: 'revision_90d', label: 'EPS REV 90D', first: 'desc' },
+];
+
+// Rows for that table: the S&P 500 (the build's market object) pinned first, then
+// the sectors sorted by the chosen column, a missing figure last either way.
+export function valueRows(data, sort = { key: 'eps_growth_next', direction: 'desc' }) {
+  const flat = (s) => ({ ...s, revision_90d: s.revision?.['90d'] ?? null });
+  const sectors = sortRows((data.sectors || []).map(flat), sort.key, sort.direction);
+  const market = data.market ? [{ ...flat(data.market), key: null, label: 'S&P 500', benchmark: true }] : [];
+  return [...market, ...sectors];
+}

@@ -7,6 +7,7 @@
 import { el, card, table, num, sectionTitle, notice, metaRow, periodSwitch, DASH } from '../fmt.js';
 import { render, SERIES_COLORS } from '../charts.js';
 import * as FF from '../fiscal-forward.js';
+import { hashFor } from '../routes.js';
 
 const { quantile } = FF;
 
@@ -608,7 +609,8 @@ export default async function renderValuation(root, data, _manifest, ctx = {}) {
   const universe = select([[ALL, 'All'], ...data.indices.map((k) => [k, k])], ALL);
   const sectors = [...new Set(data.rows.map((r) => r.sector).filter(Boolean))].sort();
   const sector = select([[ALL, 'All sectors'], ...sectors.map((s) => [s, s])], ALL);
-  const search = el('input', { placeholder: 'ticker or name', size: '14' });
+  // An old #valuation/MSFT link lands here with that name already in the search box.
+  const search = el('input', { placeholder: 'ticker or name', size: '14', value: ctx.arg || '' });
   const xSelect = select(valuationMetrics.map((m) => [m.key, m.label]), 'ev_ebitda');
   const ySelect = select(qualityMetrics.map((m) => [m.key, m.label]), 'roic');
   const status = el('span', { class: 'field-note', text: '' });
@@ -618,6 +620,12 @@ export default async function renderValuation(root, data, _manifest, ctx = {}) {
   const sectorHost = el('div', {});
   const tableHost = el('div', {});
   const sort = { key: 'market_cap', descending: true };
+
+  // A company's P/E in detail lives on its TICKER page, under the VALUATION tab.
+  const openTicker = (ticker) => {
+    if (ctx.navigate) ctx.navigate('ticker', `${ticker}/VALUATION`);
+    else location.hash = `#${hashFor('ticker', `${ticker}/VALUATION`)}`;
+  };
 
   function filtered() {
     const text = search.value.trim().toUpperCase();
@@ -638,52 +646,25 @@ export default async function renderValuation(root, data, _manifest, ctx = {}) {
       sort.descending = sort.key === key ? !sort.descending : typeof data.rows[0][key] !== 'string';
       sort.key = key;
       draw();
-    }, (ticker) => {
-      historyInput.value = ticker;
-      loadPeHistory();
-      historyCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }));
+    }, openTicker));
     status.textContent = `${rows.length} companies`;
   }
 
   for (const control of [universe, sector, xSelect, ySelect]) control.addEventListener('change', draw);
   search.addEventListener('input', draw);
 
-  root.append(card('FILTER', null, el('div', { class: 'field-row' }, [
-    el('div', { class: 'field' }, [el('label', { text: 'UNIVERSE' }), universe]),
-    el('div', { class: 'field' }, [el('label', { text: 'SECTOR' }), sector]),
-    el('div', { class: 'field' }, [el('label', { text: 'SEARCH' }), search]),
-    el('div', { class: 'field' }, [el('label', { text: 'X · VALUATION' }), xSelect]),
-    el('div', { class: 'field' }, [el('label', { text: 'Y · QUALITY' }), ySelect]),
-    status,
-  ])));
-  root.append(card('VALUATION × QUALITY', null, [scatterNode, scatterNote]));
-
-  // ---------------- P/E against its own history ---------------------------
-  const requestedTicker = ctx.arg;
-  const historyInput = el('input', { value: requestedTicker || 'AAPL', size: '8' });
-  const historyStatus = el('span', { class: 'field-note', text: '' });
-  const historyHost = el('div', {});
-  async function loadPeHistory() {
-    const symbol = historyInput.value.trim().toUpperCase();
-    historyStatus.textContent = `Loading ${symbol}…`;
-    try {
-      historyStatus.textContent = await renderPeHistory(historyHost, symbol, data);
-    } catch (error) {
-      historyHost.replaceChildren();
-      historyStatus.textContent = error.message;
-    }
-  }
-  historyInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') loadPeHistory(); });
-  const historyCard = card('P/E AGAINST ITS OWN 10 YEARS — PRICE ÷ TTM EPS AS FILED AT THE TIME · OPERATING OR REPORTED', null, [
+  root.append(card('FILTER', null, [
     el('div', { class: 'field-row' }, [
-      el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), historyInput]),
-      el('button', { class: 'action', text: 'LOAD', onclick: loadPeHistory }),
-      historyStatus,
+      el('div', { class: 'field' }, [el('label', { text: 'UNIVERSE' }), universe]),
+      el('div', { class: 'field' }, [el('label', { text: 'SECTOR' }), sector]),
+      el('div', { class: 'field' }, [el('label', { text: 'SEARCH' }), search]),
+      el('div', { class: 'field' }, [el('label', { text: 'X · VALUATION' }), xSelect]),
+      el('div', { class: 'field' }, [el('label', { text: 'Y · QUALITY' }), ySelect]),
+      status,
     ]),
-    historyHost,
-  ]);
-  root.append(historyCard);
+    el('div', { class: 'field-note', text: 'A company\'s P/E in detail is on its TICKER page, VALUATION tab.' }),
+  ]));
+  root.append(card('VALUATION × QUALITY', null, [scatterNode, scatterNote]));
   root.append(card('SECTOR MEDIANS', null, sectorHost));
   root.append(card('ALL COMPANIES — COLOURED BY RANK WITHIN SECTOR (TOP / BOTTOM FIFTH)', null, tableHost));
 
@@ -696,5 +677,4 @@ export default async function renderValuation(root, data, _manifest, ctx = {}) {
     + `Not valued: ${Object.keys(data.skipped).join(', ') || 'none'}. * = a line taken from the prior quarter; hover a ticker for its sources.`,
   ));
   draw();
-  await loadPeHistory();
 }

@@ -18,15 +18,16 @@ export const VIEWS = [
   // reached from that switch, so it is hidden from the menu and highlights its parent (`menu`).
   { id: 'kshape', label: 'RELATIVE VALUE', group: 'sectors', artifact: 'kshape', module: 'kshape', takesArg: true },
   { id: 'sizek', label: 'SIZE & STYLE', group: 'sectors', artifact: 'sizek', module: 'sizek', takesArg: true, hidden: true, menu: 'kshape' },
-  // Every company's multiples in one table: reached from links (a ticker's P/E), not the menu.
   { id: 'chain', label: 'AI CHAIN', group: 'sectors', artifact: 'chain', module: 'chain', takesArg: true },
-  { id: 'valuation', label: 'SCREEN', group: 'sectors', artifact: 'valuation', module: 'valuation', takesArg: true, hidden: true },
   { id: 'risk', label: 'RISK', group: 'risk', artifact: ['risk', 'anchor'], module: 'risk' },
   { id: 'rates', label: 'RATES & MACRO', group: 'risk', artifact: ['fixed_income', 'macro'], module: 'rates' },
   { id: 'priced', label: 'PRICED PATH', group: 'risk', artifact: 'priced', module: 'priced' },
   { id: 'positioning', label: 'POSITIONING', group: 'risk', artifact: 'positioning', module: 'positioning' },
   { id: 'monitor', label: 'MONITOR', group: 'names', artifact: 'monitor', module: 'monitor' },
   { id: 'ticker', label: 'TICKER', group: 'names', artifact: 'valuation', module: 'ticker', takesArg: true },
+  // Every company's multiples in one table. A company's P/E in detail is on its TICKER page;
+  // an old #valuation/MSFT link still opens the table with that name in the search box.
+  { id: 'valuation', label: 'SCREENER', group: 'names', artifact: 'valuation', module: 'valuation', takesArg: true },
   { id: 'europe-names', label: 'EUROPE NAMES', group: 'names', artifact: 'europe', module: 'europe-names', takesArg: true },
   { id: 'cross-listing', label: 'CROSS-LISTING', group: 'names', artifact: 'cross_listing', module: 'cross-listing' },
   { id: 'catalysts', label: 'CALENDAR', group: 'calendar', artifact: 'catalysts', module: 'catalysts' },
@@ -72,6 +73,17 @@ export function cleanThemeArg(value) {
   return THEME_ARG_PATTERN.test(text) ? text : null;
 }
 
+// The TICKER page carries its sub-tab after the symbol (NVDA/REPORT); the view
+// name is plain letters, so BRK.B/FINANCIALS stays unambiguous.
+const TICKER_VIEW_PATTERN = /^[A-Z]{3,12}$/;
+
+export function cleanTickerArg(value) {
+  const [symbol, view, ...extra] = String(value || '').trim().toUpperCase().split('/');
+  const ticker = cleanTicker(symbol);
+  if (!ticker || extra.length) return null;
+  return view && TICKER_VIEW_PATTERN.test(view) ? `${ticker}/${view}` : ticker;
+}
+
 export function cleanTicker(value) {
   const text = String(value || '').trim().toUpperCase();
   return TICKER_PATTERN.test(text) ? text : null;
@@ -99,13 +111,15 @@ export function parseHash(hash, search = '') {
   if (!view.takesArg) return { id, arg: null };
   // THEMES carries its sub-view in the argument (CLOUD.DATA.OPENROUTER), longer
   // than any ticker; it gets its own pattern so the deep link survives a reload.
-  const fromHash = id === 'themes' ? cleanThemeArg(rest.join('/')) : cleanTicker(rest.join('/'));
+  const clean = { themes: cleanThemeArg, ticker: cleanTickerArg }[id] || cleanTicker;
+  const fromHash = clean(rest.join('/'));
   const fromQuery = cleanTicker(new URLSearchParams(search).get('ticker'));
   return { id, arg: fromHash || fromQuery || null };
 }
 
+// A slash inside the argument (the TICKER sub-tab, NVDA/REPORT) stays readable.
 export function hashFor(id, arg = null) {
-  return arg ? `${id}/${encodeURIComponent(arg)}` : id;
+  return arg ? `${id}/${encodeURIComponent(arg).replace(/%2F/gi, '/')}` : id;
 }
 
 // The one link every ticker on the site uses (principle: one entity, one page).

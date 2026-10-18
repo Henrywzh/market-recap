@@ -130,7 +130,7 @@ for (const route of list) {
   }
   try {
     if (route === 'sectors') {
-      for (const name of ['Industry & valuation', 'Rotation & sectors']) {
+      for (const name of ['Industries', 'Rotation & sectors']) {
         await page.getByRole('tab', { name, exact: true }).click();
         const panel = page.getByRole('tabpanel', { name, exact: true });
         await panel.waitFor({ state: 'visible', timeout: RENDER_WAIT_MS });

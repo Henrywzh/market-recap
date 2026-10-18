@@ -17,7 +17,7 @@ import { renderRotationGraph, renderRotationDetail } from './rotation.js';
 import { themeBlocks } from './themes.js';
 import {
   PERIODS, DEFAULT_PERIOD, REPORT_WINDOW_DAYS, CHART_PERIODS, DEFAULT_CHART_PERIOD, DEFAULT_WINDOW, NAMED_LIMIT,
-  levelOf, membersOf, subsOf, sortRows, upcoming,
+  levelOf, membersOf, subsOf, sortRows, upcoming, VALUE_COLUMNS, valueRows,
   timingLabel, timingTitle, quadrantTag, evidenceFlags, extremesOf, themedSubs, ordinal, boolMark, nameColumns,
   sectorShort, shortName, subBars, subMapPoints, nameMapPoints, symmetricRange, pathBars, longestDates,
   pageValuation,
@@ -273,7 +273,6 @@ function sectorTable(data, state, ctx) {
     const ret = s.returns?.[period];
     const vs = s.vs_index?.[period];
     const q = quadrantTag(s.quadrant);
-    const rev = s.revision || {};
     return openRow([
       el('td', {}, [el('span', { class: 'sx-name', text: s.label }), el('span', { class: 'sub', text: `${s.etf} · ${s.members} names` })]),
       el('td', { text: share(s.weight, 1) }),
@@ -282,13 +281,54 @@ function sectorTable(data, state, ctx) {
       el('td', {}, [q ? tag(q.label, q.tone) : DASH]),
       el('td', { text: share(s.above_200d, 0) }),
       el('td', { class: dirClass(s.median_drawdown), text: pct(s.median_drawdown, 1) }),
-      el('td', { class: dirClass(rev['90d']), text: pct(rev['90d'], 1) }),
-      el('td', { text: multiple(s.forward_pe) }),
-      el('td', { class: 'dim', text: ordinal(s.pe_percentile) }),
       el('td', {}, [s.theme ? link(s.theme.toUpperCase(), themeHref(s.theme), 'tag tag-info') : DASH]),
     ], ctx, s.key, `${s.label} · ${s.members} names · ${share(s.weight)} of the index`);
   });
-  return titledTable(['SECTOR', 'WEIGHT', 'RETURN', 'VS S&P', 'ROTATION', 'ABOVE 200D', 'MEDIAN DRAWDOWN', 'EPS REV 90D', 'FWD P/E', 'P/E PCTL', 'THEME'], rows, HUB_TITLES);
+  return titledTable(['SECTOR', 'WEIGHT', 'RETURN', 'VS S&P', 'ROTATION', 'ABOVE 200D', 'MEDIAN DRAWDOWN', 'THEME'], rows, HUB_TITLES);
+}
+
+// What the market pays for each sector and what it expects it to earn, beside the
+// S&P 500: forward P/E and where the trailing P/E sits in its own ten years,
+// consensus EPS growth this and next fiscal year, revenue growth, 90-day revisions.
+function valueCell(key, s) {
+  const v = s[key];
+  if (key === 'forward_pe') return el('td', { text: multiple(v) });
+  if (key === 'pe_percentile') return el('td', { class: 'dim', text: ordinal(v) });
+  if (key === 'revision_90d') return el('td', { class: dirClass(v), text: pct(v, 1) });
+  return el('td', { class: dirClass(v), text: signed(v, 1, '%') });
+}
+function valueCard(data, state, ctx) {
+  const wrap = el('div', {});
+  const draw = () => {
+    const head = el('tr', {}, [el('th', { text: 'SECTOR' }), ...VALUE_COLUMNS.map((c) => {
+      const active = state.valueSort.key === c.key;
+      const arrow = active ? (state.valueSort.direction === 'desc' ? ' ▼' : ' ▲') : '';
+      return el('th', { title: HUB_TITLES[c.label] || '', 'aria-sort': active ? (state.valueSort.direction === 'desc' ? 'descending' : 'ascending') : null }, [
+        el('button', {
+          type: 'button',
+          class: 'sx-sort',
+          text: c.label + arrow,
+          onclick: () => {
+            state.valueSort = { key: c.key, direction: active ? (state.valueSort.direction === 'desc' ? 'asc' : 'desc') : c.first };
+            draw();
+          },
+        }),
+      ]);
+    })]);
+    const rows = valueRows(data, state.valueSort).map((s) => {
+      const cells = [
+        el('td', {}, [el('span', { class: 'sx-name', text: s.label }), s.benchmark ? null : el('span', { class: 'sub', text: s.etf })]),
+        ...VALUE_COLUMNS.map((c) => valueCell(c.key, s)),
+      ];
+      return s.benchmark ? el('tr', { class: 'sx-benchmark' }, cells) : openRow(cells, ctx, s.key, `${s.label}: open its page`);
+    });
+    wrap.replaceChildren(el('table', { class: 'data' }, [el('thead', {}, [head]), el('tbody', {}, rows)]));
+  };
+  draw();
+  return card('VALUATION & EARNINGS GROWTH · 11 SECTORS VS S&P 500', el('span', { class: 'dim', text: 'consensus · click a column to sort' }), [
+    wrap,
+    el('div', { class: 'field-note', text: 'EPS G is the change in total consensus EPS of the sector\'s names: this fiscal year over last, next over this, each company on its own fiscal year. REV G is trailing twelve months from filings. EPS REV 90D is the median change in FY1 consensus over 90 days. A row opens the sector page, which has its valuation path and P/E history.' }),
+  ]);
 }
 
 function subTable(subs, state, ctx) {
@@ -736,15 +776,16 @@ async function renderLevel(root, data, ctx, row, isSector) {
 
 // --- The market hub ----------------------------------------------------------
 
-// The market: where money is rotating first, then every sector in one table,
-// the cross-sector themes, and the industry scorecard and sector valuation.
+// The market: where money is rotating first, then every sector in one table, the
+// sector valuation comparison beside its value card, and the cross-sector themes.
+// The industry scorecard is the second view, so the overview stays short.
 async function renderHub(root, data, _manifest, ctx) {
   const state = { period: DEFAULT_PERIOD, sort: { key: 'weight', direction: 'desc' } };
   const thin = data.sub_industries.filter((s) => s.thin).length;
   root.append(sectionTitle('SECTORS', 'MARKET → SECTOR → SUB-INDUSTRY → NAMES'));
   root.append(metaRow(`AS OF ${data.as_of} · ${data.sectors.length} SECTORS · ${data.sub_industries.length} SUB-INDUSTRIES, ${thin} THIN · ${data.members.length} NAMES`, hubNotes(data)));
 
-  const choices = [['overview', 'Rotation & sectors'], ['industries', 'Industry & valuation']];
+  const choices = [['overview', 'Rotation & sectors'], ['industries', 'Industries']];
   const nav = el('div', { class: 'view-switch', role: 'tablist', 'aria-label': 'Sector research views' });
   const panes = new Map(choices.map(([key]) => [key, el('div', {
     role: 'tabpanel', id: `sector-view-${key}`, 'aria-labelledby': `sector-tab-${key}`,
@@ -771,20 +812,6 @@ async function renderHub(root, data, _manifest, ctx) {
         loading.remove();
         pane.append(el('div', { class: 'field-note', text: 'Open any sector below for its combined valuation, relative performance, industries and names.' }),
           el('div', { class: 'tag-row' }, data.sectors.map((s) => link(s.label, sectorHref(s.key), 'tag tag-dim'))));
-        const valuationHost = el('div', {});
-        const fold = el('details', { class: 'sx-fold' }, [el('summary', { text: 'Compare aggregate sector valuations' }), valuationHost]);
-        let loaded = false;
-        fold.addEventListener('toggle', async () => {
-          if (!fold.open || loaded) return;
-          loaded = true;
-          try {
-            await renderRotationDetail(valuationHost, ctx, { section: 'valuation', stillMounted: () => pane.isConnected });
-          } catch (error) {
-            loaded = false;
-            valuationHost.replaceChildren(gap(`Valuation is unavailable: ${error.message}.`));
-          }
-        });
-        pane.append(fold);
       } catch (error) {
         ready.delete(key); // a failed optional request can be tried again
         pane.replaceChildren(gap(`This research view is unavailable: ${error.message}.`));
@@ -828,6 +855,18 @@ async function renderHub(root, data, _manifest, ctx) {
     draw();
   }), [tableHost]));
   draw();
+  if (!state.valueSort) state.valueSort = { key: 'eps_growth_next', direction: 'desc' };
+  overview.append(valueCard(data, state, ctx));
+
+  // The index and sector P/E comparison sits right under the value card it
+  // details. It loads on its own, so a slow valuation file never holds up the
+  // rest of the overview.
+  const valuationHost = el('div', {});
+  overview.append(valuationHost);
+  renderRotationDetail(valuationHost, ctx, { section: 'valuation', stillMounted: () => valuationHost.isConnected })
+    .catch((error) => {
+      if (valuationHost.isConnected) valuationHost.replaceChildren(gap(`Valuation is unavailable: ${error.message}.`));
+    });
 
   if ((data.themes || []).length) {
     overview.append(card('CROSS-SECTOR THEMES', el('span', { class: 'dim', text: `${data.themes.length} · not one sector` }), [

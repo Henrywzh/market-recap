@@ -856,10 +856,8 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .risk-more > summary::before { content: '▸ '; }
 .risk-more[open] > summary::before { content: '▾ '; }
 
-/* ---------- TICKER: groups and folded detail ---------- */
+/* ---------- TICKER: folded detail ---------- */
 .ticker-reads { margin: 6px 0 2px; }
-.ticker-group { margin: 18px 0 8px; padding-top: 8px; border-top: 1px solid var(--border-strong);
-  font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: var(--accent); }
 .fold { margin: 0 0 10px; }
 .fold > summary { cursor: pointer; font-size: 11px; letter-spacing: 0.08em; color: var(--text-dim); padding: 6px 0; list-style: none; }
 .fold > summary::-webkit-details-marker { display: none; }
@@ -1280,3 +1278,4 @@ table.data.ppi-momentum-table a { word-break: normal; }
 @media (max-width: 700px) {
   .cat-watch-line { margin-left: 0; }
 }
+.sx-benchmark td { color: var(--text); font-weight: 600; border-bottom: 1px solid var(--border-strong); }

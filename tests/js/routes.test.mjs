@@ -53,8 +53,9 @@ test('every view has a module, a known group, and a unique id', () => {
   for (const target of Object.values(R.ALIASES)) assert.ok(ids.has(target), `alias target ${target} is not a view`);
 });
 
-test('no group offers more than four views', () => {
-  for (const group of R.GROUPS) assert.ok(R.viewsIn(group.id).length <= 4, group.id);
+// Four, except NAMES: the screener came back beside TICKER (2026-10-18).
+test('no group offers more than five views', () => {
+  for (const group of R.GROUPS) assert.ok(R.viewsIn(group.id).length <= 5, group.id);
 });
 
 test('every ticker link opens the ticker page', () => {
@@ -75,8 +76,12 @@ test('the overview is the landing page; MARKET, then SECTORS, then RISK', () => 
   assert.deepEqual(R.parseHash('#journal'), { id: 'overview', arg: null });
 });
 
-test('the screen is out of the menu but its links still open it', () => {
-  assert.ok(!R.viewsIn('sectors').some((v) => v.id === 'valuation'));
+test('SCREENER is in the menu under NAMES, right after TICKER; #valuation/MSFT still opens it', () => {
+  const names = R.viewsIn('names').map((v) => v.id);
+  assert.equal(R.viewById('valuation').label, 'SCREENER');
+  assert.ok(!R.viewById('valuation').hidden);
+  assert.equal(names[names.indexOf('valuation') - 1], 'ticker');
+  assert.deepEqual(names, ['monitor', 'ticker', 'valuation', 'europe-names', 'cross-listing']);
   assert.deepEqual(R.parseHash('#valuation/MSFT'), { id: 'valuation', arg: 'MSFT' });
 });
 
@@ -116,4 +121,15 @@ test('THEMES deep links keep their sub-view through the hash', async () => {
   assert.equal(parseHash('#themes/CLOUD').arg, 'CLOUD');
   assert.equal(cleanThemeArg('<script>'), null);
   assert.equal(parseHash('#ticker/NVDA').arg, 'NVDA');
+});
+
+test('the TICKER page keeps its sub-tab after the symbol, dotted symbols included', () => {
+  assert.deepEqual(R.parseHash('#ticker/nvda/report'), { id: 'ticker', arg: 'NVDA/REPORT' });
+  assert.deepEqual(R.parseHash('#ticker/BRK.B/FINANCIALS'), { id: 'ticker', arg: 'BRK.B/FINANCIALS' });
+  assert.equal(R.hashFor('ticker', 'NVDA/VALUE'), 'ticker/NVDA/VALUE', 'the slash stays readable');
+  assert.deepEqual(R.parseHash(`#${R.hashFor('ticker', 'NVDA/VALUE')}`), { id: 'ticker', arg: 'NVDA/VALUE' });
+  assert.deepEqual(R.parseHash('#ticker/NVDA%2FVALUE'), { id: 'ticker', arg: 'NVDA/VALUE' }, 'an encoded slash still reads');
+  assert.deepEqual(R.parseHash('#ticker/NVDA/1/2'), { id: 'ticker', arg: null }, 'anything longer is not an argument');
+  assert.deepEqual(R.parseHash('#ticker/NVDA/x1'), { id: 'ticker', arg: 'NVDA' }, 'a malformed view keeps the symbol');
+  assert.deepEqual(R.parseHash('#dcf/NVDA/REPORT'), { id: 'dcf', arg: null }, 'only TICKER takes a sub-tab');
 });

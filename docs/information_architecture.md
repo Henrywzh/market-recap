@@ -56,7 +56,7 @@ no record of **decisions** to review against outcomes.
 
 ## Navigation
 
-**As built (2026-10-13).** Six groups, at most four views each:
+**As built (2026-10-13).** Six groups, at most four views each (NAMES has five since the screener returned to the menu, 2026-10-18):
 
 ```
 MARKET     Overview · Indices · Heat maps · Europe
@@ -74,8 +74,9 @@ gives every sector and sub-industry one page with the same blocks: summary,
 sub-industries, members, reports ahead, and the industry data of the THEMES
 group mapped to it in `[sectors]` (staples, energy and consumer on their
 sectors; semis, banks, housing, cruise and defense on their sub-industries).
-THEMES keeps every group; only cloud & AI capex spans sectors. Screen leaves
-the menu (reached from a ticker's P/E link); `#rotation` opens the hub.
+THEMES keeps every group; only cloud & AI capex spans sectors. Screen is back
+in the NAMES menu as SCREENER, after TICKER; a company's P/E in detail is on its
+TICKER page, VALUATION tab. `#rotation` opens the hub.
 
 A sector or sub-industry page opens on its charts, in four numbered blocks:
 the basket against the S&P 500 over one lookback window (with the SPDR fund
@@ -88,7 +89,7 @@ sit folded beneath. The hub keeps the rotation graph and the sector table.
 The plan below is the original one, kept for the record.
 
 Trial branch, 2026-10-14: the sector hub has two local views, **Rotation &
-sectors** (default, rotation first) and **Industry & valuation**. Group names
+sectors** (default, rotation first) and **Industries** (the sector valuation comparison moved up to the first view, 2026-10-18). Group names
 link to the existing combined sector/sub-industry pages; aggregate sector
 valuation comparison remains in a fold rather than a fourth local tab.
 INDICES selects one recap universe at a time in contract order (SPX first),

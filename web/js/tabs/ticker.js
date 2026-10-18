@@ -15,6 +15,8 @@ import { eventCard, outcomeCard, timelineCard, loadEvents, historyCard, revision
 import { resolveTicker } from '../routes.js';
 import { chainCard } from '../chain-card.js';
 import { moveCard } from '../moves-card.js';
+import { viewTabs } from '../view-tabs.js';
+import { renderPeHistory } from './valuation.js';
 
 const BILLION = 1e9;
 // The multiples shown in the header block, in this order. The full set is on
@@ -140,14 +142,10 @@ function fold(label, node) {
   return node ? el('details', { class: 'fold' }, [el('summary', { text: label }), node]) : null;
 }
 
-function group(label) {
-  return el('div', { class: 'ticker-group', text: label });
-}
-
 function links(symbol, { mon, dcf, pairs }) {
   const items = [
     ['TECHNICALS TOOL', `#technicals/${encodeURIComponent(symbol)}`],
-    ['P/E ON SCREEN', `#valuation/${encodeURIComponent(symbol)}`],
+    ['SCREENER', '#valuation'],
   ];
   if (dcf?.available?.includes(symbol)) items.push(['DCF MODEL', `#dcf/${encodeURIComponent(symbol)}`]);
   if (pairs.some((p) => p.us_ticker === symbol)) items.push(['CROSS-LISTING', '#cross-listing']);
@@ -350,6 +348,20 @@ async function section(root, title, draw) {
   }
 }
 
+// The page under its header, in sub-tabs: what is new, the next report, the price
+// and the moves that made it, the valuation in full, the filed statements.
+export const TICKER_TABS = [['recent', 'RECENT'], ['report', 'NEXT REPORT'], ['price', 'PRICE'], ['valuation', 'VALUATION'], ['financials', 'FINANCIALS']];
+
+// The hash's argument -> { symbol, view }: NVDA/REPORT. An unknown view is RECENT.
+export function tickerArg(arg) {
+  const [symbol, view] = String(arg || '').split('/');
+  const known = TICKER_TABS.find(([id]) => id.toUpperCase() === (view || '').toUpperCase());
+  return { symbol: symbol || null, view: known ? known[0] : 'recent' };
+}
+export function tickerArgFor(symbol, view) {
+  return view && view !== 'recent' ? `${symbol}/${view.toUpperCase()}` : symbol;
+}
+
 export default async function renderTicker(root, valuation, manifest, ctx) {
   const [monitor, technicals, financials, dcf, crossListing, evidence, events, themes, chain, sectors, moves] = await Promise.all(
     ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events', 'themes', 'chain', 'sectors', 'moves']
@@ -360,8 +372,9 @@ export default async function renderTicker(root, valuation, manifest, ctx) {
   const universe = new Map(rows.map((r) => [r.ticker, r.name]));
   (technicals?.available || []).forEach((t) => { if (!universe.has(t)) universe.set(t, ''); });
 
-  const symbol = resolveTicker(ctx.arg, (t) => universe.has(t)) || (universe.has('AAPL') ? 'AAPL' : rows[0]?.ticker);
-  if (symbol && symbol !== ctx.arg) ctx.setArg(symbol);
+  const asked = tickerArg(ctx.arg);
+  const symbol = resolveTicker(asked.symbol, (t) => universe.has(t)) || (universe.has('AAPL') ? 'AAPL' : rows[0]?.ticker);
+  if (symbol && tickerArgFor(symbol, asked.view) !== ctx.arg) ctx.setArg(tickerArgFor(symbol, asked.view));
   const row = rows.find((r) => r.ticker === symbol) || null;
   const mon = (monitor?.rows || []).find((r) => r.ticker === symbol) || null;
   const name = row?.name || mon?.name || '';
@@ -384,58 +397,80 @@ export default async function renderTicker(root, valuation, manifest, ctx) {
   const stats = headerStats(row, mon, sit, ev?.options?.implied_move);
   if (stats) root.append(stats);
   const company = Boolean(row || mon);
-  const add = (...nodes) => nodes.filter(Boolean).forEach((n) => root.append(n));
+  const keep = (...nodes) => nodes.filter(Boolean);
 
   // What is new: a report the last session traded on, the evidence listed for
   // and against, the industry data since the last report, recent filings.
-  const move = moves ? moveCard((moves.rows || []).find((r) => r.ticker === symbol), moves) : null;
-  add(group('RECENT'), move, eventPayload ? outcomeCard(eventPayload) : null, company ? noteCard(mon) : null);
-  const recent = [company ? evidenceCard(mon, ev) : null, eventPayload ? filingsCard(eventPayload) : null].filter(Boolean);
-  if (recent.length) add(recent.length > 1 ? el('div', { class: 'grid two' }, recent) : recent[0]);
-  add(eventPayload ? sinceCard(eventPayload) : null);
-
+  const recentPane = () => {
+    const move = moves ? moveCard((moves.rows || []).find((r) => r.ticker === symbol), moves) : null;
+    const pair = [company ? evidenceCard(mon, ev) : null, eventPayload ? filingsCard(eventPayload) : null].filter(Boolean);
+    const nodes = keep(move, eventPayload ? outcomeCard(eventPayload) : null, company ? noteCard(mon) : null,
+      pair.length > 1 ? el('div', { class: 'grid two' }, pair) : pair[0], eventPayload ? sinceCard(eventPayload) : null);
+    return nodes.length ? nodes : [gap(`Nothing recent for ${symbol} in this build.`)];
+  };
   // The next report: what is expected and priced, what is ahead, and the
   // record behind it, folded.
-  const upcoming = eventPayload ? eventCard(eventPayload, asOf, { prices }) : null;
-  if (upcoming || eventPayload?.timeline) {
-    add(group('NEXT REPORT'), upcoming, eventPayload ? timelineCard(eventPayload, prices, events?.macro, asOf) : null,
+  const reportPane = () => {
+    const upcoming = eventPayload ? eventCard(eventPayload, asOf, { prices }) : null;
+    if (!upcoming && !eventPayload?.timeline) return [gap(`${symbol} has no report data in this build.`)];
+    return keep(upcoming, eventPayload ? timelineCard(eventPayload, prices, events?.macro, asOf) : null,
       fold('LAST 8 REPORTS · EPS, GUIDE, MOVE AND DRIFT', eventPayload ? historyCard(eventPayload) : null),
       fold('ESTIMATE REVISIONS BY PERIOD', eventPayload ? revisionsCard(eventPayload) : null),
       optionsCard(symbol, ev, evidence || {}));
-  }
-
-  // The long view: price and trend, valuation against its own history and
-  // its sector, the moves that made it, its chain, the filed statements.
-  add(group('LONG TERM'));
-  if (!company) {
-    root.append(el('div', { class: 'notice', text:
-      `${symbol} has baked prices but no filings in this build (a fund, an index or a non-member), so only its technicals are shown. `
-      + 'A fund\'s holdings are on TOOLS → ETF X-RAY.' }));
-  }
-  if (technicals?.available?.includes(symbol)) {
-    const host = el('div', {});
-    root.append(host);
-    await renderSingleTicker(host, technicals, { symbol, lockTicker: true, compact: true });
-  } else {
-    root.append(card('PRICE & TREND', null, gap(`${symbol} has no baked price history in this build.`)));
-  }
-  // A failure here blanks this block only, as the other sections of this page do.
-  if (row) {
-    try {
-      root.append(...await companyValuation(ctx, symbol, row, sectors, financials));
-    } catch (error) {
-      root.append(card('VALUATION', null, gap(error.message)));
+  };
+  // The price: its trend, the reports and large moves that made it, its AI-chain links.
+  const pricePane = async (host) => {
+    if (!company) {
+      host.append(el('div', { class: 'notice', text:
+        `${symbol} has baked prices but no filings in this build (a fund, an index or a non-member), so only its technicals are shown. `
+        + 'A fund\'s holdings are on TOOLS → ETF X-RAY.' }));
     }
-  }
-  if (company) root.append(valuationCard(symbol, row, valuation));
-  add(eventPayload ? storyCard(eventPayload) : null, chain ? chainCard(chain, symbol, { compact: true }) : null);
-  if (!company) return;
-  await section(root, 'FINANCIALS — FILED ANNUAL STATEMENTS · SEC XBRL', (host) => {
-    if (!financials) throw new Error('FINANCIALS was not built for this session.');
-    if (!financials.available.some((c) => c.ticker === symbol)) {
-      const why = financials.skipped?.[symbol];
-      throw new Error(`${symbol} has no filed statements in this build${why ? `: ${why}` : ' (not a member of the covered indices)'}`);
+    if (technicals?.available?.includes(symbol)) {
+      const chartHost = el('div', {});
+      host.append(chartHost);
+      await renderSingleTicker(chartHost, technicals, { symbol, lockTicker: true, compact: true });
+    } else {
+      host.append(card('PRICE & TREND', null, gap(`${symbol} has no baked price history in this build.`)));
     }
-    return renderStatements(host, symbol, financials);
+    host.append(...keep(eventPayload ? storyCard(eventPayload) : null, chain ? chainCard(chain, symbol, { compact: true }) : null));
+    return null;
+  };
+  // The valuation: the VALUATION block against its sector, the P/E in detail
+  // (operating and reported, Yahoo's own forward history, TTM EPS by filing date),
+  // and the multiples against the sector median.
+  const valuationPane = async (host) => {
+    if (!company) return [gap(`${symbol} has no filings in this build, so no valuation.`)];
+    // A failure here blanks this block only, as the other sections of this page do.
+    if (row) {
+      try {
+        host.append(...await companyValuation(ctx, symbol, row, sectors, financials));
+      } catch (error) {
+        host.append(card('VALUATION', null, gap(error.message)));
+      }
+      await section(host, 'P/E IN DETAIL — OPERATING AND REPORTED, FORWARD', (inner) => renderPeHistory(inner, symbol, valuation));
+    }
+    host.append(valuationCard(symbol, row, valuation));
+    return null;
+  };
+  const financialsPane = async (host) => {
+    if (!company) return [gap(`${symbol} has no filed statements: it is a fund, an index or a non-member.`)];
+    await section(host, 'FINANCIALS — FILED ANNUAL STATEMENTS · SEC XBRL', (inner) => {
+      if (!financials) throw new Error('FINANCIALS was not built for this session.');
+      if (!financials.available.some((c) => c.ticker === symbol)) {
+        const why = financials.skipped?.[symbol];
+        throw new Error(`${symbol} has no filed statements in this build${why ? `: ${why}` : ' (not a member of the covered indices)'}`);
+      }
+      return renderStatements(inner, symbol, financials);
+    });
+    return null;
+  };
+  const builders = { recent: recentPane, report: reportPane, price: pricePane, valuation: valuationPane, financials: financialsPane };
+  const tabs = viewTabs(TICKER_TABS, asked.view, {
+    label: `${symbol} views`,
+    idPrefix: 'ticker',
+    build: (id, host) => builders[id](host),
+    onPick: (id) => ctx.setArg(tickerArgFor(symbol, id)),
   });
+  root.append(tabs.nav, ...tabs.panes);
+  await tabs.show(asked.view);
 }

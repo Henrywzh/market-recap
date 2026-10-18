@@ -201,3 +201,21 @@ test('a page\'s valuation parts are passed on as they are; an older page with no
   assert.equal(M.pageValuation(null), null);
   assert.equal(M.pageValuation(undefined), null);
 });
+
+test('the valuation table pins the S&P 500 first and sorts the sectors, missing figures last', () => {
+  const value = {
+    market: { forward_pe: 19.1, eps_growth_next: 13.5 },
+    sectors: [
+      { key: 'XLK', label: 'Info Tech', eps_growth_next: 32.3, forward_pe: 19.3, revision: { '90d': 4.0 } },
+      { key: 'XLRE', label: 'Real Estate', eps_growth_next: null, forward_pe: null, revision: { '90d': 1.2 } },
+      { key: 'XLE', label: 'Energy', eps_growth_next: -8.0, forward_pe: 13.3, revision: { '90d': 6.8 } },
+    ],
+  };
+  assert.deepEqual(M.valueRows(value).map((r) => r.label), ['S&P 500', 'Info Tech', 'Energy', 'Real Estate']);
+  assert.equal(M.valueRows(value)[0].benchmark, true);
+  const cheap = M.valueRows(value, { key: 'forward_pe', direction: 'asc' }).map((r) => r.label);
+  assert.deepEqual(cheap, ['S&P 500', 'Energy', 'Info Tech', 'Real Estate']);
+  const revised = M.valueRows(value, { key: 'revision_90d', direction: 'desc' }).map((r) => r.revision_90d);
+  assert.deepEqual(revised, [null, 6.8, 4.0, 1.2], 'the 90-day revision is read from the revision object');
+  assert.ok(M.VALUE_COLUMNS.some((c) => c.key === 'eps_growth_this'));
+});
