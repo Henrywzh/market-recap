@@ -30,3 +30,15 @@ def test_a_rebuilt_monitor_replaces_the_carried_marker():
     previous = {"panels": ["monitor"], "monitor_carried": {"since": "x"}}
     merged = merge_manifest.merge(previous, {"panels": ["monitor"], "skipped_panels": [], "errors": {}})
     assert "monitor_carried" not in merged
+
+
+def test_a_monitor_not_rebuilt_keeps_the_stamp_of_the_build_it_came_from():
+    previous = {"generated_at": "t0", "panels": ["monitor", "today"], "skipped_panels": [], "errors": {}}
+    merged = merge_manifest.merge(previous, {"generated_at": "t1", "panels": ["today"], "skipped_panels": [], "errors": {}})
+    assert merged["monitor_generated_at"] == "t0" and merged["generated_at"] == "t1"
+    # A second partial refresh still points at the build that made the monitor.
+    again = merge_manifest.merge(merged, {"generated_at": "t2", "panels": ["credit"], "skipped_panels": [], "errors": {}})
+    assert again["monitor_generated_at"] == "t0"
+    # A rebuilt monitor carries this run's stamp, so no separate one is kept.
+    rebuilt = merge_manifest.merge(again, {"generated_at": "t3", "panels": ["monitor"], "skipped_panels": [], "errors": {}})
+    assert "monitor_generated_at" not in rebuilt

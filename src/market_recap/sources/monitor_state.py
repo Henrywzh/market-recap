@@ -614,6 +614,17 @@ def _manifest_info(manifest: Any) -> tuple[str, bool, str | None, tuple[str, str
         raise _invalid("published manifest.as_of", "required date is missing")
 
     expected: tuple[str, str | None] = (as_of.isoformat(), generated_at)
+    # A partial refresh that did not rebuild MONITOR republishes the previous
+    # build's monitor.json with that build's stamp (scripts/merge_manifest.py).
+    # Manifests merged before ``monitor_generated_at`` existed name it only as
+    # the partial refresh's previous build.
+    partial = value.get("partial_refresh") if isinstance(value.get("partial_refresh"), Mapping) else None
+    kept_stamp = value.get("monitor_generated_at")
+    if kept_stamp is None and partial and "monitor" not in (partial.get("rebuilt") or []):
+        kept_stamp = partial.get("previous_generated_at")
+    if kept_stamp is not None:
+        _require_nonempty_string(kept_stamp, "published manifest.monitor_generated_at")
+        expected = (as_of.isoformat(), kept_stamp)
     carried = value.get("monitor_carried")
     if carried is not None:
         carried = _require_mapping(carried, "published manifest.monitor_carried")

@@ -45,8 +45,16 @@ def merge(previous: dict, new: dict) -> dict:
     merged["errors"] = errors
     if "monitor" in attempted:
         pass  # this run's monitor_carried (or its absence) already says it
-    elif previous.get("monitor_carried"):
-        merged["monitor_carried"] = previous["monitor_carried"]
+    else:
+        if previous.get("monitor_carried"):
+            merged["monitor_carried"] = previous["monitor_carried"]
+        # The published monitor.json is the previous build's, stamped with its
+        # generated_at, not this run's: say which, or the next build reading the
+        # ledger sees a manifest and a monitor that disagree and takes it for a
+        # deploy caught half-way (it refuses to carry the ledger).
+        stamp = previous.get("monitor_generated_at") or previous.get("generated_at")
+        if "monitor" in panels and stamp:
+            merged["monitor_generated_at"] = stamp
     # The sources, timings and indices above are this run's; say so.
     merged["partial_refresh"] = {"rebuilt": rebuilt, "previous_generated_at": previous.get("generated_at")}
     return merged

@@ -515,3 +515,30 @@ def test_carried_record_cannot_postdate_the_manifest(monkeypatch):
     monkeypatch.setattr(monitor_state, "get_text", lambda _url, **_kwargs: bad)
     with pytest.raises(ValueError, match="monitor_carried"):
         monitor_state.load_previous(local_path=Path("unused.json"), published_base_url="https://example.test")
+
+
+@pytest.mark.parametrize("extra", [
+    {"monitor_generated_at": "build-a"},
+    # A manifest merged before monitor_generated_at existed: the partial refresh names the build.
+    {"partial_refresh": {"rebuilt": ["today"], "previous_generated_at": "build-a"}},
+])
+def test_a_partial_refresh_that_kept_the_monitor_is_read_with_the_monitors_own_stamp(monkeypatch, extra):
+    """A TODAY-only deploy republished the monitor of build-a under a manifest stamped build-b."""
+    payload = _payload()
+    payload["generated_at"] = "build-a"
+    manifest = json.loads(_manifest(monitor_schema_version=1, generated_at="build-b"))
+    manifest.update(extra)
+    responses = iter([json.dumps(manifest), json.dumps(payload), json.dumps(manifest)])
+    monkeypatch.setattr(monitor_state, "get_text", lambda _url, **_kwargs: next(responses))
+    assert monitor_state.load_previous(local_path=Path("unused.json"), published_base_url="https://example.test") == payload
+
+
+def test_a_partial_refresh_that_rebuilt_the_monitor_expects_its_own_stamp(monkeypatch):
+    payload = _payload()
+    payload["generated_at"] = "build-a"
+    manifest = json.loads(_manifest(monitor_schema_version=1, generated_at="build-b"))
+    manifest["partial_refresh"] = {"rebuilt": ["monitor"], "previous_generated_at": "build-a"}
+    responses = iter([json.dumps(manifest), json.dumps(payload), json.dumps(manifest)] * monitor_state.PUBLISHED_READ_ATTEMPTS)
+    monkeypatch.setattr(monitor_state, "get_text", lambda _url, **_kwargs: next(responses))
+    with pytest.raises(ValueError, match="raced"):
+        monitor_state.load_previous(local_path=Path("unused.json"), published_base_url="https://example.test")
