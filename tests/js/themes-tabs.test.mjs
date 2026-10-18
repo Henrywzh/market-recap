@@ -127,13 +127,18 @@ test('the argument written back reads the same as the hash it came from', () => 
   assert.deepEqual(back, { key: 'semis', view: 'data', chip: 'KOREA-EXPORTS' });
 });
 
-test('each theme lists one chip per industry-data card, in the order the page draws them', () => withBrowser(() => {
+test('each theme lists its DATA chips in the order the page draws them', () => withBrowser(() => {
   const cloudCards = themeDataCards('cloud', data).map((c) => [c.id, c.label]);
   assert.deepEqual(cloudCards, [
-    ['CAPEX', 'Capex'], ['GUIDANCE', 'Guidance'], ['NVIDIA', 'NVIDIA'], ['AI-SERVERS', 'AI servers'], ['RAMP', 'Ramp'], ['RELEASE-DAYS', 'Release days'],
+    ['SPENDING', 'Spending'], ['SUPPLIERS', 'Suppliers'], ['RAMP', 'Ramp'], ['RELEASE-DAYS', 'Release days'],
   ]);
-  const semisLabels = themeDataCards('semis', data).map((c) => c.label);
-  assert.deepEqual(semisLabels, ['TSMC & Nanya', 'Korea flash', 'Korea exports', 'Memory exports', 'Chip prices', 'Ramp tokens', 'OpenRouter', 'ADATA', 'PCPartPicker', 'Release days']);
+  // SEMIS gathers its cards under three chips by what they read, in page order.
+  const semis = themeDataCards('semis', data);
+  assert.deepEqual(semis.map((c) => [c.id, c.label]), [
+    ['TAIWAN-KOREA', 'Taiwan & Korea'], ['MEMORY-PRICES', 'Memory prices'], ['AI-USAGE', 'AI usage'], ['RELEASE-DAYS', 'Release days'],
+  ]);
+  assert.deepEqual(semis[1].cards, ['MEMORY-EXPORTS', 'CHIP-PRICES', 'ADATA', 'PCPARTPICKER']);
+  assert.deepEqual(semis[2].cards, ['RAMP-TOKENS', 'OPENROUTER']);
   // A driven theme whose sensitivity has no rows draws no card for it; the release-day card stays.
   const cruise = themeDataCards('cruise', data).map((c) => c.label);
   assert.deepEqual(cruise, ['Release days']);
@@ -176,8 +181,8 @@ test('the page opens on OVERVIEW with the first DATA card only when DATA is pick
   nav.children[2].click();                              // DATA
   const chips = pane('data').children[0];
   const cards = pane('data').children[1].children;
-  assert.equal(chips.children.length, 6 + 1, 'one chip per card, plus All');
-  assert.deepEqual(cards.map((c) => c.hidden), [false, true, true, true, true, true], 'the first card only');
+  assert.equal(chips.children.length, 4 + 1, 'one chip per group of cards, plus All');
+  assert.deepEqual(cards.map((c) => c.hidden), [false, true, true, true], 'the first chip only');
   assert.equal(chips.children[0].attrs['aria-pressed'], 'true');
   assert.deepEqual(ctx.calls, ['CLOUD.DATA']);
 }));
@@ -192,7 +197,7 @@ test('picking a chip shows that card; All shows every card; the hash follows', (
   const cards = pane('data').children[1].children;
   const ramp = chips.find((c) => c.textContent === 'Ramp');
   ramp.click();
-  assert.deepEqual(cards.map((c) => c.hidden), [true, true, true, true, false, true]);
+  assert.deepEqual(cards.map((c) => c.hidden), [true, true, false, true]);
   assert.equal(ramp.attrs['aria-pressed'], 'true');
   assert.equal(chips[0].attrs['aria-pressed'], 'false');
   assert.equal(ctx.calls.at(-1), 'CLOUD.DATA.RAMP');
@@ -201,20 +206,20 @@ test('picking a chip shows that card; All shows every card; the hash follows', (
   assert.equal(ctx.calls.at(-1), 'CLOUD.DATA.ALL');
 }));
 
-test('a deep link to a chip opens that card on load; an unknown chip falls back to the first', () => withBrowser(async () => {
+test('a deep link to a card opens the chip that holds it on load; an unknown chip falls back to the first', () => withBrowser(async () => {
   const root = new FakeNode('div');
   await renderThemes(root, data, {}, ctxWith('SEMIS.DATA.ADATA'));
   await flush();
   const { pane } = panels(root);
   assert.equal(pane('data').hidden, false, 'the linked sub-tab is the one shown');
   const cards = pane('data').children[1].children;
-  assert.deepEqual(cards.map((c) => c.hidden), [true, true, true, true, true, true, true, false, true, true]);
+  assert.deepEqual(cards.map((c) => c.hidden), [true, false, true, true], 'ADATA sits under Memory prices');
 
   const fallback = new FakeNode('div');
   await renderThemes(fallback, data, {}, ctxWith('SEMIS.DATA.NOPE'));
   await flush();
   const first = panels(fallback).pane('data').children[1].children;
-  assert.deepEqual(first.map((c) => c.hidden), [false, true, true, true, true, true, true, true, true, true]);
+  assert.deepEqual(first.map((c) => c.hidden), [false, true, true, true]);
 }));
 
 test('picking a theme on the status board keeps the sub-tab and redraws the title', () => withBrowser(async () => {
@@ -232,4 +237,16 @@ test('picking a theme on the status board keeps the sub-tab and redraws the titl
   assert.equal(pane('valuation').hidden, false, 'the sub-tab is kept');
   assert.equal(nav.children[1].attrs['aria-selected'], 'true');
   assert.equal(ctx.calls.at(-1), 'SEMIS.VALUATION');
+}));
+
+test('an older link to one SEMIS card opens the chip that holds it', () => withBrowser(async () => {
+  const root = new FakeNode('div');
+  const ctx = ctxWith('SEMIS.DATA.OPENROUTER');
+  await renderThemes(root, data, {}, ctx);
+  await flush();
+  const { pane } = panels(root);
+  const chips = pane('data').children[0].children;
+  const cards = pane('data').children[1].children;
+  assert.equal(chips.find((c) => c.textContent === 'AI usage').attrs['aria-pressed'], 'true');
+  assert.deepEqual(cards.map((c) => c.hidden), [true, true, false, true]);
 }));

@@ -869,31 +869,41 @@ function studyCard(study, failed) {
 }
 
 // Every industry-data card of a theme, in the order the page draws them, each with
-// the short name its DATA chip carries. `row` puts two cards side by side on the
-// SECTORS pages (a `grid two`), as the page always has.
-function item(label, node, row = null) {
-  return { label, node, row };
+// a short name. `row` puts two cards side by side on the SECTORS pages (a `grid two`),
+// as the page always has. `chip` gathers related cards under one DATA chip, so a theme
+// with many cards keeps a short chip row; a card without one is its own chip.
+function item(label, node, row = null, chip = null) {
+  return { label, node, row, chip };
 }
 
+// SEMIS has the most cards: three chips by what they read -- revenue and exports out of
+// Taiwan and Korea, memory and component prices, and AI usage.
+const SEMIS_TRADE = 'Taiwan & Korea';
+const SEMIS_MEMORY = 'Memory prices';
+const SEMIS_AI = 'AI usage';
+// CLOUD: what the hyperscalers spend, and what their suppliers deliver.
+const CLOUD_SPEND = 'Spending';
+const CLOUD_SUPPLY = 'Suppliers';
 function industry(key, data) {
   if (key === 'cloud') {
     const c = data.cloud;
-    return [item('Capex', capexCard(c.capex)), item('Guidance', guidanceCard(c.guidance)), item('NVIDIA', nvdaCard(c.nvda)),
-      item('AI servers', twRevenueCard('AI SERVER MAKERS · MONTHLY REVENUE', c.odm, 'Quanta, Wiwynn and Wistron build most hyperscaler AI servers; their revenue is capex being delivered, reported by the 10th of the next month. Foxconn is left out: iPhone assembly dominates it.')),
+    return [item('Capex', capexCard(c.capex), null, CLOUD_SPEND), item('Guidance', guidanceCard(c.guidance), null, CLOUD_SPEND),
+      item('NVIDIA', nvdaCard(c.nvda), null, CLOUD_SUPPLY),
+      item('AI servers', twRevenueCard('AI SERVER MAKERS · MONTHLY REVENUE', c.odm, 'Quanta, Wiwynn and Wistron build most hyperscaler AI servers; their revenue is capex being delivered, reported by the 10th of the next month. Foxconn is left out: iPhone assembly dominates it.'), null, CLOUD_SUPPLY),
       item('Ramp', rampCard(c.ramp))];
   }
   if (key === 'semis') {
     const s = data.semis;
     return [
-      item('TSMC & Nanya', twRevenueCard('TSMC & NANYA · MONTHLY REVENUE', s.tw, 'TSMC: leading-edge foundry demand. Nanya: commodity DRAM, the purest listed read on DRAM pricing. Published by the 10th of the next month.'), 'semis-pair-1'),
-      item('Korea flash', koreaFlashCard(s.korea_flash), 'semis-pair-1'),
-      item('Korea exports', koreaCard(s.korea)),
-      item('Memory exports', memoryExportsCard(s.memory_exports), 'semis-pair-2'),
-      item('Chip prices', chipPricesCard(s.chip_prices), 'semis-pair-2'),
-      item('Ramp tokens', rampTokenomicsCard(s.ramp_tokenomics)),
-      item('OpenRouter', openrouterCard(s.openrouter)),
-      item('ADATA', adataCard(s.adata)),
-      item('PCPartPicker', pcppCard(s.pcpp)),
+      item('TSMC & Nanya', twRevenueCard('TSMC & NANYA · MONTHLY REVENUE', s.tw, 'TSMC: leading-edge foundry demand. Nanya: commodity DRAM, the purest listed read on DRAM pricing. Published by the 10th of the next month.'), 'semis-pair-1', SEMIS_TRADE),
+      item('Korea flash', koreaFlashCard(s.korea_flash), 'semis-pair-1', SEMIS_TRADE),
+      item('Korea exports', koreaCard(s.korea), null, SEMIS_TRADE),
+      item('Memory exports', memoryExportsCard(s.memory_exports), 'semis-pair-2', SEMIS_MEMORY),
+      item('Chip prices', chipPricesCard(s.chip_prices), 'semis-pair-2', SEMIS_MEMORY),
+      item('Ramp tokens', rampTokenomicsCard(s.ramp_tokenomics), null, SEMIS_AI),
+      item('OpenRouter', openrouterCard(s.openrouter), null, SEMIS_AI),
+      item('ADATA', adataCard(s.adata), null, SEMIS_MEMORY),
+      item('PCPartPicker', pcppCard(s.pcpp), null, SEMIS_MEMORY),
     ];
   }
   if (key === 'energy' && data.energy) {
@@ -960,9 +970,23 @@ export function themeBlocks(key, data, { title = true } = {}) {
   themeCards(g.key, data).forEach((node) => blocks.push(node));
   return blocks;
 }
-// The DATA sub-tab's cards: each with its chip id (its label in capitals, spaces as dashes).
+// The DATA sub-tab's chips, in page order: each with its id (its label in capitals,
+// spaces as dashes), its cards laid out as the page does, and the ids of the cards
+// inside it, so an older link to one card still opens the chip that holds it.
 export function themeDataCards(key, data) {
-  return themeItems(key, data).map((x) => ({ id: chipId(x.label), label: x.label, node: x.node }));
+  const chips = [];
+  themeItems(key, data).forEach((x) => {
+    const label = x.chip || x.label;
+    const last = chips.find((c) => c.label === label);
+    if (last) last.items.push(x);
+    else chips.push({ label, items: [x] });
+  });
+  return chips.map((c) => ({
+    id: chipId(c.label),
+    label: c.label,
+    cards: c.items.map((x) => chipId(x.label)),
+    node: c.items.length === 1 ? c.items[0].node : el('div', { class: 'theme-chip-group' }, layoutItems(c.items)),
+  }));
 }
 function chipId(label) {
   return label.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -1067,7 +1091,8 @@ export default async function renderThemes(root, data, _manifest, ctx = {}) {
   const dataPane = (g) => {
     const cards = themeDataCards(g.key, data);
     if (!cards.length) return [gap('No industry data for this theme in this build.')];
-    if (state.chip !== ALL_CHIP && !cards.some((c) => c.id === state.chip)) state.chip = null;
+    const holder = cards.find((c) => c.id === state.chip || c.cards.includes(state.chip));
+    if (state.chip !== ALL_CHIP) state.chip = holder ? holder.id : null;
     const chosen = () => state.chip || cards[0].id;
     const buttonOf = new Map();
     const paint = () => {
