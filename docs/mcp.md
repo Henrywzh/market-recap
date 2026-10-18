@@ -26,6 +26,7 @@ artifacts.
 
 | Tool | Question | Reads |
 |---|---|---|
+| `today(section?)` | What matters for the next session? What just came out (macro prints and earnings with their consensus and move), what is coming in the next three sessions with importance, timing and implied moves, and what is unusual now: moves beyond each stock's own volatility, market states that started or ended, and ongoing states. `section` is `all` (default), `just_out`, `coming_up` or `unusual`. | today |
 | `market_snapshot()` | Where does the market stand and how risky does it look? Indices and returns, breadth, which market-state conditions hold (ACTIVE or CAUTION, with the rule), core risk tiles and breaches, index put/call, buyback-blackout level and its next-7-day change, sector rotation. | overview, market_state, risk, positioning, sectors |
 | `catalysts(from?, to?, kind?, importance?, limit?)` | What is scheduled? Earnings, releases, auctions, central-bank dates, with expectations where present; last session's earnings reactions. Default: today to +7 days (New York). | catalysts |
 | `ticker(symbol)` | What do we know about this company? Identity, valuation (P/E, own-history percentile, forward), MONITOR state and evidence, next report (consensus, implied move) and last outcome, and the MOVES row: own z, market/sector/own parts, gap vs session, calibrated range with factor and reason, and what past shocks like this did next. `BRK.B` and `BRK-B` both work. | valuation, monitor, moves, events/\<T\> |
@@ -89,7 +90,9 @@ both ways (every ticker, sector, theme and macro kind; a sample of searches and
 fetches) and fails if the results differ or if a slice call parses more than
 600 KB (about 2.5 ms of CPU at ~4 ms per MB; the free plan allows ~10 ms). It
 also fails if `index.json`'s hashes do not match the artifacts beside them.
-`catalysts` is not sliced: it reads about 330 KB in earnings season. A single
+`catalysts` is not sliced: it reads about 330 KB in earnings season. `today` is
+not sliced either: it reads `artifacts/today.json` whole and its adapter caps each
+list, so the contract check finds the same result with or without slices. A single
 named value that is missing (a data gap the page also shows as a dash) is a
 warning, not a failure; a broken shape, a whole section gone or an oversized
 call still fails the deploy.

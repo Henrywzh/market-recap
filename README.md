@@ -17,7 +17,7 @@ The views are grouped by the question they answer
 
 | Group | Views |
 |---|---|
-| **MARKET** | **Overview** (the default view) · Indices · Heat maps · Europe (FTSE 100 and 250, STOXX Europe 600, EURO STOXX 50, DAX, CAC 40, AEX, IBEX 35, FTSE MIB, SMI; the iShares STOXX Europe 600 supersector funds) |
+| **MARKET** | **Today** (the default view, `#overview`) · Indices · Heat maps · Europe (FTSE 100 and 250, STOXX Europe 600, EURO STOXX 50, DAX, CAC 40, AEX, IBEX 35, FTSE MIB, SMI; the iShares STOXX Europe 600 supersector funds) |
 | **SECTORS** | **Sectors**: one hub, market → the 11 GICS sectors → their sub-industries → their names, every sector and sub-industry page opens on its charts (the basket against the S&P 500 over a switchable window, sub-industry bars, the VALUATION section (the same one THEMES, TICKER, K-SHAPE and SIZE & STYLE draw: trailing P/E against its own ten years, forward P/E, growth expected, revenue growth and operating margin, each beside the S&P 500's or the parent sector's; revenue growth and margins by fiscal year; the P/E premium against its own history and what moved the ratio), the valuation path, a sub-industry map and a names chart), with the tables, reports ahead and the industry data of the THEMES group mapped to it folded beneath; the rotation graph, industry scorecard and index/sector P/E sit under the sector table · **Themes** · **Relative value**, one menu entry with a switch between **K-shape** and **Size & style** (cap against equal weight, large against small, value against growth (IWD/IWF and Fama-French HML), staples and low volatility against the market) · **AI chain** (the AI supply chain's companies, links and report dates) |
 | **RISK** | **Risk** · Rates & macro · **Priced path** · Positioning |
 | **NAMES** | Monitor · **Ticker** · Screener (every company's multiples in one table) · Europe names (FTSE 100 and EURO STOXX 50 members, luxury, UK financials) · Cross-listing |
@@ -102,25 +102,25 @@ the velocity and acceleration for analysis, not as page charts.
 `scripts/preview_blackout.py` rebuilds those momentum fields from the existing
 local artifact only; research limits remain in `docs/blackout_audit.md`.
 
-**Overview** is the one-glance read: the live strip; stocks (S&P 500,
-Nasdaq 100, Russell 2000, equal-weight S&P) with 1D/1W/1M/YTD and the
-distance from the 52-week high; breadth (members up and down over a day, a
-week and a month, the share above the 50- and 200-day averages, new highs
-and lows); rates and credit (2Y, 10Y, 2s10s, real 10Y, HY and IG spreads)
-with the next FOMC's pricing; the dollar, crude, copper, gold and VIX; the
-latest macro prints; and the next three sessions. Each row carries six
-months of line. **Indices** is the former MARKETS page (charts, movers,
-sector tables). **Risk** opens with the **systematic anchor** (the frozen v1
-exposure control from quantamental-lab, re-implemented and checked to
-reproduce it exactly), a self-computed Fear & Greed gauge after CNN's
-seven components, and ten core series -- trend, breadth, VIX and its
-term structure, HY spread, real yield, the dollar, copper/oil and NFCI --
-each a tile with level, 1Y and full-history percentile, week change and a
-threshold written in `config/dashboard.toml` before the page drew it; never
-a score. The other series are folded beneath (sources and probes:
-`docs/risk_sources.md`). **Priced path** computes each FOMC meeting's
-probabilities from fed funds futures beside Kalshi and Polymarket, the path
-a week and a month ago, the SOFR path and every open Kalshi release ladder.
+**Today** (`#overview`, the landing page; `today.json` from the `today` panel) is what
+matters for the next session, not the market's levels (those are on INDICES and HEAT MAPS).
+Under the live strip: JUST OUT (the last session's releases with their prints, and who
+reported, with the EPS against consensus and the move); COMING UP (the next three NYSE
+sessions in full -- high and medium macro releases, the Fed, auctions, options expiries,
+earnings above `[today] earnings_min_weight` of the S&P 500 or on the watchlist with the
+options-implied move where the build has one, and the themes' data due -- then high
+importance only for two weeks); and UNUSUAL NOW: MOVES (names beyond their own volatility:
+during the session computed live from the heat-map and sector-fund quotes and each name's
+sigma and betas in `moves.json`, marked LIVE · PROVISIONAL; otherwise the build's close),
+STATES (market states that started or ended, risk tiles that crossed their line, the anchor's
+exposure changing, an index put/call at an extreme of its own history -- descriptions, not
+warnings, until a channel is validated) and EVENTS (names new to the MONITOR queue, recent
+catalyst-log entries, earnings reactions beyond two of the name's own sigma); long-running
+states share one "Ongoing" line. TESTED marks an item backed by a research table in the build.
+Each build keeps a compact history of what TODAY listed (read back from the published copy),
+so what it flagged can be checked later. The same lists are the MCP tool `today`. OVERVIEW's
+cards that existed nowhere else (breadth with new highs and lows, what moved the S&P 500,
+SPY/QQQ/IWM/RSP performance, bond against equity volatility) are on INDICES under SESSION.
 
 **Ticker** (`#ticker/AAPL`) is one company on one page, reached from any
 ticker link. A summary strip says each thing once: the close against a year
@@ -596,7 +596,7 @@ under `data/snapshots/` locally. The plan they serve is
 ## Live intraday prices
 
 Three things on the page change on their own during the session, each labelled live with
-its age: the **strip** at the top of MARKETS and OVERVIEW (SPX, NDX, RUT, Dow,
+its age: the **strip** at the top of MARKETS and TODAY (SPX, NDX, RUT, Dow,
 VIX, the 5Y/10Y/30Y yields, the dollar index, WTI and gold, then a row of
 names to watch: `[live] strip` and `strip_names`), the **intraday index
 charts** on INDICES (five-minute closes against the previous close), and the

@@ -190,7 +190,7 @@ test('a notification gets 202 and no body; ping gets an empty result', async () 
 test('tools/list names every tool with an input and an output schema, read-only', async () => {
   const { json } = await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
   const names = json.result.tools.map((t) => t.name);
-  assert.deepEqual(names, ['market_snapshot', 'catalysts', 'ticker', 'unusual_moves', 'sector', 'theme', 'macro', 'search', 'fetch']);
+  assert.deepEqual(names, ['today', 'market_snapshot', 'catalysts', 'ticker', 'unusual_moves', 'sector', 'theme', 'macro', 'search', 'fetch']);
   json.result.tools.forEach((t) => {
     assert.equal(t.inputSchema.type, 'object');
     assert.equal(t.outputSchema.type, 'object');
@@ -471,6 +471,143 @@ test('an inactive sell-off flag reports only that it is inactive', async () => {
   assert.deepEqual(flag, { active: false, fund: 'XLK', z: -0.5, market_z: 0.1 });
 });
 
+// ------------------------------------------------------------ today
+
+// The contract's today.json for the fixture's session (2026-10-15): one item
+// per list, enough to show each part, the ordering and the gaps.
+function todayFixture(overrides = {}) {
+  const item = (kind, subject, extra = {}) => ({
+    key: `${kind}:${subject}:2026-10-16`, kind, date: '2026-10-16', time: null, timing: null, subject, title: `${subject} is due`,
+    detail: null, value: null, unit: null, z: null, importance: 'medium', new: true, since: null, days: null,
+    evidence: 'description', link: '#catalysts', extra: {}, ...extra,
+  });
+  return {
+    as_of: '2026-10-15', sessions: ['2026-10-16', '2026-10-19', '2026-10-20'],
+    just_out: { session: '2026-10-15', macro: [item('macro', 'CPI', { value: 3.7, unit: '%', importance: 'high', extra: { consensus: 3.6 } })],
+      earnings: [item('earnings', 'NVDA', { z: -2.4, value: -3.9, unit: '%', evidence: 'tested', link: '#ticker/NVDA' })] },
+    coming_up: {
+      days: [
+        { date: '2026-10-16', items: [item('macro', 'Retail sales', { importance: 'medium', time: '08:30' })] },
+        { date: '2026-10-19', items: [item('theme_data', 'Korea exports', { link: '#themes/SEMIS.DATA' })] },
+        { date: '2026-10-20', items: [] },
+      ],
+      later: [item('macro', 'FOMC decision', { importance: 'high', date: '2026-10-28' })], later_until: '2026-11-01',
+    },
+    unusual: {
+      moves: [item('move', 'AMD', { z: 2.2, evidence: 'tested', link: '#ticker/AMD', extra: { own_z: 2.2 } })],
+      states: [item('market_state', 'NARROW LEADERSHIP', { new: true, link: '#markets' })],
+      events: [item('reaction', 'ASML', { z: -2.6, link: '#ticker/ASML' })],
+      ongoing: [item('market_state', 'FEW SECTORS ABOVE 200D', { new: false, days: 9, since: '2026-10-07' })],
+    },
+    live: { threshold_sigma: 2.0, market: 'SPY', sector_funds: { 'Information Technology': 'XLK' }, max_items: 12 },
+    history: [{ as_of: '2026-10-14', items: [] }], settings: { history_days: 400 },
+    unavailable: [{ part: 'events', reason: 'no event files were published' }],
+    notes: ['Sessions are the next three New York sessions.'],
+    ...overrides,
+  };
+}
+
+const todayFiles = (today = todayFixture()) => ({ ...fixture(), [art('today')]: today });
+
+test('today names the sessions and the three parts in the build\'s order, without history or settings', async () => {
+  const result = await call('today', {}, todayFiles());
+  assert.notEqual(result.isError, true, result.content?.[0]?.text);
+  const data = result.structuredContent;
+  assert.deepEqual(validate(TOOLS.find((t) => t.name === 'today').outputSchema, data), []);
+  assert.deepEqual(data.sessions, ['2026-10-16', '2026-10-19', '2026-10-20']);
+  assert.deepEqual(Object.keys(data).filter((k) => ['just_out', 'coming_up', 'unusual', 'live'].includes(k)).sort(), ['coming_up', 'just_out', 'live', 'unusual']);
+  assert.ok(!('history' in data) && !('settings' in data));
+  assert.equal(data.just_out.macro[0].subject, 'CPI');
+  assert.deepEqual(data.coming_up.days.map((d) => d.date), ['2026-10-16', '2026-10-19', '2026-10-20']);
+  assert.deepEqual(data.coming_up.days[2].items, []);
+  assert.equal(data.coming_up.later_until, '2026-11-01');
+  assert.equal(data.live.market, 'SPY');
+  assert.equal(data.as_of, '2026-10-15');
+  assert.equal(data.source_as_of['today.json'], '2026-10-15');
+  assert.ok(data.caveats.some((c) => /Unusual means/.test(c)));
+});
+
+test('today keeps each item\'s own fields: the link, the evidence tag, the sigma, the new flag and the days', async () => {
+  const { unusual, just_out } = (await call('today', {}, todayFiles())).structuredContent;
+  assert.deepEqual(unusual.moves[0], {
+    key: 'move:AMD:2026-10-16', kind: 'move', date: '2026-10-16', time: null, timing: null, subject: 'AMD', title: 'AMD is due', detail: null,
+    value: null, unit: null, z: 2.2, importance: 'medium', new: true, since: null, days: null, evidence: 'tested', link: '#ticker/AMD', extra: { own_z: 2.2 },
+  });
+  assert.equal(just_out.earnings[0].z, -2.4);
+  assert.equal(just_out.macro[0].extra.consensus, 3.6);
+  assert.equal(unusual.ongoing[0].days, 9);
+  assert.equal(unusual.ongoing[0].new, false);
+});
+
+test('today with a section returns only that part, and an unknown section is a tool error', async () => {
+  const unusual = (await call('today', { section: 'unusual' }, todayFiles())).structuredContent;
+  assert.ok('unusual' in unusual && !('just_out' in unusual) && !('coming_up' in unusual) && !('live' in unusual));
+  assert.deepEqual(Object.keys(unusual.unusual).sort(), ['events', 'more_events', 'more_moves', 'more_ongoing', 'more_states', 'moves', 'ongoing', 'states']);
+  const justOut = (await call('today', { section: 'just_out' }, todayFiles())).structuredContent;
+  assert.equal(justOut.just_out.earnings[0].subject, 'NVDA');
+  assert.equal(justOut.coming_up, undefined);
+  assert.equal((await call('today', { section: 'tomorrow' }, todayFiles())).isError, true);
+});
+
+test('today lists the unusual moves and states the build named, and caps each list with a count of what it left out', async () => {
+  const many = todayFixture();
+  many.unusual.moves = Array.from({ length: 20 }, (_, i) => ({ ...many.unusual.moves[0], key: `move:S${i}:2026-10-16`, subject: `S${i}`, z: -2 - i / 10 }));
+  const data = (await call('today', { section: 'unusual' }, todayFiles(many))).structuredContent.unusual;
+  assert.equal(data.moves.length, 15);
+  assert.equal(data.more_moves, 5);
+  assert.equal(data.moves[0].subject, 'S0', 'the build\'s order is kept');
+  assert.equal(data.more_states, 0);
+});
+
+test('an empty list stays an empty list, and a day with no items says so', async () => {
+  const quiet = todayFixture();
+  quiet.unusual.states = [];
+  quiet.unusual.moves = [];
+  quiet.unusual.events = [];
+  quiet.unusual.ongoing = [];
+  const data = (await call('today', {}, todayFiles(quiet))).structuredContent;
+  assert.deepEqual([data.unusual.moves, data.unusual.states, data.unusual.events, data.unusual.ongoing], [[], [], [], []]);
+  assert.deepEqual(data.coming_up.days[2].items, []);
+  assert.equal(data.coming_up.days[2].more, 0);
+});
+
+test('an extra that is not an object becomes {}, and a missing key is null', async () => {
+  const odd = todayFixture();
+  odd.unusual.moves[0] = { key: 'move:X:2026-10-16', kind: 'move', subject: 'X', title: 'X', extra: 'oops', z: 'NaN' };
+  const data = (await call('today', { section: 'unusual' }, todayFiles(odd))).structuredContent.unusual;
+  assert.deepEqual(data.moves[0].extra, {});
+  assert.equal(data.moves[0].z, null);
+  assert.equal(data.moves[0].link, null);
+  assert.equal(data.moves[0].new, false);
+});
+
+test('a missing today.json returns null parts with the reason, and the call still succeeds', async () => {
+  const result = await call('today', {}, fixture());
+  assert.notEqual(result.isError, true);
+  const data = result.structuredContent;
+  assert.equal(data.sessions, null);
+  assert.deepEqual([data.just_out, data.coming_up, data.unusual, data.live], [null, null, null, null]);
+  assert.ok(data.unavailable.some((u) => u.part === 'TODAY' && /today\.json/.test(u.reason)));
+  assert.deepEqual(validate(TOOLS.find((t) => t.name === 'today').outputSchema, data), []);
+  const one = (await call('today', { section: 'unusual' }, fixture())).structuredContent;
+  assert.equal(one.unusual, null);
+  assert.equal(one.just_out, undefined);
+});
+
+test('the parts the build could not read join unavailable, and its notes join method.notes', async () => {
+  const data = (await call('today', {}, todayFiles())).structuredContent;
+  assert.deepEqual(data.unavailable, [{ part: 'events', reason: 'no event files were published' }]);
+  assert.ok(data.method.notes.includes('Sessions are the next three New York sessions.'));
+});
+
+test('today reads only today.json and the manifest through ASSETS', async () => {
+  const asked = [];
+  const files = todayFiles();
+  const spy = { async fetch(request) { asked.push(new URL(request.url).pathname); return memoryAssets(files).fetch(request); } };
+  await handleMcp(new Request('https://market-recap-b5p.pages.dev/mcp', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'today', arguments: {} } }) }), { ASSETS: spy }, { now: NOW });
+  assert.deepEqual(asked.sort(), ['/artifacts/manifest.json', '/artifacts/today.json']);
+});
+
 // ------------------------------------------------------------ sector and theme
 
 test('sector finds a sector by ETF key, lower case or name, with valuation strip and sub-industries', async () => {
@@ -589,7 +726,7 @@ test('tools only ever ask the ASSETS binding for artifacts/ files', async () => 
   const files = fixture();
   const spy = { async fetch(request) { asked.push(request.method + ' ' + new URL(request.url).pathname); return memoryAssets(files).fetch(request); } };
   for (const tool of TOOLS) {
-    const args = { market_snapshot: {}, catalysts: {}, ticker: { symbol: 'NVDA' }, unusual_moves: {}, sector: { key: 'XLK' }, theme: { key: 'cloud' }, macro: { kind: 'cpi' }, search: { query: 'nvda' }, fetch: { id: 'ticker:NVDA' } }[tool.name];
+    const args = { today: {}, market_snapshot: {}, catalysts: {}, ticker: { symbol: 'NVDA' }, unusual_moves: {}, sector: { key: 'XLK' }, theme: { key: 'cloud' }, macro: { kind: 'cpi' }, search: { query: 'nvda' }, fetch: { id: 'ticker:NVDA' } }[tool.name];
     await handleMcp(new Request('https://market-recap-b5p.pages.dev/mcp', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool.name, arguments: args } }) }), { ASSETS: spy }, { now: NOW });
   }
   assert.ok(asked.length > 10);

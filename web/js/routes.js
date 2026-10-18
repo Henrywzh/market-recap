@@ -7,7 +7,8 @@
 // a link in a note never lands on an empty page.
 
 export const VIEWS = [
-  { id: 'overview', label: 'OVERVIEW', group: 'market', artifact: 'overview', module: 'overview' },
+  // TODAY replaced OVERVIEW as the landing page; the id stays, so old links and DEFAULT_VIEW keep working.
+  { id: 'overview', label: 'TODAY', group: 'market', artifact: 'today', module: 'today' },
   { id: 'markets', label: 'INDICES', group: 'market', artifact: 'markets', module: 'markets' },
   { id: 'heatmaps', label: 'HEAT MAPS', group: 'market', artifact: 'heatmaps', module: 'heatmaps' },
   { id: 'europe', label: 'EUROPE', group: 'market', artifact: 'europe', module: 'europe' },

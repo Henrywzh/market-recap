@@ -16,7 +16,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalyst_log, catalysts, chain, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, moves, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, sizek, themes, valuation, xray
+from .panels import anchor, catalyst_log, catalysts, chain, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, moves, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, sizek, themes, today, valuation, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -73,6 +73,8 @@ PANELS = {
     "moves": moves.build,
     # OVERVIEW reads this session's other panels and so runs last.
     "overview": overview.build,
+    # TODAY reads this session's calendar, moves, market state, risk, anchor, positioning, monitor and themes, so last.
+    "today": today.build,
 }
 SEC_PANELS = {"financials", "valuation", "dcf"}
 
@@ -124,7 +126,7 @@ def run(
     # Also honor dependency order when the user passes --panels monitor valuation:
     # monitor after what it reads, industries after monitor, sectors after
     # industries, overview last.
-    for late in ("monitor", "industries", "sectors", "overview"):
+    for late in ("monitor", "industries", "sectors", "overview", "today"):
         if late in selected:
             selected = [name for name in selected if name != late] + [late]
 
@@ -193,6 +195,8 @@ def run(
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in moves.INPUTS})
                 elif name == "chain":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in chain.INPUTS})
+                elif name == "today":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in today.INPUTS})
                 else:
                     payload = PANELS[name](ctx)
             except Exception as exc:

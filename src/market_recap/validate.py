@@ -244,6 +244,38 @@ def _check_catalysts(payload: dict | None) -> list[Finding]:
     return out
 
 
+# TODAY's top-level keys; the page and the MCP tool read each of them.
+TODAY_KEYS = ("as_of", "sessions", "just_out", "coming_up", "unusual", "live", "history", "settings", "unavailable", "notes")
+
+
+def _today_items(payload: dict):
+    """Every list entry TODAY carries, in any of its sections."""
+    just_out, coming_up, unusual = payload.get("just_out") or {}, payload.get("coming_up") or {}, payload.get("unusual") or {}
+    lists = [just_out.get("macro"), just_out.get("earnings"), coming_up.get("later")]
+    lists += [day.get("items") for day in coming_up.get("days") or [] if isinstance(day, dict)]
+    lists += [unusual.get(name) for name in ("moves", "states", "events", "ongoing")]
+    for entries in lists:
+        for item in entries or []:
+            if isinstance(item, dict):
+                yield item
+
+
+def _check_today(manifest: dict, payload: dict | None) -> list[Finding]:
+    """TODAY must describe the manifest's session, carry every section, and give each item the fields the page links by."""
+    if payload is None:
+        return []
+    out = []
+    if payload.get("as_of") != manifest.get("as_of"):
+        out.append(Finding("error", "today", f"today is dated {payload.get('as_of')}, manifest says {manifest.get('as_of')}"))
+    missing = [key for key in TODAY_KEYS if key not in payload]
+    if missing:
+        out.append(Finding("error", "today", f"today is missing {', '.join(missing)}"))
+    bad = sum(1 for item in _today_items(payload) if not all(item.get(key) for key in ("key", "kind", "title", "link")))
+    if bad:
+        out.append(Finding("error", "today", f"{bad} today item(s) lack a key, kind, title or link"))
+    return out
+
+
 # The one finding a deploy may go ahead with: the rest of the page is sound
 # and only MONITOR is yesterday's, republished unchanged (build._carry_monitor).
 CARRIED_CATEGORY = "monitor_carried"
@@ -553,6 +585,7 @@ def run() -> dict:
         + _check_xray(config, panels.get("xray"))
         + _check_sizek(config, panels.get("sizek"))
         + _check_catalysts(panels.get("catalysts"))
+        + _check_today(manifest, panels.get("today"))
         # A carried ledger is the live one verbatim; checking it against this
         # code is what may have failed, and would block the rest of the page.
         + (_check_monitor(panels.get("monitor")) if not manifest.get("monitor_carried") else [])

@@ -240,10 +240,10 @@ for (const route of list) {
       }
     }
     if (route === 'overview') {
-      const context = page.locator('details.ov-context');
-      if (await context.getAttribute('open') !== null) throw new Error('Overview context should start collapsed');
-      await context.locator('summary').click();
-      if (await context.getAttribute('open') === null) throw new Error('Overview context did not expand');
+      // TODAY, the landing page: its title and the three section headings render.
+      for (const heading of ['TODAY', 'JUST OUT', 'COMING UP', 'UNUSUAL NOW']) {
+        if (!await page.locator('.section-title', { hasText: heading }).count()) throw new Error(`TODAY is missing its ${heading} heading`);
+      }
     }
     if (route.startsWith('trade')) {
       await page.getByRole('button', { name: 'OVERNIGHT', exact: true }).click();

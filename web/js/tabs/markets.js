@@ -4,6 +4,7 @@ import { mountLive } from '../live.js';
 import { mountIndexCharts } from '../live-indices.js';
 import { spark } from '../spark.js';
 import { readingText, readingNote, outcomeCell, stateSummary, daysNow, sectorFlag, statePresentation } from '../market-state-model.js';
+import { sessionCards } from '../session-cards.js';
 
 // One row per index: how far it sits below its high, and how many members rose.
 // Side by side, so the indices compare before one is opened below.
@@ -198,6 +199,22 @@ function marketStateSection(state) {
   ];
 }
 
+// --- session cards -------------------------------------------------------------
+// Breadth, what moved the S&P 500, performance and the volatility reading: the
+// cards that OVERVIEW used to hold. They come from overview.json, loaded here so
+// a failed read leaves one named gap instead of taking the page down.
+
+async function mountSessionCards(host, ctx) {
+  const heading = () => sectionTitle('SESSION', '· BREADTH, WHAT MOVED IT, PERFORMANCE');
+  try {
+    const overview = await ctx.loadArtifact('overview');
+    if (!overview || overview.unavailable) throw new Error('no session figures in this build');
+    host.replaceChildren(heading(), ...sessionCards(overview));
+  } catch (error) {
+    host.replaceChildren(heading(), el('div', { class: 'gap', text: `Session cards are unavailable: ${error.message}.` }));
+  }
+}
+
 async function mountMarketState(host, ctx) {
   try {
     const state = await ctx.loadArtifact('market_state');
@@ -229,6 +246,14 @@ export default function renderMarkets(root, data, manifest, ctx = {}) {
   // labelled as such and nothing below it changes during the session.
   root.append(mountLive({ asOf: data.as_of }));
   root.append(mountIndexCharts());
+
+  // The session's breadth, movers and performance, loaded on their own so a
+  // failure leaves a named gap and nothing else on the page moves.
+  if (ctx.loadArtifact) {
+    const sessionHost = el('div', { class: 'session-cards' });
+    root.append(sessionHost);
+    mountSessionCards(sessionHost, ctx);
+  }
 
   // How narrow or stressed the market is; built on its own, so a failure of
   // that panel leaves a named gap here and nothing else on the page.

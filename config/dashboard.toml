@@ -2340,3 +2340,22 @@ single_buy_min_value = 1000000
 [evidence.six_k]
 TSM = { pattern = '^tsm-\d{8}x6k\.htm$', timing = "bmo" }
 ASML = { pattern = 'quarterlyfilings', timing = "bmo" }
+
+# TODAY: what just came out, what is due in the next three sessions, and what
+# is unusual now (the panel reads the other artifacts; these are its own cut-offs).
+# earnings_min_weight is an S&P 500 index weight in percent: smaller names are
+# listed only when they are on the watchlist. later_days is calendar days after
+# the as-of session. put_call_high_pct and put_call_low_pct are
+# percentiles of the index put/call ratio within its own history. reaction_sigma
+# is the size, in units of a name's own volatility, of a post-report move that is
+# listed as unusual. history_days caps how many sessions the carried history keeps.
+[today]
+earnings_min_weight = 0.3
+later_days = 14
+max_moves = 12
+max_events = 12
+live_max_items = 12
+reaction_sigma = 2.0
+put_call_high_pct = 90
+put_call_low_pct = 10
+history_days = 400

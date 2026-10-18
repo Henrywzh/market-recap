@@ -11,9 +11,10 @@ import { unusualMovesTool } from './tools/moves.mjs';
 import { fetchTool, searchTool } from './tools/search.mjs';
 import { sectorTool, themeTool } from './tools/sector.mjs';
 import { tickerTool } from './tools/ticker.mjs';
+import { todayTool } from './tools/today.mjs';
 
 export const TOOLS = [
-  marketSnapshotTool, catalystsTool, tickerTool, unusualMovesTool, sectorTool, themeTool, macroTool, searchTool, fetchTool,
+  todayTool, marketSnapshotTool, catalystsTool, tickerTool, unusualMovesTool, sectorTool, themeTool, macroTool, searchTool, fetchTool,
 ];
 
 const ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };

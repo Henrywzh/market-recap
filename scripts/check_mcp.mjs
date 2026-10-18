@@ -49,6 +49,7 @@ async function plan(manifest) {
   const sub = sectors.sub_industries.find((s) => s.sector_key === sector.key) || sectors.sub_industries[0];
   const calls = [
     { tool: 'market_snapshot', args: {}, paths: ['indices.0.last', 'breadth.0.above_200d_pct', 'risk.core_tiles.0.value', 'index_put_call.series.0.daily.value', 'buyback_blackout.level_pct', 'buyback_blackout.next_7d_schedule_change_pp', 'sector_rotation.sectors.0.quadrant'], expect: ['indices', 'breadth', 'market_state', 'risk', 'index_put_call', 'buyback_blackout', 'sector_rotation'] },
+    { tool: 'today', args: {}, paths: ['sessions.0', 'coming_up.days'] },
     { tool: 'catalysts', args: { from, to: addDays(from, 7) }, paths: ['recent_session.session', 'events.0.title'], expect: ['events', 'recent_session'], nonEmpty: ['events'] },
     { tool: 'ticker', args: { symbol: top }, paths: ['valuation.price', 'valuation.pe_percentile_own_10y', 'monitor.price_state', 'reports.last.date', 'moves.parts.own_z', 'moves.range.bands.0.price'], expect: ['valuation', 'monitor', 'moves'] },
     { tool: 'unusual_moves', args: {}, paths: ['threshold_sigma', 'technology_selloff.active'], expect: ['technology_selloff'] },

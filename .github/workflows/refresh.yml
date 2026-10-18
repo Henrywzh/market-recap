@@ -201,6 +201,7 @@ jobs:
           # Restore the last published ledgers (MONITOR observations, the earnings
           # season's captured year-ago EPS), never an evictable cache.
           MONITOR_PUBLISHED_STATE: "1"
+          TODAY_PUBLISHED_STATE: "1"
           # Preserve observed CPI/PPI versions independently of the TTL cache.
           INFLATION_PUBLISHED_STATE: "1"
           # THEMES reads alternative-data's files and asks GitHub which commit
@@ -247,6 +248,7 @@ jobs:
             artifacts/monitor.json
             artifacts/earnings.json
             artifacts/macro.json
+            artifacts/today.json
           if-no-files-found: ignore
           retention-days: 90
 
