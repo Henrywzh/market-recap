@@ -101,24 +101,36 @@ def _market_state():
     ]}
 
 
-def _tile(key, label, risk_when, threshold, value, recent, breach, unit=None):
-    return {"key": key, "label": label, "risk_when": risk_when, "threshold": threshold, "value": value,
-            "unit": unit, "breach": breach, "recent": {"dates": [], "values": recent} if recent is not None else None}
+def _cell(row, column, label, state, state_prev, percentile, value=None, unit=None):
+    """A matrix cell with a lead; the fields TODAY reads, the rest as the panel writes them."""
+    return {"row": row, "column": column, "lead": label.lower(), "label": label, "value": value, "unit": unit,
+            "date": AS_OF, "risk_when": "high", "percentile": percentile, "state": state, "state_prev": state_prev,
+            "change_1m": None, "worse_1m": None, "evidence": "description", "caution": None, "note": None,
+            "pending": None, "members": []}
+
+
+def _placeholder(row, column):
+    return {"row": row, "column": column, "lead": None, "label": None, "value": None, "unit": None, "date": None,
+            "risk_when": None, "percentile": None, "state": "grey", "state_prev": None, "change_1m": None,
+            "worse_1m": None, "evidence": "description", "caution": None, "note": None, "pending": "—", "members": []}
 
 
 def _risk():
-    return {"sections": [{"key": "volatility", "tiles": [
-        _tile("skew", "SKEW", "high", 150, 168.59, [140.0, 168.59], True),
-        _tile("ccc_oas", "CCC OAS", "high", 1000, 1278.0, [1300.0, 1278.0], True),
-        _tile("vx_front", "VX FRONT", "low", 0, -0.08, [0.96, -0.08], True),
-        _tile("hyg", "HYG", "low", -2, -1.05, [-0.63, -1.05], False),
-        _tile("drop", "DROPPING", "high", 20, 10.0, [25.0, 10.0], False),
-        _tile("cftc_es", "CFTC ES", "extreme", 5, -21.2, None, True),
-    ]}]}
-
-
-def _anchor(exposure):
-    return {"history": {"dates": ["2026-10-15", AS_OF][: len(exposure)], "exposure": exposure}, "changes": []}
+    """A matrix with a change into elevated, a change back to calm, two stressed cells, a grey cell
+    that was stressed (no reading now, so no change) and a placeholder."""
+    return {"matrix": {
+        "rows": [{"key": "credit", "label": "CREDIT"}, {"key": "equities", "label": "EQUITIES"},
+                 {"key": "macro", "label": "MACRO"}],
+        "columns": [{"key": "structure", "label": "STRUCTURE"}, {"key": "technical", "label": "TECHNICAL"},
+                    {"key": "fundamental", "label": "FUNDAMENTAL / PREMIUM"}],
+        "cells": [
+            _cell("credit", "fundamental", "HY OAS", "elevated", "calm", 88.0, value=520, unit="bp"),
+            _cell("credit", "technical", "HY OAS 20D CHANGE", "calm", "elevated", 40.0, value=-5, unit="bp"),
+            _cell("equities", "structure", "VIX / VIX3M", "stressed", "stressed", 97.0, value=1.02, unit="ratio"),
+            _cell("equities", "technical", "SPX FROM 1Y HIGH", "grey", "stressed", None, value=-12.0, unit="pct"),
+            _cell("macro", "structure", "NET LIQUIDITY", "stressed", None, 96.0, value=-400, unit="usd_bn"),
+            _placeholder("equities", "fundamental"),
+        ]}}
 
 
 def _positioning():
@@ -137,7 +149,6 @@ def _inputs(events_dir=None):
         "moves": _moves(),
         "market_state": _market_state(),
         "risk": _risk(),
-        "anchor": _anchor([0.5, 0.44]),
         "positioning": _positioning(),
         "monitor": {"changes": [
             {"ticker": "ABC", "sector": "Health Care", "kind": "entered", "text": "Entered the queue: drawdown deeper than 20%"},
@@ -305,15 +316,29 @@ def test_no_previous_state_skips_ended_with_unavailable_note(tmp_path):
     assert not any("ended" in i["title"] for i in out["unusual"]["states"])
 
 
-def test_risk_flip_into_and_out_of_and_ongoing(tmp_path):
+def test_matrix_state_changes_are_listed_once_each_way(tmp_path):
     out = _run(events_dir=tmp_path)
-    flips = {i["subject"]: i for i in out["unusual"]["states"] if i["kind"] == "risk"}
-    assert flips["SKEW"]["title"] == "SKEW moved into its risk zone"
-    assert flips["VX FRONT"]["title"] == "VX FRONT moved into its risk zone"
-    assert flips["DROPPING"]["title"] == "DROPPING moved back out of its risk zone"
-    assert all(i["evidence"] == "description" and i["new"] for i in flips.values())
-    still = {i["subject"] for i in out["unusual"]["ongoing"] if i["kind"] == "risk"}
-    assert still == {"CCC OAS", "CFTC ES"}  # the extreme tile cannot be flipped, so it stays ongoing
+    changed = {i["subject"]: i for i in out["unusual"]["states"] if i["kind"] == "risk"}
+    assert changed["HY OAS"]["title"] == "Credit · fundamental: HY OAS moved to elevated (88th pct of 10y)"
+    assert changed["HY OAS 20D CHANGE"]["title"] == \
+        "Credit · technical: HY OAS 20D CHANGE moved back to calm (40th pct of 10y)"
+    assert all(i["new"] and i["link"] == "#risk" and i["evidence"] == "description" for i in changed.values())
+    assert changed["HY OAS"]["extra"]["state_prev"] == "calm"
+    # A cell with no reading today is not a change, and the placeholder is nothing.
+    assert "SPX FROM 1Y HIGH" not in changed and set(changed) == {"HY OAS", "HY OAS 20D CHANGE"}
+
+
+def test_stressed_cells_that_did_not_change_are_ongoing(tmp_path):
+    out = _run(events_dir=tmp_path)
+    ongoing = {i["subject"]: i for i in out["unusual"]["ongoing"] if i["kind"] == "risk"}
+    assert set(ongoing) == {"VIX / VIX3M", "NET LIQUIDITY"}  # the second has no earlier reading, so it is ongoing too
+    assert ongoing["VIX / VIX3M"]["title"] == "Equities · structure: VIX / VIX3M is stressed (97th pct of 10y)"
+    assert ongoing["VIX / VIX3M"]["new"] is False
+
+
+def test_ordinal_writes_the_percentile_as_the_page_does(tmp_path):
+    assert [today._ordinal(v) for v in (1, 2, 3, 4, 11, 12, 13, 21, 22, 102)] == \
+        ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "102nd"]
 
 
 def test_put_call_extreme_only_when_newly_past_the_tail(tmp_path):
@@ -324,22 +349,12 @@ def test_put_call_extreme_only_when_newly_past_the_tail(tmp_path):
     assert put[0]["value"] == pytest.approx(1.5) and put[0]["unit"] == "x"
 
 
-def test_anchor_change_and_blackout_ongoing(tmp_path):
+def test_blackout_is_ongoing(tmp_path):
     out = _run(events_dir=tmp_path)
-    anchor = [i for i in out["unusual"]["states"] if i["kind"] == "anchor"]
-    assert anchor[0]["title"] == "Anchor exposure moved from 50% to 44%"
     blackout = next(i for i in out["unusual"]["ongoing"] if i["kind"] == "blackout")
     assert blackout["title"] == "Buyback blackout covers 76% of S&P 500 weight"
     assert blackout["detail"] == "Share changes by -2.6 pp over the next 7 days"
-
-
-def test_anchor_below_full_without_change_is_ongoing(tmp_path):
-    inputs = _inputs()
-    inputs["anchor"] = _anchor([0.5, 0.5])
-    out = _run(inputs=inputs, events_dir=tmp_path)
-    assert not any(i["kind"] == "anchor" for i in out["unusual"]["states"])
-    anchor = [i for i in out["unusual"]["ongoing"] if i["kind"] == "anchor"]
-    assert anchor[0]["title"] == "Anchor exposure is 50% of a full position"
+    assert not any(i["kind"] == "anchor" for i in out["unusual"]["states"] + out["unusual"]["ongoing"])
 
 
 # --- unusual: events ---------------------------------------------------------
@@ -469,3 +484,17 @@ def test_check_today_flags_wrong_session_missing_keys_and_bare_items(tmp_path):
 
 def test_check_today_absent_is_not_an_error():
     assert validate._check_today({"as_of": AS_OF}, None) == []
+
+
+def test_a_banded_cell_names_the_line_it_crossed():
+    cell = {"row": "volatility", "column": "technical", "lead": "vix", "label": "VIX", "value": 36.2, "unit": "pts",
+            "state": "stressed", "state_prev": "elevated", "percentile": 99.1, "scale": "bands",
+            "bands": {"elevated": 25.0, "stressed": 35.0}, "evidence": "description"}
+    matrix = {"rows": [{"key": "volatility", "label": "VOLATILITY"}], "cells": [cell]}
+    (item,), ongoing = today._matrix_items(matrix, "2026-10-16")
+    assert item["title"] == "Volatility · technical: VIX moved to stressed (stressed from 35)"
+    assert ongoing == []
+    back = {**cell, "state": "calm", "state_prev": "elevated", "value": 22.0, "unit": "bp",
+            "bands": {"elevated": 25.0, "stressed": 35.0}}
+    (item,), _ = today._matrix_items({**matrix, "cells": [back]}, "2026-10-16")
+    assert item["title"].endswith("moved back to calm (elevated from 25bp)")

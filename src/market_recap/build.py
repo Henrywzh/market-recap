@@ -76,7 +76,7 @@ PANELS = {
     "moves": moves.build,
     # OVERVIEW reads this session's other panels and so runs last.
     "overview": overview.build,
-    # TODAY reads this session's calendar, moves, market state, risk, anchor, positioning, monitor and themes, so last.
+    # TODAY reads this session's calendar, moves, market state, risk, positioning, monitor and themes, so last.
     "today": today.build,
 }
 SEC_PANELS = {"financials", "valuation", "dcf", "credit"}

@@ -2300,6 +2300,176 @@ risk_when = "extreme"
 threshold = 5
 note = "Cboe total put/call ratio, 5-session average; history is fetched one session at a time."
 
+# RISK MATRIX (RISK -> top of page). Rows are asset groups, columns are what
+# kind of evidence a lead is: STRUCTURE (positioning, liquidity, options,
+# flows), TECHNICAL (trend, vol, drawdown), FUNDAMENTAL / PREMIUM (valuation,
+# spreads, premia). Each cell has one lead series, which sets its colour: the
+# lead's percentile in its own last ten years, read in its risk direction.
+# calm below ``elevated``, elevated up to ``stressed``, stressed from it on.
+# Other series in a cell are members: they open on click, and nothing is
+# averaged across cells. A cell with no lead is a placeholder; its pending text
+# says what is still to be built.
+# Each cell's colour comes from its lead alone, on the scale its cell names:
+#   scale = "bands": fixed lines in the lead's own unit, set from its level in
+#     past S&P 500 drawdowns (Treasury leads: IEF's drawdowns) or from a line
+#     with an outside meaning (an inverted VIX curve, NFCI's average). Source:
+#     quantamental-lab docs/risk_matrix_bands_v1.md. For levels with a meaning in
+#     any decade, where a ten-year percentile would compress the tail and let a
+#     low-volatility decade decide what "elevated" is.
+#   scale = "percentile" (the default): the lead's percentile in its own last
+#     `years`, at `elevated` / `stressed`. For changes and spreads with no anchor.
+#   scale = "none": shown with its percentile, not coloured.
+[risk.matrix]
+elevated = 75
+stressed = 95
+years = 10
+min_years = 3
+stale_days_daily = 10
+stale_days_weekly = 21
+
+[[risk.matrix.rows]]
+key = "equities"
+label = "EQUITIES"
+[[risk.matrix.rows]]
+key = "treasuries"
+label = "TREASURIES"
+[[risk.matrix.rows]]
+key = "credit"
+label = "CREDIT"
+[[risk.matrix.rows]]
+key = "volatility"
+label = "VOLATILITY"
+[[risk.matrix.rows]]
+key = "cross_asset"
+label = "CROSS-ASSET"
+[[risk.matrix.rows]]
+key = "macro"
+label = "MACRO"
+
+[[risk.matrix.columns]]
+key = "structure"
+label = "STRUCTURE"
+[[risk.matrix.columns]]
+key = "technical"
+label = "TECHNICAL"
+[[risk.matrix.columns]]
+key = "fundamental"
+label = "FUNDAMENTAL / PREMIUM"
+
+[[risk.matrix.cells]]
+row = "equities"
+column = "structure"
+lead = "vix_term"
+scale = "bands"
+bands = { elevated = 1.0, stressed = 1.2 }
+members = ["vix_term", "vix9d_term", "skew", "vx_front", "put_call", "cftc_es", "cftc_nq"]
+[[risk.matrix.cells]]
+row = "equities"
+column = "technical"
+lead = "spx_drawdown"
+scale = "bands"
+bands = { elevated = -5.0, stressed = -10.0 }
+members = ["spx_drawdown", "spx_vs_200d", "breadth_200d", "rv20", "realised_corr", "cor1m", "dispersion"]
+[[risk.matrix.cells]]
+row = "equities"
+column = "fundamental"
+pending = "Equity risk premium: forward earnings yield less the real yield (next step)"
+[[risk.matrix.cells]]
+row = "treasuries"
+column = "structure"
+pending = "Auction tails (next step)"
+members = ["cftc_zn"]
+[[risk.matrix.cells]]
+row = "treasuries"
+column = "technical"
+lead = "move"
+scale = "bands"
+bands = { elevated = 100.0, stressed = 120.0 }
+members = ["move"]
+[[risk.matrix.cells]]
+row = "treasuries"
+column = "fundamental"
+lead = "real_10y_3m"
+members = ["real_10y"]
+note = "The three-month change, not the level: the level's ten years are mostly the zero-rate decade, so any normal real yield ranks at the top. Term premium to follow (next step)"
+[[risk.matrix.cells]]
+row = "credit"
+column = "structure"
+lead = "hyg_ief"
+scale = "bands"
+bands = { elevated = -2.0, stressed = -5.0 }
+members = ["hyg_ief", "lqd_ief"]
+[[risk.matrix.cells]]
+row = "credit"
+column = "technical"
+lead = "baa10y_4w"
+scale = "bands"
+bands = { elevated = 10.0, stressed = 25.0 }
+members = ["baa10y", "hy_oas"]
+note = "How fast BAA − 10Y moved over the last 20 sessions, not its level (ICE HY on FRED is only three years long)"
+[[risk.matrix.cells]]
+row = "credit"
+column = "fundamental"
+lead = "baa10y"
+scale = "bands"
+bands = { elevated = 250.0, stressed = 300.0 }
+members = ["baa10y", "hy_oas", "ccc_oas", "ig_oas"]
+note = "Moody's BAA − 10Y, history to 1986 (ICE HY on FRED is only three years). The level separates drawdowns weakly: it widens far only in credit-led bear markets. Read here as stress; this column is to become VALUATION (how thin the compensation is), where a tight spread reads rich"
+[[risk.matrix.cells]]
+row = "volatility"
+column = "structure"
+lead = "vvix"
+scale = "bands"
+bands = { elevated = 120.0, stressed = 140.0 }
+members = ["vvix", "vx_front"]
+[[risk.matrix.cells]]
+row = "volatility"
+column = "technical"
+lead = "vix"
+scale = "bands"
+bands = { elevated = 25.0, stressed = 35.0 }
+members = ["vix", "rv20"]
+[[risk.matrix.cells]]
+row = "volatility"
+column = "fundamental"
+lead = "vrp"
+scale = "bands"
+bands = { elevated = 0.0, stressed = -5.0 }
+members = ["vrp"]
+[[risk.matrix.cells]]
+row = "cross_asset"
+column = "structure"
+lead = "dxy_3m"
+members = ["dxy_3m"]
+[[risk.matrix.cells]]
+row = "cross_asset"
+column = "technical"
+pending = "Stock–bond correlation (next step)"
+[[risk.matrix.cells]]
+row = "cross_asset"
+column = "fundamental"
+lead = "copper_oil"
+scale = "none"
+members = ["copper_oil", "ovx"]
+caution = "failed out of sample"
+[[risk.matrix.cells]]
+row = "macro"
+column = "structure"
+lead = "net_liquidity"
+members = ["net_liquidity"]
+[[risk.matrix.cells]]
+row = "macro"
+column = "technical"
+pending = "—"
+[[risk.matrix.cells]]
+row = "macro"
+column = "fundamental"
+lead = "nfci"
+scale = "bands"
+bands = { elevated = 0.0, stressed = 0.5 }
+members = ["nfci"]
+note = "OFR Financial Stress Index to follow (next step)"
+
 # PRICED PATH (RISK -> PRICED PATH): meeting probabilities from fed funds
 # futures beside Kalshi and Polymarket. A meeting where Kalshi's expected
 # change differs from the futures' by more than disagreement_bp is flagged,

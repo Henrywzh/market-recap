@@ -3,7 +3,7 @@
 Nothing here is a new data source. Every list is cut from the artifacts this
 build has already written for the same session: the calendar (CATALYSTS), each
 stock's move against its own volatility (MOVES), the market-state and risk
-readings, the anchor exposure, the put/call ratio and buyback blackout
+readings (the risk matrix's state changes), the put/call ratio and buyback blackout
 (POSITIONING), the MONITOR queue, the hand-kept catalyst log, theme data due
 dates, and the options-implied moves (EVIDENCE and the per-name event cards).
 
@@ -22,13 +22,12 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 from ..compute import catalysts as C
-from ..compute.risk import breach
 from ..config import EVENTS_ARTIFACT_DIR
 from ..sources.http import get_text
 from ..util import describe_error
 
 # Panels TODAY reads, all required to be from this session (build passes them as inputs).
-INPUTS = ("catalysts", "moves", "market_state", "risk", "anchor", "positioning", "monitor", "catalyst_log", "themes", "evidence")
+INPUTS = ("catalysts", "moves", "market_state", "risk", "positioning", "monitor", "catalyst_log", "themes", "evidence")
 IMPORTANCE_RANK = {"high": 0, "medium": 1, "low": 2}
 # Calendar event types shown under their own kind; every other macro type is "macro".
 EVENT_KINDS = {"central_bank": "fed", "treasury_auction": "auction"}
@@ -352,7 +351,7 @@ def _move_items(moves: dict, cfg: dict, sector: str, as_of: str) -> list[dict]:
     return _order(names + ([sector_item] if sector_item else []))
 
 
-# --- unusual: states, risk, anchor, positioning ------------------------------
+# --- unusual: states, risk matrix, positioning -------------------------------
 
 def _market_items(market_state: dict, as_of: str, previous_active: set[str] | None) -> tuple[list, list, set[str]]:
     """(started or ended this session, ongoing, active keys). Ended needs yesterday's active set."""
@@ -379,66 +378,69 @@ def _market_items(market_state: dict, as_of: str, previous_active: set[str] | No
     return changed, ongoing, active
 
 
-def _risk_tiles(risk: dict) -> list[dict]:
-    return [tile for section in (risk or {}).get("sections") or [] for tile in section.get("tiles") or []]
-
-
-def _yesterday_breach(tile: dict) -> bool | None:
-    """Whether the day before was past the line. Extreme tiles need a percentile history, so none here."""
-    if tile.get("risk_when") == "extreme":
-        return None
-    values = (tile.get("recent") or {}).get("values") or []
-    if len(values) < 2:
-        return None
-    return breach(_number(values[-2]), risk_when=tile.get("risk_when"), threshold=_number(tile.get("threshold")))
-
-
-def _risk_item(tile: dict, as_of: str, now: bool, *, new: bool) -> dict:
-    label = tile.get("label") or tile["key"]
-    value, unit, line = _number(tile.get("value")), tile.get("unit"), _number(tile.get("threshold"))
-    if tile.get("risk_when") == "extreme":
-        detail = f"{_fmt(value, unit)} now; the line is a tail of its own history"
-    else:
-        side = "above" if tile.get("risk_when") == "high" else "below"
-        detail = f"{_fmt(value, unit)} now; line {side} {_fmt(line, unit)}" if line is not None else f"{_fmt(value, unit)} now"
+def _matrix_item(cell: dict, labels: dict, as_of: str, *, new: bool) -> dict:
+    """One risk-matrix cell as a list entry: a state change, or a stressed cell still stressed."""
+    label = cell["label"]
+    where = f"{labels.get(cell['row'], cell['row']).capitalize()} · {cell['column']}"
+    value, unit = _number(cell.get("value")), cell.get("unit")
     if new:
-        title = f"{label} moved {'into' if now else 'back out of'} its risk zone"
+        verb = "moved back to" if cell["state"] == "calm" else "moved to"
+        title = f"{where}: {label} {verb} {cell['state']} ({_basis(cell)})"
+        detail = f"{_fmt(value, unit)} now; {cell['state_prev']} before"
     else:
-        title = f"{label} is still in its risk zone"
+        title = f"{where}: {label} is stressed ({_basis(cell)})"
+        detail = f"{_fmt(value, unit)} now"
     return _item("risk", label, as_of, title, link="#risk", detail=detail, value=value, unit=unit,
-                 new=new, extra={"tile": tile["key"]})
+                 new=new, evidence=cell.get("evidence") or "description",
+                 extra={"row": cell["row"], "column": cell["column"], "state": cell["state"],
+                        "state_prev": cell.get("state_prev"), "percentile": cell.get("percentile"),
+                        "caution": cell.get("caution")})
 
 
-def _risk_items(risk: dict, as_of: str) -> tuple[list, list]:
-    """(flips since yesterday, breaches still on). A breach only counts as a flip when yesterday is known."""
-    flips, ongoing = [], []
-    for tile in _risk_tiles(risk):
-        now = tile.get("breach")
-        if now is None:
+def _matrix_items(matrix: dict, as_of: str) -> tuple[list, list]:
+    """(cells that changed state since the previous session, stressed cells that did not change).
+
+    A cell only changes state when both days have a reading: moving from grey
+    to a reading is a data-availability event, not a risk one.
+    """
+    labels = {r["key"]: r["label"] for r in (matrix or {}).get("rows") or []}
+    changed, ongoing = [], []
+    for cell in (matrix or {}).get("cells") or []:
+        state, before = cell.get("state"), cell.get("state_prev")
+        if not cell.get("lead") or state in (None, "grey"):
             continue
-        before = _yesterday_breach(tile)
-        if before is not None and before != now:
-            flips.append(_risk_item(tile, as_of, now, new=True))
-        elif now:
-            ongoing.append(_risk_item(tile, as_of, now, new=False))
-    return flips, ongoing
+        if before not in (None, "grey") and before != state:
+            changed.append(_matrix_item(cell, labels, as_of, new=True))
+        elif state == "stressed":
+            ongoing.append(_matrix_item(cell, labels, as_of, new=False))
+    return changed, ongoing
 
 
-def _anchor_items(anchor: dict, as_of: str) -> tuple[list, list]:
-    """(exposure changed this session, exposure below full while unchanged)."""
-    exposure = (anchor or {}).get("history", {}).get("exposure") or []
-    if len(exposure) < 1 or _number(exposure[-1]) is None:
-        return [], []
-    now = _number(exposure[-1])
-    before = _number(exposure[-2]) if len(exposure) >= 2 else None
-    if before is not None and now != before:
-        title = f"Anchor exposure moved from {_fmt(before * 100, '%', 0)} to {_fmt(now * 100, '%', 0)}"
-        return [_item("anchor", "Anchor exposure", as_of, title, link="#risk", importance="medium",
-                      value=now * 100, unit="%", new=True)], []
-    if now < 1:
-        return [], [_item("anchor", "Anchor exposure", as_of, f"Anchor exposure is {now * 100:.0f}% of a full position",
-                          link="#risk", value=now * 100, unit="%")]
-    return [], []
+def _basis(cell: dict) -> str:
+    """Why the cell has its colour: the fixed line it crossed, or its percentile."""
+    bands = cell.get("bands")
+    if cell.get("scale") == "bands" and bands:
+        # Calm names the line it fell back inside; the others the line they reached.
+        line = bands["elevated"] if cell["state"] == "calm" else bands[cell["state"]]
+        suffix = {"bp": "bp", "pct": "%"}.get(cell.get("unit"), "")
+        return f"{cell['state'] if cell['state'] != 'calm' else 'elevated'} from {line:g}{suffix}"
+    return f"{_ordinal(cell['percentile'])} pct of {_span(cell)}"
+
+
+def _span(cell: dict) -> str:
+    """The years the percentile was read over: ten, or what a shorter source allows."""
+    years = cell.get("years_used")
+    return f"{years:g}y" if years else "10y"
+
+
+def _ordinal(value) -> str:
+    """12 -> 12th, 21 -> 21st: the percentile as the page writes it."""
+    n = int(round(float(value)))
+    if 10 <= n % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
 
 
 def _put_call_items(positioning: dict, cfg: dict, as_of: str) -> list[dict]:
@@ -593,19 +595,18 @@ def build(ctx, *, inputs: dict, events_dir: Path = EVENTS_ARTIFACT_DIR) -> dict:
 
     sector = (ctx.config.get("moves", {}).get("sector_selloff") or {}).get("sector") or "Sector"
     market_changed, market_ongoing, _active = _market_items(src["market_state"], as_of, previous_active)
-    risk_flips, risk_ongoing = _risk_items(src["risk"], as_of)
-    anchor_changed, anchor_ongoing = _anchor_items(src["anchor"], as_of)
+    matrix_changed, matrix_ongoing = _matrix_items(src["risk"].get("matrix"), as_of)
     positioning = src["positioning"]
     blackout = _blackout_item(positioning, as_of) if inputs.get("positioning") is not None else None
     floor = _session_back(date.fromisoformat(as_of), RECENT_LOG_SESSIONS - 1).isoformat()
 
     unusual = {
         "moves": _move_items(moves, cfg, sector, as_of),
-        "states": _order(market_changed + risk_flips + anchor_changed + _put_call_items(positioning, cfg, as_of)),
+        "states": _order(market_changed + matrix_changed + _put_call_items(positioning, cfg, as_of)),
         "events": _order(_monitor_items(src["monitor"], cfg, as_of)
                          + _catalyst_items(src["catalyst_log"], floor, as_of)
                          + _reaction_items(recent.get("earnings_reacted") or [], moves_by, cfg, session)),
-        "ongoing": _order(market_ongoing + risk_ongoing + anchor_ongoing + ([blackout] if blackout else [])),
+        "ongoing": _order(market_ongoing + matrix_ongoing + ([blackout] if blackout else [])),
     }
 
     return {

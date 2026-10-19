@@ -33,7 +33,15 @@ def _artifacts(root, *, as_of="2026-10-09", breaches=("ccc_oas",), reading="rate
         write("risk", {"sections": [{"tiles": [{"key": k, "core": True, "breach": True} for k in breaches]}],
                        "breaches": [{"key": k, "label": k.upper(), "section": "credit", "horizon": "tactical",
                                      "value": 1.0, "unit": "bp", "crossed": None} for k in breaches],
-                       "crossed": [], "sentiment": {"score": 38.7, "rating": "FEAR"}})
+                       "crossed": [], "sentiment": {"score": 38.7, "rating": "FEAR"},
+                       "matrix": {"rows": [{"key": "credit", "label": "CREDIT"}], "columns": [], "cells": [
+                           {"row": "credit", "column": "fundamental", "lead": "hy_oas", "label": "HY OAS",
+                            "value": 520.0, "unit": "bp", "percentile": 88.0, "state": "elevated",
+                            "state_prev": "calm", "evidence": "description", "caution": None,
+                            "change_1m": 30.0, "worse_1m": True, "members": ["hy_oas"]},
+                           {"row": "credit", "column": "technical", "lead": None, "label": None, "value": None,
+                            "unit": None, "percentile": None, "state": "grey", "state_prev": None,
+                            "evidence": "description", "caution": None, "pending": "—", "members": []}]}})
     write("monitor", {
         "note": "rule", "settings": {}, "previous_as_of": "2026-10-08",
         "sectors": [{"sector": "Financials", "event": sector_event, "median_excess_pct": -2.0}],
@@ -54,7 +62,6 @@ def _artifacts(root, *, as_of="2026-10-09", breaches=("ccc_oas",), reading="rate
                                          "surprise_pct": None, "return_1d": 0.04, "result_pending": True,
                                          "index_weights": {"SPX": 0.07}}]},
     })
-    write("anchor", {"rule": "frozen v1", "held": 0.5, "next": 0.5, "components": {}, "changes": []})
 
 
 def _build(tmp_path, previous=None, **kw):
@@ -74,7 +81,13 @@ def _states(brief):
 def test_the_feed_condenses_without_recomputing_and_labels_the_overlay(tmp_path):
     index, brief = _build(tmp_path)
     assert index["market_state"]["indices"][0]["last"] == 7811.54
-    assert "not a position" in brief["risk_budget"]["systematic_anchor"]["what"]
+    # The systematic anchor has left RISK and the feed; its artifact is still built, but nothing reads it.
+    assert "systematic_anchor" not in brief["risk_budget"] and "systematic_anchor" not in index["market_state"]
+    # The matrix is listed cell by cell; a placeholder keeps its place with no lead.
+    cells = brief["risk_budget"]["risk_matrix"]
+    assert [(c["row"], c["column"], c["label"], c["state"]) for c in cells] == [
+        ("credit", "fundamental", "HY OAS", "elevated"), ("credit", "technical", None, "grey")]
+    assert cells[0]["percentile"] == 88.0 and cells[0]["evidence"] == "description"
     assert index["next_7_days"][0]["what"] == "JPM earnings"
     # CPI carries what the market prices for it.
     assert [e for e in index["next_7_days"] if e["what"] == "CPI"][0]["market_implied"]["value"] == 3.59

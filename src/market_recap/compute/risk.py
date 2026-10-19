@@ -253,3 +253,141 @@ def term_structure(points: dict[str, pd.Series], *, lags_days: tuple[int, ...] =
             "values": [None if v is None else round(v, 2) for v in values],
         })
     return {"labels": labels, "curves": curves}
+
+
+# --- the matrix: one lead series per cell -----------------------------------------
+#
+# A cell is coloured by its lead alone, never averaged with another, on one of
+# three scales its config names. "bands": fixed lines set from past drawdowns
+# (quantamental-lab docs/risk_matrix_bands_v1.md), for series whose level has a
+# meaning of its own (VIX 35 is stress in any decade). "percentile": where the
+# lead sits in its own last ten years, for changes and spreads with no outside
+# anchor. "none": shown, not coloured (a lead that failed its test). The
+# percentile is reported on every scale, as a description.
+
+def risk_percentile(series: pd.Series, value: float, risk_when: str) -> float | None:
+    """Where ``value`` sits in ``series``, 0-100, in the risk direction.
+
+    ``high``: the share of the sample at or below the value. ``low``: the share
+    at or above it. ``extreme``: distance from the median, so both tails read
+    high (2 * |pct - 50|). Ties count as at-or-below / at-or-above.
+    """
+    clean = _clean(series)
+    if clean.empty or value is None or not np.isfinite(value):
+        return None
+    below = 100 * float((clean <= value).mean())
+    if risk_when == "high":
+        return below
+    if risk_when == "low":
+        return 100 * float((clean >= value).mean())
+    if risk_when == "extreme":
+        return 2 * abs(below - 50)
+    raise ValueError(f"unknown risk_when {risk_when!r}")
+
+
+def cell_state(pct: float | None, thresholds: dict) -> str:
+    """calm below the elevated line, elevated up to the stressed line, stressed from it on."""
+    if pct is None:
+        return "grey"
+    if pct >= thresholds["stressed"]:
+        return "stressed"
+    if pct >= thresholds["elevated"]:
+        return "elevated"
+    return "calm"
+
+
+def band_state(value: float | None, bands: dict, risk_when: str) -> str:
+    """calm short of the elevated line, elevated up to the stressed line, stressed from it on.
+
+    A ``low`` series crosses a line by falling to it, a ``high`` one by rising to it.
+    """
+    if value is None or not np.isfinite(value):
+        return "grey"
+    sign = -1 if risk_when == "low" else 1
+    if sign * value >= sign * bands["stressed"]:
+        return "stressed"
+    if sign * value >= sign * bands["elevated"]:
+        return "elevated"
+    return "calm"
+
+
+def _last_years(series: pd.Series, years: int) -> pd.Series:
+    """The observations in the ``years`` up to and including the last one."""
+    return series[series.index > series.index[-1] - pd.DateOffset(years=years)]
+
+
+def _observation_state(clean: pd.Series, *, risk_when: str, years: int, min_years: float,
+                       thresholds: dict, scale: str = "percentile", bands: dict | None = None
+                       ) -> tuple[float | None, str]:
+    """Percentile and state of the last observation.
+
+    The percentile needs ``min_years`` of history before that observation; a
+    fixed band does not, as its lines were set elsewhere.
+    """
+    last = clean.index[-1]
+    value = float(clean.iloc[-1])
+    long_enough = (last - clean.index[0]).days / 365.25 >= min_years
+    pct = risk_percentile(_last_years(clean, years), value, risk_when) if long_enough else None
+    if scale == "bands":
+        return pct, band_state(value, bands, risk_when)
+    if scale == "none":
+        return pct, "unrated"
+    return pct, cell_state(pct, thresholds)
+
+
+def _month_change(clean: pd.Series, *, risk_when: str, years: int) -> tuple[float | None, bool | None]:
+    """The change over the last month, and whether it moved toward risk.
+
+    The base is the last observation at least 30 calendar days earlier. For an
+    ``extreme`` series "toward risk" means further from the ten-year median.
+    """
+    last = clean.index[-1]
+    value = float(clean.iloc[-1])
+    before = _value_at(clean, last - timedelta(days=30))
+    if before is None:
+        return None, None
+    change = value - before
+    if risk_when == "high":
+        return change, change > 0
+    if risk_when == "low":
+        return change, change < 0
+    median = float(_last_years(clean, years).median())
+    return change, abs(value - median) > abs(before - median)
+
+
+def matrix_reading(series: pd.Series, *, risk_when: str, as_of: str | None, years: int,
+                   min_years: float, stale_days: int, thresholds: dict, scale: str = "percentile",
+                   bands: dict | None = None) -> dict:
+    """One matrix cell's reading from its lead series, on its ``scale``.
+
+    Grey (no percentile, state, change or previous state) when the series is
+    empty, its last observation is older than ``stale_days`` before ``as_of``,
+    or, on the percentile scale, it has less than ``min_years`` of history. The
+    value and date still show so the page can say what the last reading was.
+    """
+    clean = _clean(series)
+    reading = {"value": None, "date": None, "percentile": None, "state": "grey", "state_prev": None,
+               "change_1m": None, "worse_1m": None, "years_used": None}
+    if clean.empty:
+        return reading
+    last = clean.index[-1]
+    reading["value"] = float(clean.iloc[-1])
+    reading["date"] = last.strftime("%Y-%m-%d")
+    stale = as_of is not None and (pd.Timestamp(as_of) - last).days > stale_days
+    how = {"risk_when": risk_when, "years": years, "min_years": min_years, "thresholds": thresholds,
+           "scale": scale, "bands": bands}
+    pct, state = _observation_state(clean, **how)
+    if stale or state == "grey":
+        return reading
+    reading["state"] = state
+    if pct is not None:
+        reading["percentile"] = round(pct, 1)
+        # The span the percentile was read over: up to ``years``, less where the source is shorter.
+        window = clean[clean.index >= last - pd.DateOffset(years=years)]
+        reading["years_used"] = round(min(years, (last - window.index[0]).days / 365.25), 1)
+    if len(clean) > 1:
+        # The same test one observation earlier: the window ends there.
+        reading["state_prev"] = _observation_state(clean.iloc[:-1], **how)[1]
+    change, worse = _month_change(clean, risk_when=risk_when, years=years)
+    reading["change_1m"], reading["worse_1m"] = change, worse
+    return reading

@@ -39,12 +39,22 @@ FRED_SERIES = {
 ARCHIVED_ICE = ("BAMLH0A0HYM2", "BAMLC0A0CM", "BAMLH0A3HYC")
 YAHOO_SYMBOLS = ("^MOVE", "HYG", "IEF", "LQD", "^GSPC", "DX-Y.NYB", "HG=F", "CL=F")
 DOLLAR_WINDOW = 63
+# Changes the matrix reads as leads (sessions back), not tiles of their own:
+# BAA - 10Y over a month, and the real yield over three months.
+HY_OAS_CHANGE_SESSIONS = 20
+REAL_YIELD_CHANGE_SESSIONS = 63
 CFTC_CODES = {"cftc_es": "13874A", "cftc_nq": "209742", "cftc_zn": "043602", "cftc_vx": "1170E1"}
 PUT_CALL_FIELD = "TOTAL PUT/CALL RATIO"
 PUT_CALL_BUDGET_SECONDS = 240
 # How many expired VIX futures are read to give the front-month spread a year of history.
 VX_HISTORY_MONTHS = 13
 TERM_TENORS = {"9D": "VIX9D", "30D": "VIX", "3M": "VIX3M", "6M": "VIX6M", "1Y": "VIX1Y"}
+# Matrix leads that are derived series rather than tiles: their label, unit and
+# risk direction live here, as a tile's would in [[risk.tiles]].
+# Credit's speed is read on Moody's BAA - 10Y: ICE's HY index on FRED reaches back
+# only three years, too short for a 10-year percentile of its 20-session change.
+DERIVED_LEADS = {"baa10y_4w": {"label": "BAA − 10Y · 20D CHANGE", "unit": "bp", "risk_when": "high"},
+                 "real_10y_3m": {"label": "10Y REAL YIELD · 3M CHANGE", "unit": "bp", "risk_when": "high"}}
 
 
 class _Inputs:
@@ -242,6 +252,8 @@ def _builders(inputs: _Inputs) -> dict[str, Callable[[], pd.Series]]:
         "lqd_ief": lambda: R.vs_moving_average(R.ratio(inputs.yahoo_close("LQD"), inputs.yahoo_close("IEF")), R.CREDIT_TREND_WINDOW),
         "baa10y": lambda: get(f, "BAA10Y") * 100,
         "hy_oas": lambda: get(f, "BAMLH0A0HYM2") * 100,
+        "baa10y_4w": lambda: R.change_over(get(f, "BAA10Y") * 100, HY_OAS_CHANGE_SESSIONS),
+        "real_10y_3m": lambda: R.change_over(get(f, "DFII10") * 100, REAL_YIELD_CHANGE_SESSIONS),
         "ig_oas": lambda: get(f, "BAMLC0A0CM") * 100,
         "ccc_oas": lambda: get(f, "BAMLH0A3HYC") * 100,
         "cor1m": lambda: get(c, "COR1M"),
@@ -312,6 +324,64 @@ def _sentiment(inputs: _Inputs) -> dict:
     return S.gauge(raw, calendar, history_sessions=len(calendar))
 
 
+def _round(value: float | None, digits: int) -> float | None:
+    return None if value is None else round(float(value), digits)
+
+
+def _lead_series(lead: str, series_of: dict, builders: dict) -> pd.Series:
+    """A lead's full series: a tile's own, or built now for a derived lead."""
+    if lead not in series_of:
+        series_of[lead] = builders[lead]()
+    return series_of[lead]
+
+
+def _matrix_cell(row: str, column: str, spec: dict, *, tiles: dict, series_of: dict, builders: dict,
+                 cfg: dict, as_of: str | None) -> dict:
+    """One row x column cell. A cell with no lead is a placeholder and shows its pending text."""
+    lead = spec.get("lead")
+    cell = {"row": row, "column": column, "lead": lead, "label": None, "value": None, "unit": None,
+            "date": None, "risk_when": None, "percentile": None, "state": "grey", "state_prev": None,
+            "change_1m": None, "worse_1m": None, "scale": spec.get("scale", "percentile"),
+            "bands": spec.get("bands"), "evidence": spec.get("evidence", "description"),
+            "caution": spec.get("caution"), "note": spec.get("note"),
+            "pending": spec.get("pending", None if lead else "—"), "members": list(spec.get("members", []))}
+    if not lead:
+        return cell
+    meta = tiles.get(lead) or DERIVED_LEADS[lead]
+    # A weekly series is allowed a longer gap before it is stale, as its tile is read weekly.
+    stale_days = cfg["stale_days_weekly"] if lead in WEEKLY_TILES else cfg["stale_days_daily"]
+    try:
+        series = _lead_series(lead, series_of, builders)
+    except Exception:  # noqa: BLE001 - a lead that did not build leaves its cell grey, never the panel
+        series = pd.Series(dtype=float)
+    reading = R.matrix_reading(series, risk_when=meta["risk_when"], as_of=as_of, years=cfg["years"],
+                               min_years=cfg["min_years"], stale_days=stale_days,
+                               thresholds={"elevated": cfg["elevated"], "stressed": cfg["stressed"]},
+                               scale=cell["scale"], bands=cell["bands"])
+    digits = DIGITS.get(meta["unit"], 2)
+    cell.update(reading)
+    cell.update({"label": meta["label"], "unit": meta["unit"], "risk_when": meta["risk_when"],
+                 "value": _round(reading["value"], digits), "change_1m": _round(reading["change_1m"], digits)})
+    return cell
+
+
+def _matrix(settings: dict, builders: dict, series_of: dict, as_of: str | None) -> dict:
+    """The RISK matrix: one cell per row and column, each read from its own lead."""
+    cfg = settings["matrix"]
+    tiles = {t["key"]: t for t in settings.get("tiles", [])}
+    specs = {(c["row"], c["column"]): c for c in cfg.get("cells", [])}
+    cells = [_matrix_cell(row["key"], column["key"], specs.get((row["key"], column["key"]), {}), tiles=tiles,
+                          series_of=series_of, builders=builders, cfg=cfg, as_of=as_of)
+             for row in cfg["rows"] for column in cfg["columns"]]
+    return {
+        "thresholds": {"elevated": cfg["elevated"], "stressed": cfg["stressed"]},
+        "years": cfg["years"],
+        "rows": [{"key": r["key"], "label": r["label"]} for r in cfg["rows"]],
+        "columns": [{"key": c["key"], "label": c["label"]} for c in cfg["columns"]],
+        "cells": cells,
+    }
+
+
 def build(ctx) -> dict:
     settings = ctx.config.get("risk", {})
     inputs = _Inputs(ctx)
@@ -319,6 +389,8 @@ def build(ctx) -> dict:
     builders = _builders(inputs)
 
     sections = []
+    # Each tile's full series, kept for the matrix: its leads are read from these.
+    series_of: dict[str, pd.Series] = {}
     for section in settings.get("sections", []):
         tiles = []
         for spec in (t for t in settings.get("tiles", []) if t["section"] == section["key"]):
@@ -326,6 +398,7 @@ def build(ctx) -> dict:
             builder = builders.get(key)
             try:
                 series = builder() if builder else pd.Series(dtype=float)
+                series_of[key] = series
                 reading = R.tile(series, risk_when=spec["risk_when"], threshold=spec.get("threshold"),
                                  digits=DIGITS.get(spec.get("unit"), 2), daily=key not in WEEKLY_TILES)
                 error = None if reading.get("value") is not None else "no observations"
@@ -371,6 +444,7 @@ def build(ctx) -> dict:
     return {
         "as_of": ctx.as_of,
         "sections": sections,
+        "matrix": _matrix(settings, builders, series_of, ctx.as_of),
         "sentiment": sentiment,
         "charts": charts,
         "breaches": breaches,

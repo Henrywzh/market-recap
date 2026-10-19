@@ -82,10 +82,6 @@ RULES: dict[str, dict[str, str]] = {
 STATE_ORDER = ("new", "continuing", "unknown", "resolved", "scheduled")
 RULE_ORDER = tuple(RULES)
 
-OVERLAY_NOTE = ("Model-suggested equity exposure (0-1) of quantamental-lab's frozen v1 overlay, as the ANCHOR "
-                "tab shows it: a systematic reference, not a position, an allocation or a risk budget.")
-
-
 def _load(root: Path, name: str) -> dict | None:
     try:
         return json.loads((root / f"{name}.json").read_text())
@@ -130,17 +126,9 @@ class _Feed:
 # --- sections ---------------------------------------------------------------
 
 def _risk_budget(f: _Feed) -> dict:
-    overview, risk, anchor = f.get("overview"), f.get("risk"), f.get("anchor")
+    overview, risk = f.get("overview"), f.get("risk")
     positioning, scenarios, priced = f.get("positioning"), f.get("scenarios"), f.get("priced")
     out: dict[str, Any] = {}
-    if anchor:
-        out["systematic_anchor"] = {
-            "what": OVERLAY_NOTE, "rule": anchor.get("rule"),
-            "exposure_held": anchor.get("held"), "exposure_next": anchor.get("next"),
-            "components": anchor.get("components"),
-            "last_change": (anchor.get("changes") or [None])[-1],
-            "source": f.url("anchor"),
-        }
     if risk:
         tiles = [t for s in risk["sections"] for t in s["tiles"]]
         core = [t for t in tiles if t.get("core")]
@@ -157,6 +145,10 @@ def _risk_budget(f: _Feed) -> dict:
         }
         out["sentiment"] = {**_pick(risk.get("sentiment"), "score", "rating", "date", "week_ago", "month_ago", "year_ago"),
                             "source": f.url("risk")}
+        # The RISK matrix, one line per cell: a grey placeholder keeps its row and column, with no lead.
+        out["risk_matrix"] = [_pick(c, "row", "column", "label", "value", "unit", "percentile", "state", "scale", "bands",
+                                    "evidence", "caution")
+                              for c in (risk.get("matrix") or {}).get("cells") or []]
     if overview and overview.get("vol"):
         out["volatility"] = {**overview["vol"], "source": f.url("overview")}
     if positioning:
@@ -628,7 +620,7 @@ def build(*, root: Path | None = None, validation: dict | None = None,
 
 def _market_state(brief: dict, f: _Feed) -> dict:
     market, rb, review = brief.get("market") or {}, brief.get("risk_budget") or {}, brief.get("review") or {}
-    vol, anchor = rb.get("volatility") or {}, rb.get("systematic_anchor") or {}
+    vol = rb.get("volatility") or {}
     breadth = next((b for b in market.get("breadth") or [] if b["key"] == "SPX"), {})
     season = review.get("earnings_season") or {}
     next_meeting = (rb.get("fed") or {}).get("next_meeting") or {}
@@ -644,7 +636,6 @@ def _market_state(brief: dict, f: _Feed) -> dict:
             for t in rb.get("trend") or []],
         "risk_tiles_in_breach": (rb.get("risk_dashboard") or {}).get("core_in_breach"),
         "fed_next_meeting": _pick(next_meeting, "date", "change_bp", "futures_p_hike"),
-        "systematic_anchor": {"exposure_held": anchor.get("exposure_held"), "what": OVERLAY_NOTE} if anchor else None,
         "earnings_season": _pick(season, "quarter", "reported", "beat_share", "median_surprise_pct")
         | {"result_not_posted": [r["symbol"] for r in season.get("result_not_posted") or []]} if season else None,
     }

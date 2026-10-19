@@ -1,13 +1,15 @@
-// RISK: how much risk the market is pricing. The systematic anchor and ten
-// core series first; every other series folded beneath, by group. One tile
-// per series -- level, where it sits in its year and in its whole history,
-// the week's change, and whether it is past the line written in config
-// beforehand. No score.
+// RISK: how much risk the market is pricing. A matrix first: six channels down
+// the side, three kinds of evidence across. Each cell is coloured by its lead
+// series' percentile in its own history, and opens its member series on click.
+// Every other series is folded beneath, by group. One tile per series -- level,
+// where it sits in its year and in its whole history, the week's change, and
+// whether it is past the line written in config beforehand. No score.
 
-import { el, card, num, metaRow, tag, DASH } from '../fmt.js';
+import { el, card, num, metaRow, tag, gap, DASH } from '../fmt.js';
 import { render } from '../charts.js';
 import { rangeSwitch, sliceRange, initialRange } from '../range.js';
 import { spark } from '../spark.js';
+import { cellsByRow, stateCounts, stateOf, stateWord, isPlaceholder, arrowFor, tagFor, scaleText } from '../risk-matrix.js';
 
 const HORIZONS = [
   ['tactical', 'TACTICAL · 1–4 WEEKS'],
@@ -180,9 +182,13 @@ function termChart(node, charts) {
 
 // `charts` histories are drawn one above the other; a click puts that tile's history
 // first and drops the oldest. Series past their line are shown first.
-function sectionCard(section, data, { charts = 1, head = null } = {}) {
+// `lead` (a tile key) is drawn first, ahead of the past-their-line order.
+function sectionCard(section, data, { charts = 1, head = null, lead = null } = {}) {
   const tiles = section.tiles;
-  let selected = [...tiles.filter((t) => t.breach), ...tiles.filter((t) => !t.breach)].slice(0, charts).map((t) => t.key);
+  const order = lead
+    ? [...tiles.filter((t) => t.key === lead), ...tiles.filter((t) => t.key !== lead)]
+    : [...tiles.filter((t) => t.breach), ...tiles.filter((t) => !t.breach)];
+  let selected = order.slice(0, charts).map((t) => t.key);
   const grid = el('div', { class: 'risk-grid' });
   const slots = selected.map(() => ({ node: el('div', { class: 'chart' }), title: el('span', { class: 'dim' }) }));
   // One range for the card's charts; offered as far as its longest history.
@@ -215,63 +221,147 @@ function sectionCard(section, data, { charts = 1, head = null } = {}) {
   return card(section.label, head ? el('span', { class: 'dim', text: head }) : el('span', { class: breached ? 'down' : 'dim', text: breached ? `${breached} of ${tiles.length} past threshold` : `${tiles.length} series · none past threshold` }), body);
 }
 
-const pctOf = (v) => (present(v) ? `${Math.round(v * 100)}%` : DASH);
-
-// What holds the anchor below full exposure today, in the rule's own terms.
-export function anchorLimits(c) {
-  if (!c) return [];
-  return [
-    c.trend_on === false ? 'TREND OFF (cap 50%)' : null,
-    c.copper_oil_on === false ? `COPPER/OIL OFF (cap ${Math.round((c.copper_oil_cap ?? 0.5) * 100)}%)` : null,
-    present(c.vol_scaled) && c.vol_scaled < 1 ? `VOL TARGET ×${num(c.vol_scaled, 2)}` : null,
-    present(c.ladder) && c.ladder < 1 ? `DRAWDOWN LADDER ×${num(c.ladder, 1)}` : null,
-  ].filter(Boolean);
+// The matrix's headline words: how a cell's percentile reads, and the rule
+// that colours it. Both come from the build's own thresholds.
+function percentText(cell, years) {
+  // A banded cell is read against its lines, so the lines are what it shows.
+  if (cell.scale === 'bands' && cell.bands) {
+    const dir = cell.risk_when === 'low' ? '≤' : '≥';
+    return `elev ${dir} ${formatValue(cell.bands.elevated, cell.unit)} · stress ${dir} ${formatValue(cell.bands.stressed, cell.unit)}`;
+  }
+  if (!present(cell.percentile)) return 'no percentile';
+  // A source shorter than the window (ICE spreads on FRED: three years) says so.
+  const span = present(cell.years_used) && cell.years_used < years ? num(cell.years_used, cell.years_used < 3 ? 1 : 0) : years;
+  return `${ordinal(cell.percentile)} of ${span}y`;
 }
 
-function anchorCard(a) {
-  if (!a || a.unavailable) return card('SYSTEMATIC ANCHOR', null, el('div', { class: 'gap', text: 'The anchor was not built for this session.' }));
-  const c = a.components;
-  const chartNode = el('div', { class: 'chart short' });
-  // The whole daily path where the build carries it (since 2001), else five years.
-  const series = a.full?.dates?.length ? a.full : a.history;
-  let range = initialRange(series.dates, '1Y');
-  const draw = () => {
-    const h = sliceRange(series.dates, { exposure: series.exposure, spy: series.spy }, range);
-    render(chartNode, (option, p) => ({
-      ...option,
-      grid: { left: 36, right: 40, top: 8, bottom: 22 },
-      tooltip: { ...option.tooltip, trigger: 'axis' },
-      xAxis: { ...option.xAxis, data: h.dates },
-      yAxis: [
-        { ...option.yAxis, min: 0, max: 1, axisLabel: { color: p.dim, fontSize: 9, formatter: (v) => `${Math.round(v * 100)}%` } },
-        { ...option.yAxis, position: 'right', splitLine: { show: false }, axisLabel: { color: p.faint, fontSize: 9 } },
-      ],
-      series: [
-        { name: 'anchor exposure', type: 'line', step: 'end', data: h.exposure, showSymbol: false, areaStyle: { opacity: 0.12 }, lineStyle: { width: 1.4, color: p.accent }, itemStyle: { color: p.accent } },
-        { name: 'SPY', type: 'line', yAxisIndex: 1, data: h.spy, showSymbol: false, lineStyle: { width: 1, color: p.faint } },
-      ],
-    }));
+function ruleText(matrix, cell) {
+  return `${scaleText(cell, matrix, (v) => formatValue(v, cell.unit))} `
+    + 'Grey: no reading, or a stale lead.';
+}
+
+function cellClass(cell, selected) {
+  return ['risk-cell', stateOf(cell), selected ? 'selected' : ''].filter(Boolean).join(' ');
+}
+
+// What a screen reader hears for a cell: where it is, the lead, its reading,
+// its state in words, and its evidence.
+function cellLabel(row, column, cell, years) {
+  const arrow = arrowFor(cell);
+  const parts = [
+    `${row.label} · ${column.label}`,
+    `${cell.label}${present(cell.value) ? ` ${formatValue(cell.value, cell.unit)}` : ''}`,
+    percentText(cell, years),
+    cell.scale === 'bands' && present(cell.percentile) ? `${ordinal(cell.percentile)} percentile of 10 years` : null,
+    stateWord(stateOf(cell)),
+    arrow ? arrow.word : null,
+    ...tagFor(cell).map((t) => t.title || t.text.toLowerCase()),
+  ];
+  return parts.filter(Boolean).join(', ');
+}
+
+// A placeholder is only its pending text: there is no series to open yet.
+function placeholderNode(row, column, cell) {
+  return el('div', { class: 'risk-cell grey placeholder', 'aria-label': `${row.label} · ${column.label}: no series yet` }, [
+    el('span', { class: 'risk-cell-col', text: column.label }),
+    el('span', { class: 'risk-cell-pending dim', text: cell?.pending || DASH }),
+  ]);
+}
+
+// One cell as a button. The tint carries the state; the words are in the label.
+function cellButton(row, column, cell, years, onPick) {
+  if (isPlaceholder(cell)) {
+    return el('button', {
+      type: 'button', class: cellClass(cell, false) + ' placeholder', 'aria-expanded': 'false',
+      'aria-label': `${row.label} · ${column.label}: ${cell.pending || 'no series yet'}`, onclick: onPick,
+    }, [
+      el('span', { class: 'risk-cell-col', text: column.label }),
+      el('span', { class: 'risk-cell-pending dim', text: cell.pending || DASH }),
+    ]);
+  }
+  const arrow = arrowFor(cell);
+  return el('button', {
+    type: 'button',
+    class: cellClass(cell, false),
+    'aria-expanded': 'false',
+    'aria-label': cellLabel(row, column, cell, years),
+    title: cell.note || null,
+    onclick: onPick,
+  }, [
+    el('span', { class: 'risk-cell-col', text: column.label }),
+    el('span', { class: 'risk-cell-label', text: cell.label }),
+    el('span', { class: 'risk-cell-reading' }, [
+      el('span', { class: 'risk-cell-value', text: formatValue(cell.value, cell.unit) }),
+      arrow ? el('span', { class: `risk-cell-arrow ${arrow.tone}`, title: arrow.word, text: arrow.arrow }) : null,
+    ]),
+    el('span', { class: 'risk-cell-pct', text: percentText(cell, years) }),
+    el('span', { class: 'risk-cell-tags' }, tagFor(cell).map((t) => tag(t.text, t.tone, t.title))),
+  ]);
+}
+
+// What a cell opens: the rule, its note and caution, then its member series
+// through the same tiles and history chart as the folded groups.
+function drillNode(matrix, row, column, cell, data, tiles) {
+  const members = (cell.members || []).map((key) => tiles.get(key)).filter(Boolean);
+  const notes = isPlaceholder(cell) ? [] : [el('div', { class: 'risk-drill-rule dim', text: ruleText(matrix, cell) })];
+  if (cell.note) notes.push(el('div', { class: 'risk-drill-note', text: cell.note }));
+  if (cell.caution) notes.push(el('div', { class: 'risk-drill-note down', text: `Caution: ${cell.caution}.` }));
+  const body = members.length
+    ? sectionCard({ key: `${row.key}-${column.key}`, label: `${row.label} · ${column.label}`, tiles: members }, data,
+      { charts: 1, head: 'click a series for its history', lead: cell.lead })
+    : gap('No series to draw for this cell yet.');
+  return el('div', { class: 'risk-drill' }, [...notes, body]);
+}
+
+// The headline: channels down, evidence across. One cell open at a time; a
+// second click on the same cell closes it. Enter and Space are a button's own
+// click, so they need no handler here.
+function matrixBlock(matrix, data) {
+  const years = matrix.years ?? 10;
+  const tiles = new Map(data.sections.flatMap((s) => s.tiles).map((t) => [t.key, t]));
+  const drill = el('div', { class: 'risk-drill-host' });
+  const buttons = new Map();
+  let open = null;
+
+  const choose = (key, row, column, cell) => {
+    open = open === key ? null : key;
+    for (const [k, node] of buttons) {
+      node.setAttribute('aria-expanded', String(k === open));
+      node.className = cellClass(node.cell, k === open);
+    }
+    drill.replaceChildren(...(open ? [drillNode(matrix, row, column, cell, data, tiles)] : []));
   };
-  requestAnimationFrame(draw);
-  const last = a.changes[a.changes.length - 1];
-  const binding = anchorLimits(c);
-  const path = a.next === a.held || pctOf(a.next) === pctOf(a.held)
-    ? `unchanged next session${last ? ` · since ${last.date}` : ''}`
-    : `next session ${pctOf(a.next)}`;
-  return card('SYSTEMATIC ANCHOR · MODEL EXPOSURE', el('span', { class: 'dim', text: 'quantamental-lab v1 · not a position' }), [
-    el('div', { class: 'anchor-head' }, [
-      el('span', { class: 'anchor-value', text: pctOf(a.held) }),
-      el('span', { class: 'dim', text: `model target · ${path}` }),
-      el('span', { class: binding.length ? 'down' : 'dim', text: binding.length ? `limited by ${binding.join(' + ')}` : 'no limit binding' }),
-    ]),
-    el('div', { class: 'anchor-chips tag-row' }, [
-      tag(`VOL ${present(c.realised_vol) ? num(c.realised_vol * 100, 1) : DASH}% → ×${num(c.vol_scaled, 2)}`, c.vol_scaled < 1 ? 'warn' : 'dim'),
-      tag(`TREND ${c.trend_on ? 'ON · SPY > 200D' : 'OFF · cap 50%'}`, c.trend_on ? 'up' : 'down'),
-      tag(`COPPER/OIL ${c.copper_oil_on === false ? `OFF · z ${num(c.copper_oil_z, 2)} · cap 50%` : c.copper_oil_on ? `ON · z ${num(c.copper_oil_z, 2)}` : DASH}`, c.copper_oil_on === false ? 'down' : c.copper_oil_on ? 'up' : 'dim'),
-      tag(`DRAWDOWN LADDER ×${num(c.ladder, 1)}`, c.ladder < 1 ? 'down' : 'dim'),
-    ]),
-    el('div', { class: 'chart-head' }, [el('span', { class: 'dim', text: 'EXPOSURE · SPY on the right axis' }), rangeSwitch(series.dates, range, (label) => { range = label; draw(); })]),
-    chartNode,
+
+  const rows = cellsByRow(matrix).map((row) => el('div', { class: 'risk-row', 'data-row': row.key }, [
+    el('div', { class: 'risk-row-label', text: row.label }),
+    ...row.cells.map((cell, i) => {
+      const column = matrix.columns[i];
+      // A placeholder with no member series has nothing to open; one that
+      // names members still opens them, under its pending text.
+      if (isPlaceholder(cell) && !(cell?.members || []).length) return placeholderNode(row, column, cell);
+      const key = `${row.key}|${column.key}`;
+      const node = cellButton(row, column, cell, years, () => choose(key, row, column, cell));
+      node.cell = cell;
+      buttons.set(key, node);
+      return node;
+    }),
+  ]));
+  const head = el('div', { class: 'risk-matrix-head' }, [
+    el('span'),
+    ...matrix.columns.map((c) => el('span', { text: c.label })),
+  ]);
+  return el('div', { class: 'risk-matrix' }, [head, ...rows, drill]);
+}
+
+// One line: how many cells sit in each state. Placeholders count as no reading.
+function summary(matrix) {
+  const counts = stateCounts(cellsByRow(matrix).flatMap((r) => r.cells));
+  return el('div', { class: 'risk-status' }, [
+    el('span', {
+      class: counts.stressed ? 'down risk-status-count' : 'risk-status-count',
+      text: `${counts.stressed} stressed · ${counts.elevated} elevated · ${counts.calm} calm`
+        + `${counts.unrated ? ` · ${counts.unrated} not coloured` : ''} · ${counts.grey} no reading`,
+    }),
   ]);
 }
 
@@ -341,30 +431,9 @@ function sentimentCard(g) {
   ]);
 }
 
-// One line for the page's state: which core series are past their line,
-// what crossed this week (only when something did), and the rest.
-function summary(data, core) {
-  const past = core.filter((t) => t.breach);
-  const others = data.sections.flatMap((s) => s.tiles).filter((t) => !t.core);
-  const changed = data.crossed.filter((b) => core.some((t) => t.key === b.key));
-  const sep = () => el('span', { class: 'dim', text: ' · ' });
-  return el('div', { class: 'risk-status' }, [
-    el('span', { class: past.length ? 'down risk-status-count' : 'risk-status-count', text: `${past.length} of ${core.length} core past their line` }),
-    ...past.map((t) => el('span', { class: 'mchip down', text: `${t.label} ${formatValue(t.value, t.unit)}` })),
-    sep(),
-    changed.length
-      ? el('span', {}, [el('span', { class: 'dim', text: 'this week ' }),
-        ...changed.map((b) => el('span', { class: `mchip ${b.crossed === 'into' ? 'down' : 'up'}`, text: `${b.label} ${b.crossed === 'into' ? '↑ in' : '↓ out'}` }))])
-      : el('span', { class: 'dim', text: 'none crossed this week' }),
-    sep(),
-    el('span', { class: 'dim', text: `other series ${others.filter((t) => t.breach).length} of ${others.length} past their line, listed below` }),
-  ]);
-}
-
 function methodNotes() {
   return [
-    'The anchor is quantamental-lab\'s frozen v1 control, re-implemented here and checked to reproduce its daily exposure exactly over 1993–2026: vol-targeted to 12% on 63-day realised volatility, capped at 50% while SPY is not above its 200-day average or while the copper/oil gate is off (z below −0.25, back on above +0.25), and stepped down to ×0.6 / ×0.3 when its own drawdown passes −8% / −12%. Its recession gate is that repository\'s model output and is not ported (treated as neutral). A reference, not a recommendation.',
-    'Core series: trend and breadth (SPX against its 200-day average and its 1-year high, the share of members above their 200-day average), volatility (VIX and VIX/VIX3M), credit (high-yield OAS), rates (10-year real yield), the dollar, copper/oil and financial conditions (NFCI). Everything else is folded under ALL SERIES: most of it restates one of these.',
+    'The matrix: six channels down the side (equities, treasuries, credit, volatility, cross-asset, macro), and three kinds of evidence across (structure, technical, fundamental / premium). Each cell has one lead series, read on one of two scales. Levels with a meaning in any decade (VIX, the VIX curve, MOVE, drawdowns, NFCI, BAA − 10Y) are read against fixed lines, set from where each stood in past drawdowns or from a line with its own meaning (an inverted VIX curve at 1.0, NFCI\'s average at 0); a ten-year percentile would compress the tail and let a quiet decade decide what elevated means. Changes and spreads with no outside anchor are read by their percentile in their own last ten years: elevated from the 75th, stressed from the 95th. A lead that failed its out-of-sample test is shown but not coloured. Grey means no reading yet. Cells are never averaged or scored; the other series in a cell open on click.',
     'Each tile is one series. 1Y = its percentile over the last 365 days; 1990– = over all the history the source serves, from the year shown; 1W = change over a week. Nothing is combined into a score.',
     'Thresholds were written in config/dashboard.toml before this page drew any series, and are not fitted to it. A red tile is past its line; NEW means it was not a week ago, CLEARED that it was. Positioning and the put/call ratio are read at extremes: the tails of their own history (≤5th or ≥95th percentile).',
     'Back-calculated history: VIX3M, VIX9D, VIX6M, VIX1Y, VVIX, SKEW and COR1M were launched after the first row of their files; the earlier part is Cboe\'s back-calculation. ICE BofA spreads (HY, IG, CCC) come from FRED, which serves the last three years only; the site archives what FRED serves each evening (a full-history baseline first, then the daily tail), and those archived dates extend the series back as the archive grows. The archive is current-vintage history, not point-in-time; Moody\'s Baa − 10Y runs to 1986.',
@@ -374,18 +443,17 @@ function methodNotes() {
   ];
 }
 
-export default function renderRisk(root, payload) {
-  const [data, anchor] = Array.isArray(payload) ? payload : [payload, null];
+export default function renderRisk(root, data) {
   if (!data || data.unavailable) throw new Error(data?.unavailable || 'risk artifact missing');
-  const core = data.sections.flatMap((s) => s.tiles.map((t) => ({ ...t, horizon: s.horizon }))).filter((t) => t.core);
   const total = data.sections.reduce((n, s) => n + s.tiles.length, 0);
-  root.append(metaRow(`RISK · ANCHOR AND ${core.length} CORE SERIES · AS OF ${data.as_of}`, methodNotes()));
-  root.append(summary(data, core));
-  root.append(el('div', { class: 'grid risk-top' }, [
-    el('div', { class: 'risk-left' }, [anchorCard(anchor), sentimentCard(data.sentiment)]),
-    // The status line above already counts the core series past their line.
-    sectionCard({ key: 'core', label: 'CORE SERIES', tiles: core }, data, { charts: 2, head: 'click a tile for its history' }),
-  ]));
+  root.append(metaRow(`RISK · MATRIX · AS OF ${data.as_of}`, methodNotes()));
+  if (data.matrix) {
+    root.append(summary(data.matrix));
+    root.append(matrixBlock(data.matrix, data));
+  } else {
+    root.append(gap('The risk matrix was not built for this session.'));
+  }
+  root.append(sentimentCard(data.sentiment));
 
   // Everything else, drawn only when opened: a chart laid out while folded
   // has no width.

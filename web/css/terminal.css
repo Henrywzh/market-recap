@@ -829,15 +829,9 @@ a.mchip:hover, a.cat-title:hover { text-decoration: underline; }
 .ov-event-figure { font-size: 11px; text-align: right; }
 @media (max-width: 600px) { .ov-event { grid-template-columns: minmax(0, 1fr); gap: 0; } .ov-event-figure { text-align: left; } }
 
-/* RISK: the systematic anchor and the folded full list. */
-.risk-top { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); margin-bottom: 10px; align-items: start; }
-@media (max-width: 1100px) { .risk-top { grid-template-columns: minmax(0, 1fr); } }
+/* RISK: the headline figure (shared with Fear & Greed and POSITIONING) and the folded full list. */
 .anchor-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
 .anchor-value { font-size: 30px; font-weight: 700; color: var(--accent); line-height: 1.1; }
-.anchor-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
-.anchor-chips .mchip { margin: 0; font-size: 10px; line-height: 17px; }
-.risk-left { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.risk-left > .card { margin: 0; }
 .fg-value.up, .fg-value.down { color: inherit; }
 .fg-value.up { color: var(--up); }
 .fg-value.down { color: var(--down); }
@@ -1311,4 +1305,44 @@ a.today-row:hover { background: var(--panel-alt); }
 @media (max-width: 800px) {
   .today-columns { grid-template-columns: minmax(0, 1fr); }
   .today-when { min-width: 0; width: 100%; }
+}
+
+/* RISK matrix: six channels down, three kinds of evidence across. A cell's tint is its
+   state; the state word is in its aria-label, so colour is never the only signal. On a
+   phone each channel is a card with its three cells stacked, so nothing scrolls sideways. */
+.risk-matrix { margin-bottom: 12px; }
+.risk-matrix-head, .risk-row { display: grid; grid-template-columns: 112px repeat(3, minmax(0, 1fr)); gap: 6px; align-items: stretch; }
+.risk-matrix-head { font-size: 9.5px; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 4px; }
+.risk-row { margin-bottom: 6px; }
+.risk-row-label { align-self: center; font-size: 10px; letter-spacing: 0.1em; color: var(--text-dim); }
+.risk-cell { appearance: none; display: flex; flex-direction: column; gap: 2px; min-width: 0; margin: 0; padding: 7px 9px;
+  border: 1px solid var(--border); background: var(--panel); color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.risk-cell:hover { border-color: var(--border-strong); }
+.risk-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.risk-cell.elevated { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--accent) 14%, var(--panel)); }
+.risk-cell.stressed { border-color: color-mix(in srgb, var(--down) 70%, transparent); background: color-mix(in srgb, var(--down) 18%, var(--panel)); }
+.risk-cell.grey { color: var(--text-dim); background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--border-strong) 35%, transparent) 6px 7px), var(--panel); }
+.risk-cell.unrated .risk-cell-value { color: var(--text-dim); }
+.risk-cell.placeholder { cursor: default; font-size: 11px; justify-content: center; }
+.risk-cell.selected { box-shadow: inset 0 0 0 2px var(--accent); }
+.risk-cell-col { display: none; font-size: 9.5px; letter-spacing: 0.08em; color: var(--text-dim); }
+.risk-cell-label { font-size: 10px; letter-spacing: 0.06em; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.risk-cell-reading { display: flex; align-items: baseline; gap: 4px; }
+.risk-cell-value { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.risk-cell-arrow { font-size: 12px; font-weight: 700; }
+.risk-cell-arrow.worse { color: var(--down); }
+.risk-cell-arrow.better { color: var(--up); }
+.risk-cell-arrow.flat { color: var(--text-dim); }
+.risk-cell-pct { font-size: 10.5px; color: var(--text-dim); }
+.risk-cell-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.risk-cell-tags .tag { font-size: 9px; line-height: 14px; }
+.risk-drill-host:not(:empty) { margin-bottom: 12px; }
+.risk-drill-rule { font-size: 11px; line-height: 1.5; margin-bottom: 4px; }
+.risk-drill-note { font-size: 11.5px; line-height: 1.5; margin-bottom: 4px; }
+@media (max-width: 719px) {
+  .risk-matrix-head { display: none; }
+  .risk-row { display: block; margin-bottom: 10px; padding: 8px; border: 1px solid var(--border); background: var(--panel-alt); }
+  .risk-row-label { display: block; margin-bottom: 4px; font-size: 11px; font-weight: 700; color: var(--text); }
+  .risk-row .risk-cell { margin-top: 6px; width: 100%; box-sizing: border-box; }
+  .risk-cell-col { display: block; }
 }

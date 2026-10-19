@@ -223,6 +223,12 @@ for (const route of list) {
       if (!(await block.locator('.blackout-momentum').innerText()).includes('IN BLACKOUT NOW')) throw new Error('Blackout strip should show the current blackout share');
       if (BAD_TEXT.test(await block.innerText())) throw new Error('Blackout section shows invalid text');
     }
+    if (route === 'risk' && (await artifact('risk'))?.matrix) {
+      // Six channels by three kinds of evidence; the first cell with a lead opens its drill-down.
+      if (await page.locator('.risk-cell').count() !== 18) throw new Error('Risk matrix should have 18 cells');
+      await page.locator('.risk-cell:not(.placeholder)').first().click();
+      if (!await page.locator('.risk-drill').count()) throw new Error('Clicking a risk cell did not open its drill-down');
+    }
     if (route === 'europe') {
       const maps = page.locator('.card').filter({ has: page.locator('.eu-heatmap') });
       for (const map of await maps.all()) {

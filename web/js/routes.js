@@ -20,7 +20,7 @@ export const VIEWS = [
   { id: 'kshape', label: 'RELATIVE VALUE', group: 'sectors', artifact: 'kshape', module: 'kshape', takesArg: true },
   { id: 'sizek', label: 'SIZE & STYLE', group: 'sectors', artifact: 'sizek', module: 'sizek', takesArg: true, hidden: true, menu: 'kshape' },
   { id: 'chain', label: 'AI CHAIN', group: 'sectors', artifact: 'chain', module: 'chain', takesArg: true },
-  { id: 'risk', label: 'RISK', group: 'risk', artifact: ['risk', 'anchor'], module: 'risk' },
+  { id: 'risk', label: 'RISK', group: 'risk', artifact: 'risk', module: 'risk' },
   { id: 'rates', label: 'RATES & MACRO', group: 'risk', artifact: ['fixed_income', 'macro'], module: 'rates' },
   { id: 'priced', label: 'PRICED PATH', group: 'risk', artifact: 'priced', module: 'priced' },
   { id: 'positioning', label: 'POSITIONING', group: 'risk', artifact: 'positioning', module: 'positioning' },
