@@ -2037,6 +2037,10 @@ key = "growth"
 label = "GROWTH & DOLLAR"
 horizon = "slow"
 [[risk.sections]]
+key = "valuation"
+label = "VALUATION (THE CUSHION, NOT THE TIMING)"
+horizon = "slow"
+[[risk.sections]]
 key = "positioning"
 label = "POSITIONING (READ AT EXTREMES)"
 horizon = "slow"
@@ -2263,6 +2267,30 @@ threshold = 5
 note = "Change in the dollar index over 63 sessions; a fast rise tightens conditions for the rest of the world."
 
 [[risk.tiles]]
+key = "ecy"
+section = "valuation"
+label = "EXCESS CAPE YIELD"
+unit = "pct"
+risk_when = "low"
+threshold = 0.87
+note = "1/CAPE less the real 10-year rate (the 10-year yield less ten years' CPI inflation), each session from Shiller's latest month. Source: Robert J. Shiller, \"Irrational Exuberance\" data, shillerdata.com. The line is the post-1960 10th percentile."
+[[risk.tiles]]
+key = "erp_damodaran"
+section = "valuation"
+label = "IMPLIED ERP (DAMODARAN)"
+unit = "pct"
+risk_when = "low"
+note = "S&P 500 implied equity risk premium at the start of each month, as published. Source: Aswath Damodaran, pages.stern.nyu.edu/~adamodar."
+[[risk.tiles]]
+key = "term_premium"
+section = "valuation"
+label = "10Y TERM PREMIUM"
+unit = "pct"
+risk_when = "low"
+threshold = 0
+note = "Kim-Wright estimate (Federal Reserve Board) via FRED THREEFYTP10. Below 0: a 10-year bond pays less than rolling short ones."
+
+[[risk.tiles]]
 key = "cftc_es"
 section = "positioning"
 label = "S&P FUTURES · LEV FUNDS"
@@ -2319,6 +2347,13 @@ note = "Cboe total put/call ratio, 5-session average; history is fetched one ses
 #   scale = "percentile" (the default): the lead's percentile in its own last
 #     `years`, at `elevated` / `stressed`. For changes and spreads with no anchor.
 #   scale = "none": shown with its percentile, not coloured.
+#   scale = "valuation" (the VALUATION column): how thin the compensation for
+#     the row's risk is, by its percentile over the lead's whole history from
+#     `valuation_since` (or the cell's own `since`): cheap to the 25th, rich from
+#     the 75th, very rich from the 90th. A description of the cushion, not of
+#     timing: a thin equity premium has not told the next three months'
+#     drawdowns apart, only deeper falls over two years and lower ten-year
+#     returns (quantamental-lab docs/erp_history_v1.md).
 [risk.matrix]
 elevated = 75
 stressed = 95
@@ -2326,6 +2361,10 @@ years = 10
 min_years = 3
 stale_days_daily = 10
 stale_days_weekly = 21
+stale_days_monthly = 45
+# Post-war history: accounting, the index and the rates are closer to today's than 1881's.
+valuation_since = "1960-01-01"
+valuation = { cheap = 25, rich = 75, very_rich = 90 }
 
 [[risk.matrix.rows]]
 key = "equities"
@@ -2353,8 +2392,8 @@ label = "STRUCTURE"
 key = "technical"
 label = "TECHNICAL"
 [[risk.matrix.columns]]
-key = "fundamental"
-label = "FUNDAMENTAL / PREMIUM"
+key = "valuation"
+label = "VALUATION"
 
 [[risk.matrix.cells]]
 row = "equities"
@@ -2372,8 +2411,11 @@ bands = { elevated = -5.0, stressed = -10.0 }
 members = ["spx_drawdown", "spx_vs_200d", "breadth_200d", "rv20", "realised_corr", "cor1m", "dispersion"]
 [[risk.matrix.cells]]
 row = "equities"
-column = "fundamental"
-pending = "Equity risk premium: forward earnings yield less the real yield (next step)"
+column = "valuation"
+lead = "ecy"
+scale = "valuation"
+members = ["ecy", "erp_damodaran"]
+note = "The equity risk premium as Shiller's excess CAPE yield, from Robert J. Shiller's \"Irrational Exuberance\" data (shillerdata.com); Aswath Damodaran's implied ERP beside it as a cross-check. A thin premium has come before lower ten-year returns and deeper falls over two years, not before the next three months' drawdowns"
 [[risk.matrix.cells]]
 row = "treasuries"
 column = "structure"
@@ -2385,13 +2427,15 @@ column = "technical"
 lead = "move"
 scale = "bands"
 bands = { elevated = 100.0, stressed = 120.0 }
-members = ["move"]
+members = ["move", "real_10y"]
 [[risk.matrix.cells]]
 row = "treasuries"
-column = "fundamental"
-lead = "real_10y_3m"
-members = ["real_10y"]
-note = "The three-month change, not the level: the level's ten years are mostly the zero-rate decade, so any normal real yield ranks at the top. Term premium to follow (next step)"
+column = "valuation"
+lead = "term_premium"
+scale = "valuation"
+since = "1990-01-01"
+members = ["term_premium", "real_10y"]
+note = "The extra yield for holding a 10-year bond over rolling short ones (Kim and Wright, Federal Reserve Board, via FRED), from 1990. Thin or negative: bonds are rich"
 [[risk.matrix.cells]]
 row = "credit"
 column = "structure"
@@ -2409,12 +2453,12 @@ members = ["baa10y", "hy_oas"]
 note = "How fast BAA − 10Y moved over the last 20 sessions, not its level (ICE HY on FRED is only three years long)"
 [[risk.matrix.cells]]
 row = "credit"
-column = "fundamental"
+column = "valuation"
 lead = "baa10y"
-scale = "bands"
-bands = { elevated = 250.0, stressed = 300.0 }
-members = ["baa10y", "hy_oas", "ccc_oas", "ig_oas"]
-note = "Moody's BAA − 10Y, history to 1986 (ICE HY on FRED is only three years). The level separates drawdowns weakly: it widens far only in credit-led bear markets. Read here as stress; this column is to become VALUATION (how thin the compensation is), where a tight spread reads rich"
+scale = "valuation"
+risk_when = "low"
+members = ["baa10y", "hy_oas", "ig_oas", "ccc_oas"]
+note = "The spread as compensation: tight is rich. Moody's BAA − 10Y, from 1986 (ICE spreads on FRED cover three years). Its widening is read under TECHNICAL"
 [[risk.matrix.cells]]
 row = "volatility"
 column = "structure"
@@ -2431,11 +2475,11 @@ bands = { elevated = 25.0, stressed = 35.0 }
 members = ["vix", "rv20"]
 [[risk.matrix.cells]]
 row = "volatility"
-column = "fundamental"
+column = "valuation"
 lead = "vrp"
-scale = "bands"
-bands = { elevated = 0.0, stressed = -5.0 }
+scale = "valuation"
 members = ["vrp"]
+note = "What volatility sellers are paid: implied over realised, from 1990. Thin: insurance is cheap, so the market is rich. Deeply negative readings are crashes, where realised volatility runs ahead"
 [[risk.matrix.cells]]
 row = "cross_asset"
 column = "structure"
@@ -2447,11 +2491,8 @@ column = "technical"
 pending = "Stock–bond correlation (next step)"
 [[risk.matrix.cells]]
 row = "cross_asset"
-column = "fundamental"
-lead = "copper_oil"
-scale = "none"
-members = ["copper_oil", "ovx"]
-caution = "failed out of sample"
+column = "valuation"
+pending = "Stocks against credit: the earnings yield less the BAA yield (next step)"
 [[risk.matrix.cells]]
 row = "macro"
 column = "structure"
@@ -2460,15 +2501,15 @@ members = ["net_liquidity"]
 [[risk.matrix.cells]]
 row = "macro"
 column = "technical"
-pending = "—"
-[[risk.matrix.cells]]
-row = "macro"
-column = "fundamental"
 lead = "nfci"
 scale = "bands"
 bands = { elevated = 0.0, stressed = 0.5 }
-members = ["nfci"]
-note = "OFR Financial Stress Index to follow (next step)"
+members = ["nfci", "copper_oil", "ovx"]
+note = "Financial conditions (Chicago Fed). OFR Financial Stress Index to follow (next step). Copper/oil is shown for reference: it failed out of sample"
+[[risk.matrix.cells]]
+row = "macro"
+column = "valuation"
+pending = "EPS revision breadth: recorded since 2026-09, coloured once it has history"
 
 # PRICED PATH (RISK -> PRICED PATH): meeting probabilities from fed funds
 # futures beside Kalshi and Polymarket. A meeting where Kalshi's expected

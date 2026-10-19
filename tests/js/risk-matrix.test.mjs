@@ -89,7 +89,7 @@ test('a placeholder or an unknown state reads as grey; a real state is kept', ()
 });
 
 test('the state counts add up to the cell count', () => {
-  assert.deepEqual(stateCounts(CELLS), { stressed: 1, elevated: 4, calm: 9, unrated: 0, grey: 4 });
+  assert.deepEqual(stateCounts(CELLS), { stressed: 1, elevated: 4, calm: 9, unrated: 0, grey: 4, very_rich: 0, rich: 0, fair: 0, cheap: 0 });
   assert.equal(Object.values(stateCounts(CELLS)).reduce((a, b) => a + b, 0), 18);
 });
 
@@ -245,7 +245,7 @@ test('a lead shown but not coloured has its own bucket and words', async () => {
   const cell = { lead: 'copper_oil', state: 'unrated', scale: 'none' };
   assert.equal(stateOf(cell), 'unrated');
   assert.equal(stateWord('unrated'), 'not coloured');
-  assert.deepEqual(stateCounts([cell, { lead: null }]), { stressed: 0, elevated: 0, calm: 0, unrated: 1, grey: 1 });
+  assert.deepEqual(stateCounts([cell, { lead: null }]), { stressed: 0, elevated: 0, calm: 0, unrated: 1, grey: 1, very_rich: 0, rich: 0, fair: 0, cheap: 0 });
 });
 
 test('the scale text names the fixed lines, the percentile rule, or neither', async () => {
@@ -255,4 +255,14 @@ test('the scale text names the fixed lines, the percentile rule, or neither', as
   assert.match(scaleText({ lead: 'dxy_3m', scale: 'percentile' }, matrix), /last 10 years.*75th.*95th/);
   assert.match(scaleText({ lead: 'copper_oil', scale: 'none' }, matrix), /^Not coloured/);
   assert.equal(scaleText({ lead: null }, matrix), null);
+});
+
+test('a VALUATION cell reads in its own words and its own rule', () => {
+  const cell = { lead: 'ecy', column: 'valuation', state: 'very_rich', scale: 'valuation', since: '1960-01-01' };
+  assert.equal(stateOf(cell), 'very_rich');
+  assert.equal(stateWord('very_rich'), 'very rich');
+  const text = scaleText(cell, { valuation: { cheap: 25, rich: 75, very_rich: 90 } });
+  assert.match(text, /since 1960/);
+  assert.match(text, /rich when thinner than 75%.*very rich from 90%.*cheap when wider than 75%/);
+  assert.match(text, /not the timing/);
 });

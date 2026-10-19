@@ -1,7 +1,9 @@
 """RISK tab: how much risk the market is pricing, one tile per series.
 
 Sources are Cboe's index files and VIX futures, FRED, Yahoo, the CFTC's TFF
-report and the members' own closes (docs/risk_sources.md has the probe of each).
+report and the members' own closes (docs/risk_sources.md has the probe of each);
+the valuation tiles add Shiller's CAPE data and Damodaran's implied ERP, each
+named beside its values.
 A source that fails leaves its tiles empty with the reason; the others render.
 Nothing is combined into a score: see compute.risk.
 """
@@ -17,7 +19,7 @@ import pandas as pd
 from ..compute import anchor as A
 from ..compute import risk as R
 from ..compute import sentiment as S
-from ..sources import cboe, cftc, fred, snapshot_store, yahoo
+from ..sources import cboe, cftc, damodaran, fred, shiller, snapshot_store, yahoo
 from ..util import SourceRecord, describe_error, to_iso_date
 
 CBOE_INDICES = ("VIX", "VIX9D", "VIX3M", "VIX6M", "VIX1Y", "VVIX", "SKEW", "COR1M")
@@ -35,6 +37,8 @@ FRED_SERIES = {
     "NFCI": "Chicago Fed NFCI (weekly)",
     "DFII10": "10-year TIPS real yield",
     "OVXCLS": "Cboe crude oil volatility (OVX)",
+    "DGS10": "10-year Treasury yield",
+    "THREEFYTP10": "Kim-Wright 10-year term premium",
 }
 ARCHIVED_ICE = ("BAMLH0A0HYM2", "BAMLC0A0CM", "BAMLH0A3HYC")
 YAHOO_SYMBOLS = ("^MOVE", "HYG", "IEF", "LQD", "^GSPC", "DX-Y.NYB", "HG=F", "CL=F")
@@ -68,6 +72,8 @@ class _Inputs:
         self.cftc = pd.DataFrame()
         self.vx = pd.DataFrame()
         self.put_call = pd.Series(dtype=float)
+        self.shiller = pd.DataFrame()
+        self.damodaran = pd.Series(dtype=float)
         self.failed: dict[str, str] = {}
 
     def load(self, settings: dict) -> None:
@@ -123,8 +129,26 @@ class _Inputs:
                   [self.cftc["date"].max()] if not self.cftc.empty else [], 1 if not self.cftc.empty else 0, 1,
                   policy="weekly_release")
 
+        self._load_valuation()
         self._load_vx(int(settings.get("vx_contracts", 8)), session)
         self._load_put_call(int(settings.get("put_call_sessions", 260)))
+
+    def _load_valuation(self) -> None:
+        """Shiller's CAPE data and Damodaran's implied ERP: monthly research datasets."""
+        try:
+            self.shiller = shiller.fetch()
+        except Exception as exc:
+            self.failed["shiller"] = describe_error(exc)
+        rows = self.shiller.dropna(subset=["cape"]) if not self.shiller.empty else self.shiller
+        self._log("shiller", shiller.ATTRIBUTION, shiller.HOME_URL, [rows.index[-1]] if not rows.empty else [],
+                  0 if rows.empty else 1, 1, policy="monthly_release")
+        try:
+            self.damodaran = damodaran.fetch()
+        except Exception as exc:
+            self.failed["damodaran"] = describe_error(exc)
+        self._log("damodaran", damodaran.ATTRIBUTION, damodaran.HOME_URL,
+                  [self.damodaran.index[-1]] if not self.damodaran.empty else [],
+                  0 if self.damodaran.empty else 1, 1, policy="monthly_release")
 
     def _load_vx(self, count: int, session: date | None = None) -> None:
         today = date.today()
@@ -254,6 +278,9 @@ def _builders(inputs: _Inputs) -> dict[str, Callable[[], pd.Series]]:
         "hy_oas": lambda: get(f, "BAMLH0A0HYM2") * 100,
         "baa10y_4w": lambda: R.change_over(get(f, "BAA10Y") * 100, HY_OAS_CHANGE_SESSIONS),
         "real_10y_3m": lambda: R.change_over(get(f, "DFII10") * 100, REAL_YIELD_CHANGE_SESSIONS),
+        "ecy": lambda: R.excess_cape_yield(inputs.spx(), get(f, "DGS10"), inputs.shiller),
+        "erp_damodaran": lambda: inputs.damodaran,
+        "term_premium": lambda: get(f, "THREEFYTP10"),
         "ig_oas": lambda: get(f, "BAMLC0A0CM") * 100,
         "ccc_oas": lambda: get(f, "BAMLH0A3HYC") * 100,
         "cor1m": lambda: get(c, "COR1M"),
@@ -295,9 +322,14 @@ TILE_SOURCES = {
     "cftc_es": ["CFTC TFF 13874A"], "cftc_nq": ["CFTC TFF 209742"], "cftc_zn": ["CFTC TFF 043602"],
     "cftc_vx": ["CFTC TFF 1170E1"], "put_call": ["Cboe daily put/call"],
     "dxy_3m": ["Yahoo DX-Y.NYB"], "copper_oil": ["Yahoo HG=F, CL=F"],
+    "ecy": [shiller.ATTRIBUTION, "S&P 500 closes", "FRED DGS10"], "erp_damodaran": [damodaran.ATTRIBUTION],
+    "term_premium": ["FRED THREEFYTP10 (Kim and Wright, Federal Reserve Board)"],
 }
 TILE_BACKCALC = {"vix_term": "VIX3M", "vix9d_term": "VIX9D", "vvix": "VVIX", "skew": "SKEW", "cor1m": "COR1M"}
 WEEKLY_TILES = {"net_liquidity", "nfci", "cftc_es", "cftc_nq", "cftc_zn", "cftc_vx"}
+# Published once a month: no one-session or one-week change, and a matrix lead
+# from one is allowed a month and a half before it is stale.
+MONTHLY_TILES = {"erp_damodaran"}
 DIGITS = {"ratio": 3, "corr": 2, "pct_oi": 1, "bp": 0, "usd_bn": 0}
 
 
@@ -347,9 +379,13 @@ def _matrix_cell(row: str, column: str, spec: dict, *, tiles: dict, series_of: d
             "pending": spec.get("pending", None if lead else "—"), "members": list(spec.get("members", []))}
     if not lead:
         return cell
-    meta = tiles.get(lead) or DERIVED_LEADS[lead]
+    meta = dict(tiles.get(lead) or DERIVED_LEADS[lead])
+    # A cell may read its lead the other way round: a credit spread is stress
+    # when wide (its tile) and a thin premium, a rich market, when tight (VALUATION).
+    meta["risk_when"] = spec.get("risk_when", meta["risk_when"])
     # A weekly series is allowed a longer gap before it is stale, as its tile is read weekly.
-    stale_days = cfg["stale_days_weekly"] if lead in WEEKLY_TILES else cfg["stale_days_daily"]
+    stale_days = (cfg["stale_days_monthly"] if lead in MONTHLY_TILES
+                  else cfg["stale_days_weekly"] if lead in WEEKLY_TILES else cfg["stale_days_daily"])
     try:
         series = _lead_series(lead, series_of, builders)
     except Exception:  # noqa: BLE001 - a lead that did not build leaves its cell grey, never the panel
@@ -357,7 +393,14 @@ def _matrix_cell(row: str, column: str, spec: dict, *, tiles: dict, series_of: d
     reading = R.matrix_reading(series, risk_when=meta["risk_when"], as_of=as_of, years=cfg["years"],
                                min_years=cfg["min_years"], stale_days=stale_days,
                                thresholds={"elevated": cfg["elevated"], "stressed": cfg["stressed"]},
-                               scale=cell["scale"], bands=cell["bands"])
+                               scale=cell["scale"], bands=cell["bands"],
+                               since=spec.get("since", cfg.get("valuation_since")),
+                               valuation=cfg.get("valuation"))
+    if cell["scale"] == "valuation":
+        # The span actually read: the configured start, or the series' own first year if later.
+        since = pd.Timestamp(spec.get("since", cfg.get("valuation_since")))
+        first = series.dropna().index.min() if not series.dropna().empty else since
+        cell["since"] = max(since, pd.Timestamp(first)).strftime("%Y-%m-%d")
     digits = DIGITS.get(meta["unit"], 2)
     cell.update(reading)
     cell.update({"label": meta["label"], "unit": meta["unit"], "risk_when": meta["risk_when"],
@@ -375,6 +418,7 @@ def _matrix(settings: dict, builders: dict, series_of: dict, as_of: str | None) 
              for row in cfg["rows"] for column in cfg["columns"]]
     return {
         "thresholds": {"elevated": cfg["elevated"], "stressed": cfg["stressed"]},
+        "valuation": cfg.get("valuation"),
         "years": cfg["years"],
         "rows": [{"key": r["key"], "label": r["label"]} for r in cfg["rows"]],
         "columns": [{"key": c["key"], "label": c["label"]} for c in cfg["columns"]],
@@ -400,7 +444,8 @@ def build(ctx) -> dict:
                 series = builder() if builder else pd.Series(dtype=float)
                 series_of[key] = series
                 reading = R.tile(series, risk_when=spec["risk_when"], threshold=spec.get("threshold"),
-                                 digits=DIGITS.get(spec.get("unit"), 2), daily=key not in WEEKLY_TILES)
+                                 digits=DIGITS.get(spec.get("unit"), 2),
+                                 daily=key not in WEEKLY_TILES and key not in MONTHLY_TILES)
                 error = None if reading.get("value") is not None else "no observations"
             except Exception as exc:
                 reading, error = {"value": None, "date": None}, describe_error(exc)
@@ -414,7 +459,7 @@ def build(ctx) -> dict:
                 "threshold": spec.get("threshold"),
                 "note": spec.get("note"),
                 "sources": TILE_SOURCES.get(key, []),
-                "frequency": "weekly" if key in WEEKLY_TILES else "daily",
+                "frequency": "monthly" if key in MONTHLY_TILES else "weekly" if key in WEEKLY_TILES else "daily",
                 "backcalc": (f"{backcalc}'s early history is Cboe's back-calculation, not a record published at the time"
                              if backcalc in BACKCALC else None),
                 "error": error,

@@ -9,7 +9,7 @@ import { el, card, num, metaRow, tag, gap, DASH } from '../fmt.js';
 import { render } from '../charts.js';
 import { rangeSwitch, sliceRange, initialRange } from '../range.js';
 import { spark } from '../spark.js';
-import { cellsByRow, stateCounts, stateOf, stateWord, isPlaceholder, arrowFor, tagFor, scaleText } from '../risk-matrix.js';
+import { cellsByRow, stateCounts, stateOf, stateWord, isPlaceholder, arrowFor, tagFor, scaleText, VALUATION_STATES } from '../risk-matrix.js';
 
 const HORIZONS = [
   ['tactical', 'TACTICAL · 1–4 WEEKS'],
@@ -224,6 +224,9 @@ function sectionCard(section, data, { charts = 1, head = null, lead = null } = {
 // The matrix's headline words: how a cell's percentile reads, and the rule
 // that colours it. Both come from the build's own thresholds.
 function percentText(cell, years) {
+  if (cell.scale === 'valuation' && present(cell.percentile)) {
+    return `thinner than ${num(cell.percentile, 0)}% since ${(cell.since || '').slice(0, 4)}`;
+  }
   // A banded cell is read against its lines, so the lines are what it shows.
   if (cell.scale === 'bands' && cell.bands) {
     const dir = cell.risk_when === 'low' ? '≤' : '≥';
@@ -355,13 +358,19 @@ function matrixBlock(matrix, data) {
 
 // One line: how many cells sit in each state. Placeholders count as no reading.
 function summary(matrix) {
-  const counts = stateCounts(cellsByRow(matrix).flatMap((r) => r.cells));
+  const cells = cellsByRow(matrix).flatMap((r) => r.cells);
+  const isValuation = (cell) => cell?.column === 'valuation';
+  const counts = stateCounts(cells.filter((c) => !isValuation(c)));
+  const worth = stateCounts(cells.filter(isValuation));
+  const valuationText = VALUATION_STATES.filter((s) => worth[s]).map((s) => `${worth[s]} ${stateWord(s)}`)
+    .concat(worth.grey ? [`${worth.grey} no reading`] : []).join(' · ');
   return el('div', { class: 'risk-status' }, [
     el('span', {
       class: counts.stressed ? 'down risk-status-count' : 'risk-status-count',
       text: `${counts.stressed} stressed · ${counts.elevated} elevated · ${counts.calm} calm`
         + `${counts.unrated ? ` · ${counts.unrated} not coloured` : ''} · ${counts.grey} no reading`,
     }),
+    valuationText ? el('span', { class: 'risk-status-count dim', text: `VALUATION: ${valuationText}` }) : null,
   ]);
 }
 
@@ -433,7 +442,7 @@ function sentimentCard(g) {
 
 function methodNotes() {
   return [
-    'The matrix: six channels down the side (equities, treasuries, credit, volatility, cross-asset, macro), and three kinds of evidence across (structure, technical, fundamental / premium). Each cell has one lead series, read on one of two scales. Levels with a meaning in any decade (VIX, the VIX curve, MOVE, drawdowns, NFCI, BAA − 10Y) are read against fixed lines, set from where each stood in past drawdowns or from a line with its own meaning (an inverted VIX curve at 1.0, NFCI\'s average at 0); a ten-year percentile would compress the tail and let a quiet decade decide what elevated means. Changes and spreads with no outside anchor are read by their percentile in their own last ten years: elevated from the 75th, stressed from the 95th. A lead that failed its out-of-sample test is shown but not coloured. Grey means no reading yet. Cells are never averaged or scored; the other series in a cell open on click.',
+    'The matrix: six channels down the side (equities, treasuries, credit, volatility, cross-asset, macro), and three kinds of evidence across (structure, technical, fundamental / premium). Each cell has one lead series. The first two columns say how stressed the market is, read on one of two scales. Levels with a meaning in any decade (VIX, the VIX curve, MOVE, drawdowns, NFCI, BAA − 10Y) are read against fixed lines, set from where each stood in past drawdowns or from a line with its own meaning (an inverted VIX curve at 1.0, NFCI\'s average at 0); a ten-year percentile would compress the tail and let a quiet decade decide what elevated means. Changes and spreads with no outside anchor are read by their percentile in their own last ten years: elevated from the 75th, stressed from the 95th. A lead that failed its out-of-sample test is shown but not coloured. The VALUATION column says how thin the compensation is for holding each risk -- the equity risk premium (Shiller\'s excess CAPE yield, from Robert J. Shiller\'s "Irrational Exuberance" data, shillerdata.com, with Aswath Damodaran\'s implied ERP beside it), the term premium (Kim and Wright, via FRED), the BAA spread and the volatility premium -- against its whole history since 1960 (1990 where it starts then): cheap, fair, rich or very rich. It describes the cushion, not the timing. Grey means no reading yet. Cells are never averaged or scored; the other series in a cell open on click.',
     'Each tile is one series. 1Y = its percentile over the last 365 days; 1990– = over all the history the source serves, from the year shown; 1W = change over a week. Nothing is combined into a score.',
     'Thresholds were written in config/dashboard.toml before this page drew any series, and are not fitted to it. A red tile is past its line; NEW means it was not a week ago, CLEARED that it was. Positioning and the put/call ratio are read at extremes: the tails of their own history (≤5th or ≥95th percentile).',
     'Back-calculated history: VIX3M, VIX9D, VIX6M, VIX1Y, VVIX, SKEW and COR1M were launched after the first row of their files; the earlier part is Cboe\'s back-calculation. ICE BofA spreads (HY, IG, CCC) come from FRED, which serves the last three years only; the site archives what FRED serves each evening (a full-history baseline first, then the daily tail), and those archived dates extend the series back as the archive grows. The archive is current-vintage history, not point-in-time; Moody\'s Baa − 10Y runs to 1986.',

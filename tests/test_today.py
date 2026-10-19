@@ -498,3 +498,15 @@ def test_a_banded_cell_names_the_line_it_crossed():
             "bands": {"elevated": 25.0, "stressed": 35.0}}
     (item,), _ = today._matrix_items({**matrix, "cells": [back]}, "2026-10-16")
     assert item["title"].endswith("moved back to calm (elevated from 25bp)")
+
+
+def test_a_valuation_cell_says_how_thin_its_premium_is():
+    cell = {"row": "equities", "column": "valuation", "lead": "ecy", "label": "EXCESS CAPE YIELD", "value": 0.56,
+            "unit": "pct", "state": "very_rich", "state_prev": "rich", "percentile": 94.5, "scale": "valuation",
+            "since": "1960-01-01", "evidence": "description"}
+    matrix = {"rows": [{"key": "equities", "label": "EQUITIES"}], "cells": [cell]}
+    (item,), ongoing = today._matrix_items(matrix, "2026-10-16")
+    assert item["title"] == ("Equities · valuation: EXCESS CAPE YIELD moved to very rich "
+                             "(premium thinner than 94% of the time since 1960)")
+    assert item["detail"].endswith("rich before")
+    assert ongoing == [], "a rich market is not an ongoing stress"

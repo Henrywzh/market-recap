@@ -137,6 +137,24 @@ def pct_change_over(series: pd.Series, periods: int) -> pd.Series:
     return ((clean / clean.shift(periods) - 1) * 100).dropna()
 
 
+def excess_cape_yield(spx: pd.Series, gs10: pd.Series, shiller: pd.DataFrame) -> pd.Series:
+    """Shiller's excess CAPE yield, each session: 1/CAPE less the real 10-year rate, in %.
+
+    His own monthly figure is 100 / CAPE - (GS10 - the CPI's ten-year annualised
+    change), which this reproduces exactly at his month's average price. A
+    session reads its month's row (or the latest one before it): CAPE scaled by
+    the day's close against that month's average price, and the day's 10-year
+    yield less that month's inflation.
+    """
+    rows = shiller[["price", "cape", "infl_10y"]].dropna()
+    days = pd.concat([_clean(spx).rename("spx"), _clean(gs10).rename("gs10")], axis=1).dropna()
+    if rows.empty or days.empty:
+        return pd.Series(dtype=float)
+    month = rows.reindex(days.index.union(rows.index)).ffill().reindex(days.index)
+    cape = month["cape"] * days["spx"] / month["price"]
+    return (100 / cape - (days["gs10"] - month["infl_10y"])).dropna()
+
+
 def smoothed(series: pd.Series, window: int) -> pd.Series:
     return _clean(series).rolling(window, min_periods=window).mean().dropna()
 
@@ -263,7 +281,12 @@ def term_structure(points: dict[str, pd.Series], *, lags_days: tuple[int, ...] =
 # meaning of its own (VIX 35 is stress in any decade). "percentile": where the
 # lead sits in its own last ten years, for changes and spreads with no outside
 # anchor. "none": shown, not coloured (a lead that failed its test). The
-# percentile is reported on every scale, as a description.
+# percentile is reported on every scale, as a description. "valuation": how
+# thin the compensation is, by its percentile in the lead's whole history from
+# `since` (not ten years: a decade of zero rates would set the norm), read as
+# cheap / fair / rich / very rich. A valuation reading describes the cushion,
+# not the timing: it does not separate the next three months' drawdowns
+# (quantamental-lab docs/erp_history_v1.md).
 
 def risk_percentile(series: pd.Series, value: float, risk_when: str) -> float | None:
     """Where ``value`` sits in ``series``, 0-100, in the risk direction.
@@ -311,14 +334,27 @@ def band_state(value: float | None, bands: dict, risk_when: str) -> str:
     return "calm"
 
 
+def valuation_state(pct: float | None, thresholds: dict) -> str:
+    """A thin-premium percentile in words: rich from the 75th, very rich from the 90th, cheap to the 25th."""
+    if pct is None:
+        return "grey"
+    if pct >= thresholds["very_rich"]:
+        return "very_rich"
+    if pct >= thresholds["rich"]:
+        return "rich"
+    if pct <= thresholds["cheap"]:
+        return "cheap"
+    return "fair"
+
+
 def _last_years(series: pd.Series, years: int) -> pd.Series:
     """The observations in the ``years`` up to and including the last one."""
     return series[series.index > series.index[-1] - pd.DateOffset(years=years)]
 
 
 def _observation_state(clean: pd.Series, *, risk_when: str, years: int, min_years: float,
-                       thresholds: dict, scale: str = "percentile", bands: dict | None = None
-                       ) -> tuple[float | None, str]:
+                       thresholds: dict, scale: str = "percentile", bands: dict | None = None,
+                       since: str | None = None, valuation: dict | None = None) -> tuple[float | None, str]:
     """Percentile and state of the last observation.
 
     The percentile needs ``min_years`` of history before that observation; a
@@ -327,6 +363,10 @@ def _observation_state(clean: pd.Series, *, risk_when: str, years: int, min_year
     last = clean.index[-1]
     value = float(clean.iloc[-1])
     long_enough = (last - clean.index[0]).days / 365.25 >= min_years
+    if scale == "valuation":
+        window = clean[clean.index >= pd.Timestamp(since)] if since else clean
+        pct = risk_percentile(window, value, risk_when) if long_enough else None
+        return pct, valuation_state(pct, valuation)
     pct = risk_percentile(_last_years(clean, years), value, risk_when) if long_enough else None
     if scale == "bands":
         return pct, band_state(value, bands, risk_when)
@@ -357,7 +397,7 @@ def _month_change(clean: pd.Series, *, risk_when: str, years: int) -> tuple[floa
 
 def matrix_reading(series: pd.Series, *, risk_when: str, as_of: str | None, years: int,
                    min_years: float, stale_days: int, thresholds: dict, scale: str = "percentile",
-                   bands: dict | None = None) -> dict:
+                   bands: dict | None = None, since: str | None = None, valuation: dict | None = None) -> dict:
     """One matrix cell's reading from its lead series, on its ``scale``.
 
     Grey (no percentile, state, change or previous state) when the series is
@@ -375,16 +415,21 @@ def matrix_reading(series: pd.Series, *, risk_when: str, as_of: str | None, year
     reading["date"] = last.strftime("%Y-%m-%d")
     stale = as_of is not None and (pd.Timestamp(as_of) - last).days > stale_days
     how = {"risk_when": risk_when, "years": years, "min_years": min_years, "thresholds": thresholds,
-           "scale": scale, "bands": bands}
+           "scale": scale, "bands": bands, "since": since, "valuation": valuation}
     pct, state = _observation_state(clean, **how)
     if stale or state == "grey":
         return reading
     reading["state"] = state
     if pct is not None:
         reading["percentile"] = round(pct, 1)
-        # The span the percentile was read over: up to ``years``, less where the source is shorter.
-        window = clean[clean.index >= last - pd.DateOffset(years=years)]
-        reading["years_used"] = round(min(years, (last - window.index[0]).days / 365.25), 1)
+        # The span the percentile was read over: up to ``years`` (a valuation
+        # reading: from ``since``), less where the source is shorter.
+        if scale == "valuation":
+            start = clean.index[0] if not since else max(clean.index[0], pd.Timestamp(since))
+            reading["years_used"] = round((last - start).days / 365.25, 1)
+        else:
+            window = clean[clean.index >= last - pd.DateOffset(years=years)]
+            reading["years_used"] = round(min(years, (last - window.index[0]).days / 365.25), 1)
     if len(clean) > 1:
         # The same test one observation earlier: the window ends there.
         reading["state_prev"] = _observation_state(clean.iloc[:-1], **how)[1]

@@ -384,9 +384,9 @@ def _matrix_item(cell: dict, labels: dict, as_of: str, *, new: bool) -> dict:
     where = f"{labels.get(cell['row'], cell['row']).capitalize()} · {cell['column']}"
     value, unit = _number(cell.get("value")), cell.get("unit")
     if new:
-        verb = "moved back to" if cell["state"] == "calm" else "moved to"
-        title = f"{where}: {label} {verb} {cell['state']} ({_basis(cell)})"
-        detail = f"{_fmt(value, unit)} now; {cell['state_prev']} before"
+        verb = "moved back to" if cell["state"] in ("calm", "fair") else "moved to"
+        title = f"{where}: {label} {verb} {_state_words(cell['state'])} ({_basis(cell)})"
+        detail = f"{_fmt(value, unit)} now; {_state_words(cell['state_prev'])} before"
     else:
         title = f"{where}: {label} is stressed ({_basis(cell)})"
         detail = f"{_fmt(value, unit)} now"
@@ -416,6 +416,10 @@ def _matrix_items(matrix: dict, as_of: str) -> tuple[list, list]:
     return changed, ongoing
 
 
+def _state_words(state: str | None) -> str:
+    return (state or "").replace("_", " ")
+
+
 def _basis(cell: dict) -> str:
     """Why the cell has its colour: the fixed line it crossed, or its percentile."""
     bands = cell.get("bands")
@@ -424,6 +428,10 @@ def _basis(cell: dict) -> str:
         line = bands["elevated"] if cell["state"] == "calm" else bands[cell["state"]]
         suffix = {"bp": "bp", "pct": "%"}.get(cell.get("unit"), "")
         return f"{cell['state'] if cell['state'] != 'calm' else 'elevated'} from {line:g}{suffix}"
+    if cell.get("scale") == "valuation":
+        since = (cell.get("since") or "")[:4]
+        return f"premium thinner than {cell['percentile']:.0f}% of the time since {since}" if since \
+            else f"premium thinner than {cell['percentile']:.0f}% of its history"
     return f"{_ordinal(cell['percentile'])} pct of {_span(cell)}"
 
 

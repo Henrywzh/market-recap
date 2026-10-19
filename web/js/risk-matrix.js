@@ -4,7 +4,11 @@
 
 const STATE_WORDS = {
   calm: 'calm', elevated: 'elevated', stressed: 'stressed', unrated: 'not coloured', grey: 'no reading',
+  cheap: 'cheap', fair: 'fair', rich: 'rich', very_rich: 'very rich',
 };
+// The VALUATION column's words: how thin the compensation is, not how stressed
+// the market is. They are counted on a line of their own.
+export const VALUATION_STATES = ['very_rich', 'rich', 'fair', 'cheap'];
 
 // A cell with no lead is a placeholder: its series is still to come.
 export function isPlaceholder(cell) {
@@ -37,7 +41,7 @@ export function cellsByRow(matrix) {
 // Counts for the summary line. Every cell lands in exactly one bucket, so the
 // numbers add up to the matrix's cell count.
 export function stateCounts(cells) {
-  const counts = { stressed: 0, elevated: 0, calm: 0, unrated: 0, grey: 0 };
+  const counts = { stressed: 0, elevated: 0, calm: 0, unrated: 0, grey: 0, very_rich: 0, rich: 0, fair: 0, cheap: 0 };
   for (const cell of cells) counts[stateOf(cell)] += 1;
   return counts;
 }
@@ -83,6 +87,13 @@ export function scaleText(cell, matrix, fmt = String) {
     return `Colour: fixed lines, elevated ${dir} ${fmt(cell.bands.elevated)}, stressed ${dir} ${fmt(cell.bands.stressed)}, `
       + 'set from where this series stood in past S&P 500 drawdowns (Treasury series: in past Treasury drawdowns) '
       + 'or from a line with its own meaning. The percentile is a description only.';
+  }
+  if (cell.scale === 'valuation') {
+    const since = cell.since ? cell.since.slice(0, 4) : 'the start of its history';
+    const v = matrix?.valuation || {};
+    return `Colour: how thin the premium is against its whole history since ${since}: `
+      + `rich when thinner than ${v.rich ?? 75}% of it, very rich from ${v.very_rich ?? 90}%, cheap when wider than ${100 - (v.cheap ?? 25)}%. `
+      + 'It describes the cushion, not the timing: a thin premium has not told the next three months apart.';
   }
   if (cell.scale === 'none') return 'Not coloured: this lead failed its out-of-sample test, so it is shown as a description only.';
   const th = matrix?.thresholds || {};

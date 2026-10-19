@@ -1323,6 +1323,11 @@ a.today-row:hover { background: var(--panel-alt); }
 .risk-cell.stressed { border-color: color-mix(in srgb, var(--down) 70%, transparent); background: color-mix(in srgb, var(--down) 18%, var(--panel)); }
 .risk-cell.grey { color: var(--text-dim); background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--border-strong) 35%, transparent) 6px 7px), var(--panel); }
 .risk-cell.unrated .risk-cell-value { color: var(--text-dim); }
+/* VALUATION states: an outline in the state's tone, not a fill, so a rich
+   market never reads as a stressed one. */
+.risk-cell.rich { border-color: color-mix(in srgb, var(--accent) 70%, transparent); border-style: dashed; }
+.risk-cell.very_rich { border-color: color-mix(in srgb, var(--down) 75%, transparent); border-style: dashed; border-width: 2px; }
+.risk-cell.cheap { border-color: color-mix(in srgb, var(--up) 60%, transparent); border-style: dashed; }
 .risk-cell.placeholder { cursor: default; font-size: 11px; justify-content: center; }
 .risk-cell.selected { box-shadow: inset 0 0 0 2px var(--accent); }
 .risk-cell-col { display: none; font-size: 9.5px; letter-spacing: 0.08em; color: var(--text-dim); }

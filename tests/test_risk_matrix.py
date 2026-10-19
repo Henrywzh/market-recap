@@ -177,38 +177,49 @@ def test_a_lead_that_fails_leaves_its_cell_grey_and_the_others_render():
 # The leads the real config must produce, one per row and column; None is a placeholder.
 EXPECTED_LEADS = {
     ("equities", "structure"): "vix_term", ("equities", "technical"): "spx_drawdown",
-    ("equities", "fundamental"): None,
+    ("equities", "valuation"): "ecy",
     ("treasuries", "structure"): None, ("treasuries", "technical"): "move",
-    ("treasuries", "fundamental"): "real_10y_3m",
+    ("treasuries", "valuation"): "term_premium",
     ("credit", "structure"): "hyg_ief", ("credit", "technical"): "baa10y_4w",
-    ("credit", "fundamental"): "baa10y",
+    ("credit", "valuation"): "baa10y",
     ("volatility", "structure"): "vvix", ("volatility", "technical"): "vix",
-    ("volatility", "fundamental"): "vrp",
+    ("volatility", "valuation"): "vrp",
     ("cross_asset", "structure"): "dxy_3m", ("cross_asset", "technical"): None,
-    ("cross_asset", "fundamental"): "copper_oil",
-    ("macro", "structure"): "net_liquidity", ("macro", "technical"): None,
-    ("macro", "fundamental"): "nfci",
+    ("cross_asset", "valuation"): None,
+    ("macro", "structure"): "net_liquidity", ("macro", "technical"): "nfci",
+    ("macro", "valuation"): None,
 }
+RISK_STATES = ("calm", "elevated", "stressed")
+VALUATION_STATES = ("cheap", "fair", "rich", "very_rich")
+
+
+def _real_matrix() -> dict:
+    settings = load_config()["risk"]
+    series = _daily(np.cumsum(np.random.default_rng(3).normal(size=1460)) + 100)
+    keys = [t["key"] for t in settings["tiles"]] + list(risk.DERIVED_LEADS)
+    return risk._matrix(settings, {key: (lambda s=series: s) for key in keys}, {}, END)
 
 
 def test_the_real_config_builds_eighteen_cells_with_their_leads_and_risk_directions():
     settings = load_config()["risk"]
-    series = _daily(np.cumsum(np.random.default_rng(3).normal(size=1460)) + 100)
-    keys = [t["key"] for t in settings["tiles"]] + list(risk.DERIVED_LEADS)
-    builders = {key: (lambda s=series: s) for key in keys}
-    matrix = risk._matrix(settings, builders, {}, END)
+    matrix = _real_matrix()
     cells = matrix["cells"]
     assert len(cells) == 18
     assert {(c["row"], c["column"]): c["lead"] for c in cells} == EXPECTED_LEADS
+    assert [c["key"] for c in matrix["columns"]] == ["structure", "technical", "valuation"]
     directions = {t["key"]: t["risk_when"] for t in settings["tiles"]}
     directions.update({k: v["risk_when"] for k, v in risk.DERIVED_LEADS.items()})
     for cell in cells:
         if cell["lead"] is None:
             continue
-        assert cell["risk_when"] == directions[cell["lead"]]
         assert cell["percentile"] is not None
-        expected = ("unrated",) if cell["scale"] == "none" else ("calm", "elevated", "stressed")
-        assert cell["state"] in expected
+        if cell["column"] == "valuation":
+            # Every valuation lead is read as a premium: thin is the risk, whatever its tile says.
+            assert cell["scale"] == "valuation" and cell["risk_when"] == "low", cell["lead"]
+            assert cell["state"] in VALUATION_STATES
+        else:
+            assert cell["risk_when"] == directions[cell["lead"]]
+            assert cell["state"] in RISK_STATES
 
 
 def test_every_banded_cell_has_two_lines_in_its_risk_direction():
@@ -216,31 +227,29 @@ def test_every_banded_cell_has_two_lines_in_its_risk_direction():
     directions = {t["key"]: t["risk_when"] for t in settings["tiles"]}
     directions.update({k: v["risk_when"] for k, v in risk.DERIVED_LEADS.items()})
     banded = [c for c in settings["matrix"]["cells"] if c.get("scale") == "bands"]
-    assert len(banded) == 10
+    assert len(banded) == 8
     for cell in banded:
         elevated, stressed = cell["bands"]["elevated"], cell["bands"]["stressed"]
         # The stressed line lies further in the risk direction than the elevated one.
         assert (stressed > elevated) if directions[cell["lead"]] == "high" else (stressed < elevated), cell["lead"]
 
 
-def test_the_real_config_keeps_its_members_notes_caution_and_pending_text():
-    settings = load_config()["risk"]
-    series = _daily(np.cumsum(np.random.default_rng(3).normal(size=1460)) + 100)
-    builders = {key: (lambda s=series: s) for key in [t["key"] for t in settings["tiles"]] + list(risk.DERIVED_LEADS)}
-    cells = {(c["row"], c["column"]): c for c in risk._matrix(settings, builders, {}, END)["cells"]}
+def test_the_real_config_keeps_its_members_notes_and_pending_text():
+    cells = {(c["row"], c["column"]): c for c in _real_matrix()["cells"]}
     assert cells[("equities", "structure")]["members"] == [
         "vix_term", "vix9d_term", "skew", "vx_front", "put_call", "cftc_es", "cftc_nq"]
     assert cells[("credit", "technical")]["members"] == ["baa10y", "hy_oas"]
-    assert cells[("cross_asset", "fundamental")]["caution"] == "failed out of sample"
-    assert cells[("cross_asset", "fundamental")]["members"] == ["copper_oil", "ovx"]
-    assert cells[("equities", "fundamental")]["pending"] == \
-        "Equity risk premium: forward earnings yield less the real yield (next step)"
+    assert cells[("equities", "valuation")]["members"] == ["ecy", "erp_damodaran"]
+    # The datasets' authors are named beside the values derived from them.
+    assert "Robert J. Shiller" in cells[("equities", "valuation")]["note"]
+    assert "Damodaran" in cells[("equities", "valuation")]["note"]
+    # The synthetic series start in 2022: a cell names the span it actually read, not the configured start.
+    assert cells[("treasuries", "valuation")]["since"] == cells[("credit", "valuation")]["since"]
+    assert cells[("credit", "valuation")]["since"] > "2022-01-01"
+    assert cells[("macro", "technical")]["members"] == ["nfci", "copper_oil", "ovx"]
     assert cells[("cross_asset", "technical")]["pending"] == "Stock–bond correlation (next step)"
     assert cells[("treasuries", "structure")]["members"] == ["cftc_zn"]
-    assert cells[("treasuries", "fundamental")]["note"].endswith("Term premium to follow (next step)")
-    assert cells[("credit", "fundamental")]["members"] == ["baa10y", "hy_oas", "ccc_oas", "ig_oas"]
-    assert cells[("macro", "fundamental")]["note"] == "OFR Financial Stress Index to follow (next step)"
-    assert cells[("macro", "technical")]["pending"] == "—"
+    assert cells[("macro", "valuation")]["pending"].startswith("EPS revision breadth")
 
 
 # --- fixed bands and the unrated scale ---------------------------------------------
@@ -280,3 +289,58 @@ def test_an_unrated_cell_shows_its_percentile_but_no_colour():
                                thresholds=THRESHOLDS, scale="none")
     assert reading["state"] == "unrated" and reading["state_prev"] == "unrated"
     assert reading["percentile"] == 100.0
+
+
+# --- the valuation scale and the excess CAPE yield ----------------------------------
+
+VALUATION = {"cheap": 25, "rich": 75, "very_rich": 90}
+
+
+def test_valuation_words_at_their_lines():
+    assert [R.valuation_state(p, VALUATION) for p in (25.0, 25.1, 74.9, 75.0, 89.9, 90.0)] == \
+        ["cheap", "fair", "fair", "rich", "rich", "very_rich"]
+    assert R.valuation_state(None, VALUATION) == "grey"
+
+
+def test_a_valuation_reading_uses_the_whole_history_from_since_not_ten_years():
+    # Wide for decades, then a thin decade: within ten years today is ordinary, since 1960 it is thin.
+    days = pd.bdate_range("1960-01-01", END)
+    recent = days >= pd.Timestamp("2016-01-01")
+    values = np.full(len(days), 5.0)
+    values[recent] = np.linspace(1.0, 1.4, recent.sum())
+    series = pd.Series(values, index=days)
+    series.iloc[-1] = 1.2
+    reading = R.matrix_reading(series, risk_when="low", as_of=END, years=10, min_years=3, stale_days=10,
+                               thresholds=THRESHOLDS, scale="valuation", since="1960-01-01", valuation=VALUATION)
+    assert reading["state"] == "very_rich" and reading["percentile"] > 90
+    assert reading["years_used"] > 60
+    ten_years = R.matrix_reading(series, risk_when="low", as_of=END, years=10, min_years=3, stale_days=10,
+                                 thresholds=THRESHOLDS, scale="percentile")
+    assert ten_years["percentile"] < 75
+
+
+def test_a_cell_can_read_its_lead_the_other_way_round():
+    settings = _settings([{"row": "credit", "column": "valuation", "lead": "baa10y", "scale": "valuation",
+                           "risk_when": "low", "members": []}], rows=(("credit", "CREDIT"),), columns=(("valuation", "VALUATION"),),
+                         tiles=[{"key": "baa10y", "label": "BAA − 10Y", "unit": "bp", "risk_when": "high"}])
+    settings["matrix"].update({"valuation_since": "1960-01-01", "valuation": VALUATION})
+    tight_now = _daily(np.r_[np.linspace(400, 200, 365 * 4 - 1), 150.0])
+    (cell,) = risk._matrix(settings, {"baa10y": lambda: tight_now}, {}, END)["cells"]
+    assert cell["risk_when"] == "low" and cell["state"] == "very_rich"
+
+
+def test_the_excess_cape_yield_matches_shillers_formula_and_moves_with_the_close():
+    months = pd.date_range("2026-08-01", periods=2, freq="MS")
+    shiller = pd.DataFrame({"price": [100.0, 110.0], "cape": [25.0, 27.5], "infl_10y": [3.0, 3.0]}, index=months)
+    days = pd.bdate_range("2026-09-01", "2026-09-04")
+    spx = pd.Series([110.0, 110.0, 121.0, 99.0], index=days)
+    gs10 = pd.Series(5.0, index=days)
+    ecy = R.excess_cape_yield(spx, gs10, shiller)
+    # At the month's average price it is Shiller's own: 100 / 27.5 - (5 - 3).
+    assert ecy.iloc[0] == pytest.approx(100 / 27.5 - 2.0)
+    # Ten percent higher: CAPE 30.25.
+    assert ecy.iloc[2] == pytest.approx(100 / 30.25 - 2.0)
+    # A day after his last month reads that month's row.
+    later = R.excess_cape_yield(pd.Series([110.0], index=[pd.Timestamp("2026-10-15")]),
+                                pd.Series([5.0], index=[pd.Timestamp("2026-10-15")]), shiller)
+    assert later.iloc[0] == pytest.approx(100 / 27.5 - 2.0)

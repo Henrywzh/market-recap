@@ -146,7 +146,7 @@ def _risk_budget(f: _Feed) -> dict:
         out["sentiment"] = {**_pick(risk.get("sentiment"), "score", "rating", "date", "week_ago", "month_ago", "year_ago"),
                             "source": f.url("risk")}
         # The RISK matrix, one line per cell: a grey placeholder keeps its row and column, with no lead.
-        out["risk_matrix"] = [_pick(c, "row", "column", "label", "value", "unit", "percentile", "state", "scale", "bands",
+        out["risk_matrix"] = [_pick(c, "row", "column", "label", "value", "unit", "percentile", "state", "scale", "bands", "since",
                                     "evidence", "caution")
                               for c in (risk.get("matrix") or {}).get("cells") or []]
     if overview and overview.get("vol"):
