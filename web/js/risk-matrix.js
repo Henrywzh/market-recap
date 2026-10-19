@@ -110,3 +110,17 @@ export function upcomingFor(events, channel, asOf, limit = 3) {
     .sort((a, b) => a.date.localeCompare(b.date) || (a.importance === 'high' ? -1 : 1))
     .slice(0, limit);
 }
+
+// The short word in a cell's corner: the same state words as the summary line,
+// in capitals, so a cell and the count that includes it always agree.
+export function chipWord(cell) {
+  return stateWord(stateOf(cell)).toUpperCase();
+}
+
+// The summary line's counts as parts, each with the tone its state earns:
+// stressed red, elevated and rich amber, very rich red; everything else plain.
+// The caller picks the states, so the order and the zero-count rules stay there.
+const COUNT_TONE = { stressed: 'down', very_rich: 'down', elevated: 'amber', rich: 'amber' };
+export function countParts(counts, states) {
+  return states.map((state) => ({ text: `${counts[state]} ${stateWord(state)}`, tone: COUNT_TONE[state] || '' }));
+}

@@ -656,8 +656,16 @@ function methodNotes(data) {
   ];
 }
 
+// The first `shown` rows, and the rest to fold under a "N more" line. A short
+// list folds nothing.
+export function splitRows(rows, shown = 2) {
+  const list = rows || [];
+  return { shown: list.slice(0, shown), folded: list.slice(shown) };
+}
+
 // Reports heavy enough to move an index (or on the watchlist): the next
-// week's cards, and the ones the last session traded on.
+// week's cards, and the ones the last session traded on. Only the first two
+// upcoming reporters show; the rest fold, so a long week does not bury the page.
 async function eventLead(events) {
   if (!events || (!events.upcoming?.length && !events.reported?.length)) return null;
   const t = events.thresholds || {};
@@ -669,7 +677,15 @@ async function eventLead(events) {
   if (events.upcoming?.length) {
     const prices = await Promise.all(events.upcoming.map((p) => loadPrices(p.symbol)));
     nodes.push(el('div', { class: 'section-sub', text: `REPORTING IN THE NEXT ${events.lead_days} DAYS · SPX ≥ ${t.SPX}% OR NDX ≥ ${t.NDX}% OR WATCHLIST` }));
-    nodes.push(el('div', { class: 'event-lead' }, events.upcoming.map((p, i) => eventCard(p, events.as_of, { compact: true, prices: prices[i] }))));
+    const cards = events.upcoming.map((p, i) => eventCard(p, events.as_of, { compact: true, prices: prices[i] }));
+    const { shown, folded } = splitRows(cards, 2);
+    nodes.push(el('div', { class: 'event-lead' }, shown));
+    if (folded.length) {
+      nodes.push(el('details', { class: 'event-more' }, [
+        el('summary', { text: `${folded.length} more reporting` }),
+        el('div', { class: 'event-lead' }, folded),
+      ]));
+    }
   }
   return el('div', {}, nodes);
 }

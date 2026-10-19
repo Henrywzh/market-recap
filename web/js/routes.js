@@ -74,7 +74,7 @@ export function cleanThemeArg(value) {
   return THEME_ARG_PATTERN.test(text) ? text : null;
 }
 
-// The TICKER page carries its sub-tab after the symbol (NVDA/REPORT); the view
+// The TICKER page carries its sub-tab after the symbol (NVDA/VALUATION); the view
 // name is plain letters, so BRK.B/FINANCIALS stays unambiguous.
 const TICKER_VIEW_PATTERN = /^[A-Z]{3,12}$/;
 
@@ -118,7 +118,7 @@ export function parseHash(hash, search = '') {
   return { id, arg: fromHash || fromQuery || null };
 }
 
-// A slash inside the argument (the TICKER sub-tab, NVDA/REPORT) stays readable.
+// A slash inside the argument (the TICKER sub-tab, NVDA/VALUATION) stays readable.
 export function hashFor(id, arg = null) {
   return arg ? `${id}/${encodeURIComponent(arg).replace(/%2F/gi, '/')}` : id;
 }

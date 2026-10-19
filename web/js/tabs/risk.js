@@ -9,7 +9,7 @@ import { el, card, num, metaRow, tag, gap, DASH } from '../fmt.js';
 import { render } from '../charts.js';
 import { rangeSwitch, sliceRange, initialRange } from '../range.js';
 import { spark } from '../spark.js';
-import { cellsByRow, stateCounts, stateOf, stateWord, isPlaceholder, arrowFor, tagFor, scaleText, VALUATION_STATES, upcomingFor } from '../risk-matrix.js';
+import { cellsByRow, stateCounts, stateOf, stateWord, chipWord, countParts, isPlaceholder, arrowFor, tagFor, scaleText, VALUATION_STATES, upcomingFor } from '../risk-matrix.js';
 
 const HORIZONS = [
   ['tactical', 'TACTICAL · 1–4 WEEKS'],
@@ -267,7 +267,17 @@ function cellLabel(row, column, cell, years) {
 function placeholderNode(row, column, cell) {
   return el('div', { class: 'risk-cell grey placeholder', 'aria-label': `${row.label} · ${column.label}: no series yet` }, [
     el('span', { class: 'risk-cell-col', text: column.label }),
+    cellHead(null, cell),
     el('span', { class: 'risk-cell-pending dim', text: cell?.pending || DASH }),
+  ]);
+}
+
+// The label and the state chip on one line. Calm gets a quiet chip too, so every
+// cell reads the same way; the chip's words repeat the cell's state in capitals.
+function cellHead(label, cell) {
+  return el('span', { class: 'risk-cell-head' }, [
+    label ? el('span', { class: 'risk-cell-label', text: label }) : null,
+    el('span', { class: `risk-chip risk-chip-${stateOf(cell)}`, text: chipWord(cell) }),
   ]);
 }
 
@@ -279,6 +289,7 @@ function cellButton(row, column, cell, years, onPick) {
       'aria-label': `${row.label} · ${column.label}: ${cell.pending || 'no series yet'}`, onclick: onPick,
     }, [
       el('span', { class: 'risk-cell-col', text: column.label }),
+      cellHead(null, cell),
       el('span', { class: 'risk-cell-pending dim', text: cell.pending || DASH }),
     ]);
   }
@@ -292,7 +303,7 @@ function cellButton(row, column, cell, years, onPick) {
     onclick: onPick,
   }, [
     el('span', { class: 'risk-cell-col', text: column.label }),
-    el('span', { class: 'risk-cell-label', text: cell.label }),
+    cellHead(cell.label, cell),
     el('span', { class: 'risk-cell-reading' }, [
       el('span', { class: 'risk-cell-value', text: formatValue(cell.value, cell.unit) }),
       arrow ? el('span', { class: `risk-cell-arrow ${arrow.tone}`, title: arrow.word, text: arrow.arrow }) : null,
@@ -368,20 +379,22 @@ function matrixBlock(matrix, data, calendarOf = () => null) {
 }
 
 // One line: how many cells sit in each state. Placeholders count as no reading.
+// Each count carries its state's tone, so the reds and ambers read at a glance.
 function summary(matrix) {
   const cells = cellsByRow(matrix).flatMap((r) => r.cells);
   const isValuation = (cell) => cell?.column === 'valuation';
   const counts = stateCounts(cells.filter((c) => !isValuation(c)));
   const worth = stateCounts(cells.filter(isValuation));
-  const valuationText = VALUATION_STATES.filter((s) => worth[s]).map((s) => `${worth[s]} ${stateWord(s)}`)
-    .concat(worth.grey ? [`${worth.grey} no reading`] : []).join(' · ');
+  const stateStates = ['stressed', 'elevated', 'calm', ...(counts.unrated ? ['unrated'] : []), 'grey'];
+  const valuationStates = [...VALUATION_STATES, 'grey'].filter((s) => worth[s]);
+  const parts = (list) => list.flatMap((part, i) => [i ? el('span', { class: 'dim', text: ' · ' }) : null,
+    el('span', { class: part.tone ? `risk-count risk-count-${part.tone}` : 'risk-count', text: part.text })]);
   return el('div', { class: 'risk-status' }, [
-    el('span', {
-      class: counts.stressed ? 'down risk-status-count' : 'risk-status-count',
-      text: `${counts.stressed} stressed · ${counts.elevated} elevated · ${counts.calm} calm`
-        + `${counts.unrated ? ` · ${counts.unrated} not coloured` : ''} · ${counts.grey} no reading`,
-    }),
-    valuationText ? el('span', { class: 'risk-status-count dim', text: `VALUATION: ${valuationText}` }) : null,
+    el('span', { class: 'risk-status-count' }, parts(countParts(counts, stateStates))),
+    valuationStates.length ? el('span', { class: 'risk-status-count dim' }, [
+      el('span', { text: 'VALUATION: ' }),
+      ...parts(countParts(worth, valuationStates)),
+    ]) : null,
   ]);
 }
 
@@ -393,6 +406,17 @@ export function fgTone(score) {
   if (!present(score)) return 'dim';
   return score < 45 ? 'down' : score > 55 ? 'up' : 'dim';
 }
+
+// The score's own colour: red in fear, green in greed, plain in between.
+const valueTone = (v) => (!present(v) ? 'dim' : v < 45 ? 'down' : v > 55 ? 'up' : '');
+
+// Where the marker sits on the 0–100 bar; a score outside the range is pinned to its end.
+export function fgMarkerPercent(score) {
+  if (!present(score)) return null;
+  return Math.min(100, Math.max(0, score));
+}
+
+const agoText = (label, v) => `${label} ${present(v) ? num(v, 0) : DASH}`;
 
 const FG_UNITS = { momentum: '%', strength: '% of members', breadth: '', put_call: '', volatility: '%', safe_haven: 'pp', junk_bond: 'bp' };
 function fgReading(c) {
@@ -407,7 +431,7 @@ function fgReading(c) {
 function sentimentCard(g) {
   const head = el('span', { class: 'dim', text: 'self-computed · not CNN\'s index' });
   if (!g || !present(g.score)) return card('FEAR & GREED', head, el('div', { class: 'gap', text: `Not computed this session${g?.error ? `: ${g.error}` : ''}.` }));
-  const tone = (v) => (!present(v) ? 'dim' : v < 45 ? 'down' : v > 55 ? 'up' : '');
+  const tone = valueTone;
   const chartNode = el('div', { class: 'chart short' });
   let range = initialRange(g.history.dates, '1Y');
   const draw = () => {
@@ -435,7 +459,7 @@ function sentimentCard(g) {
     el('td', { class: 'fg-bar-cell' }, [el('span', { class: 'fg-bar' }, [el('span', { class: `fg-bar-fill ${tone(c.score)}`, style: `width:${present(c.score) ? c.score : 0}%` })])]),
     el('td', { class: tone(c.score), text: present(c.score) ? num(c.score, 0) : DASH }),
   ]));
-  const ago = (label, v) => `${label} ${present(v) ? num(v, 0) : DASH}`;
+  const ago = agoText;
   return card('FEAR & GREED', head, [
     el('div', { class: 'anchor-head' }, [
       el('span', { class: `anchor-value fg-value ${tone(g.score)}`, text: num(g.score, 0) }),
@@ -451,6 +475,22 @@ function sentimentCard(g) {
   ]);
 }
 
+// The page's headline reading: one row with the score, its rating, a 0–100 bar
+// and the week and month before. The full card (history, components) folds below it.
+function sentimentStrip(g) {
+  if (!g || !present(g.score)) return gap(`FEAR & GREED · not computed this session${g?.error ? `: ${g.error}` : ''}.`);
+  const marker = fgMarkerPercent(g.score);
+  return el('div', { class: 'fg-strip', title: "self-computed · not CNN's index" }, [
+    el('span', { class: 'fg-strip-title dim', text: 'FEAR & GREED' }),
+    el('span', { class: `anchor-value fg-value ${valueTone(g.score)}`, text: num(g.score, 0) }),
+    tag(g.rating, fgTone(g.score)),
+    el('span', { class: 'fg-strip-track', title: 'Score from 0 (extreme fear) to 100 (extreme greed)' }, [
+      el('span', { class: 'fg-strip-marker', style: `left:${marker}%` }),
+    ]),
+    el('span', { class: 'dim fg-strip-ago', text: `${agoText('1W', g.week_ago)} · ${agoText('1M', g.month_ago)}` }),
+  ]);
+}
+
 function methodNotes() {
   return [
     'The matrix: six channels down the side (equities, treasuries, credit, volatility, cross-asset, macro), and three kinds of evidence across (structure, technical, fundamental / premium). Each cell has one lead series. The first two columns say how stressed the market is, read on one of two scales. Levels with a meaning in any decade (VIX, the VIX curve, MOVE, drawdowns, NFCI, BAA − 10Y) are read against fixed lines, set from where each stood in past drawdowns or from a line with its own meaning (an inverted VIX curve at 1.0, NFCI\'s average at 0); a ten-year percentile would compress the tail and let a quiet decade decide what elevated means. Changes and spreads with no outside anchor are read by their percentile in their own last ten years: elevated from the 75th, stressed from the 95th. A lead that failed its out-of-sample test is shown but not coloured. The VALUATION column says how thin the compensation is for holding each risk -- the equity risk premium (Shiller\'s excess CAPE yield, from Robert J. Shiller\'s "Irrational Exuberance" data, shillerdata.com, with Aswath Damodaran\'s implied ERP beside it), the term premium (Kim and Wright, via FRED), the BAA spread and the volatility premium -- against its whole history since 1960 (1990 where it starts then): cheap, fair, rich or very rich. It describes the cushion, not the timing. Grey means no reading yet. Cells are never averaged or scored; the other series in a cell open on click.',
@@ -463,10 +503,24 @@ function methodNotes() {
   ];
 }
 
+// The full Fear & Greed card, folded under the strip and built on first open.
+function sentimentFold(g) {
+  const fold = el('details', { class: 'risk-fg-more' }, [el('summary', { text: 'FEAR & GREED · HISTORY AND COMPONENTS' })]);
+  let drawn = false;
+  fold.addEventListener('toggle', () => {
+    if (!fold.open || drawn) return;
+    drawn = true;
+    fold.append(sentimentCard(g));
+  });
+  return fold;
+}
+
 export default function renderRisk(root, data, _manifest, ctx = {}) {
   if (!data || data.unavailable) throw new Error(data?.unavailable || 'risk artifact missing');
   const total = data.sections.reduce((n, s) => n + s.tiles.length, 0);
   root.append(metaRow(`RISK · MATRIX · AS OF ${data.as_of}`, methodNotes()));
+  root.append(sentimentStrip(data.sentiment));
+  if (present(data.sentiment?.score)) root.append(sentimentFold(data.sentiment));
   if (data.matrix) {
     root.append(summary(data.matrix));
     // The calendar's tagged events, for "next for this channel" in a cell's drill-down; optional.
@@ -476,7 +530,8 @@ export default function renderRisk(root, data, _manifest, ctx = {}) {
   } else {
     root.append(gap('The risk matrix was not built for this session.'));
   }
-  root.append(sentimentCard(data.sentiment));
+  // The strip sits above the matrix; the full card is built only when opened,
+  // because its chart is laid out from the page's width and a folded one has none.
 
   // Everything else, drawn only when opened: a chart laid out while folded
   // has no width.

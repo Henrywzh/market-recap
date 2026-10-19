@@ -4,7 +4,7 @@
 // render with the live feeds stubbed out.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import renderToday, { dayLabel, whenText, unusualNodes, comingUpSection, justOutSection } from '../../web/js/tabs/today.js';
+import renderToday, { dayLabel, whenText, unusualNodes, comingUpSection, justOutSection, median, epsVerdict, earningsSummary, forecastOf, surpriseDirection } from '../../web/js/tabs/today.js';
 import { VIEWS, DEFAULT_VIEW, parseHash, viewById } from '../../web/js/routes.js';
 
 class FakeNode {
@@ -74,8 +74,12 @@ const fixture = () => ({
   sessions: ['2026-10-19', '2026-10-20', '2026-10-21'],
   just_out: {
     session: '2026-10-16',
-    macro: [item({ subject: 'CPI', title: 'Consumer prices rose faster than expected', value: 3.4, unit: '%', detail: 'consensus 3.2%', importance: 'high', time: '08:30' })],
-    earnings: [item({ kind: 'earnings', subject: 'TRV', title: 'Travelers beat and rose 1.5%', link: '#ticker/TRV', z: 0.9, extra: { return_1d: 1.47 } })],
+    macro: [
+      item({ subject: 'CPI', title: 'CPI: CPI 3.4%', value: 3.4, unit: '%', detail: 'For 2026-09-01', importance: 'high', time: '08:30',
+        extra: { expectations: [{ kind: 'survey', value: 3.2, unit: '%', decimals: 1, source: 'Survey' }] } }),
+      item({ kind: 'expiry', subject: 'Monthly options expiry', title: 'Monthly options expiry settled this session', importance: 'medium' }),
+    ],
+    earnings: [item({ kind: 'earnings', subject: 'TRV', title: 'TRV beat expected EPS: 9.18 against 7.07', link: '#ticker/TRV', z: 0.9, extra: { return_1d: 1.47, surprise_pct: 29.84, weight: 0.12 } })],
   },
   coming_up: {
     days: [
@@ -128,8 +132,9 @@ test('the page draws the title, the three section headings, the coming-up days a
   assert.ok(text.includes('LATER · HIGH IMPORTANCE · TO SUN NOV 1'));
   assert.ok(text.includes('Fifth Third reports before the open'));
   assert.ok(text.includes('EPS estimate 1.09 · implied ±4.2%'));
-  assert.ok(text.includes('Consumer prices rose faster than expected'));
-  assert.ok(text.includes('Travelers beat and rose 1.5%'));
+  assert.ok(text.includes('CPI') && text.includes('3.40%') && text.includes('vs forecast 3.20%'), 'the macro card carries the actual and the forecast');
+  assert.ok(text.includes('Monthly options expiry settled this session'), 'a release with no number is a chip');
+  assert.ok(text.includes('TRV') && text.includes('BEAT') && text.includes('+29.8%') && text.includes('+1.5%'), 'the earnings tile carries the verdict, surprise and move');
   assert.ok(text.includes('SESSION CLOSE · OCT 16, 2026'), 'the header carries the session close');
 }));
 
@@ -178,3 +183,65 @@ test('a page with a moves file that fails keeps the close list and no live feed'
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.ok(textOf(root).includes('NVIDIA fell far beyond its usual move'));
 });
+
+test('the median is the middle value, the mean of the middle two, or null when there is none', () => {
+  assert.equal(median([3, 1, 2]), 2);
+  assert.equal(median([4, 1, 3, 2]), 2.5);
+  assert.equal(median([null, 0.4, undefined, 0.6]), 0.5, 'missing moves are left out, not read as zero');
+  assert.equal(median([]), null);
+});
+
+test('an EPS surprise reads as BEAT, MISS or IN LINE, and a missing one gets no verdict', () => {
+  assert.deepEqual(epsVerdict(2.1), { word: 'BEAT', tone: 'up' });
+  assert.deepEqual(epsVerdict(-0.85), { word: 'MISS', tone: 'down' });
+  assert.deepEqual(epsVerdict(0), { word: 'IN LINE', tone: 'flat' });
+  assert.equal(epsVerdict(null), null);
+});
+
+test('the earnings summary counts every reporter, its beats and misses, the median move and the heaviest weight', () => {
+  const reporters = [
+    item({ kind: 'earnings', subject: 'TRV', extra: { surprise_pct: 29.8, return_1d: 1.47, weight: 0.12 } }),
+    item({ kind: 'earnings', subject: 'TFC', extra: { surprise_pct: -0.85, return_1d: 1.07, weight: 0.085 } }),
+    item({ kind: 'earnings', subject: 'MTB', extra: { surprise_pct: 2.01, return_1d: -1.54, weight: 0.047 } }),
+    item({ kind: 'earnings', subject: 'CFG', extra: { surprise_pct: 2.17, return_1d: -0.11, weight: 0.04 } }),
+    item({ kind: 'earnings', subject: 'RF', extra: { surprise_pct: 8.96, return_1d: 0.51, weight: 0.035 } }),
+  ];
+  assert.equal(earningsSummary(reporters), '5 reported · 4 beat · 1 miss · median move +0.5% · largest weight: TRV');
+  assert.equal(earningsSummary([]), null);
+  assert.equal(earningsSummary([item({ kind: 'earnings', subject: 'XYZ', extra: {} })]), '1 reported · 0 beat · 0 miss');
+});
+
+test('the forecast is the survey row, and the surprise is read only when the units match', () => {
+  const survey = { kind: 'survey', value: 3.2, unit: '%' };
+  const model = { kind: 'model', value: 9, unit: '%' };
+  assert.equal(forecastOf(item({ extra: { expectations: [model, survey] } })), survey);
+  assert.equal(forecastOf(item({ extra: { expectations: [model] } })), null, 'a model row is not a forecast');
+  assert.equal(surpriseDirection(item({ value: 3.4, unit: '%', extra: { expectations: [survey] } })), 'above');
+  assert.equal(surpriseDirection(item({ value: 3.2, unit: '%', extra: { expectations: [survey] } })), 'in-line');
+  assert.equal(surpriseDirection(item({ value: 3.4, unit: '%', extra: { expectations: [] } })), null, 'no forecast, no colour');
+  assert.equal(surpriseDirection(item({ value: 3.4, unit: 'bp', extra: { expectations: [survey] } })), null, 'mixed units are not compared');
+});
+
+// Every node under a root whose class names the given class.
+function byClass(node, name, found = []) {
+  if (node?.className?.split(' ').includes(name)) found.push(node);
+  for (const child of node?.children || []) byClass(child, name, found);
+  return found;
+}
+
+test('the earnings tiles lead with the heaviest reporter, fold past eight, and scale the bar to the largest move', () => withBrowser(() => {
+  const earnings = Array.from({ length: 10 }, (_, i) => item({
+    kind: 'earnings', subject: `T${i}`, link: `#ticker/T${i}`, extra: { weight: 1 + i, surprise_pct: 1, return_1d: i === 0 ? 4 : 1 },
+  }));
+  const root = justOutSection({ session: '2026-10-16', macro: [], earnings });
+  const grids = byClass(root, 'today-tiles');
+  assert.equal(grids.length, 2, 'one grid of eight, one folded grid of the rest');
+  assert.equal(grids[0].children.length, 8);
+  assert.equal(grids[1].children.length, 2);
+  assert.ok(textOf(root).includes('2 more'), 'the two lightest reporters are folded');
+  assert.ok(textOf(grids[0].children[0]).includes('T9'), 'heaviest first');
+  assert.ok(!textOf(grids[0].children[0]).includes('T0'));
+  const fills = byClass(root, 'today-tile-bar-fill');
+  assert.equal(fills[0].style.width, '25%', 'T9 moved 1 against the set largest of 4 (T0)');
+  assert.equal(fills[9].style.width, '100%', 'T0 is the largest move');
+}));

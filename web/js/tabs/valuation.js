@@ -379,22 +379,56 @@ function drawScenario(s, axes, node) {
   node.replaceChildren(table(['FWD P/E', ...axes.eps_change_pct.map((c) => `EPS ${c > 0 ? '+' : ''}${c}%`)], rows));
 }
 
+// Each TTM EPS filing's growth on one basis against the TTM EPS in force a year
+// before it: the last filing made on or before that day, 364 days back (the same
+// weekday). Null where either side is missing or not above zero, since a loss
+// year has no growth rate worth reading.
+export function epsGrowth(eps, leading = 'reported', lagDays = 364) {
+  const figure = (e) => (leading === 'operating' ? e.operating : (e.reported ?? e.eps));
+  const day = (filed) => Date.parse(`${filed}T00:00:00Z`) / 86400000;
+  const made = eps.map((e) => ({ day: day(e.filed), value: figure(e) ?? null }));
+  return made.map((now) => {
+    if (!Number.isFinite(now.day)) return null;
+    const target = now.day - lagDays;
+    let before = null;
+    for (const f of made) if (f.day <= target && (before === null || f.day > before.day)) before = f;
+    if (!before || !present(now.value) || !present(before.value) || now.value <= 0 || before.value <= 0) return null;
+    return Math.round(((now.value / before.value) - 1) * 1000) / 10;
+  });
+}
+
+// TTM EPS by filing date, with its year-over-year growth on the leading basis as
+// bars on a second axis (green up, red down).
 function epsChart(node, history) {
   // Older artifacts carry one `eps` per quarter; newer ones both bases.
   const reported = history.eps.map((e) => e.reported ?? e.eps);
   const operating = history.eps.map((e) => e.operating ?? null);
   const both = operating.some((v) => v !== null);
+  const leading = history.basis === 'reported' ? 'reported' : 'operating';
+  const growth = epsGrowth(history.eps, leading);
+  const hasGrowth = growth.some(present);
+  const shown = (v, format) => (typeof v === 'number' && Number.isFinite(v) ? format(v) : DASH);
   render(node, (option, p) => ({
     ...option,
-    grid: { ...option.grid, top: both ? 22 : 10, bottom: 24 },
-    legend: both ? { top: 0, textStyle: { color: p.dim, fontSize: 9 }, itemWidth: 10, itemHeight: 2 } : undefined,
-    tooltip: { ...option.tooltip, trigger: 'axis', valueFormatter: (v) => (v === null || v === undefined ? DASH : `$${num(v, 2)}`) },
+    grid: { ...option.grid, top: both || hasGrowth ? 22 : 10, bottom: 24, ...(hasGrowth ? { right: 44 } : {}) },
+    legend: both || hasGrowth ? { top: 0, textStyle: { color: p.dim, fontSize: 9 }, itemWidth: 10, itemHeight: 2 } : undefined,
+    // The bars are a percentage and the lines dollars, so the tooltip names each.
+    tooltip: {
+      ...option.tooltip,
+      trigger: 'axis',
+      formatter: (items) => [items[0]?.axisValueLabel ?? items[0]?.name ?? '', ...items.map((i) => `${i.marker}${i.seriesName}: `
+        + (i.seriesType === 'bar' ? shown(i.value, (v) => `${v > 0 ? '+' : ''}${num(v, 1)}%`) : shown(i.value, (v) => `$${num(v, 2)}`)))].join('<br>'),
+    },
     xAxis: { ...option.xAxis, data: history.eps.map((e) => e.filed) },
+    yAxis: hasGrowth ? [option.yAxis, { ...option.yAxis, splitLine: { show: false },
+      axisLabel: { ...option.yAxis?.axisLabel, formatter: (v) => `${v}%` } }] : option.yAxis,
     series: [
       { name: 'reported', type: 'line', step: 'end', data: reported, showSymbol: false,
         lineStyle: { width: 1.2, color: both ? p.faint : p.blue }, itemStyle: { color: both ? p.faint : p.blue } },
       ...(both ? [{ name: 'operating', type: 'line', step: 'end', data: operating, showSymbol: false,
         lineStyle: { width: 1.4, color: p.blue }, itemStyle: { color: p.blue } }] : []),
+      ...(hasGrowth ? [{ name: `TTM EPS growth YoY · ${leading}`, type: 'bar', yAxisIndex: 1, barMaxWidth: 10,
+        data: growth.map((v) => (present(v) ? { value: v, itemStyle: { color: v >= 0 ? p.up : p.down, opacity: 0.6 } } : null)) }] : []),
     ],
   }));
 }
@@ -516,49 +550,35 @@ function mainTable(rows, metrics, data, sort, onSort, onPick) {
   return el('div', { class: 'table-scroll' }, node);
 }
 
-// One company's P/E against its own ten years into `host`. Returns a one-line
-// status; throws when the company has no P/E history in this build.
-export async function renderPeHistory(host, symbol, data) {
+// The company's earnings and forward multiple: TTM EPS by filing date with its
+// year-over-year growth, Yahoo's own forward P/E history, the statistics table
+// and the method, folded. The trailing P/E band, with its operating/reported
+// switch, is drawn by valuation-block above it. Returns a one-line status; throws
+// when the company has no P/E history in this build.
+export async function renderEarningsForward(host, symbol, data) {
   const history = await loadHistory(symbol);
-  // The leading basis (operating unless the company has no operating
-  // history) and the other one; an older artifact has only the first.
-  const views = [
-    { basis: history.basis || 'reported', label: history.label, pe: history.pe, stats: history.stats },
-    ...(history.alternate ? [history.alternate] : []),
-  ];
-  let active = views[0];
-  const historyNode = el('div', { class: 'chart tall' });
+  // The leading basis (operating unless the company has no operating history);
+  // the statistics table follows it.
+  const view = { basis: history.basis || 'reported', label: history.label, pe: history.pe, stats: history.stats };
   const epsNode = el('div', { class: 'chart short' });
   // undefined: an artifact from before this series existed. null: Yahoo has none for this company.
   const fiscal = history.fiscal_forward;
   const fiscalNode = fiscal ? el('div', { class: 'chart short' }) : null;
-  const tableHost = el('div', {});
-  const draw = () => {
-    const s = active.stats;
-    const other = views.find((v) => v !== active);
-    tableHost.replaceChildren(historyTable(history, active));
-    historyChart(historyNode, { dates: history.dates, pe: active.pe, stats: s, name: BASIS_NAMES[active.basis].toLowerCase() }, {
-      cap: s && s.max > s.p90 * AGGREGATE_AXIS_CAP ? s.p90 * AGGREGATE_AXIS_CAP : null,
-      compare: other ? { name: BASIS_NAMES[other.basis].toLowerCase(), pe: other.pe } : null,
-    });
-  };
-  const basisSwitch = views.length > 1
-    ? periodSwitch(views.map((v) => BASIS_NAMES[v.basis]), BASIS_NAMES[active.basis], (name) => {
-      active = views.find((v) => BASIS_NAMES[v.basis] === name); draw();
-    })
-    : null;
+  const leadingName = (BASIS_NAMES[view.basis] || 'REPORTED').toLowerCase();
   host.replaceChildren(
     el('div', { class: 'grid two' }, [
-      el('div', {}, [basisSwitch ? el('div', { class: 'tag-row' }, [el('span', { class: 'dim', text: 'EARNINGS' }), basisSwitch]) : null, historyNode]),
       el('div', {}, [
-        tableHost,
-        el('div', { class: 'card-title', text: 'TTM EPS, TODAY\'S SHARE BASIS, BY FILING DATE' }), epsNode,
-        ...(fiscal === undefined ? [] : [
-          el('div', { class: 'card-title', text: 'FORWARD P/E · YAHOO\'S OWN HISTORY, FISCAL-YEAR EPS' }),
-          fiscal ? fiscalNode : el('div', { class: 'gap', text: 'Yahoo has no forward P/E history for this company.' }),
-        ]),
+        el('div', { class: 'card-title', text: 'TTM EPS BY FILING DATE' }),
+        epsNode,
+        el('div', { class: 'field-note', text: `Bars: year-over-year growth of TTM EPS, ${leadingName} basis, against the TTM EPS in force a year earlier. `
+          + 'A gap where either is a loss or missing.' }),
+      ]),
+      el('div', {}, fiscal === undefined ? [] : [
+        el('div', { class: 'card-title', text: 'FORWARD P/E · YAHOO\'S OWN HISTORY, FISCAL-YEAR EPS' }),
+        fiscal ? fiscalNode : el('div', { class: 'gap', text: 'Yahoo has no forward P/E history for this company.' }),
       ]),
     ]),
+    historyTable(history, view),
     el('details', { class: 'method-fold' }, [el('summary', { text: 'ⓘ METHOD & DATA' }), el('div', { class: 'method-copy', text:
       `Each session's P/E is the split-adjusted close (not dividend-adjusted) over the TTM EPS `
       + `public by then: every quarter is built only from filings made by the day it was first reported, `
@@ -581,7 +601,6 @@ export async function renderPeHistory(host, symbol, data) {
       + `Compare a point with the same month a year earlier, or with the fiscal year ends, which are always twelve months ahead. `
       + `That chart's axis stops at ${FF.AXIS_CAP_FACTOR}x the 75th percentile when near-zero earnings send the multiple into the hundreds; the table keeps the true figure.` })]),
   );
-  draw();
   epsChart(epsNode, history);
   if (fiscal) fiscalForwardChart(fiscalNode, fiscal);
   const row = data.rows.find((r) => r.ticker === symbol);

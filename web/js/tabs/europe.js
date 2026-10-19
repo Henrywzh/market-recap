@@ -5,7 +5,8 @@
 import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, gap, periodSwitch, DASH } from '../fmt.js';
 import { multiLine } from '../charts.js';
 import { spark } from '../spark.js';
-import { flagText } from '../europe-model.js';
+import { flagText, mapPeriods, mapGroups, mapColourCap, mapNote, marketCapText } from '../europe-model.js';
+import { drawTreemap, returnColor } from '../treemap.js';
 
 const present = (v) => v !== null && v !== undefined && Number.isFinite(v);
 
@@ -98,6 +99,67 @@ function sectorTable(data) {
     [table(head, rows), el('div', { class: 'field-note', text: 'The Europe analogue of the SPDR sector funds: each is a STOXX Europe 600 supersector index fund listed on Xetra. "VS 600" is the fund\'s return less the STOXX Europe 600 fund\'s, in percentage points. Personal & Household Goods holds the luxury houses; Oil & Gas and Basic Resources are the commodity legs.' })]);
 }
 
+// The tooltip is the page's shared #tooltip element, as on the heatmaps. A
+// treemap tile's hover needs the event for placement, so it is passed in.
+function showTip(html, event) {
+  const node = document.getElementById('tooltip');
+  if (!node) return;
+  node.innerHTML = html;
+  node.style.display = 'block';
+  const pad = 14;
+  const rect = node.getBoundingClientRect();
+  let x = event.clientX + pad;
+  let y = event.clientY + pad;
+  if (x + rect.width > window.innerWidth) x = event.clientX - rect.width - pad;
+  if (y + rect.height > window.innerHeight) y = event.clientY - rect.height - pad;
+  node.style.left = `${Math.max(4, x)}px`;
+  node.style.top = `${Math.max(4, y)}px`;
+}
+
+function hideTip() {
+  const node = document.getElementById('tooltip');
+  if (node) node.style.display = 'none';
+}
+
+// FTSE 100 / EURO STOXX 50 members sized by market cap. The indices and sector
+// funds above are equal-size maps because the build has no caps for them.
+function membersCard(data) {
+  const universes = Object.entries(data.universes || {}).filter(([, u]) => Array.isArray(u?.names) && u.names.length);
+  if (!universes.length) return null;
+  const state = { key: universes[0][0], period: '1M' };
+  const periodHost = el('div', { class: 'pc-controls' });
+  const node = el('div', { class: 'treemap eu-members-map' });
+  const note = el('div', { class: 'field-note' });
+  const universe = () => data.universes[state.key];
+
+  const draw = () => {
+    const names = universe().names;
+    const periods = mapPeriods(names);
+    if (!periods.includes(state.period)) state.period = periods.includes('1M') ? '1M' : periods[0];
+    const period = state.period;
+    const shaped = mapGroups(names, period, (ret) => returnColor(ret, mapColourCap(period)));
+    periodHost.replaceChildren(periodSwitch(periods, period, (p) => { state.period = p; draw(); }));
+    note.textContent = mapNote(shaped);
+    drawTreemap(node, shaped.groups, (payload, event) => {
+      const ret = payload.ret;
+      showTip(`<div class="t-head">${payload.symbol} <span class="${dirClass(ret)}">${present(ret) ? `${ret > 0 ? '+' : ''}${num(ret, 1)}%` : DASH}</span> <span class="dim">${period}</span></div>
+        <div class="t-meta">${payload.name}<br>${payload.sector} · ${marketCapText(payload.market_cap, payload.currency)}</div>`, event);
+    }, hideTip);
+  };
+
+  const switcher = periodSwitch(universes.map(([, u]) => u.label), universe().label, (label) => {
+    state.key = universes.find(([, u]) => u.label === label)?.[0] || state.key;
+    draw();
+  });
+  // Drawing needs the node in the page, so the first draw waits a microtask; a
+  // resize relays the map out in pixels.
+  queueMicrotask(draw);
+  window.addEventListener('resize', draw);
+  return card('FTSE 100 / EURO STOXX 50 · MEMBERS BY MARKET CAP', null, [
+    el('div', { class: 'pc-controls' }, [switcher]), periodHost, node, note,
+  ]);
+}
+
 export default function renderEurope(root, data) {
   if (!data || data.unavailable || !Array.isArray(data.indices)) {
     root.append(gap('No European data in this build.'));
@@ -106,6 +168,8 @@ export default function renderEurope(root, data) {
   root.append(sectionTitle('EUROPE', 'INDICES AND SECTORS'));
   root.append(metaRow(`AS OF ${data.as_of} · PRICES THROUGH ${data.inputs.prices_through}${data.inputs.no_prices?.length ? ` · NO PRICES: ${data.inputs.no_prices.join(', ')}` : ''}`, data.notes));
   root.append(strip(data), heatmap(data, 'indices'), heatmap(data, 'sectors'));
+  const members = membersCard(data);
+  if (members) root.append(members);
   const details = el('details', { class: 'sx-fold' }, [el('summary', { text: 'Exact readings, trend flags & dollar history' })]);
   let loaded = false;
   details.addEventListener('toggle', () => {

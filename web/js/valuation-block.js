@@ -20,7 +20,7 @@
 //   other (the benchmark) may be null; any part may be missing in an older build.
 //   reference: the real ratio {dates, ratio}, only where membership changes.
 
-import { el, card, num, gap, sectionTitle, DASH } from './fmt.js';
+import { el, card, num, gap, sectionTitle, periodSwitch, DASH } from './fmt.js';
 import { render } from './charts.js';
 import { relativeCards } from './basket-view.js';
 
@@ -96,29 +96,73 @@ function strip(cells) {
   ].filter(Boolean))));
 }
 
-function bandChart(node, valuation) {
-  const st = valuation.stats;
+// The axis of a company's band stops at this multiple of its 90th percentile
+// when a spike (earnings near zero) would flatten the rest, as its P/E history
+// chart always did. Sectors and baskets are not capped.
+const BAND_AXIS_CAP = 1.6;
+
+// `view` is one basis: {name, dates, pe, stats}. `compare`, when given, is the
+// other basis, drawn as a thin dashed line so the switch's effect is visible.
+function bandChart(node, view, { compare = null, capAxis = false } = {}) {
+  const st = view.stats;
+  const capped = capAxis && st.max > st.p90 * BAND_AXIS_CAP ? Math.ceil(st.p90 * BAND_AXIS_CAP) : null;
   render(node, (option, p) => ({
     ...option,
-    grid: { ...option.grid, right: 92, top: 14, bottom: 30 },
+    grid: { ...option.grid, right: 92, top: compare ? 24 : 14, bottom: 30 },
+    legend: compare ? { top: 0, textStyle: { color: p.dim, fontSize: 9 }, itemWidth: 10, itemHeight: 2 } : undefined,
     tooltip: { ...option.tooltip, valueFormatter: (v) => times(v) },
-    xAxis: { ...option.xAxis, data: valuation.dates },
+    xAxis: { ...option.xAxis, data: view.dates },
     yAxis: {
       ...option.yAxis,
       min: (v) => Math.floor(Math.min(v.min, st.p25) * 0.95),
-      max: (v) => Math.ceil(Math.max(v.max, st.p75) * 1.05),
+      max: capped ?? ((v) => Math.ceil(Math.max(v.max, st.p75) * 1.05)),
       axisLabel: { ...option.yAxis.axisLabel, formatter: (v) => `${v}×` },
     },
-    series: [{
-      name: 'trailing P/E', type: 'line', data: valuation.pe, showSymbol: false,
-      lineStyle: { width: 1.4, color: p.text }, itemStyle: { color: p.text },
-      markArea: { silent: true, itemStyle: { color: p.accent, opacity: 0.12 }, data: [[{ yAxis: st.p25 }, { yAxis: st.p75 }]] },
-      markLine: {
-        silent: true, symbol: 'none', label: { color: p.dim, fontSize: 10, position: 'end', formatter: (d) => d.name },
-        data: [{ name: `median ${times(st.median)}`, yAxis: st.median, lineStyle: { color: p.accent, type: 'dashed' } }],
+    series: [
+      ...(compare ? [{
+        name: compare.name, type: 'line', data: compare.pe, showSymbol: false, connectNulls: false, z: 1,
+        lineStyle: { width: 1, color: p.faint, type: 'dashed' }, itemStyle: { color: p.faint },
+      }] : []),
+      {
+        name: view.name, type: 'line', data: view.pe, showSymbol: false, connectNulls: false, z: 2,
+        lineStyle: { width: 1.4, color: p.text }, itemStyle: { color: p.text },
+        markArea: { silent: true, itemStyle: { color: p.accent, opacity: 0.12 }, data: [[{ yAxis: st.p25 }, { yAxis: st.p75 }]] },
+        markLine: {
+          silent: true, symbol: 'none', label: { color: p.dim, fontSize: 10, position: 'end', formatter: (d) => d.name },
+          data: [{ name: `median ${times(st.median)}`, yAxis: st.median, lineStyle: { color: p.accent, type: 'dashed' } }],
+        },
       },
-    }],
+    ],
   }));
+}
+
+const BASIS_WORDS = { operating: 'OPERATING', ex_gains: 'EX GAINS', reported: 'REPORTED' };
+const basisWord = (basis) => BASIS_WORDS[basis] || String(basis || 'reported').replace(/_/g, ' ').toUpperCase();
+
+// The trailing P/E band of one valuation. A company whose history has a second
+// earnings basis (operating against reported EPS) gets the switch; the others get
+// the plain card, exactly as before.
+function trailingPeCard(valuation, capAxis) {
+  const alt = valuation.alternate?.pe?.length && valuation.alternate.stats
+    ? { basis: valuation.alternate.basis, pe: valuation.alternate.pe, stats: valuation.alternate.stats } : null;
+  const views = [{ basis: valuation.basis, pe: valuation.pe, stats: valuation.stats }, ...(alt ? [alt] : [])]
+    .map((v) => ({ ...v, dates: valuation.dates, name: alt ? basisWord(v.basis).toLowerCase() : 'trailing P/E' }));
+  let active = views[0];
+  const titleOf = (v) => `TRAILING P/E · ${views.length > 1 ? `${basisWord(v.basis)} ` : ''}${times(v.stats.current)} · `
+    + `${present(v.stats.percentile) ? ordinalOf(v.stats.percentile) : DASH} OF ITS OWN TEN YEARS`;
+  const node = chartNode();
+  const draw = () => bandChart(node, active, { compare: views.length > 1 ? views.find((v) => v !== active) : null, capAxis });
+  const note = el('span', { class: 'dim', text: 'weekly · band 25th–75th' });
+  const right = views.length > 1
+    ? el('span', { class: 'tag-row' }, [note, periodSwitch(views.map((v) => basisWord(v.basis)), basisWord(active.basis), (word) => {
+      active = views.find((v) => basisWord(v.basis) === word);
+      cardNode.querySelector('.card-title').textContent = titleOf(active);
+      draw();
+    })])
+    : note;
+  const cardNode = card(titleOf(active), right, [node]);
+  queueMicrotask(draw);
+  return cardNode;
 }
 
 // Revenue growth as bars (left axis), margins as lines (right axis); the
@@ -155,11 +199,14 @@ export function companyBasket(history) {
   const close = history.close || null;
   return {
     dates: history.dates, pe: history.pe, stats: history.stats || null,
+    // The company's second earnings basis, when its history carries one.
+    basis: history.basis || null, alternate: history.alternate || null,
     price: close, earnings: close ? close.map((c, i) => (present(c) && present(history.pe[i]) ? c / history.pe[i] : null)) : null,
   };
 }
 
-export function valuationBlock({ name, benchmark = null, own, other = null, reference = null, referenceLabel = 'the real ratio', title = 'VALUATION' }) {
+// capAxis: the company case only (see BAND_AXIS_CAP).
+export function valuationBlock({ name, benchmark = null, own, other = null, reference = null, referenceLabel = 'the real ratio', title = 'VALUATION', capAxis = false }) {
   const nodes = [sectionTitle(title, `${name}${benchmark ? ` against ${benchmark}` : ''}: what the market pays, what the business earns`)];
   if (!own || (!own.valuation && !own.outlook && !own.history)) {
     nodes.push(gap(`${name}: no filings history, so no valuation.`));
@@ -171,10 +218,7 @@ export function valuationBlock({ name, benchmark = null, own, other = null, refe
   const business = el('div', {});
   const st = own.valuation?.stats;
   if (own.valuation?.dates?.length && st && present(st.median)) {
-    const node = chartNode();
-    band.append(card(`TRAILING P/E · ${times(st.current)} · ${present(st.percentile) ? ordinalOf(st.percentile) : DASH} OF ITS OWN TEN YEARS`,
-      el('span', { class: 'dim', text: 'weekly · band 25th–75th' }), [node]));
-    queueMicrotask(() => bandChart(node, own.valuation));
+    band.append(trailingPeCard(own.valuation, capAxis));
   } else {
     band.append(card('TRAILING P/E', null, [gap('Too little P/E history to draw (a loss-making stretch, or a short listing).')]));
   }

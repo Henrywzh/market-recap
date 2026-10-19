@@ -3,17 +3,23 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TICKER_TABS, tickerArg, tickerArgFor, creditSummary } from '../../web/js/tabs/ticker.js';
 
-test('the page opens on RECENT; a known view after the symbol opens that tab', () => {
-  assert.deepEqual(TICKER_TABS.map(([id]) => id), ['recent', 'report', 'price', 'valuation', 'financials']);
-  assert.deepEqual(tickerArg('NVDA'), { symbol: 'NVDA', view: 'recent' });
-  assert.deepEqual(tickerArg('NVDA/REPORT'), { symbol: 'NVDA', view: 'report' });
+test('the page opens on REPORTS; a known view after the symbol opens that tab', () => {
+  assert.deepEqual(TICKER_TABS.map(([id]) => id), ['reports', 'price', 'valuation', 'financials']);
+  assert.deepEqual(tickerArg('NVDA'), { symbol: 'NVDA', view: 'reports' });
+  assert.deepEqual(tickerArg('NVDA/PRICE'), { symbol: 'NVDA', view: 'price' });
   assert.deepEqual(tickerArg('BRK.B/FINANCIALS'), { symbol: 'BRK.B', view: 'financials' });
-  assert.deepEqual(tickerArg('NVDA/NOPE'), { symbol: 'NVDA', view: 'recent' });
-  assert.deepEqual(tickerArg(null), { symbol: null, view: 'recent' });
+  assert.deepEqual(tickerArg('NVDA/NOPE'), { symbol: 'NVDA', view: 'reports' });
+  assert.deepEqual(tickerArg(null), { symbol: null, view: 'reports' });
 });
 
-test('RECENT is left out of the hash; the other views follow the symbol', () => {
-  assert.equal(tickerArgFor('NVDA', 'recent'), 'NVDA');
+test('the old RECENT and REPORT views open REPORTS, so old links keep working', () => {
+  assert.deepEqual(tickerArg('NVDA/REPORT'), { symbol: 'NVDA', view: 'reports' });
+  assert.deepEqual(tickerArg('NVDA/recent'), { symbol: 'NVDA', view: 'reports' });
+  assert.deepEqual(tickerArg('NVDA/Report'), { symbol: 'NVDA', view: 'reports' });
+});
+
+test('REPORTS is left out of the hash; the other views follow the symbol', () => {
+  assert.equal(tickerArgFor('NVDA', 'reports'), 'NVDA');
   assert.equal(tickerArgFor('NVDA', 'valuation'), 'NVDA/VALUATION');
   TICKER_TABS.forEach(([id]) => assert.deepEqual(tickerArg(tickerArgFor('BRK-B', id)), { symbol: 'BRK-B', view: id }));
 });

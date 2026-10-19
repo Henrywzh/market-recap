@@ -80,3 +80,68 @@ export function medianOf(values) {
   const mid = Math.floor(v.length / 2);
   return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
 }
+
+// MARKET-CAP MAP: the FTSE 100 and EURO STOXX 50 members as a treemap. Area is
+// market cap, colour is the chosen window's return. Pure, so it is tested under node.
+
+// The windows the map offers, shortest first. A universe shows only those its names carry.
+export const MAP_PERIODS = ['1D', '1W', '1M', '3M', 'YTD', '1Y'];
+
+// Each window saturates its colour at its own move: a day's and a year's are
+// not comparable on one scale, so a 3% day and a 3% year look different.
+const MAP_CAP = { '1D': 3, '1W': 6, '1M': 10, '3M': 15, YTD: 20, '1Y': 30 };
+
+export function mapColourCap(period) {
+  return MAP_CAP[period] ?? 10;
+}
+
+export function mapPeriods(names) {
+  return MAP_PERIODS.filter((p) => names.some((n) => Object.hasOwn(n.returns || {}, p)));
+}
+
+// The currency a market cap is quoted in. A London price is in pence, but the
+// build's London caps are in pounds (3i's comes to about 25bn, not 2,500bn).
+export function marketCapCurrency(currency) {
+  return currency === 'GBp' ? 'GBP' : currency || '';
+}
+
+// A market cap in billions of the name's currency, e.g. "27.7bn EUR".
+export function marketCapText(value, currency) {
+  if (!finite(value)) return DASH;
+  return `${num(value / 1e9, 1)}bn ${marketCapCurrency(currency)}`.trim();
+}
+
+// The members with a usable market cap, grouped by sector for the treemap. A
+// member with no positive, finite cap has no area to draw, so it is left out
+// and counted in `missing`. A missing return for the window gets a grey tile.
+export function mapGroups(names, period, colour) {
+  const groups = new Map();
+  let missing = 0;
+  names.forEach((n) => {
+    if (!finite(n.market_cap) || n.market_cap <= 0) {
+      missing += 1;
+      return;
+    }
+    const ret = finite(n.returns?.[period]) ? n.returns[period] : null;
+    const sector = n.sector || 'Other';
+    if (!groups.has(sector)) groups.set(sector, []);
+    groups.get(sector).push({
+      key: n.symbol,
+      value: n.market_cap,
+      color: colour(ret),
+      label: String(n.symbol).split('.')[0],
+      sublabel: ret === null ? DASH : `${ret > 0 ? '+' : ''}${num(ret, 1)}%`,
+      payload: { symbol: n.symbol, name: n.name, sector, currency: n.currency, market_cap: n.market_cap, ret, period },
+    });
+  });
+  const grouped = [...groups].map(([group, items]) => ({ group, items }));
+  return { groups: grouped, sized: names.length - missing, missing, total: names.length };
+}
+
+// The note under the map: how many members are left out, and what the figures are.
+export function mapNote(shaped) {
+  const left = shaped.missing
+    ? `${shaped.missing} of ${shaped.total} members have no market cap in the build and are left out.`
+    : `All ${shaped.total} members are sized.`;
+  return `${left} Returns are in local currency; market caps are as Yahoo reports them.`;
+}

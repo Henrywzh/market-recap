@@ -16,7 +16,7 @@ import { resolveTicker } from '../routes.js';
 import { chainCard } from '../chain-card.js';
 import { moveCard } from '../moves-card.js';
 import { viewTabs } from '../view-tabs.js';
-import { renderPeHistory } from './valuation.js';
+import { renderEarningsForward } from './valuation.js';
 
 const BILLION = 1e9;
 // The multiples shown in the header block, in this order. The full set is on
@@ -135,6 +135,11 @@ function headerStats(row, mon, sit, implied) {
     el('div', { class: 'stat-strip' }, stats),
     sit.reads.length ? el('div', { class: 'tag-row ticker-reads' }, sit.reads.map(([text, tone]) => tag(text, tone))) : null,
   ]);
+}
+
+// A small heading between the parts of one pane.
+function subhead(text) {
+  return el('div', { class: 'card-title ticker-subhead', text });
 }
 
 // A section that is detail behind something already on the page: folded.
@@ -332,6 +337,7 @@ export async function companyValuation(ctx, symbol, row, sectors, financials = n
     benchmark: row.sector || null,
     own: { valuation: companyBasket(own), outlook: companyOutlook(row), history: companyHistory(statement) },
     other: sectorPage ? { valuation: peer, outlook: sectorPage.outlook, history: sectorPage.history } : null,
+    capAxis: true,
   });
 }
 
@@ -383,18 +389,23 @@ function creditCard(symbol, credit) {
   ]);
 }
 
-// The page under its header, in sub-tabs: what is new, the next report, the price
-// and the moves that made it, the valuation in full, the filed statements.
-export const TICKER_TABS = [['recent', 'RECENT'], ['report', 'NEXT REPORT'], ['price', 'PRICE'], ['valuation', 'VALUATION'], ['financials', 'FINANCIALS']];
+// The page under its header, in sub-tabs: the reports (what is new and the next
+// one), the price and the moves that made it, the valuation in full, the filed statements.
+// REPORTS joins what is new since the last report and the next report. The old
+// RECENT and REPORT views still open it, so links made before the merge work.
+export const TICKER_TABS = [['reports', 'REPORTS'], ['price', 'PRICE'], ['valuation', 'VALUATION'], ['financials', 'FINANCIALS']];
+const LEGACY_VIEWS = { RECENT: 'reports', REPORT: 'reports' };
 
-// The hash's argument -> { symbol, view }: NVDA/REPORT. An unknown view is RECENT.
+// The hash's argument -> { symbol, view }: NVDA/PRICE. An unknown view is REPORTS.
 export function tickerArg(arg) {
   const [symbol, view] = String(arg || '').split('/');
-  const known = TICKER_TABS.find(([id]) => id.toUpperCase() === (view || '').toUpperCase());
-  return { symbol: symbol || null, view: known ? known[0] : 'recent' };
+  const key = (view || '').toUpperCase();
+  const known = LEGACY_VIEWS[key] || TICKER_TABS.find(([id]) => id.toUpperCase() === key)?.[0];
+  return { symbol: symbol || null, view: known || 'reports' };
 }
+// The default view is left out of the hash.
 export function tickerArgFor(symbol, view) {
-  return view && view !== 'recent' ? `${symbol}/${view.toUpperCase()}` : symbol;
+  return view && view !== 'reports' ? `${symbol}/${view.toUpperCase()}` : symbol;
 }
 
 export default async function renderTicker(root, valuation, manifest, ctx) {
@@ -436,22 +447,31 @@ export default async function renderTicker(root, valuation, manifest, ctx) {
 
   // What is new: a report the last session traded on, the evidence listed for
   // and against, the industry data since the last report, recent filings.
-  const recentPane = () => {
+  const whatsNew = () => {
     const move = moves ? moveCard((moves.rows || []).find((r) => r.ticker === symbol), moves) : null;
     const pair = [company ? evidenceCard(mon, ev) : null, eventPayload ? filingsCard(eventPayload) : null].filter(Boolean);
-    const nodes = keep(move, eventPayload ? outcomeCard(eventPayload) : null, company ? noteCard(mon) : null,
+    return keep(move, eventPayload ? outcomeCard(eventPayload) : null, company ? noteCard(mon) : null,
       pair.length > 1 ? el('div', { class: 'grid two' }, pair) : pair[0], eventPayload ? sinceCard(eventPayload) : null);
-    return nodes.length ? nodes : [gap(`Nothing recent for ${symbol} in this build.`)];
   };
   // The next report: what is expected and priced, what is ahead, and the
-  // record behind it, folded.
-  const reportPane = () => {
+  // record behind it, folded. Empty when the build has no report data.
+  const nextReport = () => {
     const upcoming = eventPayload ? eventCard(eventPayload, asOf, { prices }) : null;
-    if (!upcoming && !eventPayload?.timeline) return [gap(`${symbol} has no report data in this build.`)];
+    if (!upcoming && !eventPayload?.timeline) return [];
     return keep(upcoming, eventPayload ? timelineCard(eventPayload, prices, events?.macro, asOf) : null,
       fold('LAST 8 REPORTS · EPS, GUIDE, MOVE AND DRIFT', eventPayload ? historyCard(eventPayload) : null),
       fold('ESTIMATE REVISIONS BY PERIOD', eventPayload ? revisionsCard(eventPayload) : null),
       optionsCard(symbol, ev, evidence || {}));
+  };
+  // One page for both: what is new, then the next report, each under a small
+  // sub-heading. A part with nothing in it is left out; neither gives one gap.
+  const reportsPane = () => {
+    const news = whatsNew();
+    const next = nextReport();
+    const parts = [];
+    if (news.length) parts.push(subhead("WHAT'S NEW"), ...news);
+    if (next.length) parts.push(subhead('NEXT REPORT'), ...next);
+    return parts.length ? parts : [gap(`Nothing recent and no report data for ${symbol} in this build.`)];
   };
   // The price: its trend, the reports and large moves that made it, its AI-chain links.
   const pricePane = async (host) => {
@@ -470,9 +490,9 @@ export default async function renderTicker(root, valuation, manifest, ctx) {
     host.append(...keep(eventPayload ? storyCard(eventPayload) : null, chain ? chainCard(chain, symbol, { compact: true }) : null));
     return null;
   };
-  // The valuation: the VALUATION block against its sector, the P/E in detail
-  // (operating and reported, Yahoo's own forward history, TTM EPS by filing date),
-  // and the multiples against the sector median.
+  // The valuation: the VALUATION block against its sector (its trailing P/E band
+  // switches between operating and reported), the earnings and forward P/E, and
+  // the multiples against the sector median.
   const valuationPane = async (host) => {
     if (!company) return [gap(`${symbol} has no filings in this build, so no valuation.`)];
     // A failure here blanks this block only, as the other sections of this page do.
@@ -482,7 +502,7 @@ export default async function renderTicker(root, valuation, manifest, ctx) {
       } catch (error) {
         host.append(card('VALUATION', null, gap(error.message)));
       }
-      await section(host, 'P/E IN DETAIL — OPERATING AND REPORTED, FORWARD', (inner) => renderPeHistory(inner, symbol, valuation));
+      await section(host, 'EARNINGS & FORWARD P/E', (inner) => renderEarningsForward(inner, symbol, valuation));
     }
     host.append(valuationCard(symbol, row, valuation));
     const creditNode = creditCard(symbol, credit);
@@ -501,7 +521,7 @@ export default async function renderTicker(root, valuation, manifest, ctx) {
     });
     return null;
   };
-  const builders = { recent: recentPane, report: reportPane, price: pricePane, valuation: valuationPane, financials: financialsPane };
+  const builders = { reports: reportsPane, price: pricePane, valuation: valuationPane, financials: financialsPane };
   const tabs = viewTabs(TICKER_TABS, asked.view, {
     label: `${symbol} views`,
     idPrefix: 'ticker',

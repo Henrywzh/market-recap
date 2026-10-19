@@ -42,3 +42,43 @@ test('a multiple against the group median, and the median itself, skip what is m
   assert.equal(M.medianOf([1, 2, 3, 4]), 2.5);
   assert.equal(M.medianOf([null]), null);
 });
+
+test('the market-cap map offers the windows a universe carries and sizes members by cap', () => {
+  const names = [
+    { symbol: 'III.L', name: '3i', sector: 'Financials', currency: 'GBp', market_cap: 25065500672, returns: { '1D': 0.86, '1M': -9.1 } },
+    { symbol: 'ADS.DE', name: 'Adidas', sector: 'Consumer Discretionary', currency: 'EUR', market_cap: 27747467264, returns: { '1D': -1, '1M': 4 } },
+    { symbol: 'NOCAP.L', name: 'No cap', sector: null, currency: 'GBp', market_cap: null, returns: { '1D': 2 } },
+    { symbol: 'ZERO.L', name: 'Zero', sector: 'Energy', currency: 'GBp', market_cap: 0, returns: {} },
+  ];
+  assert.deepEqual(M.mapPeriods(names), ['1D', '1M']);
+  assert.deepEqual(M.mapPeriods([{ returns: { '1Y': 3, YTD: 1 } }]), ['YTD', '1Y']);
+
+  const shaped = M.mapGroups(names, '1M', (ret) => (ret === null ? 'grey' : 'colour'));
+  assert.deepEqual(shaped.groups.map((g) => g.group), ['Financials', 'Consumer Discretionary']);
+  const [first] = shaped.groups[0].items;
+  assert.equal(first.key, 'III.L');
+  assert.equal(first.label, 'III');
+  assert.equal(first.sublabel, '-9.1%');
+  assert.equal(first.color, 'colour');
+  assert.equal(first.payload.sector, 'Financials');
+  assert.equal(shaped.missing, 2);
+  assert.equal(shaped.total, 4);
+  assert.equal(shaped.sized, 2);
+
+  const noReturn = M.mapGroups(names, '1W', (ret) => (ret === null ? 'grey' : 'colour'));
+  assert.equal(noReturn.groups[0].items[0].sublabel, '—');
+  assert.equal(noReturn.groups[0].items[0].color, 'grey');
+});
+
+test('a market cap reads in billions of the name\'s currency, with London in pounds not pence', () => {
+  assert.equal(M.marketCapText(25065500672, 'GBp'), '25.1bn GBP');
+  assert.equal(M.marketCapText(27747467264, 'EUR'), '27.7bn EUR');
+  assert.equal(M.marketCapText(null, 'EUR'), '—');
+  assert.equal(M.mapColourCap('1D'), 3);
+  assert.equal(M.mapColourCap('nope'), 10);
+});
+
+test('the map note counts the members left out', () => {
+  assert.equal(M.mapNote({ missing: 0, total: 100 }), 'All 100 members are sized. Returns are in local currency; market caps are as Yahoo reports them.');
+  assert.match(M.mapNote({ missing: 3, total: 50 }), /^3 of 50 members have no market cap in the build and are left out\./);
+});

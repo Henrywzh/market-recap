@@ -5,8 +5,8 @@
 // Rendered under node against a small fake DOM and a stub ECharts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cellsByRow, stateCounts, stateOf, stateWord, arrowFor, tagFor, isPlaceholder, scaleText } from '../../web/js/risk-matrix.js';
-import renderRisk from '../../web/js/tabs/risk.js';
+import { cellsByRow, stateCounts, stateOf, stateWord, arrowFor, tagFor, isPlaceholder, scaleText, chipWord, countParts } from '../../web/js/risk-matrix.js';
+import renderRisk, { fgMarkerPercent } from '../../web/js/tabs/risk.js';
 
 const ROWS = [
   { key: 'equities', label: 'EQUITIES' }, { key: 'treasuries', label: 'TREASURIES' }, { key: 'credit', label: 'CREDIT' },
@@ -55,10 +55,17 @@ const tile = (key) => ({
   spark: null, sources: [], note: null,
 });
 
-function fixture({ matrix = true } = {}) {
+// A Fear & Greed reading as the build writes it; the page reads these fields.
+const SENTIMENT = {
+  score: 24.5, rating: 'EXTREME FEAR', date: '2026-10-16', components_counted: 1, week_ago: 40.4, month_ago: 32, year_ago: 34.6,
+  components: [{ key: 'momentum', label: 'Market momentum', value: 1.58, score: 18.4 }],
+  history: { dates: ['2026-10-15', '2026-10-16'], score: [30, 24.5] },
+};
+
+function fixture({ matrix = true, sentiment = { score: null } } = {}) {
   return {
     as_of: '2026-10-16',
-    sentiment: { score: null },
+    sentiment,
     sections: [{ key: 'all', label: 'ALL', horizon: 'tactical', tiles: TILE_KEYS.map(tile) }],
     ...(matrix ? { matrix: { thresholds: { elevated: 75, stressed: 95 }, years: 10, rows: ROWS, columns: COLUMNS, cells: CELLS } } : {}),
   };
@@ -199,7 +206,10 @@ test('the page draws 6 rows of 3 cells, a placeholder with its pending text, and
   assert.equal(cells.length, 18);
   assert.ok(textOf(cells[2]).includes('Equity risk premium'), 'the placeholder shows its pending text');
   assert.equal(cells[2].listeners.click, undefined, 'a placeholder with no members does not open');
-  assert.ok(textOf(root).includes('1 stressed · 4 elevated · 9 calm · 4 no reading'));
+  assert.ok(textOf(root).includes('1 stressed'));
+  assert.ok(textOf(root).includes('4 elevated'));
+  assert.ok(textOf(root).includes('9 calm'));
+  assert.ok(textOf(root).includes('4 no reading'));
   assert.ok(textOf(root).includes('RISK · MATRIX · AS OF 2026-10-16'));
 }));
 
@@ -280,3 +290,59 @@ test('the next events for a channel skip small ones and the past', async () => {
   assert.deepEqual(upcomingFor(events, 'equities', '2026-10-19').map((e) => e.title), ['CPI']);
   assert.deepEqual(upcomingFor(null, 'credit', '2026-10-19'), []);
 });
+
+// ---------- state chips, summary tones, the Fear & Greed strip ----------
+
+test('chip words and summary parts: capitals for the cell, a tone for each count', () => {
+  assert.equal(chipWord(CELLS[4]), 'STRESSED');
+  assert.equal(chipWord({ lead: 'x', state: 'very_rich' }), 'VERY RICH');
+  assert.equal(chipWord(CELLS[2]), 'NO READING', 'a placeholder reads as no reading');
+  assert.deepEqual(countParts({ stressed: 1, elevated: 2, calm: 0 }, ['stressed', 'elevated', 'calm']), [
+    { text: '1 stressed', tone: 'down' }, { text: '2 elevated', tone: 'amber' }, { text: '0 calm', tone: '' },
+  ]);
+  assert.deepEqual(countParts({ rich: 1, very_rich: 2 }, ['rich', 'very_rich']).map((p) => p.tone), ['amber', 'down']);
+});
+
+test('the marker sits on the 0–100 bar, pinned at the ends, and absent without a score', () => {
+  assert.equal(fgMarkerPercent(24.5), 24.5);
+  assert.equal(fgMarkerPercent(-3), 0);
+  assert.equal(fgMarkerPercent(120), 100);
+  assert.equal(fgMarkerPercent(null), null);
+  assert.equal(fgMarkerPercent(undefined), null);
+});
+
+test('every cell carries a state chip, and a calm chip is the quiet one', () => withBrowser(() => {
+  const root = new FakeNode('main');
+  renderRisk(root, fixture());
+  const cells = cellsOf(root);
+  const chips = (cell) => all(cell, (n) => hasClass(n, 'risk-chip'));
+  assert.ok(cells.every((c) => chips(c).length === 1));
+  assert.equal(chips(cells[1])[0].className, 'risk-chip risk-chip-calm');
+  assert.equal(chips(cells[4])[0].className, 'risk-chip risk-chip-stressed');
+  assert.equal(textOf(chips(cells[4])[0]), 'STRESSED');
+}));
+
+test('the Fear & Greed strip sits above the summary and matrix, and its full card folds and draws on open', () => withBrowser(() => {
+  const root = new FakeNode('main');
+  renderRisk(root, fixture({ sentiment: SENTIMENT }));
+  const strip = root.children.findIndex((c) => hasClass(c, 'fg-strip'));
+  const summaryAt = root.children.findIndex((c) => hasClass(c, 'risk-status'));
+  const matrixAt = root.children.findIndex((c) => hasClass(c, 'risk-matrix'));
+  assert.ok(strip > 0 && strip < summaryAt && summaryAt < matrixAt, 'strip, then summary, then matrix');
+  assert.ok(textOf(root.children[strip]).includes('24.5') || textOf(root.children[strip]).includes('25'));
+  assert.ok(textOf(root.children[strip]).includes('EXTREME FEAR'));
+  const fold = all(root, (n) => hasClass(n, 'risk-fg-more'))[0];
+  assert.equal(fold.children.length, 1, 'only its summary until opened');
+  fold.open = true;
+  fold.listeners.toggle.forEach((fn) => fn());
+  assert.equal(fold.children.length, 2, 'the full card is built on first open');
+  fold.listeners.toggle.forEach((fn) => fn());
+  assert.equal(fold.children.length, 2, 'opening again does not build it twice');
+}));
+
+test('with no Fear & Greed score, the strip says so and there is no fold', () => withBrowser(() => {
+  const root = new FakeNode('main');
+  renderRisk(root, fixture());
+  assert.ok(textOf(root).includes('not computed this session'));
+  assert.equal(all(root, (n) => hasClass(n, 'risk-fg-more')).length, 0);
+}));

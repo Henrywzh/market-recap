@@ -128,18 +128,16 @@ ago and its high, the month against its sector peers, the valuation against
 its own ten years (P/E; P/TBV with ROTCE for a bank), the 90-day revision to
 next year's EPS, the next report with its implied move, and MONITOR's state,
 with short neutral tags where a pattern is plain. Under it, four sub-tabs, each
-built when first opened and kept in the hash (`#ticker/NVDA/REPORT`; RECENT
-is the default and left out). RECENT:
+built when first opened and kept in the hash (`#ticker/NVDA/VALUATION`; REPORTS
+is the default and left out, and the old RECENT and REPORT links open it). REPORTS: what's new --
 a report the last session traded on, the evidence for and against (MONITOR's,
 plus insider buying from Form 4, short interest and rating changes for focus
-names), recent 8-Ks and the industry data since the last report. NEXT
-REPORT: the event card, a timeline of its own events and what is ahead
+names), recent 8-Ks and the industry data since the last report -- then the next
+report: the event card, a timeline of its own events and what is ahead
 (peers' reports, macro dates, its themes' data releases, announced and
 hand-kept company events), the last eight reports and the estimate
 revisions folded, and the options' implied move and term structure. PRICE:
-price and trend, WHAT MOVED IT and its AI-chain links. VALUATION: the VALUATION block (the same section as on every page: what the company pays and expects against its sector, its business by fiscal year, and its P/E against its own ten years), the P/E in detail (operating and reported with
-the table of its own range, TTM EPS by filing date, Yahoo's own forward P/E history -- the
-drawn from the same build as the SCREENER), and valuation against the
+price and trend, WHAT MOVED IT and its AI-chain links. VALUATION: the VALUATION block (the same section as on every page: what the company pays and expects against its sector, its business by fiscal year, and its trailing P/E against its own ten years, with an operating / reported switch and the other basis dashed), then EARNINGS & FORWARD P/E (TTM EPS by filing date with its year-over-year growth as bars, Yahoo's own forward P/E history, and the P/E statistics table and method folded -- drawn from the same build as the SCREENER), and valuation against the
 sector median (a bank against its sub-industry, on bank measures). WHAT
 MOVED IT on PRICE is every report and large move with what happened that session,
 headlines included. FINANCIALS: the filed statements. Each section is drawn by
