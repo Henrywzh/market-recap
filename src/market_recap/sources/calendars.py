@@ -13,7 +13,7 @@ An event is a plain dict: ``source_id``, ``title``, ``date`` (ISO), ``time``
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import html
 import json
 import re
@@ -143,8 +143,33 @@ def parse_census(text: str) -> list[dict]:
     return events
 
 
-def fetch_census(*, use_cache: bool = True) -> list[dict]:
-    return parse_census(_text("census", CENSUS_URL, use_cache=use_cache))
+def census_year_url(year: int) -> str:
+    return CENSUS_URL.replace(".html", f"-{year}.html")
+
+
+def fetch_census(*, use_cache: bool = True, today: date | None = None) -> list[dict]:
+    """The default page and this year's own page, merged.
+
+    The default page moves to next year's schedule some time in the autumn,
+    which drops the rest of this year's releases (October 2026: retail sales
+    disappeared until January). This year's page keeps them.
+    """
+    year = (today or date.today()).year
+    events, seen = [], set()
+    pages = [("census", CENSUS_URL), (f"census-{year}", census_year_url(year))]
+    for index, (name, url) in enumerate(pages):
+        try:
+            rows = parse_census(_text(name, url, use_cache=use_cache))
+        except Exception:
+            if index == 0:
+                raise
+            continue  # this year's page is a supplement; the default page still answers
+        for event in rows:
+            key = (event["title"], event["date"])
+            if key not in seen:
+                seen.add(key)
+                events.append(event)
+    return events
 
 
 # --- Federal Reserve ----------------------------------------------------------------

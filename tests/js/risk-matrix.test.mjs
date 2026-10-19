@@ -266,3 +266,17 @@ test('a VALUATION cell reads in its own words and its own rule', () => {
   assert.match(text, /rich when thinner than 75%.*very rich from 90%.*cheap when wider than 75%/);
   assert.match(text, /not the timing/);
 });
+
+test('the next events for a channel skip small ones and the past', async () => {
+  const { upcomingFor } = await import('../../web/js/risk-matrix.js');
+  const events = [
+    { title: 'CPI', date: '2026-11-12', importance: 'high', lane: 'macro', channels: ['treasuries', 'equities'] },
+    { title: 'Old', date: '2026-10-01', importance: 'high', lane: 'macro', channels: ['treasuries'] },
+    { title: 'Claims', date: '2026-10-22', importance: 'low', lane: 'macro', channels: ['treasuries'] },
+    { title: '5-Year Note auction', date: '2026-10-28', importance: 'medium', lane: 'macro', channels: ['treasuries'] },
+    { title: 'AAPL earnings', date: '2026-10-29', importance: 'medium', lane: 'single_name', channels: ['equities'] },
+  ];
+  assert.deepEqual(upcomingFor(events, 'treasuries', '2026-10-19').map((e) => e.title), ['5-Year Note auction', 'CPI']);
+  assert.deepEqual(upcomingFor(events, 'equities', '2026-10-19').map((e) => e.title), ['CPI']);
+  assert.deepEqual(upcomingFor(null, 'credit', '2026-10-19'), []);
+});

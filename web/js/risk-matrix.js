@@ -100,3 +100,13 @@ export function scaleText(cell, matrix, fmt = String) {
   return `Colour: the lead's percentile in its own last ${matrix?.years ?? 10} years, in its risk direction; `
     + `elevated from the ${th.elevated ?? 75}th, stressed from the ${th.stressed ?? 95}th. Used for changes and spreads with no outside anchor.`;
 }
+
+// The next scheduled events that hit a row's channel, from the calendar's tags:
+// macro events of medium importance or more, and only the largest earnings.
+export function upcomingFor(events, channel, asOf, limit = 3) {
+  return (events || [])
+    .filter((e) => (e.channels || []).includes(channel) && (!asOf || e.date >= asOf))
+    .filter((e) => (e.lane === 'single_name' ? e.importance === 'high' : e.importance !== 'low'))
+    .sort((a, b) => a.date.localeCompare(b.date) || (a.importance === 'high' ? -1 : 1))
+    .slice(0, limit);
+}

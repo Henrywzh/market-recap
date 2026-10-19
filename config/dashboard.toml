@@ -1423,6 +1423,18 @@ TLT = "ishares"
 horizon_days = 30
 # High-importance macro events (FOMC, CPI, payrolls, GDP) are listed this far out.
 high_importance_horizon_days = 45
+# Importance of a release SCENARIOS measures (its ``measure``): the larger of
+# the 2-year yield's and SPY's average absolute move on its release days over
+# other days' (SPY scaled by its own recent volatility). High from 1.4x, medium
+# from 1.15x (about two standard errors at a hundred releases), low below; at
+# least min_releases needed. Other events keep their hand-set importance and
+# say so. Each event also carries a category (what it is) and channels (the
+# RISK rows it hits), from its type unless its entry sets ``category`` or
+# ``channels``.
+importance_ratio = { high = 1.4, medium = 1.15, min_releases = 40 }
+# Hand-kept deadlines and projections (shutdowns, tariff dates, the debt limit)
+# are listed this far ahead: the risk is knowing they are coming.
+deadline_horizon_days = 120
 week_sessions = 5
 # Earnings weight by sector and day, over the next heatmap_days (the calendar's S&P 500 card).
 heatmap_days = 21
@@ -1459,6 +1471,7 @@ expiry_shock_z = 2.0
 [[catalysts.releases]]
 source = "bls"
 match = "^Employment Situation$"
+measure = "payrolls"
 label = "Employment report"
 importance = "high"
 expect_within_days = 40
@@ -1471,6 +1484,7 @@ expect = ["nfp", "unrate"]
 [[catalysts.releases]]
 source = "bls"
 match = "^Consumer Price Index$"
+measure = "cpi"
 label = "CPI"
 importance = "high"
 expect_within_days = 40
@@ -1483,6 +1497,7 @@ expect = ["cpi_yoy", "core_cpi_yoy", "cpi_mom", "core_cpi_mom"]
 [[catalysts.releases]]
 source = "bls"
 match = "^Producer Price Index$"
+measure = "ppi"
 label = "PPI"
 importance = "medium"
 prints = [{ series = "PPIFIS", transform = "yoy", label = "Final demand y/y", unit = "%", decimals = 1 }]
@@ -1490,6 +1505,7 @@ prints = [{ series = "PPIFIS", transform = "yoy", label = "Final demand y/y", un
 [[catalysts.releases]]
 source = "bls"
 match = "^Job Openings and Labor Turnover Survey$"
+measure = "jolts"
 label = "JOLTS job openings"
 importance = "medium"
 prints = [{ series = "JTSJOL", transform = "level", label = "Openings", unit = "k", decimals = 0 }]
@@ -1518,6 +1534,7 @@ expect = ["gdp"]
 [[catalysts.releases]]
 source = "bea"
 match = "^Personal Income and Outlays$"
+measure = "core_pce"
 label = "PCE inflation, income & spending"
 importance = "high"
 expect_within_days = 40
@@ -1536,6 +1553,7 @@ importance = "low"
 [[catalysts.releases]]
 source = "census"
 match = "^Advance Monthly Sales for Retail and Food Services$"
+measure = "retail_sales"
 label = "Retail sales"
 importance = "high"
 expect_within_days = 40
@@ -1572,6 +1590,7 @@ importance = "low"
 [[catalysts.releases]]
 source = "fed"
 match = "^FOMC Meeting$"
+measure = "fomc"
 label = "FOMC decision (statement)"
 importance = "high"
 expect_within_days = 60
@@ -1610,6 +1629,7 @@ importance = "medium"
 [[catalysts.releases]]
 source = "fed"
 match = "^G.17 - Industrial Production"
+category = "macro_data"
 label = "Industrial production"
 importance = "medium"
 prints = [{ series = "INDPRO", transform = "mom", label = "IP m/m", unit = "%", decimals = 1 }]
@@ -1629,6 +1649,7 @@ importance = "low"
 [[catalysts.releases]]
 source = "rule"
 match = "^Initial jobless claims$"
+measure = "claims"
 label = ""
 importance = "medium"
 prints = [{ series = "ICSA", transform = "level", label = "Claims", unit = "k", decimals = 0, scale = 0.001 }]
@@ -1637,6 +1658,7 @@ expect = ["claims"]
 [[catalysts.releases]]
 source = "rule"
 match = "^ISM Manufacturing"
+measure = "ism_manufacturing"
 label = ""
 importance = "high"
 
@@ -1665,17 +1687,357 @@ match = "^(VIX|EIA)"
 label = ""
 importance = "low"
 
+[[catalysts.releases]]
+source = "rule"
+match = "^(Quarter-end|MSCI quarterly|Nasdaq-100 annual)"
+label = ""
+importance = "medium"
+
+[[catalysts.releases]]
+source = "rule"
+match = "^(Month-end|Federal tax payment|US stock market)"
+label = ""
+importance = "low"
+
+[[catalysts.releases]]
+source = "fed"
+match = "^Senior (Loan|Credit) Officer"
+channels = ["credit", "macro"]
+label = ""
+importance = "low"
+
 # Events no calendar publishes -- elections, policy deadlines, summits, OPEC+
 # meetings -- kept by hand. ``date_precision`` is "day" when the date is fixed,
 # "approximate" when it is expected but not set; ``time`` is New York, if known.
+# Hand-kept events. ``certainty`` says how the date is known (official_schedule:
+# an official page, entered by hand; announced; expected: the usual pattern, not
+# yet announced; deadline: a legal or policy date that can move; projection) and
+# ``checked`` when it was last confirmed against ``source_url``. Deadlines and
+# projections are listed up to deadline_horizon_days ahead.
+#
+# --- Politics -----------------------------------------------------------------
 [[catalysts.manual]]
 date = "2026-11-03"
 title = "US midterm elections"
 event_type = "politics"
 importance = "high"
 date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
 source_url = "https://www.usa.gov/midterm-elections"
 detail = "All House seats and a third of the Senate. Fixed by law: the Tuesday after the first Monday in November."
+
+# --- Central banks abroad (decision day) -----------------------------------------
+[[catalysts.manual]]
+date = "2026-10-28"
+title = "Bank of Canada rate decision and Monetary Policy Report"
+event_type = "central_bank"
+scope = "global_macro"
+importance = "low"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.bankofcanada.ca/press/upcoming-events/"
+detail = "Decision at 9:45 New York time, with the quarterly Monetary Policy Report."
+
+[[catalysts.manual]]
+date = "2026-10-29"
+title = "ECB monetary policy decision"
+event_type = "central_bank"
+scope = "global_macro"
+importance = "medium"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html"
+detail = "Second day of the Governing Council's monetary policy meeting; the decision is followed by the press conference."
+
+[[catalysts.manual]]
+date = "2026-10-30"
+title = "Bank of Japan policy decision and Outlook Report"
+channels = ["cross_asset", "treasuries", "volatility"]
+event_type = "central_bank"
+scope = "global_macro"
+importance = "high"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm"
+detail = "Two-day meeting (29-30 October) with the quarterly Outlook Report. A surprise tightening in July 2024 set off the yen carry-trade unwind of early August 2024."
+
+[[catalysts.manual]]
+date = "2026-11-05"
+title = "Bank of England MPC decision"
+event_type = "central_bank"
+scope = "global_macro"
+importance = "medium"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.bankofengland.co.uk/monetary-policy/upcoming-mpc-dates"
+detail = "Monetary Policy Committee announcement, with the Monetary Policy Report."
+
+[[catalysts.manual]]
+date = "2026-12-09"
+title = "Bank of Canada rate decision"
+event_type = "central_bank"
+scope = "global_macro"
+importance = "low"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.bankofcanada.ca/press/upcoming-events/"
+detail = "Decision at 9:45 New York time."
+
+[[catalysts.manual]]
+date = "2026-12-10"
+title = "Swiss National Bank policy assessment"
+event_type = "central_bank"
+scope = "global_macro"
+importance = "low"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.snb.ch/en/services-events/digital-services/event-schedule"
+detail = "Quarterly monetary policy assessment; a safe-haven currency, and negative rates in the past."
+
+[[catalysts.manual]]
+date = "2026-12-17"
+title = "ECB monetary policy decision"
+event_type = "central_bank"
+scope = "global_macro"
+importance = "medium"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html"
+detail = "Second day of the Governing Council's monetary policy meeting, with new staff projections."
+
+[[catalysts.manual]]
+date = "2026-12-17"
+title = "Bank of England MPC decision"
+event_type = "central_bank"
+scope = "global_macro"
+importance = "medium"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.bankofengland.co.uk/monetary-policy/upcoming-mpc-dates"
+detail = "Monetary Policy Committee announcement."
+
+[[catalysts.manual]]
+date = "2026-12-18"
+title = "Bank of Japan policy decision"
+channels = ["cross_asset", "treasuries", "volatility"]
+event_type = "central_bank"
+scope = "global_macro"
+importance = "high"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm"
+detail = "Two-day meeting (17-18 December)."
+
+[[catalysts.manual]]
+date = "2027-01-22"
+title = "Bank of Japan policy decision and Outlook Report"
+channels = ["cross_asset", "treasuries", "volatility"]
+event_type = "central_bank"
+scope = "global_macro"
+importance = "high"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm"
+detail = "Two-day meeting (21-22 January) with the quarterly Outlook Report."
+
+[[catalysts.manual]]
+date = "2027-02-04"
+title = "ECB monetary policy decision"
+event_type = "central_bank"
+scope = "global_macro"
+importance = "medium"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html"
+detail = "Second day of the Governing Council's monetary policy meeting."
+
+[[catalysts.manual]]
+date = "2027-02-04"
+title = "Bank of England MPC decision"
+event_type = "central_bank"
+scope = "global_macro"
+importance = "medium"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.bankofengland.co.uk/monetary-policy/upcoming-mpc-dates"
+detail = "Monetary Policy Committee announcement, with the Monetary Policy Report."
+
+# --- Index and market structure ---------------------------------------------------
+[[catalysts.manual]]
+date = "2026-11-13"
+title = "Russell reconstitution: preliminary lists"
+event_type = "market_structure"
+scope = "us_equity"
+importance = "low"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.lseg.com/en/ftse-russell/russell-reconstitution"
+detail = "First preliminary add and delete lists for the December reconstitution (rank day 30 October); updates on 20 and 27 November and 4 December."
+
+[[catalysts.manual]]
+date = "2026-12-11"
+title = "Russell reconstitution effective after the close"
+event_type = "market_structure"
+scope = "us_equity"
+importance = "medium"
+date_precision = "day"
+certainty = "official_schedule"
+checked = "2026-10-19"
+source_url = "https://www.lseg.com/en/ftse-russell/russell-reconstitution"
+detail = "The December 2026 reconstitution (Russell now reconstitutes twice a year, June and December) takes effect after the US close; index funds trade it in the closing auction."
+
+[[catalysts.manual]]
+date = "2026-11-04"
+title = "Treasury quarterly refunding announcement (expected)"
+event_type = "fiscal"
+scope = "us_macro"
+importance = "high"
+date_precision = "day"
+certainty = "expected"
+checked = "2026-10-19"
+source_url = "https://home.treasury.gov/policy-issues/financing-the-government/quarterly-refunding"
+detail = "Not yet announced: Treasury confirms the date about a week ahead. The statement usually comes at 8:30 on the Wednesday of the first week of February, May, August and November, after borrowing estimates on the Monday. It sets coupon auction sizes; the August 2023 refunding helped drive that autumn's rise in the term premium."
+
+# --- Commodities and geopolitics ----------------------------------------------------
+[[catalysts.manual]]
+date = "2026-11-01"
+title = "OPEC+ monthly meeting (eight-country group)"
+event_type = "commodities"
+scope = "global_macro"
+importance = "medium"
+date_precision = "day"
+certainty = "announced"
+checked = "2026-10-19"
+source_url = "https://www.opec.org/pr-detail/616-4-october-2026.html"
+detail = "Sets December output; set at the 4 October meeting, which kept November targets unchanged."
+
+[[catalysts.manual]]
+date = "2026-11-29"
+title = "OPEC+ full ministerial meeting (expected)"
+event_type = "commodities"
+scope = "global_macro"
+importance = "medium"
+date_precision = "day"
+certainty = "expected"
+checked = "2026-10-19"
+source_url = "https://www.opec.org/"
+detail = "The twice-yearly ministerial meeting, scheduled for 29 November at the June meeting; not reconfirmed since. Expected to set 2027 production baselines."
+
+[[catalysts.manual]]
+date = "2026-11-18"
+end_date = "2026-11-19"
+title = "APEC leaders' meeting, Shenzhen (Trump and Xi expected)"
+event_type = "geopolitics"
+scope = "global_macro"
+importance = "medium"
+date_precision = "day"
+certainty = "announced"
+checked = "2026-10-19"
+source_url = "https://en.wikipedia.org/wiki/APEC_China_2026"
+detail = "18-19 November. Both leaders have said they will attend; a meeting on trade is expected ahead of the truce's 10 January expiry. Leaders' attendance is not officially scheduled."
+
+[[catalysts.manual]]
+date = "2026-12-14"
+end_date = "2026-12-15"
+title = "G20 leaders' summit, Doral (Miami)"
+event_type = "geopolitics"
+scope = "global_macro"
+importance = "low"
+date_precision = "day"
+certainty = "announced"
+checked = "2026-10-19"
+source_url = "https://en.wikipedia.org/wiki/2026_G20_Miami_summit"
+detail = "14-15 December; the dates were reported as tentative and not confirmed on an official G20 page."
+
+# --- Deadlines (can move) -----------------------------------------------------------
+[[catalysts.manual]]
+date = "2026-11-10"
+title = "Section 301 tariff exclusions on Chinese goods expire"
+event_type = "trade"
+scope = "us_macro"
+importance = "medium"
+date_precision = "day"
+certainty = "deadline"
+checked = "2026-10-19"
+source_url = "https://tax.thomsonreuters.com/blog/section-301-exclusions-expiration/"
+detail = "The remaining 178 product exclusions from Section 301 tariffs lapse unless USTR extends them; no extension announced when checked. Separate from the broader truce, which now runs to 10 January 2027."
+
+[[catalysts.manual]]
+date = "2026-12-01"
+title = "USMCA automobile content rules: new documentation applies"
+event_type = "trade"
+scope = "us_equity"
+importance = "low"
+date_precision = "day"
+certainty = "deadline"
+checked = "2026-10-19"
+source_url = "https://usegreco.com/insights/usmca-automobile-tariff-content-deadlines"
+detail = "Vehicles imported from 1 December need new US-content documentation to keep the reduced Section 232 auto tariff."
+
+[[catalysts.manual]]
+date = "2026-12-04"
+title = "Section 232 minimum import prices on polysilicon and solar"
+event_type = "trade"
+scope = "us_equity"
+importance = "low"
+date_precision = "day"
+certainty = "deadline"
+checked = "2026-10-19"
+source_url = "https://www.sheppard.com/insights/blogs/a-new-floor-for-solar-section-232-sets-new-tariffs-and-price-floors-on-polysilicon-imports"
+detail = "Price floors begin: polysilicon $21/kg, ingots and wafers $100/kg, cells $0.22/W, modules $0.38/W."
+
+[[catalysts.manual]]
+date = "2026-12-11"
+title = "Government funding expires (shutdown risk)"
+channels = ["macro", "treasuries", "equities"]
+event_type = "fiscal"
+scope = "us_macro"
+importance = "high"
+date_precision = "day"
+certainty = "deadline"
+checked = "2026-10-19"
+source_url = "https://www.hklaw.com/en/insights/publications/2026/10/beyond-the-midterms-congress-faces-converging-year-end-deadlines"
+detail = "The stopgap signed 2 September 2026 (Continuing Appropriations and Extensions Act, 2027) funds agencies through 11 December. Without full-year bills or another stopgap, a partial shutdown begins; the last one (1 October - 12 November 2025, 43 days) delayed BLS and BEA releases."
+
+[[catalysts.manual]]
+date = "2027-01-10"
+title = "US-China trade truce expires"
+channels = ["equities", "cross_asset", "macro"]
+event_type = "trade"
+scope = "global_macro"
+importance = "high"
+date_precision = "day"
+certainty = "deadline"
+checked = "2026-10-19"
+source_url = "https://www.spglobal.com/energy/en/news-research/latest-news/agriculture/092426-us-says-trade-truce-with-china-extended-till-jan-10-2027-ahead-of-trump-xi-meet"
+detail = "Extended on 27 September 2026 from 10 November to 10 January 2027; the pause on tariff increases and some export controls lapses unless extended again. Not yet formalised in a Federal Register notice when checked."
+
+[[catalysts.manual]]
+date = "2027-05-01"
+title = "Debt limit expected to bind (projection: February to July 2027)"
+channels = ["treasuries", "credit", "macro"]
+event_type = "fiscal"
+scope = "us_macro"
+importance = "medium"
+date_precision = "month"
+certainty = "projection"
+checked = "2026-10-19"
+source_url = "https://www.ntu.org/publications/detail/projecting-the-debt-limit"
+detail = "The $41.1 trillion limit set in July 2025 is projected to be reached around May 2027 (as early as February, as late as July); extraordinary measures would then last to about early 2028. A window, not a date."
 
 [macro.commodities]
 # Yahoo front-month futures / ETF proxies. These are proxies, not spot prints,

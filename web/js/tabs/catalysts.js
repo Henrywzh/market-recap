@@ -215,8 +215,36 @@ function eventWeight(event) {
 
 // --- Pieces ------------------------------------------------------------------------
 
-function importanceDot(importance) {
-  return el('span', { class: `cat-dot cat-${importance}`, title: `${importance} importance` });
+// Importance says how it was set: measured from past release days, an index
+// weight, or by hand.
+export function importanceTitle(event) {
+  const basis = event.importance_basis;
+  return `${event.importance} importance${basis?.text ? ` · ${basis.text}` : ''}`;
+}
+
+function importanceDot(importance, event = null) {
+  return el('span', { class: `cat-dot cat-${importance}`, title: event ? importanceTitle(event) : `${importance} importance` });
+}
+
+// What an event is (one category) and what it hits (the RISK rows), for the row's tag and the filters.
+export const CATEGORY_SHORT = {
+  macro_data: 'MACRO', monetary_policy: 'POLICY', fiscal_treasury: 'FISCAL', market_structure: 'STRUCTURE',
+  politics_policy: 'POLITICS', geopolitics: 'GEOPOLITICS', commodities_industry: 'COMMODITIES', corporate: 'CORPORATE',
+};
+const CHANNEL_WORDS = {
+  equities: 'equities', treasuries: 'treasuries', credit: 'credit', volatility: 'volatility',
+  cross_asset: 'cross-asset', macro: 'macro',
+};
+
+export function matchesTags(event, filter) {
+  if (filter.category && filter.category !== 'all' && event.category !== filter.category) return false;
+  if (filter.channel && filter.channel !== 'all' && !(event.channels || []).includes(filter.channel)) return false;
+  return true;
+}
+
+function categoryTag(event) {
+  const text = CATEGORY_SHORT[event.category];
+  return text ? el('span', { class: 'cat-tag cat-category', title: `hits ${(event.channels || []).map((c) => CHANNEL_WORDS[c] || c).join(', ')}`, text }) : null;
 }
 
 function certaintyTag(event, labels) {
@@ -252,6 +280,12 @@ function actualSpans(event) {
 }
 
 // Everything the build knows about one release, shown when its row is opened.
+// A hand-kept entry names the site it was checked against, not "manual".
+function sourceText(event) {
+  if (event.source_id !== 'manual') return event.source_id;
+  try { return new URL(event.source_url).hostname.replace(/^www\./, ''); } catch { return 'source'; }
+}
+
 function macroDetail(event, labels) {
   const rows = event.expectations || [];
   const lines = ['survey', 'market', 'model'].map((kind) => {
@@ -267,9 +301,12 @@ function macroDetail(event, labels) {
     event.actuals?.length ? el('div', { text: `Actual (TradingView; the agency release is authoritative): ${event.actuals.map((a) => `${a.label} ${num(a.value, a.decimals)}${a.unit === '%' ? '%' : a.unit || ''}`).join(' · ')}` }) : null,
     ...lines,
     prints.length ? el('div', { text: `Previous: ${prints.map((p) => `${p.label} ${printValue(p)}${p.period ? ` (${p.period.slice(0, 7)})` : ''}`).join(' · ')}` }) : null,
+    event.channels?.length ? el('div', { text: `Hits: ${event.channels.map((c) => CHANNEL_WORDS[c] || c).join(' · ')}` }) : null,
+    event.importance_basis?.text ? el('div', { text: `Importance: ${event.importance} — ${event.importance_basis.text}` }) : null,
     el('div', {}, [
-      labels[event.certainty_class] ? `Date: ${labels[event.certainty_class]}` : null,
-      event.source_url ? el('span', {}, [' · ', el('a', { href: event.source_url, target: '_blank', rel: 'noopener', text: event.source_id })]) : null,
+      labels[event.certainty_class] ? `Date: ${labels[event.certainty_class]}${event.checked ? ` (checked ${event.checked})` : ''}` : null,
+      event.end_date ? `Runs to ${event.end_date}` : null,
+      event.source_url ? el('span', {}, [' · ', el('a', { href: event.source_url, target: '_blank', rel: 'noopener', text: sourceText(event) })]) : null,
     ]),
   ]);
 }
@@ -287,8 +324,9 @@ function macroRow(event, labels) {
   const summary = el('summary', { class: 'cat-row' }, [
     timeCell(event),
     el('span', { class: 'cat-name' }, [
-      importanceDot(event.importance),
+      importanceDot(event.importance, event),
       el('span', { class: 'cat-title', text: event.title }),
+      categoryTag(event),
       event.reference_period ? el('span', { class: 'dim', text: ` · ${event.reference_period}` }) : null,
       expiry
         ? el('span', { class: `cat-tag cat-expiry-tag${event.rule === 'quad_witching' ? ' cat-expiry-quad' : ''}`, text: expiry })
@@ -310,7 +348,7 @@ function earningsRow(event) {
   return el('div', { class: 'cat-row cat-row-flat', title: [event.name, event.sector, event.fiscal_quarter ? `FQ ${event.fiscal_quarter}` : null, event.estimates ? `${event.estimates} estimates` : null].filter(Boolean).join(' · ') }, [
     timeCell(event),
     el('span', { class: 'cat-name' }, [
-      importanceDot(event.importance),
+      importanceDot(event.importance, event),
       el('a', { class: 'cat-title', href: tickerHref(event.symbol), text: event.symbol }),
       el('span', { class: 'dim cat-company', text: ` ${event.name || ''}` }),
       event.watchlist ? el('span', { class: 'cat-tag', text: 'WATCHLIST' }) : null,
@@ -481,9 +519,9 @@ function lastSession(recent, labels) {
 
 function loadFilter() {
   try {
-    return { importance: 'medium', lane: 'both', watchlist: false, ...JSON.parse(localStorage.getItem(FILTER_KEY) || '{}') };
+    return { importance: 'medium', lane: 'both', watchlist: false, category: 'all', channel: 'all', ...JSON.parse(localStorage.getItem(FILTER_KEY) || '{}') };
   } catch {
-    return { importance: 'medium', lane: 'both', watchlist: false };
+    return { importance: 'medium', lane: 'both', watchlist: false, category: 'all', channel: 'all' };
   }
 }
 
@@ -505,6 +543,7 @@ function switchGroup(options, active, onPick) {
 
 function visible(event, filter) {
   if (IMPORTANCE_RANK[event.importance] > IMPORTANCE_RANK[filter.importance]) return false;
+  if (!matchesTags(event, filter)) return false;
   if (filter.lane !== 'both' && event.lane !== filter.lane) return false;
   if (filter.watchlist && event.lane === 'single_name' && !event.watchlist) return false;
   if (filter.query) {
@@ -513,6 +552,13 @@ function visible(event, filter) {
     if (!text.includes(q)) return false;
   }
   return true;
+}
+
+function tagSelect(label, options, active, onPick) {
+  const select = el('select', { 'aria-label': label },
+    options.map(([value, text]) => el('option', { value, text, ...(value === active ? { selected: '' } : {}) })));
+  select.addEventListener('change', () => onPick(select.value));
+  return el('div', { class: 'field' }, [select]);
 }
 
 function laneColumn(title, events, weekEnd, render) {
@@ -633,6 +679,10 @@ export default async function renderCatalysts(root, data, _manifest, ctx = {}) {
     switchGroup([['high', 'HIGH'], ['medium', 'MEDIUM+'], ['low', 'ALL']], filter.importance, set('importance')),
     switchGroup([['both', 'BOTH LANES'], ['macro', 'MACRO'], ['single_name', 'SINGLE NAME']], filter.lane, set('lane')),
     switchGroup([[false, 'ALL NAMES'], [true, 'WATCHLIST']], filter.watchlist, set('watchlist')),
+    tagSelect('What it is', [['all', 'ALL KINDS'], ...Object.entries(data.categories || {}).map(([k, v]) => [k, v.toUpperCase()])],
+      filter.category, set('category')),
+    tagSelect('What it hits', [['all', 'HITS ANYTHING'], ...(data.channels || []).map((c) => [c, `HITS ${(CHANNEL_WORDS[c] || c).toUpperCase()}`])],
+      filter.channel, set('channel')),
     el('div', { class: 'field' }, [search]),
   ]));
   root.append(host);

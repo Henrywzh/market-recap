@@ -24,3 +24,20 @@ test('the shading is scaled to the largest cell, and a grid with no weight scale
   assert.equal(model.dates.length, 2);
   assert.equal(heatmapModel({ dates: ['2026-10-14'], rows: [{ sector: 'X', cells: [null] }] }).max, 0.01);
 });
+
+test('an event is filtered by what it is and by what it hits', async () => {
+  const { matchesTags } = await import('../../web/js/tabs/catalysts.js');
+  const cpi = { category: 'macro_data', channels: ['treasuries', 'equities', 'macro'] };
+  assert.equal(matchesTags(cpi, { category: 'all', channel: 'all' }), true);
+  assert.equal(matchesTags(cpi, { category: 'macro_data', channel: 'treasuries' }), true);
+  assert.equal(matchesTags(cpi, { category: 'market_structure', channel: 'all' }), false);
+  assert.equal(matchesTags(cpi, { category: 'all', channel: 'credit' }), false);
+  assert.equal(matchesTags({}, {}), true, 'an older build with no tags is never hidden by default');
+});
+
+test('the importance title says how it was set', async () => {
+  const { importanceTitle } = await import('../../web/js/tabs/catalysts.js');
+  const cpi = { importance: 'high', importance_basis: { kind: 'measured', text: '2-year yield moved 1.54x an ordinary day' } };
+  assert.equal(importanceTitle(cpi), 'high importance · 2-year yield moved 1.54x an ordinary day');
+  assert.equal(importanceTitle({ importance: 'low' }), 'low importance');
+});

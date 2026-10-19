@@ -188,3 +188,151 @@ def test_an_adr_outside_the_indexes_gets_its_theme_importance_not_low(monkeypatc
     settings_off = {k: v for k, v in settings.items() if "theme" not in k}
     off = {e["symbol"]: e for e in panel._earnings(ctx, settings_off, [date(2026, 10, 15)], True)[0]}
     assert off["TSM"]["importance"] == "low" and off["TSM"]["theme"] is None            # no theme rule configured: the old rule alone
+
+
+# --- structural and fiscal rule events --------------------------------------------
+
+def _rules(start, end):
+    return {(e["rule"], e["date"]) for e in C.rule_events(start, end)}
+
+
+def test_month_quarter_end_msci_and_nasdaq_100_follow_their_rules():
+    rules = _rules(date(2026, 10, 19), date(2026, 12, 31))
+    assert ("month_end", "2026-10-30") in rules, "the last session of October"
+    assert ("msci_review", "2026-11-30") in rules and ("month_end", "2026-11-30") in rules
+    assert ("quarter_end", "2026-12-31") in rules and ("month_end", "2026-12-31") not in rules
+    # Nasdaq-100: after the close of the third Friday of December, the same day as quad witching.
+    assert ("ndx_reconstitution", "2026-12-18") in rules and ("quad_witching", "2026-12-18") in rules
+
+
+def test_tax_dates_move_to_the_next_session_and_holidays_are_listed():
+    rules = _rules(date(2026, 11, 1), date(2027, 1, 31))
+    assert ("tax_date", "2026-12-15") in rules
+    # 15 January 2027 is a Friday; MLK Day is the 18th.
+    assert ("tax_date", "2027-01-15") in rules
+    assert ("market_holiday", "2026-11-26") in rules and ("early_close", "2026-11-27") in rules
+    # 15 January 2028 is a Saturday: the payment is due the next session, Tuesday the 18th after MLK Day.
+    assert ("tax_date", "2028-01-18") in _rules(date(2028, 1, 1), date(2028, 1, 31))
+
+
+def test_census_reads_this_years_page_beside_the_default_one(monkeypatch):
+    row = ('<tr><td>{title}</td><td>{day}</td><td>8:30 AM</td><td>{period}</td></tr>')
+    pages = {
+        "census": row.format(title="Advance Monthly Sales for Retail and Food Services", day="January 15, 2027", period="December"),
+        "census-2026": row.format(title="Advance Monthly Sales for Retail and Food Services", day="November 17, 2026", period="October")
+        + row.format(title="Advance Monthly Sales for Retail and Food Services", day="January 15, 2027", period="December"),
+    }
+    monkeypatch.setattr(calendars, "_text", lambda name, url, use_cache: pages[name])
+    events = calendars.fetch_census(today=date(2026, 10, 19))
+    assert sorted(e["date"] for e in events) == ["2026-11-17", "2027-01-15"], "merged, once each"
+
+
+def test_this_years_census_page_failing_does_not_lose_the_default_one(monkeypatch):
+    def text(name, url, use_cache):
+        if name != "census":
+            raise RuntimeError("404")
+        return '<tr><td>New Residential Sales</td><td>January 27, 2027</td><td>10:00 AM</td><td>Dec</td></tr>'
+    monkeypatch.setattr(calendars, "_text", text)
+    assert [e["date"] for e in calendars.fetch_census(today=date(2026, 10, 19))] == ["2027-01-27"]
+
+
+# --- hand-kept events: certainty, checked dates, deadline horizon --------------------
+
+def _manual_events(monkeypatch, manual, **settings):
+    monkeypatch.setattr(panel, "_macro_events", lambda ctx, start, end, use_cache: ([], {}, []))
+    monkeypatch.setattr(panel, "_attach_expectations", lambda ctx, events, use_cache: {})
+    config = {"releases": [], "manual": manual, "high_importance_horizon_days": 45, **settings}
+    events, _, _ = panel._macro(None, config, date(2026, 10, 19), date(2026, 11, 18), use_cache=True)
+    return {e["title"]: e for e in events}
+
+
+def test_a_deadline_is_listed_further_ahead_and_keeps_its_checked_date(monkeypatch):
+    manual = [
+        {"date": "2027-01-10", "title": "Truce expires", "certainty": "deadline", "importance": "high",
+         "checked": "2026-10-19", "source_url": "https://example.org"},
+        {"date": "2027-01-10", "title": "A far meeting", "certainty": "official_schedule", "importance": "high"},
+    ]
+    events = _manual_events(monkeypatch, manual, deadline_horizon_days=120)
+    assert "Truce expires" in events and "A far meeting" not in events
+    assert events["Truce expires"]["certainty_class"] == "deadline"
+    assert events["Truce expires"]["checked"] == "2026-10-19"
+
+
+def test_an_unknown_certainty_is_refused(monkeypatch):
+    with pytest.raises(ValueError, match="unknown certainty"):
+        _manual_events(monkeypatch, [{"date": "2026-11-01", "title": "x", "certainty": "rumour"}])
+
+
+def test_every_hand_kept_event_names_its_source_and_when_it_was_checked():
+    from market_recap.config import load_config
+    for item in load_config()["catalysts"]["manual"]:
+        assert item.get("source_url", "").startswith("https://"), item["title"]
+        assert item.get("checked"), item["title"]
+        assert item.get("certainty") in panel.MANUAL_CERTAINTY, item["title"]
+
+
+# --- tags and measured importance --------------------------------------------------
+
+LINES = {"high": 1.4, "medium": 1.15, "min_releases": 40}
+SCENARIOS = {
+    "drivers": [
+        {"key": "cpi", "first": "2016-01-20", "event_size": {"n": 121, "dy2_release": 5.35, "dy2_other": 3.47,
+                                                            "spy_release": 0.86, "spy_other": 0.82}},
+        {"key": "core_pce", "first": "2016-01-29", "event_size": {"n": 120, "dy2_release": 3.05, "dy2_other": 3.58,
+                                                                 "spy_release": 0.93, "spy_other": 0.82}},
+        {"key": "rare", "first": "2024-01-01", "event_size": {"n": 12, "dy2_release": 9.0, "dy2_other": 3.0,
+                                                             "spy_release": 1.0, "spy_other": 1.0}},
+    ],
+    "fomc": {"decisions": 86, "abs_move": {"dY2_fomc": 5.41, "dY2_other": 3.4, "spy_fomc": 0.8, "spy_other": 0.72}},
+}
+
+
+def test_importance_comes_from_the_larger_measured_ratio():
+    sizes = C.event_sizes(SCENARIOS)
+    level, basis = C.measured_importance("cpi", sizes, LINES)
+    assert level == "high" and basis["side"] == "2-year yield" and basis["ratio"] == pytest.approx(1.54, abs=0.01)
+    # PCE: the yield moves less than usual, SPY 1.13x -- under the medium line.
+    level, basis = C.measured_importance("core_pce", sizes, LINES)
+    assert level == "low" and basis["side"] == "SPY"
+    assert C.measured_importance("fomc", sizes, LINES)[0] == "high"
+
+
+def test_too_few_releases_or_no_measure_leaves_importance_to_the_config():
+    sizes = C.event_sizes(SCENARIOS)
+    assert C.measured_importance("rare", sizes, LINES) is None
+    assert C.measured_importance(None, sizes, LINES) is None
+    assert C.measured_importance("cpi", C.event_sizes(None), LINES) is None
+
+
+def test_tags_default_from_the_type_and_an_entry_can_set_its_own():
+    assert C.event_tags("economic_release") == ("macro_data", ["treasuries", "equities", "macro"])
+    assert C.event_tags("trade") == ("politics_policy", ["equities", "cross_asset", "macro"])
+    assert C.event_tags("central_bank", {"category": "macro_data"})[0] == "macro_data"
+    assert C.event_tags("central_bank", {"channels": ["credit"]})[1] == ["credit"]
+    with pytest.raises(ValueError):
+        C.event_tags("economic_release", {"channels": ["bitcoin"]})
+    with pytest.raises(ValueError):
+        C.event_tags("economic_release", {"category": "gossip"})
+
+
+def test_a_measured_release_is_listed_and_tagged_with_its_basis(monkeypatch):
+    raw = [{"source_id": "bls", "title": "Consumer Price Index", "date": "2026-11-12", "time": "08:30", "url": "u"},
+           {"source_id": "bea", "title": "Personal Income and Outlays", "date": "2026-11-25", "time": "08:30", "url": "u"}]
+    monkeypatch.setattr(panel, "_macro_events", lambda ctx, start, end, use_cache: (raw, {}, raw))
+    monkeypatch.setattr(panel, "_attach_expectations", lambda ctx, events, use_cache: {})
+    releases = [{"source": "bls", "match": "^Consumer Price Index$", "label": "CPI", "importance": "medium", "measure": "cpi"},
+                {"source": "bea", "match": "^Personal Income", "label": "PCE", "importance": "high", "measure": "core_pce"}]
+    config = {"releases": releases, "manual": [], "high_importance_horizon_days": 45, "importance_ratio": LINES}
+    events, _, _ = panel._macro(None, config, date(2026, 10, 19), date(2026, 11, 18), True, C.event_sizes(SCENARIOS))
+    by = {e["title"]: e for e in events}
+    assert by["CPI"]["importance"] == "high" and by["CPI"]["importance_basis"]["kind"] == "measured"
+    assert by["CPI"]["category"] == "macro_data" and "treasuries" in by["CPI"]["channels"]
+    # Measured low, and beyond the ordinary horizon: only high importance is listed that far out.
+    assert "PCE" not in by
+
+
+def test_every_configured_tag_is_known():
+    from market_recap.config import load_config
+    settings = load_config()["catalysts"]
+    for spec in settings["releases"] + settings["manual"]:
+        C.event_tags(spec.get("event_type", "economic_release"), spec)

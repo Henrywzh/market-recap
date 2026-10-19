@@ -30,18 +30,28 @@ from ..compute.xray import ticker_key
 from ..sources import calendars, estimates, expectations as expectation_feeds, fred, nasdaq, treasury
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, company_name
 
+# SCENARIOS measures how much each release has moved rates and stocks; the
+# calendar sets a release's importance from it.
+INPUTS = ("scenarios",)
+
 # How each source's dates are known.
 CERTAINTY = {
     "bls": "official_schedule", "bea": "official_schedule", "census": "official_schedule",
     "fed": "official_schedule", "treasury": "official_announcement", "rule": "rule",
     "manual": "manual", "nasdaq": "vendor_calendar",
 }
+# How a hand-kept entry's date is known. A deadline or projection can move, so
+# it carries the day it was last checked and is listed further ahead: the risk
+# is knowing it is coming, not its exact day.
+MANUAL_CERTAINTY = ("official_schedule", "announced", "expected", "deadline", "projection", "manual")
+LONG_HORIZON_CERTAINTY = ("deadline", "projection")
 EVENT_TYPE = {
     "bls": "economic_release", "bea": "economic_release", "census": "economic_release",
     "fed": "central_bank", "treasury": "treasury_auction", "rule": "market_structure",
 }
 RULE_TYPES = {"jobless_claims": "economic_release", "ism_manufacturing": "economic_release",
-              "ism_services": "economic_release", "eia_petroleum": "industry_data"}
+              "ism_services": "economic_release", "eia_petroleum": "industry_data",
+              "tax_date": "fiscal"}
 SOURCE_LABELS = {
     "bls": ("BLS release schedule", calendars.BLS_URL),
     "bea": ("BEA release schedule", calendars.BEA_URL),
@@ -129,16 +139,22 @@ def _prints(specs: list[dict], use_cache: bool, cache: dict) -> list[dict]:
     return out
 
 
-def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool) -> tuple[list[dict], dict[str, str], list[str]]:
+def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool,
+           sizes: dict | None = None) -> tuple[list[dict], dict[str, str], list[str]]:
     # High-importance releases are listed further out than the rest: an FOMC
     # decision five weeks away matters more than claims next Thursday.
     far = max(end, start + timedelta(days=int(settings.get("high_importance_horizon_days", 0))))
     raw, failed, everything = _macro_events(ctx, start, far, use_cache)
     series_cache: dict = {}
     events, seen = [], set()
+    lines = settings.get("importance_ratio") or {"high": 1.4, "medium": 1.15}
     for event in raw:
         release = _match(event, settings["releases"])
-        if release is None or (event["date"] > end.isoformat() and release["importance"] != "high"):
+        if release is None:
+            continue
+        measured = C.measured_importance(release.get("measure"), sizes or {}, lines)
+        importance, basis = measured if measured else (release["importance"], C.JUDGED)
+        if event["date"] > end.isoformat() and importance != "high":
             continue
         title = release["label"] or event["title"]
         key = f"{event['source_id']}:{event['date']}:{_slug(title)}"
@@ -146,18 +162,23 @@ def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool) -> tupl
             continue
         seen.add(key)
         detail = event.get("detail") or event.get("description")
+        event_type = RULE_TYPES.get(event.get("rule"), EVENT_TYPE.get(event["source_id"], "other"))
+        category, channels = C.event_tags(event_type, release)
         events.append({
             "event_key": key,
             "lane": "macro",
             "scope": "us_macro",
-            "event_type": RULE_TYPES.get(event.get("rule"), EVENT_TYPE.get(event["source_id"], "other")),
+            "event_type": event_type,
+            "category": category,
+            "channels": channels,
             "title": title,
             "source_title": event["title"],
             "date": event["date"],
             "time": event["time"],
             "date_precision": "datetime" if event["time"] else "day",
             "certainty_class": CERTAINTY[event["source_id"]],
-            "importance": release["importance"],
+            "importance": importance,
+            "importance_basis": basis,
             "source_id": event["source_id"],
             "source_url": event["url"],
             # The rule's name (monthly_opex, quad_witching, vix_expiry...) tags expiry rows on the page.
@@ -167,16 +188,26 @@ def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool) -> tupl
             "prints": _prints(release.get("prints"), use_cache, series_cache),
             "_expect": [key for key in (release.get("expect") or []) if key in X.CATALOG],
         })
+    deadline_end = start + timedelta(days=int(settings.get("deadline_horizon_days", 0)))
     for item in settings.get("manual") or []:
+        certainty = item.get("certainty", "manual")
+        if certainty not in MANUAL_CERTAINTY:
+            raise ValueError(f"catalysts.manual {item['title']!r}: unknown certainty {certainty!r}")
         last = far if item.get("importance") == "high" else end
+        if certainty in LONG_HORIZON_CERTAINTY:
+            last = max(last, deadline_end)
         if start.isoformat() <= item["date"] <= last.isoformat():
+            category, channels = C.event_tags(item.get("event_type", "other"), item)
             events.append({
                 "event_key": f"manual:{item['date']}:{_slug(item['title'])}",
-                "lane": "macro", "scope": "us_macro", "event_type": item.get("event_type", "other"),
+                "lane": "macro", "scope": item.get("scope", "us_macro"), "event_type": item.get("event_type", "other"),
                 "title": item["title"], "source_title": item["title"], "date": item["date"],
                 "time": item.get("time"), "date_precision": item.get("date_precision", "day"),
-                "certainty_class": "manual", "importance": item.get("importance", "medium"),
+                "category": category, "channels": channels,
+                "certainty_class": certainty, "importance": item.get("importance", "medium"),
+                "importance_basis": C.JUDGED,
                 "source_id": "manual", "source_url": item.get("source_url"),
+                "checked": item.get("checked"), "end_date": item.get("end_date"),
                 "reference_period": None, "detail": item.get("detail"), "prints": [],
             })
     failed.update(_attach_expectations(ctx, events, use_cache))
@@ -282,7 +313,9 @@ def _earnings(ctx, settings: dict, dates: list[date], use_cache: bool) -> tuple[
                 "title": f"{entry['symbol']} earnings", "symbol": entry["symbol"], "name": entry["name"],
                 "sector": entry["sector"], "date": day.isoformat(), "time": None, "timing": row["timing"],
                 "date_precision": "session" if row["timing"] else "day",
+                "category": "corporate", "channels": ["equities"],
                 "certainty_class": "vendor_calendar", "importance": importance,
+                "importance_basis": C.INDEX_WEIGHT,
                 "source_id": "nasdaq", "source_url": nasdaq.PAGE_URL,
                 "index_weights": {k: clean_float(v, 3) for k, v in entry["weights"].items()},
                 "theme": None if not theme else {"key": theme["theme"], "label": theme["label"], "share": clean_float(theme["share"] * 100, 1)},
@@ -384,13 +417,15 @@ def _heatmap(events: list[dict], as_of: date, days: int) -> dict:
             "day_totals": [round(sum((r["cells"][i] or {}).get("w", 0) for r in rows), 2) for i in range(len(dates))]}
 
 
-def build(ctx, *, use_cache: bool = True) -> dict:
+def build(ctx, *, use_cache: bool = True, inputs: dict | None = None) -> dict:
     settings = ctx.config["catalysts"]
     session = date.fromisoformat(ctx.as_of)
     previous = next(d for d in (session - timedelta(days=k) for k in range(1, 10)) if C.is_session(d))
     end = session + timedelta(days=int(settings["horizon_days"]))
 
-    macro, failed, expected_missing = _macro(ctx, settings, session, end, use_cache)
+    # How much each release has moved rates and stocks, measured by SCENARIOS this session.
+    sizes = C.event_sizes((inputs or {}).get("scenarios"))
+    macro, failed, expected_missing = _macro(ctx, settings, session, end, use_cache, sizes)
     earnings_dates = [previous] + C.sessions(session, end)
     earnings, earnings_failed = _earnings(ctx, settings, earnings_dates, use_cache)
     # Reported by the calendar's date, but Nasdaq has not posted the actual yet.
@@ -425,11 +460,18 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         "recent": _recent(ctx, macro, earnings, session, previous, use_cache),
         "expected_missing": expected_missing,
         "failed_sources": {**failed, **({"nasdaq": f"dates not fetched: {', '.join(earnings_failed)}"} if earnings_failed else {})},
+        "categories": C.CATEGORIES,
+        "channels": list(C.CHANNELS),
+        "importance_rule": settings.get("importance_ratio"),
         "certainty_labels": {
             "official_schedule": "agency's published schedule",
             "official_announcement": "announced by Treasury",
             "rule": "computed from a fixed rule",
             "manual": "kept by hand",
+            "announced": "announced by the organisers; entered by hand",
+            "expected": "expected from the usual pattern; not yet announced",
+            "deadline": "a legal or policy deadline: it can be extended or moved",
+            "projection": "an analysts' projection, not a fixed date",
             "vendor_calendar": "Nasdaq calendar; not marked company-confirmed",
         },
         "note": (

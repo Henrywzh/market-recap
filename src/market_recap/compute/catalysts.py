@@ -28,6 +28,11 @@ SPX_OPTIONS_URL = "https://www.cboe.com/tradable_products/sp_500/spx_options/"
 SETTLEMENT = ("SPX standard options settle on the OPENING prices that morning (SET, AM-settled); "
               "SPXW and most ETF/equity options settle at the close.")
 EXPIRY_RULES = ("monthly_opex", "quad_witching")
+# MSCI's quarterly index reviews take effect at the close of the last session of these months.
+MSCI_REVIEW_MONTHS = (2, 5, 8, 11)
+# Federal estimated-tax due dates (individuals: Jan, Apr, Jun, Sep; corporations: Apr, Jun, Sep, Dec).
+TAX_MONTHS = (1, 4, 6, 9, 12)
+TAX_DAY = 15
 
 
 def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
@@ -165,6 +170,13 @@ def next_expiries(after: date) -> list[dict]:
     return [first[r] for r in EXPIRY_RULES_SHOWN if r in first]
 
 
+def last_session(year: int, month: int) -> date:
+    day = (date(year, month + 1, 1) if month < 12 else date(year + 1, 1, 1)) - timedelta(days=1)
+    while not is_session(day):
+        day -= timedelta(days=1)
+    return day
+
+
 def _week_shift(day: date) -> date:
     """A weekly release moves to the next session when its day is a holiday."""
     while not is_session(day):
@@ -201,10 +213,52 @@ def rule_events(start: date, end: date) -> list[dict]:
         add(vix if is_session(vix) else vix - timedelta(days=1), "vix_expiry", "VIX options & futures expiry",
             "09:30", "Settles on the opening prices of the SPX options used in the index.",
             "https://www.cboe.com/tradable_products/vix/")
+        # Month and quarter end: pension and balanced-fund rebalancing, window dressing and,
+        # at quarter end, the reset of large hedged-equity funds' SPX collars.
+        close = last_session(year, month)
+        if month in QUARTER_END_MONTHS:
+            add(close, "quarter_end", "Quarter-end", "16:00",
+                "Pension and balanced funds rebalance between stocks and bonds after a quarter's moves; "
+                "large hedged-equity funds reset their quarterly SPX option collars this day, whose strikes "
+                "can pin the index into the close. Funding markets can tighten over the balance-sheet date.",
+                SPX_OPTIONS_URL)
+        else:
+            add(close, "month_end", "Month-end", "16:00",
+                "Month-end rebalancing and index-tracking flows into the close.", SPX_OPTIONS_URL)
+        if month in MSCI_REVIEW_MONTHS:
+            add(close, "msci_review", "MSCI quarterly index review effective after the close", "16:00",
+                "Adds, deletes and weight changes in MSCI's indexes take effect at this close; "
+                "index funds trade them in the closing auction, heaviest in emerging markets.",
+                "https://www.msci.com/index-review")
+        if month == 12:
+            ndx = monthly_expiry(year, 12)
+            add(ndx, "ndx_reconstitution", "Nasdaq-100 annual reconstitution effective after the close", "16:00",
+                "Members are reset on the annual ranking, effective before the open on the Monday after the "
+                "third Friday of December; index funds trade the changes in this close.",
+                "https://indexes.nasdaqomx.com/docs/Methodology_NDX.pdf")
+        if month in TAX_MONTHS:
+            tax = _week_shift(date(year, month, TAX_DAY))
+            kinds = {1: "Individual estimated", 4: "Individual and corporate", 6: "Individual and corporate estimated",
+                     9: "Individual and corporate estimated", 12: "Corporate estimated"}[month]
+            add(tax, "tax_date", f"Federal tax payment date ({kinds.lower()})", None,
+                f"{kinds} tax payments move cash into the Treasury's account at the Fed, draining bank "
+                "reserves for a few days; mid-September 2019's repo spike came on such a day.",
+                "https://www.irs.gov/businesses/small-businesses-self-employed/estimated-taxes")
         add(_business_day(year, month, 1), "ism_manufacturing", "ISM Manufacturing PMI", "10:00",
             "First business day of the month.", "https://www.ismworld.org/supply-management-news-and-reports/reports/rob-report-calendar/")
         add(_business_day(year, month, 3), "ism_services", "ISM Services PMI", "10:00",
             "Third business day of the month.", "https://www.ismworld.org/supply-management-news-and-reports/reports/rob-report-calendar/")
+
+    # Market closures and shortened sessions: thin liquidity around them.
+    for year in range(start.year, end.year + 1):
+        for holiday, name in nyse_holidays(year).items():
+            add(holiday, "market_holiday", f"US stock market closed: {name}", None,
+                "NYSE and Nasdaq closed; bond markets follow SIFMA's own schedule.",
+                "https://www.nyse.com/markets/hours-calendars")
+        for early, name in nyse_early_closes(year).items():
+            add(early, "early_close", f"US stock market closes at 1:00 p.m.: {name}", "13:00",
+                "A shortened session: thin volume, and the closing auction moves to 1:00 p.m.",
+                "https://www.nyse.com/markets/hours-calendars")
 
     day = start - timedelta(days=start.weekday())
     while day <= end:
@@ -221,6 +275,98 @@ def rule_events(start: date, end: date) -> list[dict]:
             "Weekly; moves later in a holiday week.", "https://www.eia.gov/petroleum/supply/weekly/schedule.php")
         day += timedelta(days=7)
     return events
+
+
+# --- Tags: what an event is, what it hits, how much it has moved markets ----------
+
+# One category per event: what it is. Its order is the page's filter order.
+CATEGORIES = {
+    "macro_data": "Macro data",
+    "monetary_policy": "Monetary policy",
+    "fiscal_treasury": "Fiscal & Treasury",
+    "market_structure": "Market structure",
+    "politics_policy": "Politics & policy",
+    "geopolitics": "Geopolitics",
+    "commodities_industry": "Commodities & industry",
+    "corporate": "Corporate",
+}
+TYPE_CATEGORY = {
+    "economic_release": "macro_data", "central_bank": "monetary_policy", "treasury_auction": "fiscal_treasury",
+    "fiscal": "fiscal_treasury", "market_structure": "market_structure", "industry_data": "commodities_industry",
+    "commodities": "commodities_industry", "politics": "politics_policy", "trade": "politics_policy",
+    "geopolitics": "geopolitics", "earnings": "corporate",
+}
+# The RISK matrix's rows an event can hit; several per event.
+CHANNELS = ("equities", "treasuries", "credit", "volatility", "cross_asset", "macro")
+CATEGORY_CHANNELS = {
+    "macro_data": ["treasuries", "equities", "macro"],
+    "monetary_policy": ["treasuries", "equities", "cross_asset"],
+    "fiscal_treasury": ["treasuries"],
+    "market_structure": ["equities", "volatility"],
+    "politics_policy": ["equities", "cross_asset", "macro"],
+    "geopolitics": ["cross_asset", "equities"],
+    "commodities_industry": ["cross_asset", "macro"],
+    "corporate": ["equities"],
+}
+
+
+def event_tags(event_type: str, spec: dict | None = None) -> tuple[str, list[str]]:
+    """(category, channels): the config entry's own, or its type's defaults."""
+    spec = spec or {}
+    category = spec.get("category") or TYPE_CATEGORY.get(event_type, "macro_data")
+    if category not in CATEGORIES:
+        raise ValueError(f"unknown category {category!r}")
+    channels = list(spec.get("channels") or CATEGORY_CHANNELS[category])
+    unknown = [c for c in channels if c not in CHANNELS]
+    if unknown:
+        raise ValueError(f"unknown channels {unknown}")
+    return category, channels
+
+
+def event_sizes(scenarios: dict | None) -> dict[str, dict]:
+    """How much each measured release has moved markets, from SCENARIOS: per
+    line key (and "fomc"), the 2-year yield's and SPY's average absolute move
+    on release days against other days (SPY in units of its own recent
+    volatility), and the release count."""
+    out = {}
+    for driver in (scenarios or {}).get("drivers") or []:
+        size = driver.get("event_size") or {}
+        if size.get("n"):
+            out[driver["key"]] = {"n": size["n"], "since": driver.get("first"),
+                                  "dy2": (size.get("dy2_release"), size.get("dy2_other")),
+                                  "spy": (size.get("spy_release"), size.get("spy_other"))}
+    fomc = (scenarios or {}).get("fomc") or {}
+    move = fomc.get("abs_move") or {}
+    if fomc.get("decisions"):
+        out["fomc"] = {"n": fomc["decisions"], "since": None,
+                       "dy2": (move.get("dY2_fomc"), move.get("dY2_other")),
+                       "spy": (move.get("spy_fomc"), move.get("spy_other"))}
+    return out
+
+
+def measured_importance(measure: str | None, sizes: dict, lines: dict) -> tuple[str, dict] | None:
+    """Importance from how much a release has moved markets, or None when unmeasured.
+
+    The ratio is the larger of the 2-year yield's and SPY's event-day average
+    absolute move over other days'. ``lines``: high from ``high`` (1.4), medium
+    from ``medium`` (1.15, about two standard errors at a hundred releases), low below.
+    """
+    size = sizes.get(measure or "")
+    if not size or size["n"] < lines.get("min_releases", 40):
+        return None
+    ratios = {side: a / b for side, (a, b) in (("2-year yield", size["dy2"]), ("SPY", size["spy"]))
+              if a is not None and b}
+    if not ratios:
+        return None
+    side, ratio = max(ratios.items(), key=lambda kv: kv[1])
+    level = "high" if ratio >= lines["high"] else "medium" if ratio >= lines["medium"] else "low"
+    since = f" since {size['since'][:4]}" if size.get("since") else ""
+    return level, {"kind": "measured", "ratio": round(ratio, 2), "side": side, "n": size["n"],
+                   "text": f"{side} moved {ratio:.2f}x an ordinary day's on its {size['n']} release days{since}"}
+
+
+JUDGED = {"kind": "judged", "text": "set by hand: no measured history"}
+INDEX_WEIGHT = {"kind": "index_weight", "text": "the company's weight in the S&P 500 or Nasdaq-100, or in its THEMES group"}
 
 
 # --- Latest print of a FRED series ---------------------------------------------

@@ -29,12 +29,13 @@ PANELS = {
     "europe": europe.build,
     # Breadth and stress readings from fund prices; reads no other panel.
     "market_state": market_state.build,
+    # Measures past data releases against rates and stocks; reads no other panel.
+    # Before the calendar, which sets each release's importance from it.
+    "scenarios": scenarios.build,
     "catalysts": catalysts.build,
     # Hand-kept unscheduled events: prices and the consensus snapshots since; reads no other panel.
     "catalyst_log": catalyst_log.build,
     "priced": priced.build,
-    # Measures past data releases against rates and stocks; reads no other panel.
-    "scenarios": scenarios.build,
     "earnings": earnings.build,
     "heatmaps": heatmaps.build,
     "rotation": rotation.build,
@@ -178,6 +179,8 @@ def run(
                     pending = ARTIFACT_DIR / "monitor.pending"
                     write_json(pending, payload)
                     pending.replace(ARTIFACT_DIR / "monitor.json")
+                elif name == "catalysts":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in catalysts.INPUTS})
                 elif name == "overview":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in overview.INPUTS})
                 elif name == "industries":

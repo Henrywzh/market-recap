@@ -9,7 +9,7 @@ import { el, card, num, metaRow, tag, gap, DASH } from '../fmt.js';
 import { render } from '../charts.js';
 import { rangeSwitch, sliceRange, initialRange } from '../range.js';
 import { spark } from '../spark.js';
-import { cellsByRow, stateCounts, stateOf, stateWord, isPlaceholder, arrowFor, tagFor, scaleText, VALUATION_STATES } from '../risk-matrix.js';
+import { cellsByRow, stateCounts, stateOf, stateWord, isPlaceholder, arrowFor, tagFor, scaleText, VALUATION_STATES, upcomingFor } from '../risk-matrix.js';
 
 const HORIZONS = [
   ['tactical', 'TACTICAL · 1–4 WEEKS'],
@@ -304,9 +304,20 @@ function cellButton(row, column, cell, years, onPick) {
 
 // What a cell opens: the rule, its note and caution, then its member series
 // through the same tiles and history chart as the folded groups.
-function drillNode(matrix, row, column, cell, data, tiles) {
+function comingUp(row, calendar) {
+  const next = upcomingFor(calendar?.events, row.key, calendar?.as_of);
+  if (!next.length) return null;
+  return el('div', { class: 'risk-drill-note' }, [
+    el('span', { class: 'dim', text: `NEXT FOR ${row.label}: ` }),
+    ...next.flatMap((e, i) => [i ? ' · ' : '', el('a', { href: '#catalysts', text: `${e.title} ${e.date.slice(5)}` })]),
+  ]);
+}
+
+function drillNode(matrix, row, column, cell, data, tiles, calendar) {
   const members = (cell.members || []).map((key) => tiles.get(key)).filter(Boolean);
   const notes = isPlaceholder(cell) ? [] : [el('div', { class: 'risk-drill-rule dim', text: ruleText(matrix, cell) })];
+  const upcoming = comingUp(row, calendar);
+  if (upcoming) notes.push(upcoming);
   if (cell.note) notes.push(el('div', { class: 'risk-drill-note', text: cell.note }));
   if (cell.caution) notes.push(el('div', { class: 'risk-drill-note down', text: `Caution: ${cell.caution}.` }));
   const body = members.length
@@ -319,7 +330,7 @@ function drillNode(matrix, row, column, cell, data, tiles) {
 // The headline: channels down, evidence across. One cell open at a time; a
 // second click on the same cell closes it. Enter and Space are a button's own
 // click, so they need no handler here.
-function matrixBlock(matrix, data) {
+function matrixBlock(matrix, data, calendarOf = () => null) {
   const years = matrix.years ?? 10;
   const tiles = new Map(data.sections.flatMap((s) => s.tiles).map((t) => [t.key, t]));
   const drill = el('div', { class: 'risk-drill-host' });
@@ -332,7 +343,7 @@ function matrixBlock(matrix, data) {
       node.setAttribute('aria-expanded', String(k === open));
       node.className = cellClass(node.cell, k === open);
     }
-    drill.replaceChildren(...(open ? [drillNode(matrix, row, column, cell, data, tiles)] : []));
+    drill.replaceChildren(...(open ? [drillNode(matrix, row, column, cell, data, tiles, calendarOf())] : []));
   };
 
   const rows = cellsByRow(matrix).map((row) => el('div', { class: 'risk-row', 'data-row': row.key }, [
@@ -452,13 +463,16 @@ function methodNotes() {
   ];
 }
 
-export default function renderRisk(root, data) {
+export default function renderRisk(root, data, _manifest, ctx = {}) {
   if (!data || data.unavailable) throw new Error(data?.unavailable || 'risk artifact missing');
   const total = data.sections.reduce((n, s) => n + s.tiles.length, 0);
   root.append(metaRow(`RISK · MATRIX · AS OF ${data.as_of}`, methodNotes()));
   if (data.matrix) {
     root.append(summary(data.matrix));
-    root.append(matrixBlock(data.matrix, data));
+    // The calendar's tagged events, for "next for this channel" in a cell's drill-down; optional.
+    let calendar = null;
+    ctx.loadArtifact?.('catalysts').then((c) => { calendar = c; }).catch(() => {});
+    root.append(matrixBlock(data.matrix, data, () => calendar));
   } else {
     root.append(gap('The risk matrix was not built for this session.'));
   }
