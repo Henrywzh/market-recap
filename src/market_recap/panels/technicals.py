@@ -17,6 +17,7 @@ from __future__ import annotations
 import pandas as pd
 
 from .. import corporate_actions
+from ..compute.oversold import LINES as OVERSOLD_LINES
 from ..config import PERIOD_TRADING_DAYS, TICKER_ARTIFACT_DIR
 from ..sources import yahoo
 from ..util import clean_float, prune_stale, write_json
@@ -116,6 +117,8 @@ def build(ctx) -> dict:
                 "slow": int(settings["macd_slow"]),
                 "signal": int(settings["macd_signal"]),
             },
+            "rsi": {"period": int(settings["rsi_period"]),
+                    "lines": [{"below": line, "verdict": verdict.upper()} for line, verdict in sorted(OVERSOLD_LINES)]},
             "single_ticker_period": settings["single_ticker_period"],
             "ratio_period": settings["ratio_period"],
         },

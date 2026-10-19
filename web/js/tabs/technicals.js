@@ -13,6 +13,10 @@ const TICKER_BASE = 'artifacts/tickers';
 // would support more, but nobody means a 2,000-day "moving average".
 const MAX_MA_WINDOW = 400;
 const MAX_SLOPE_WINDOW = 60;
+const MAX_RSI_PERIOD = 50;
+const RSI_NOTE = 'Wilder RSI on closes. The lines describe how stretched a fall is, not a rebound call: since '
+  + '1950 on the S&P 500 and since 2008 on the sector funds, a close below 20 was followed by much the same '
+  + 'returns as one below 30, and the worst tenth still fell 7–16% further within 20 sessions.';
 
 const payloads = new Map();
 
@@ -48,7 +52,13 @@ function needs(window, sessions) {
 
 // ---------------------------------------------------------------- readings
 
-function computeSingle(payload, { windows, slopeWindow, defaults }) {
+// The page's RSI settings: the build's when it sends them, else the classic 6 and
+// the module's lines, so an older technicals.json still draws.
+export function rsiSettings(defaults) {
+  return { period: defaults?.rsi?.period ?? 6, lines: defaults?.rsi?.lines ?? T.RSI_LINES };
+}
+
+function computeSingle(payload, { windows, slopeWindow, defaults, rsiPeriod }) {
   const close = payload.close;
   const n = close.length;
   const zWindow = defaults.zscore_window;
@@ -89,7 +99,16 @@ function computeSingle(payload, { windows, slopeWindow, defaults }) {
     unavailable.forward_returns = `needs ${zWindow + horizon} sessions (${zWindow} to form the z-score plus `
       + `${horizon} for the forward window), has ${n}`;
   }
-  return { averages, slopes, z, bandLines, summary, forward, unavailable };
+  const lines = rsiSettings(defaults).lines;
+  let rsi = [];
+  let rsiNow = null;
+  if (n > rsiPeriod) {
+    rsi = T.rsi(close, rsiPeriod);
+    rsiNow = T.rsiReading(rsi, lines);
+  } else {
+    unavailable.rsi = needs(rsiPeriod + 1, n);
+  }
+  return { averages, slopes, z, bandLines, summary, forward, unavailable, rsi, rsiNow, rsiPeriod, lines };
 }
 
 // ------------------------------------------------------------------ charts
@@ -166,6 +185,36 @@ function macdChart(node, dates, series) {
   }));
 }
 
+// RSI with its lines drawn and the space under each tinted, so a dip below 30
+// or 20 shows as a shape rather than a number to compare.
+function rsiChart(node, dates, values, lines) {
+  const sorted = [...lines].sort((a, b) => a.below - b.below);
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, top: 10, bottom: 24 },
+    xAxis: { ...option.xAxis, data: dates },
+    yAxis: { ...option.yAxis, min: 0, max: 100, interval: 10,
+      axisLabel: { ...(option.yAxis?.axisLabel || {}), formatter: (v) => ([0, 50, 100].includes(v) || sorted.some((l) => l.below === v) ? v : '') } },
+    series: [{
+      name: 'RSI', type: 'line', data: values, showSymbol: false, lineStyle: { width: 1.2, color: p.blue },
+      markArea: { silent: true, data: sorted.map((l, i) => [
+        { yAxis: i ? sorted[i - 1].below : 0, itemStyle: { color: p.accent, opacity: i ? 0.08 : 0.16 } },
+        { yAxis: l.below },
+      ]) },
+      markLine: { silent: true, symbol: 'none', data: sorted.map((l) => ({ yAxis: l.below })),
+        lineStyle: { color: p.accent, type: 'dashed', width: 1 },
+        label: { color: p.dim, fontSize: 10, formatter: (d) => d.value } },
+    }],
+  }));
+}
+
+// "DEEPLY OVERSOLD · 3rd close below 20", or the plain value when above the lines.
+export function rsiNote(reading) {
+  if (!reading || reading.line === null) return '';
+  const nth = reading.days === 1 ? 'first close' : `${reading.days} closes in a row`;
+  return `${reading.verdict} · ${nth} below ${reading.line}`;
+}
+
 // ------------------------------------------------------------------ tables
 
 function noteClass(note) {
@@ -186,6 +235,8 @@ function summaryTable(payload, readings, { zWindow, slopeWindow }) {
     [`${zWindow} DMA SLOPE (ANN., ${slopeWindow}D)`, missing || s.slope === null ? DASH : pct(s.slope, 1),
       missing ? gap.slope_annualised : (s.slopeVerdict || '')],
     ['Z-SCORE BAND', s.band || DASH, ''],
+    [`RSI(${readings.rsiPeriod})`, readings.rsiNow ? num(readings.rsiNow.value, 1) : DASH,
+      readings.rsiNow ? (readings.rsiNow.verdict || '') : (readings.unavailable.rsi || '')],
   ];
   return table(['METRIC', 'VALUE', ''], rows.map(([label, value, note]) => el('tr', {}, [
     el('td', { class: 'dim', text: label }),
@@ -316,6 +367,9 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
   const slopeTitle = el('span', { class: 'card-title', text: '' });
   const slopeNode = el('div', { class: 'chart short' });
   const zNode = el('div', { class: 'chart short' });
+  const rsiNode = el('div', { class: 'chart short' });
+  const rsiTitle = el('span', { class: 'card-title', text: '' });
+  const rsiInput = el('input', { value: String(rsiSettings(defaults).period), size: '3', type: 'number', min: '2', max: String(MAX_RSI_PERIOD) });
   const fwdHost = el('div', {});
   const zWindow = defaults.zscore_window;
 
@@ -328,8 +382,12 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
       if (!Number.isInteger(slopeWindow) || slopeWindow < 1 || slopeWindow > MAX_SLOPE_WINDOW) {
         throw new Error(`Slope window must be a whole number from 1 to ${MAX_SLOPE_WINDOW}`);
       }
+      const rsiPeriod = Number(rsiInput.value);
+      if (!Number.isInteger(rsiPeriod) || rsiPeriod < 2 || rsiPeriod > MAX_RSI_PERIOD) {
+        throw new Error(`RSI period must be a whole number from 2 to ${MAX_RSI_PERIOD}`);
+      }
       const payload = await loadTicker(symbol);
-      const readings = computeSingle(payload, { windows, slopeWindow, defaults });
+      const readings = computeSingle(payload, { windows, slopeWindow, defaults, rsiPeriod });
       const start = T.viewStart(payload.dates, data.periods[periodValue()]);
       const dates = cut(payload.dates, start);
 
@@ -344,6 +402,11 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
       if (readings.z.length) zChart(zNode, dates, cut(readings.z, start));
       else zNode.replaceChildren(el('div', { class: 'note-text', text: `Not available for ${symbol}: ${readings.unavailable.zscore}.` }));
 
+      const lineText = [...readings.lines].sort((a, b) => b.below - a.below).map((l) => l.below).join(' / ');
+      rsiTitle.textContent = `RSI(${rsiPeriod}) · LINES ${lineText}${readings.rsiNow?.line ? ` · ${rsiNote(readings.rsiNow)}` : ''}`;
+      if (readings.rsi.length) rsiChart(rsiNode, dates, cut(readings.rsi, start), readings.lines);
+      else rsiNode.replaceChildren(el('div', { class: 'note-text', text: `Not available for ${symbol}: ${readings.unavailable.rsi}.` }));
+
       if (!compact) fwdHost.replaceChildren(forwardCard(payload, readings, data));
       const gaps = Object.keys(readings.unavailable).length;
       stStatus.textContent = gaps
@@ -354,7 +417,10 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
     }
   }
 
-  for (const input of [tickerInput, maInput, slopeInput]) {
+  const rsiCard = card('', null, [rsiNode, el('div', { class: 'field-note', text: RSI_NOTE })]);
+  rsiCard.querySelector('.card-title').replaceWith(rsiTitle);
+
+  for (const input of [tickerInput, maInput, slopeInput, rsiInput]) {
     input.addEventListener('keydown', (event) => { if (event.key === 'Enter') loadSingle(); });
   }
   stPeriod.addEventListener('change', () => loadSingle());
@@ -365,6 +431,7 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
     const slopeCard = card('', null, slopeNode);
     slopeCard.querySelector('.card-title').replaceWith(slopeTitle);
     root.append(el('div', { class: 'grid two' }, [slopeCard, card(`Z-SCORE VS ${zWindow} DMA`, null, zNode)]));
+    root.append(rsiCard);
     await loadSingle();
     return;
   }
@@ -374,6 +441,7 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
       lockTicker ? null : el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), tickerInput]),
       el('div', { class: 'field' }, [el('label', { text: 'MA PERIODS' }), maInput]),
       el('div', { class: 'field' }, [el('label', { text: 'SLOPE WINDOW (D)' }), slopeInput]),
+      el('div', { class: 'field' }, [el('label', { text: 'RSI PERIOD' }), rsiInput]),
       el('div', { class: 'field' }, [el('label', { text: 'PERIOD' }), stPeriod]),
       el('button', { class: 'action', text: 'LOAD', onclick: loadSingle }),
       stStatus,
@@ -386,6 +454,7 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
   const slopeCard = card('', null, slopeNode);
   slopeCard.querySelector('.card-title').replaceWith(slopeTitle);
   root.append(el('div', { class: 'grid two' }, [slopeCard, card(`Z-SCORE VS ${zWindow} DMA`, null, zNode)]));
+  root.append(rsiCard);
   root.append(fwdHost);
 
   await loadSingle();

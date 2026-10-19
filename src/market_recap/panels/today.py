@@ -21,7 +21,10 @@ import os
 from pathlib import Path
 from urllib.parse import urljoin
 
+import pandas as pd
+
 from ..compute import catalysts as C
+from ..compute import oversold
 from ..config import EVENTS_ARTIFACT_DIR
 from ..sources.http import get_text
 from ..util import describe_error
@@ -38,6 +41,8 @@ PREVIOUS_STATE_TIMEOUT = 10.0
 SESSIONS_AHEAD = 3
 # Sessions counted back, including the session itself, for "just came out" catalyst-log items.
 RECENT_LOG_SESSIONS = 3
+OVERSOLD_DETAIL = ("How stretched the fall is, not a rebound call: in the lab, a close below 20 was followed by much "
+                   "the same returns as one below 30, and the worst tenth fell 7-16% further within 20 sessions.")
 
 
 # --- small value helpers -----------------------------------------------------
@@ -486,6 +491,38 @@ def _blackout_item(positioning: dict, as_of: str) -> dict | None:
                  link="#positioning", detail=detail, value=now, unit="%", extra={"ahead_delta_pp": ahead})
 
 
+# --- unusual: oversold -------------------------------------------------------
+
+def _ordinal_word(n: int) -> str:
+    return {1: "first", 2: "second", 3: "third"}.get(n, f"{n}th")
+
+
+def _oversold_item(symbol: str, label: str, reading: dict, period: int) -> dict:
+    """One watch-list name under an RSI line. New on the close that crossed the line."""
+    line, days, rsi = int(reading["line"]), int(reading["days"]), reading["rsi"]
+    title = (f"{label} {reading['verdict']}: "
+             f"{'first close' if days == 1 else _ordinal_word(days) + ' close in a row'} below {line} on RSI({period})")
+    if line < 30 and reading["days_shallow"] > days:
+        title += f" ({reading['days_shallow']} below 30)"
+    since = _session_back(date.fromisoformat(reading["date"]), days - 1).isoformat()
+    return _item("oversold", label, reading["date"], title, link=f"#technicals/{symbol}",
+                 detail=OVERSOLD_DETAIL, value=rsi, new=days == 1, since=since, days=days,
+                 extra={"symbol": symbol, "rsi": round(rsi, 1), "line": line, "verdict": reading["verdict"],
+                        "days_below_30": reading["days_shallow"]})
+
+
+def _oversold_items(closes: pd.DataFrame, watch: dict, period: int) -> list[dict]:
+    """Watch-list names below an RSI line, deepest reading first."""
+    items = []
+    for symbol, label in watch.items():
+        if symbol not in closes.columns:
+            continue
+        reading = oversold.reading(closes[symbol], period)
+        if reading and reading["line"] is not None:
+            items.append(_oversold_item(symbol, label, reading, period))
+    return sorted(items, key=lambda i: i["value"])
+
+
 # --- unusual: events ---------------------------------------------------------
 
 def _monitor_items(monitor: dict, cfg: dict, as_of: str) -> list[dict]:
@@ -577,6 +614,15 @@ def _live(config: dict) -> dict:
     }
 
 
+def _watch_closes(ctx) -> pd.DataFrame:
+    frames = [f for f in (getattr(ctx, "index_closes", None), getattr(ctx, "etf_closes", None))
+              if isinstance(f, pd.DataFrame) and not f.empty]
+    if not frames:
+        return pd.DataFrame()
+    closes = pd.concat(frames, axis=1)
+    return closes.loc[:, ~closes.columns.duplicated()]
+
+
 def build(ctx, *, inputs: dict, events_dir: Path = EVENTS_ARTIFACT_DIR) -> dict:
     cfg = dict(ctx.config["today"])
     as_of = ctx.as_of
@@ -615,6 +661,7 @@ def build(ctx, *, inputs: dict, events_dir: Path = EVENTS_ARTIFACT_DIR) -> dict:
                          + _catalyst_items(src["catalyst_log"], floor, as_of)
                          + _reaction_items(recent.get("earnings_reacted") or [], moves_by, cfg, session)),
         "ongoing": _order(market_ongoing + matrix_ongoing + ([blackout] if blackout else [])),
+        "oversold": _oversold_items(_watch_closes(ctx), cfg.get("oversold_watch") or {}, int(cfg.get("oversold_period", 6))),
     }
 
     return {

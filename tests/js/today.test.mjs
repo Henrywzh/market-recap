@@ -245,3 +245,11 @@ test('the earnings tiles lead with the heaviest reporter, fold past eight, and s
   assert.equal(fills[0].style.width, '25%', 'T9 moved 1 against the set largest of 4 (T0)');
   assert.equal(fills[9].style.width, '100%', 'T0 is the largest move');
 }));
+
+test('the oversold gauge maps RSI 0-30 onto the bar and clamps', async () => {
+  const { oversoldGauge } = await import('../../web/js/tabs/today.js');
+  assert.equal(oversoldGauge(15), 50);
+  assert.equal(oversoldGauge(45), 100);
+  assert.equal(oversoldGauge(-1), 0);
+  assert.equal(oversoldGauge(null), null);
+});

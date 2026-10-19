@@ -336,6 +336,7 @@ export function unusualNodes(unusual, view) {
       block('EVENTS', events.map(officialStateRow), 'No event to report.'),
     );
   }
+  nodes.push(oversoldBlock(unusual?.oversold || []));
   if (ongoing.length) {
     nodes.push(el('div', {
       class: 'today-ongoing dim',
@@ -344,6 +345,33 @@ export function unusualNodes(unusual, view) {
     }));
   }
   return nodes;
+}
+
+// Indices and sector funds whose RSI(6) closed under 30 or 20, deepest first.
+// The RSI sits in a small gauge (0-30 shown) so the depth reads at a glance.
+export function oversoldGauge(rsi) {
+  if (!valid(rsi)) return null;
+  return Math.max(0, Math.min(100, (rsi / 30) * 100));
+}
+
+function oversoldRow(item) {
+  const rsi = item.extra?.rsi ?? item.value;
+  const deep = item.extra?.line === 20;
+  const width = oversoldGauge(rsi);
+  const value = el('span', { class: `today-value today-rsi${deep ? ' is-deep' : ''}` }, [
+    num(rsi, 1),
+    width === null ? null : el('span', { class: 'today-rsi-bar' }, [el('span', { style: `width:${width.toFixed(0)}%` })]),
+  ]);
+  // The detail is the same for every row, so the block says it once.
+  return rowNode(item, { value, detail: null, extras: [tag(deep ? 'BELOW 20' : 'BELOW 30', deep ? 'warn' : 'info')] });
+}
+
+function oversoldBlock(items) {
+  return el('div', { class: 'today-block' }, [
+    el('div', { class: 'today-block-title', text: 'OVERSOLD · RSI(6), INDICES & SECTOR FUNDS' }),
+    ...listNodes(items.map(oversoldRow), (row) => row, 'No index or sector fund is below 30.'),
+    items.length ? el('div', { class: 'today-detail dim', text: items[0].detail }) : null,
+  ]);
 }
 
 function officialStateRow(item) {

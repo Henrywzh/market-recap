@@ -458,7 +458,7 @@ def test_empty_inputs_still_give_every_key(tmp_path):
     out = _run(inputs=inputs, events_dir=tmp_path)
     assert set(validate.TODAY_KEYS) <= set(out)
     assert len(out["unavailable"]) >= len(today.INPUTS)
-    assert out["unusual"] == {"moves": [], "states": [], "events": [], "ongoing": []}
+    assert out["unusual"] == {"moves": [], "states": [], "events": [], "ongoing": [], "oversold": []}
 
 
 # --- validate ----------------------------------------------------------------
@@ -510,3 +510,31 @@ def test_a_valuation_cell_says_how_thin_its_premium_is():
                              "(premium thinner than 94% of the time since 1960)")
     assert item["detail"].endswith("rich before")
     assert ongoing == [], "a rich market is not an ongoing stress"
+
+
+def _closes(values):
+    import pandas as pd
+    return pd.Series(values, index=pd.bdate_range("2026-09-01", periods=len(values)), dtype=float)
+
+
+def test_oversold_lists_watch_names_below_a_line_deepest_first(tmp_path):
+    import pandas as pd
+    ctx = _ctx()
+    steady = [100 + (i % 2) for i in range(30)]
+    falling = steady + [99, 97, 95, 93, 91, 89]             # RSI(6) 11: 3rd close below 20, 5th below 30
+    crossing = steady + [101, 100, 101, 100, 99.5, 97.8]    # RSI(6) 28.5: first close below 30
+    ctx.index_closes = pd.DataFrame({"^GSPC": _closes(falling)})
+    ctx.etf_closes = pd.DataFrame({"XLK": _closes(crossing), "XLU": _closes(steady + [101] * 6),
+                                   "AAPL": _closes(falling)})
+    out = _run(ctx=ctx, events_dir=tmp_path)["unusual"]["oversold"]
+    assert [i["extra"]["symbol"] for i in out] == ["^GSPC", "XLK"]   # deepest first; AAPL is not watched
+    deep, fresh = out
+    assert (deep["extra"]["line"], deep["days"], deep["extra"]["days_below_30"], deep["new"]) == (20, 3, 5, False)
+    assert deep["title"] == "S&P 500 deeply oversold: third close in a row below 20 on RSI(6) (5 below 30)"
+    assert deep["link"] == "#technicals/^GSPC"
+    assert (fresh["extra"]["line"], fresh["days"], fresh["new"]) == (30, 1, True)
+    assert "first close below 30" in fresh["title"]
+
+
+def test_oversold_is_empty_without_closes(tmp_path):
+    assert _run(events_dir=tmp_path)["unusual"]["oversold"] == []

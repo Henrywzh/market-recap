@@ -1469,3 +1469,10 @@ a.today-tile:hover { background: var(--panel-alt); }
   .fg-strip-track { flex-basis: 100%; order: 3; margin: 2px 0 0; }
   .fg-strip-ago { order: 4; }
 }
+
+/* TODAY · OVERSOLD: the RSI with a small 0-30 gauge; deeper than 20 in the accent colour. */
+.today-rsi { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.today-rsi.is-deep { color: var(--accent); }
+.today-rsi-bar { display: inline-block; width: 44px; height: 5px; background: color-mix(in srgb, var(--border) 70%, transparent); border-radius: 2px; overflow: hidden; }
+.today-rsi-bar > span { display: block; height: 100%; background: var(--accent); opacity: 0.55; }
+.today-rsi.is-deep .today-rsi-bar > span { opacity: 1; }

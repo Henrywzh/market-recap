@@ -51,3 +51,14 @@ test('slope verdicts name every value', () => {
   assert.equal(T.slopeVerdict(-25), 'STRONG DOWNTREND');
   assert.equal(T.slopeVerdict(null), null);
 });
+
+test('RSI is null until period changes exist, then names the deepest line and its run', () => {
+  const falling = [10, 9, 8, 7, 6, 5, 4, 3, 2];
+  const series = T.rsi(falling, 6);
+  assert.deepEqual(series.slice(0, 6), [null, null, null, null, null, null]);
+  assert.equal(series[6], 0);
+  assert.deepEqual(T.rsiReading(series), { value: 0, line: 20, verdict: 'DEEPLY OVERSOLD', days: 3 });
+  assert.deepEqual(T.rsiReading([null, 25, 40, 29]), { value: 29, line: 30, verdict: 'OVERSOLD', days: 1 });
+  assert.equal(T.rsiReading([50, 31]).line, null);
+  assert.equal(T.rsiReading([50, null]), null);
+});

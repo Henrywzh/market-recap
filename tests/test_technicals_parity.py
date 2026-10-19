@@ -73,3 +73,10 @@ def test_forward_returns_match_a_pandas_grouping(walk):
             assert row["mean"] == pytest.approx(bucket.mean())
             assert row["median"] == pytest.approx(bucket.median())
             assert row["hitRate"] == pytest.approx((bucket > 0).mean() * 100)
+
+
+def test_rsi_matches_the_python_definition(walk):
+    from market_recap.compute.oversold import wilder_rsi
+    out = _run("{six: T.rsi(values, 6), fourteen: T.rsi(values, 14)}", walk.tolist())
+    _close(out["six"], wilder_rsi(walk, 6))
+    _close(out["fourteen"], wilder_rsi(walk, 14))

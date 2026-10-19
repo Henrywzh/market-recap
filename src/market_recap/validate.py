@@ -253,7 +253,7 @@ def _today_items(payload: dict):
     just_out, coming_up, unusual = payload.get("just_out") or {}, payload.get("coming_up") or {}, payload.get("unusual") or {}
     lists = [just_out.get("macro"), just_out.get("earnings"), coming_up.get("later")]
     lists += [day.get("items") for day in coming_up.get("days") or [] if isinstance(day, dict)]
-    lists += [unusual.get(name) for name in ("moves", "states", "events", "ongoing")]
+    lists += [unusual.get(name) for name in ("moves", "states", "events", "ongoing", "oversold")]
     for entries in lists:
         for item in entries or []:
             if isinstance(item, dict):

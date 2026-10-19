@@ -2121,6 +2121,10 @@ macd_signal = 9
 # Per-day slope of each average is measured over this many sessions, and so is
 # the annualised slope of the long average. Editable on the page.
 slope_window = 5
+# Wilder RSI period, editable on the page. The lines (30 oversold, 20 deeply
+# oversold) are fixed in compute/oversold.py; see quantamental-lab
+# docs/rsi6_below20_v1.md for why they are descriptions, not rebound calls.
+rsi_period = 6
 # Moving averages drawn on a relative-strength ratio.
 ratio_ma_periods = [60, 200]
 # The period each chart opens on (one of periods.technicals_chart).
@@ -2962,6 +2966,29 @@ reaction_sigma = 2.0
 put_call_high_pct = 90
 put_call_low_pct = 10
 history_days = 400
+# RSI(6) oversold watch: indices and sector ETFs only (no single names). Listed
+# under UNUSUAL NOW while the close is below 30 (oversold) or 20 (deeply
+# oversold). A description: quantamental-lab docs/rsi6_below20_v1.md.
+oversold_period = 6
+
+[today.oversold_watch]
+"^GSPC" = "S&P 500"
+"^NDX" = "Nasdaq-100"
+DIA = "Dow (DIA)"
+IWM = "Russell 2000 (IWM)"
+RSP = "S&P 500 equal weight (RSP)"
+SOXX = "Semiconductors (SOXX)"
+XLB = "Materials (XLB)"
+XLC = "Communication services (XLC)"
+XLE = "Energy (XLE)"
+XLF = "Financials (XLF)"
+XLI = "Industrials (XLI)"
+XLK = "Technology (XLK)"
+XLP = "Consumer staples (XLP)"
+XLRE = "Real estate (XLRE)"
+XLU = "Utilities (XLU)"
+XLV = "Health care (XLV)"
+XLY = "Consumer discretionary (XLY)"
 
 # CREDIT: equity-implied default risk (distance to default) for every non-financial
 # name VALUATION covers. A description, not a warning: see quantamental-lab

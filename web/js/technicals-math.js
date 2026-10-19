@@ -192,3 +192,50 @@ export function parseWindows(text, { max }) {
   }
   return [...new Set(windows)].sort((a, b) => a - b);
 }
+
+// Wilder's RSI, seeded with a simple average of the first `period` changes
+// (the classic definition; pandas' ewm seeds differently). The first value
+// needs `period` price changes. src/market_recap/compute/oversold.py holds the
+// same definition for TODAY's watch list, and the parity test keeps them equal.
+export function rsi(values, period) {
+  const out = new Array(values.length).fill(null);
+  if (values.length <= period) return out;
+  let gain = 0;
+  let loss = 0;
+  for (let i = 1; i <= period; i += 1) {
+    const change = values[i] - values[i - 1];
+    gain += Math.max(change, 0);
+    loss += Math.max(-change, 0);
+  }
+  gain /= period;
+  loss /= period;
+  const level = (g, l) => (l === 0 ? (g === 0 ? 50 : 100) : 100 - 100 / (1 + g / l));
+  out[period] = level(gain, loss);
+  for (let i = period + 1; i < values.length; i += 1) {
+    const change = values[i] - values[i - 1];
+    gain = ((period - 1) * gain + Math.max(change, 0)) / period;
+    loss = ((period - 1) * loss + Math.max(-change, 0)) / period;
+    out[i] = level(gain, loss);
+  }
+  return out;
+}
+
+// Lines are labels for how stretched a fall is, not rebound calls: below 20
+// was not followed by clearly different returns from below 30 in the lab
+// (quantamental-lab docs/rsi6_below20_v1.md). Deepest first.
+export const RSI_LINES = [
+  { below: 20, verdict: 'DEEPLY OVERSOLD' },
+  { below: 30, verdict: 'OVERSOLD' },
+];
+
+// The latest RSI, the deepest line it is under, and for how many closes in a row.
+export function rsiReading(series, lines = RSI_LINES) {
+  const last = series.length - 1;
+  if (last < 0 || !finite(series[last])) return null;
+  const value = series[last];
+  const hit = [...lines].sort((a, b) => a.below - b.below).find((l) => value < l.below);
+  if (!hit) return { value, line: null, verdict: null, days: 0 };
+  let days = 0;
+  for (let i = last; i >= 0 && finite(series[i]) && series[i] < hit.below; i -= 1) days += 1;
+  return { value, line: hit.below, verdict: hit.verdict, days };
+}
