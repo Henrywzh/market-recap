@@ -168,6 +168,30 @@ def parse_auction_results(payload: dict, *, observed_at: str, since: str, until:
     return rows
 
 
+def fetch_auction_history(*, since: str = "2008-01-01", use_cache: bool = True) -> list[dict]:
+    """Every completed coupon auction from ``since``, for RISK's auction-demand
+    cell: the same schema checks as the private collection, read through the
+    build cache (twice a day), never written to the private snapshots."""
+    until = date.today().isoformat()
+    rows: list[dict] = []
+    for page in range(1, 6):
+        query = urlencode({"filter": f"security_type:in:(Note,Bond),auction_date:gte:{since},auction_date:lte:{until}",
+                           "fields": ",".join(AUCTION_FIELDS + ("inflation_index_security", "floating_rate")),
+                           "sort": "auction_date,cusip", "page[size]": 1000, "page[number]": page})
+        body = cache.fetch_bytes("treasury", f"auctions-nominal-{since}-p{page}",
+                                 lambda q=query: get_bytes(AUCTIONS_URL + "?" + q, timeout=60),
+                                 kind="macro_series", suffix=".json", use_cache=use_cache)
+        payload = json.loads(body)
+        # TIPS and floating-rate notes are listed as notes too: only fixed-rate nominal coupons compare.
+        nominal = [item for item in payload.get("data") or []
+                   if item.get("inflation_index_security") != "Yes" and item.get("floating_rate") != "Yes"]
+        rows.extend(parse_auction_results({**payload, "data": nominal}, observed_at=until, since=since, until=until))
+        pages = int((payload.get("meta") or {}).get("total-pages") or 1)
+        if page >= pages:
+            return rows
+    raise ValueError("Treasury auction history exceeded five pages")
+
+
 def collect_auction_results(*, days: int = 90, root: Path | None = None) -> dict:
     """Explicit bounded collection; private snapshots, no dashboard rebuild."""
     if not 1 <= days <= 365:

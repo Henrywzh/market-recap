@@ -155,6 +155,44 @@ def excess_cape_yield(spx: pd.Series, gs10: pd.Series, shiller: pd.DataFrame) ->
     return (100 / cape - (days["gs10"] - month["infl_10y"])).dropna()
 
 
+def stock_bond_correlation(stocks: pd.Series, ten_year: pd.Series, window: int = 63) -> pd.Series:
+    """Correlation of the S&P 500's daily return with the 10-year Treasury's,
+    taken as minus the change in its yield, over ``window`` sessions. Above
+    zero, bonds stop hedging stocks (2022, early 2025)."""
+    frame = pd.concat([np.log(_clean(stocks)).diff().rename("stock"), (-_clean(ten_year).diff()).rename("bond")],
+                      axis=1, sort=True).dropna()
+    return frame["stock"].rolling(window).corr(frame["bond"]).dropna()
+
+
+AUCTION_PRIOR = 12
+AUCTION_RECENT = 6
+NOMINAL_COUPON = {"Note", "Bond"}
+
+
+def auction_demand(rows: list[dict], *, prior: int = AUCTION_PRIOR, recent: int = AUCTION_RECENT) -> pd.DataFrame:
+    """Demand at Treasury's nominal coupon auctions, by auction date.
+
+    Each auction's bid-to-cover and primary-dealer share against the mean of its
+    own maturity's previous ``prior`` auctions (a reopening counts with its
+    original maturity), then averaged over the last ``recent`` auctions. Lower
+    bid-to-cover and a higher dealer share are weaker demand. Treasury publishes
+    no when-issued yield, so the market's "tail" cannot be computed from it.
+    """
+    frame = pd.DataFrame([r for r in rows if r.get("security_type") in NOMINAL_COUPON])
+    if frame.empty:
+        return pd.DataFrame(columns=["bid_to_cover", "dealer_share"])
+    frame["date"] = pd.to_datetime(frame["auction_date"])
+    frame = frame.sort_values(["date", "original_security_term"])
+    out = {}
+    for name, field in (("bid_to_cover", "bid_to_cover_ratio"), ("dealer_share", "primary_dealer_share_pct")):
+        value = pd.to_numeric(frame[field], errors="coerce")
+        norm = value.groupby(frame["original_security_term"]).transform(
+            lambda s: s.shift(1).rolling(prior, min_periods=prior // 2).mean())
+        excess = (value - norm).rolling(recent, min_periods=recent).mean()
+        out[name] = excess.groupby(frame["date"].to_numpy()).last()
+    return pd.DataFrame(out).dropna(how="all")
+
+
 def smoothed(series: pd.Series, window: int) -> pd.Series:
     return _clean(series).rolling(window, min_periods=window).mean().dropna()
 

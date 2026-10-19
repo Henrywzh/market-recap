@@ -178,13 +178,13 @@ def test_a_lead_that_fails_leaves_its_cell_grey_and_the_others_render():
 EXPECTED_LEADS = {
     ("equities", "structure"): "vix_term", ("equities", "technical"): "spx_drawdown",
     ("equities", "valuation"): "ecy",
-    ("treasuries", "structure"): None, ("treasuries", "technical"): "move",
+    ("treasuries", "structure"): "auction_btc", ("treasuries", "technical"): "move",
     ("treasuries", "valuation"): "term_premium",
     ("credit", "structure"): "hyg_ief", ("credit", "technical"): "baa10y_4w",
     ("credit", "valuation"): "baa10y",
     ("volatility", "structure"): "vvix", ("volatility", "technical"): "vix",
     ("volatility", "valuation"): "vrp",
-    ("cross_asset", "structure"): "dxy_3m", ("cross_asset", "technical"): None,
+    ("cross_asset", "structure"): "dxy_3m", ("cross_asset", "technical"): "stock_bond_corr",
     ("cross_asset", "valuation"): None,
     ("macro", "structure"): "net_liquidity", ("macro", "technical"): "nfci",
     ("macro", "valuation"): None,
@@ -227,7 +227,7 @@ def test_every_banded_cell_has_two_lines_in_its_risk_direction():
     directions = {t["key"]: t["risk_when"] for t in settings["tiles"]}
     directions.update({k: v["risk_when"] for k, v in risk.DERIVED_LEADS.items()})
     banded = [c for c in settings["matrix"]["cells"] if c.get("scale") == "bands"]
-    assert len(banded) == 8
+    assert len(banded) == 9
     for cell in banded:
         elevated, stressed = cell["bands"]["elevated"], cell["bands"]["stressed"]
         # The stressed line lies further in the risk direction than the elevated one.
@@ -247,8 +247,8 @@ def test_the_real_config_keeps_its_members_notes_and_pending_text():
     assert cells[("treasuries", "valuation")]["since"] == cells[("credit", "valuation")]["since"]
     assert cells[("credit", "valuation")]["since"] > "2022-01-01"
     assert cells[("macro", "technical")]["members"] == ["nfci", "copper_oil", "ovx"]
-    assert cells[("cross_asset", "technical")]["pending"] == "Stock–bond correlation (next step)"
-    assert cells[("treasuries", "structure")]["members"] == ["cftc_zn"]
+    assert cells[("cross_asset", "technical")]["members"] == ["stock_bond_corr", "realised_corr"]
+    assert cells[("treasuries", "structure")]["members"] == ["auction_btc", "auction_dealer", "cftc_zn"]
     assert cells[("macro", "valuation")]["pending"].startswith("EPS revision breadth")
 
 
@@ -344,3 +344,37 @@ def test_the_excess_cape_yield_matches_shillers_formula_and_moves_with_the_close
     later = R.excess_cape_yield(pd.Series([110.0], index=[pd.Timestamp("2026-10-15")]),
                                 pd.Series([5.0], index=[pd.Timestamp("2026-10-15")]), shiller)
     assert later.iloc[0] == pytest.approx(100 / 27.5 - 2.0)
+
+
+# --- stock-bond correlation and auction demand --------------------------------------
+
+def test_stock_bond_correlation_is_positive_when_both_fall_together():
+    days = pd.bdate_range("2026-01-01", periods=120)
+    rng = np.random.default_rng(0)
+    shock = rng.normal(0, 0.01, len(days))
+    stocks = pd.Series(100 * np.exp(np.cumsum(shock)), index=days)
+    # Yields rise when stocks fall: bonds and stocks lose together.
+    yields = pd.Series(4 + np.cumsum(-shock * 10), index=days)
+    corr = R.stock_bond_correlation(stocks, yields, window=63)
+    assert corr.iloc[-1] > 0.9
+    hedge = R.stock_bond_correlation(stocks, pd.Series(4 + np.cumsum(shock * 10), index=days), window=63)
+    assert hedge.iloc[-1] < -0.9
+
+
+def _auction(day, term, btc, dealer, kind="Note"):
+    return {"security_type": kind, "auction_date": day, "original_security_term": term,
+            "bid_to_cover_ratio": btc, "primary_dealer_share_pct": dealer}
+
+
+def test_auction_demand_compares_each_maturity_with_its_own_past():
+    days = pd.date_range("2025-01-06", periods=20, freq="7D").strftime("%Y-%m-%d")
+    rows = [_auction(d, "10-Year", 2.5, 12.0) for d in days[:18]] + [_auction(d, "2-Year", 2.7, 10.0) for d in days[:18]]
+    # Two weak 10-year auctions at the end: cover 2.2, dealers 20%.
+    rows += [_auction(days[18], "10-Year", 2.2, 20.0), _auction(days[19], "10-Year", 2.2, 20.0)]
+    rows += [_auction(days[19], "5-Year", 9.9, 0.0, kind="TIPS")]  # not a nominal coupon: ignored
+    demand = R.auction_demand(rows, prior=12, recent=2)
+    last = demand.iloc[-1]
+    # The second weak auction's norm already holds the first: -0.3 then -0.275, dealers 8 then 7.33.
+    assert last["bid_to_cover"] == pytest.approx((-0.3 - 0.275) / 2)
+    assert last["dealer_share"] == pytest.approx((8.0 + (20 - (11 * 12 + 20) / 12)) / 2)
+    assert R.auction_demand([]).empty

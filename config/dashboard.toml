@@ -2558,6 +2558,31 @@ threshold = 5
 note = "How far apart the members move, in vol points; read at either tail."
 
 [[risk.tiles]]
+key = "stock_bond_corr"
+section = "correlation"
+label = "STOCK–BOND CORR 3M"
+unit = "corr"
+risk_when = "high"
+threshold = 0
+note = "Correlation of the S&P 500's daily return with the 10-year Treasury's (minus the change in its yield), 63 sessions. Above 0, bonds stop hedging stocks: positive in the 2022 and early-2025 drawdowns, negative in 2008 and 2020. It was positive for most of 1966-1999, a regime rather than a crisis."
+
+[[risk.tiles]]
+key = "auction_btc"
+section = "liquidity"
+label = "AUCTION BID-TO-COVER VS NORM"
+unit = "index"
+risk_when = "low"
+note = "Treasury's nominal coupon auctions: each one's bid-to-cover less its own maturity's previous 12 (reopenings with their original maturity), averaged over the last 6 auctions. Below 0, weaker demand. Treasury publishes no when-issued yield, so the market's tail is not computed."
+
+[[risk.tiles]]
+key = "auction_dealer"
+section = "liquidity"
+label = "AUCTION DEALER TAKEDOWN VS NORM"
+unit = "pct"
+risk_when = "high"
+note = "The primary dealers' share of each auction's accepted competitive bids, less its maturity's previous 12, averaged over the last 6 auctions, in percentage points. Dealers absorb what other bidders do not want."
+
+[[risk.tiles]]
 key = "spx_vs_200d"
 core = true
 section = "trend"
@@ -2781,8 +2806,9 @@ note = "The equity risk premium as Shiller's excess CAPE yield, from Robert J. S
 [[risk.matrix.cells]]
 row = "treasuries"
 column = "structure"
-pending = "Auction tails (next step)"
-members = ["cftc_zn"]
+lead = "auction_btc"
+members = ["auction_btc", "auction_dealer", "cftc_zn"]
+note = "Demand at the last six coupon auctions against each maturity's own norm. In the lab (quantamental-lab docs/stock_bond_auctions_v1.md) a weak bid-to-cover came before a slightly higher 10-year yield the next day (about +1.5bp for the weakest fifth): a weak relation, a description. The tail itself needs the when-issued yield, which Treasury does not publish"
 [[risk.matrix.cells]]
 row = "treasuries"
 column = "technical"
@@ -2850,7 +2876,11 @@ members = ["dxy_3m"]
 [[risk.matrix.cells]]
 row = "cross_asset"
 column = "technical"
-pending = "Stock–bond correlation (next step)"
+lead = "stock_bond_corr"
+scale = "bands"
+bands = { elevated = 0.0, stressed = 0.3 }
+members = ["stock_bond_corr", "realised_corr"]
+note = "Above 0, bonds stop hedging stocks; +0.3 is about where both inflation-era drawdowns (2022, early 2025) peaked. Since 2000 it has been at or above 0.3 on 5% of days; for most of 1966-1999 it sat there, a regime rather than a crisis"
 [[risk.matrix.cells]]
 row = "cross_asset"
 column = "valuation"

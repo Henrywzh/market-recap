@@ -19,7 +19,7 @@ import pandas as pd
 from ..compute import anchor as A
 from ..compute import risk as R
 from ..compute import sentiment as S
-from ..sources import cboe, cftc, damodaran, fred, shiller, snapshot_store, yahoo
+from ..sources import cboe, cftc, damodaran, fred, shiller, snapshot_store, treasury, yahoo
 from ..util import SourceRecord, describe_error, to_iso_date
 
 CBOE_INDICES = ("VIX", "VIX9D", "VIX3M", "VIX6M", "VIX1Y", "VVIX", "SKEW", "COR1M")
@@ -74,6 +74,7 @@ class _Inputs:
         self.put_call = pd.Series(dtype=float)
         self.shiller = pd.DataFrame()
         self.damodaran = pd.Series(dtype=float)
+        self.auctions = pd.DataFrame()
         self.failed: dict[str, str] = {}
 
     def load(self, settings: dict) -> None:
@@ -130,6 +131,7 @@ class _Inputs:
                   policy="weekly_release")
 
         self._load_valuation()
+        self._load_auctions()
         self._load_vx(int(settings.get("vx_contracts", 8)), session)
         self._load_put_call(int(settings.get("put_call_sessions", 260)))
 
@@ -149,6 +151,16 @@ class _Inputs:
         self._log("damodaran", damodaran.ATTRIBUTION, damodaran.HOME_URL,
                   [self.damodaran.index[-1]] if not self.damodaran.empty else [],
                   0 if self.damodaran.empty else 1, 1, policy="monthly_release")
+
+    def _load_auctions(self) -> None:
+        """Treasury's coupon auction results since 2008, for the auction-demand cell."""
+        try:
+            self.auctions = R.auction_demand(treasury.fetch_auction_history())
+        except Exception as exc:
+            self.failed["treasury auctions"] = describe_error(exc)
+        self._log("treasury_auctions_risk", "Treasury auction results (bid-to-cover, dealer share)", treasury.AUCTIONS_PAGE,
+                  [self.auctions.index[-1]] if not self.auctions.empty else [], 0 if self.auctions.empty else 1, 1,
+                  policy="weekly_release")
 
     def _load_vx(self, count: int, session: date | None = None) -> None:
         today = date.today()
@@ -281,6 +293,9 @@ def _builders(inputs: _Inputs) -> dict[str, Callable[[], pd.Series]]:
         "ecy": lambda: R.excess_cape_yield(inputs.spx(), get(f, "DGS10"), inputs.shiller),
         "erp_damodaran": lambda: inputs.damodaran,
         "term_premium": lambda: get(f, "THREEFYTP10"),
+        "stock_bond_corr": lambda: R.stock_bond_correlation(inputs.spx(), get(f, "DGS10")),
+        "auction_btc": lambda: inputs.auctions.get("bid_to_cover", pd.Series(dtype=float)).dropna(),
+        "auction_dealer": lambda: inputs.auctions.get("dealer_share", pd.Series(dtype=float)).dropna(),
         "ig_oas": lambda: get(f, "BAMLC0A0CM") * 100,
         "ccc_oas": lambda: get(f, "BAMLH0A3HYC") * 100,
         "cor1m": lambda: get(c, "COR1M"),
@@ -324,9 +339,12 @@ TILE_SOURCES = {
     "dxy_3m": ["Yahoo DX-Y.NYB"], "copper_oil": ["Yahoo HG=F, CL=F"],
     "ecy": [shiller.ATTRIBUTION, "S&P 500 closes", "FRED DGS10"], "erp_damodaran": [damodaran.ATTRIBUTION],
     "term_premium": ["FRED THREEFYTP10 (Kim and Wright, Federal Reserve Board)"],
+    "stock_bond_corr": ["S&P 500 closes", "FRED DGS10"],
+    "auction_btc": ["Treasury auction results (fiscaldata)"], "auction_dealer": ["Treasury auction results (fiscaldata)"],
 }
 TILE_BACKCALC = {"vix_term": "VIX3M", "vix9d_term": "VIX9D", "vvix": "VVIX", "skew": "SKEW", "cor1m": "COR1M"}
-WEEKLY_TILES = {"net_liquidity", "nfci", "cftc_es", "cftc_nq", "cftc_zn", "cftc_vx"}
+# Auction series move only on auction days, about weekly.
+WEEKLY_TILES = {"net_liquidity", "nfci", "cftc_es", "cftc_nq", "cftc_zn", "cftc_vx", "auction_btc", "auction_dealer"}
 # Published once a month: no one-session or one-week change, and a matrix lead
 # from one is allowed a month and a half before it is stale.
 MONTHLY_TILES = {"erp_damodaran"}
