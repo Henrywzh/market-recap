@@ -365,6 +365,46 @@ def measured_importance(measure: str | None, sizes: dict, lines: dict) -> tuple[
                    "text": f"{side} moved {ratio:.2f}x an ordinary day's on its {size['n']} release days{since}"}
 
 
+def _effect(entry: dict | None, min_t: float) -> dict | None:
+    """A slope with its t-statistic and count; ``detected`` when |t| clears ``min_t``."""
+    if not entry or entry.get("slope") is None:
+        return None
+    t = entry.get("t")
+    return {"slope": entry["slope"], "t": t, "n": entry.get("n"),
+            "detected": t is not None and abs(t) >= min_t}
+
+
+def surprise_response(measure: str | None, scenarios: dict | None, *, min_t: float = 2.0) -> dict | None:
+    """What a release has done, from SCENARIOS: the size of its release days
+    against ordinary days, and the move per standard deviation of surprise
+    (actual less forecast) in the 2-year yield and SPY, overall and when rates
+    are driving the market, beside today's driver. An effect whose |t| is
+    under ``min_t`` is kept but marked not detected: most stock effects are not."""
+    if not measure or not scenarios:
+        return None
+    if measure == "fomc":
+        move = (scenarios.get("fomc") or {}).get("abs_move") or {}
+        if not move:
+            return None
+        return {"measure": "fomc", "label": "FOMC decision",
+                "size": {"dy2_release": move.get("dY2_fomc"), "dy2_other": move.get("dY2_other"),
+                         "spy_release": move.get("spy_fomc"), "spy_other": move.get("spy_other"),
+                         "n": (scenarios.get("fomc") or {}).get("decisions")},
+                "per_sd": None, "regime": (scenarios.get("regime") or {}).get("label")}
+    driver = next((d for d in scenarios.get("drivers") or [] if d.get("key") == measure), None)
+    if not driver or driver.get("status") != "ok":
+        return None
+    rates = (driver.get("rates_per_sd") or {}).get("dY2")
+    return {
+        "measure": measure, "label": driver.get("label"), "scale": driver.get("scale"), "unit": driver.get("unit"),
+        "since": driver.get("first"),
+        "size": driver.get("event_size"),
+        "per_sd": {"dy2_bp": _effect(rates, min_t), "spy_pct": _effect(driver.get("spy_per_sd"), min_t),
+                   "spy_pct_rates_driven": _effect(driver.get("spy_when_rates_drive"), min_t)},
+        "regime": (scenarios.get("regime") or {}).get("label"),
+    }
+
+
 JUDGED = {"kind": "judged", "text": "set by hand: no measured history"}
 INDEX_WEIGHT = {"kind": "index_weight", "text": "the company's weight in the S&P 500 or Nasdaq-100, or in its THEMES group"}
 

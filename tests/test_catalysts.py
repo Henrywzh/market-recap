@@ -336,3 +336,17 @@ def test_every_configured_tag_is_known():
     settings = load_config()["catalysts"]
     for spec in settings["releases"] + settings["manual"]:
         C.event_tags(spec.get("event_type", "economic_release"), spec)
+
+
+def test_a_releases_response_marks_what_is_and_is_not_detected():
+    scenarios = {"regime": {"label": "rates"}, "drivers": [{
+        "key": "cpi", "status": "ok", "label": "CPI m/m", "scale": 0.148, "unit": "pp", "first": "2016-01-20",
+        "event_size": {"n": 121}, "rates_per_sd": {"dY2": {"slope": 3.88, "t": 5.04, "n": 121}},
+        "spy_per_sd": {"slope": 0.06, "t": 0.9, "n": 121}, "spy_when_rates_drive": {"slope": -0.58, "t": -3.0, "n": 42}}],
+        "fomc": {"decisions": 86, "abs_move": {"dY2_fomc": 5.41, "dY2_other": 3.4, "spy_fomc": 0.8, "spy_other": 0.72}}}
+    r = C.surprise_response("cpi", scenarios)
+    assert r["per_sd"]["dy2_bp"]["detected"] and not r["per_sd"]["spy_pct"]["detected"]
+    assert r["per_sd"]["spy_pct_rates_driven"]["detected"] and r["regime"] == "rates"
+    fomc = C.surprise_response("fomc", scenarios)
+    assert fomc["per_sd"] is None and fomc["size"]["n"] == 86
+    assert C.surprise_response("cpi", None) is None and C.surprise_response("missing", scenarios) is None

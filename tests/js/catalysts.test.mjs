@@ -41,3 +41,35 @@ test('the importance title says how it was set', async () => {
   assert.equal(importanceTitle(cpi), 'high importance · 2-year yield moved 1.54x an ordinary day');
   assert.equal(importanceTitle({ importance: 'low' }), 'low importance');
 });
+
+test('a release says what it has done, and names undetectable effects instead of a number', async () => {
+  const { responseLines } = await import('../../web/js/tabs/catalysts.js');
+  const cpi = {
+    measure: 'cpi', scale: 0.148, unit: 'pp', since: '2016-01-20', regime: 'rates',
+    size: { n: 121, dy2_release: 5.35, dy2_other: 3.47, spy_release: 0.86, spy_other: 0.82 },
+    per_sd: { dy2_bp: { slope: 3.88, t: 5.04, n: 121, detected: true },
+              spy_pct: { slope: -0.326, t: -2.76, n: 121, detected: true },
+              spy_pct_rates_driven: { slope: -0.577, t: -3.0, n: 42, detected: true } },
+  };
+  const lines = responseLines(cpi);
+  assert.match(lines[0], /moves 5\.4bp on average \(3\.5bp on other days\) · SPY 1\.05× .* 121 releases since 2016/);
+  assert.equal(lines[1], 'A surprise 1 SD above the forecast (0.15pp): 2-year yield +3.9bp · SPY −0.33%');
+  assert.match(lines[2], /Rates are driving stocks now; in such markets SPY has moved −0\.58% per SD \(t -3\.0, 42 releases\)/);
+  const payrolls = { ...cpi, unit: 'k', scale: 83, regime: 'growth',
+    per_sd: { dy2_bp: { slope: 2.05, t: 3.8, detected: true }, spy_pct: { slope: 0.067, t: 0.86, detected: false } } };
+  assert.match(responseLines(payrolls)[1], /\(83k\): 2-year yield \+2\.1bp · SPY not detectable \(t 0\.9\)/);
+  assert.match(responseLines(payrolls)[2], /^Growth is driving stocks now/);
+  assert.deepEqual(responseLines(null), []);
+});
+
+test('an earnings row shows its past and implied moves when EVIDENCE has them', async () => {
+  const { earningsMove } = await import('../../web/js/tabs/catalysts.js');
+  const aapl = { mean_abs_move: 2.46, options: { implied_move: { straddle_pct: 5.67, expiry: '2026-11-06' } } };
+  const move = earningsMove(aapl);
+  assert.equal(move.past, 2.46);
+  assert.equal(move.implied, 5.67);
+  assert.equal(move.tone, 'down', 'options price well above its past moves');
+  assert.equal(earningsMove({ mean_abs_move: 3.1 }).implied, null);
+  assert.equal(earningsMove({}), null);
+  assert.equal(earningsMove(undefined), null);
+});

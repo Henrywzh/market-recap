@@ -242,6 +242,60 @@ export function matchesTags(event, filter) {
   return true;
 }
 
+// What a release has done to rates and stocks (SCENARIOS), in lines a reader can take in.
+// An effect under |t| 2 is named as not detectable rather than given a number.
+function signed(value, digits, unit) {
+  return `${value > 0 ? '+' : value < 0 ? '−' : ''}${num(Math.abs(value), digits)}${unit}`;
+}
+
+function sdSize(response) {
+  if (response.scale == null) return '';
+  const unit = response.unit === 'pp' ? 'pp' : response.unit === 'k' ? 'k' : ` ${response.unit || ''}`;
+  const digits = response.scale < 1 ? 2 : response.scale < 10 ? 1 : 0;
+  return ` (${num(response.scale, digits)}${unit})`;
+}
+
+export function responseLines(response) {
+  if (!response) return [];
+  const lines = [];
+  const size = response.size || {};
+  if (size.dy2_release != null && size.dy2_other) {
+    const spy = size.spy_release != null && size.spy_other ? ` · SPY ${num(size.spy_release / size.spy_other, 2)}× its usual move` : '';
+    lines.push(`Release days: the 2-year yield moves ${num(size.dy2_release, 1)}bp on average (${num(size.dy2_other, 1)}bp on other days)${spy}`
+      + `${size.n ? ` · ${size.n} ${response.measure === 'fomc' ? 'decisions' : 'releases'}` : ''}${response.since ? ` since ${response.since.slice(0, 4)}` : ''}`);
+  }
+  const per = response.per_sd;
+  if (per) {
+    const part = (effect, label, digits, unit) => {
+      if (!effect) return null;
+      return effect.detected ? `${label} ${signed(effect.slope, digits, unit)}` : `${label} not detectable (t ${num(effect.t, 1)})`;
+    };
+    const parts = [part(per.dy2_bp, '2-year yield', 1, 'bp'), part(per.spy_pct, 'SPY', 2, '%')].filter(Boolean);
+    if (parts.length) lines.push(`A surprise 1 SD above the forecast${sdSize(response)}: ${parts.join(' · ')}`);
+    if (response.regime === 'rates' && per.spy_pct_rates_driven) {
+      const e = per.spy_pct_rates_driven;
+      lines.push(e.detected
+        ? `Rates are driving stocks now; in such markets SPY has moved ${signed(e.slope, 2, '%')} per SD (t ${num(e.t, 1)}, ${e.n} releases)`
+        : `Rates are driving stocks now; in such markets SPY's response is not detectable (t ${num(e.t, 1)})`);
+    } else if (response.regime === 'growth') {
+      lines.push('Growth is driving stocks now; the per-surprise effects above are averages over both kinds of market');
+    }
+  }
+  return lines;
+}
+
+// The options-implied move into a name's report beside how far it has moved on its
+// last eight, from EVIDENCE. Null when neither is known.
+export function earningsMove(row) {
+  if (!row) return null;
+  const implied = row.options?.implied_move?.straddle_pct ?? null;
+  const past = row.mean_abs_move ?? null;
+  if (implied == null && past == null) return null;
+  const ratio = implied != null && past ? implied / past : null;
+  return { implied, past, ratio, expiry: row.options?.implied_move?.expiry || null,
+           tone: ratio == null ? '' : ratio > 1.2 ? 'down' : ratio < 0.8 ? 'up' : '' };
+}
+
 function categoryTag(event) {
   const text = CATEGORY_SHORT[event.category];
   return text ? el('span', { class: 'cat-tag cat-category', title: `hits ${(event.channels || []).map((c) => CHANNEL_WORDS[c] || c).join(', ')}`, text }) : null;
@@ -301,6 +355,7 @@ function macroDetail(event, labels) {
     event.actuals?.length ? el('div', { text: `Actual (TradingView; the agency release is authoritative): ${event.actuals.map((a) => `${a.label} ${num(a.value, a.decimals)}${a.unit === '%' ? '%' : a.unit || ''}`).join(' · ')}` }) : null,
     ...lines,
     prints.length ? el('div', { text: `Previous: ${prints.map((p) => `${p.label} ${printValue(p)}${p.period ? ` (${p.period.slice(0, 7)})` : ''}`).join(' · ')}` }) : null,
+    ...responseLines(event.response).map((line) => el('div', { text: line })),
     event.channels?.length ? el('div', { text: `Hits: ${event.channels.map((c) => CHANNEL_WORDS[c] || c).join(' · ')}` }) : null,
     event.importance_basis?.text ? el('div', { text: `Importance: ${event.importance} — ${event.importance_basis.text}` }) : null,
     el('div', {}, [
@@ -343,8 +398,9 @@ function macroRow(event, labels) {
   ]);
 }
 
-function earningsRow(event) {
+function earningsRow(event, moves = null) {
   const weight = eventWeight(event);
+  const move = earningsMove(moves?.[event.symbol]);
   return el('div', { class: 'cat-row cat-row-flat', title: [event.name, event.sector, event.fiscal_quarter ? `FQ ${event.fiscal_quarter}` : null, event.estimates ? `${event.estimates} estimates` : null].filter(Boolean).join(' · ') }, [
     timeCell(event),
     el('span', { class: 'cat-name' }, [
@@ -355,6 +411,8 @@ function earningsRow(event) {
     ]),
     el('span', { class: 'cat-figures' }, [
       weight ? el('span', { class: 'dim', text: `${num(weight, 2)}%` }) : null,
+      move?.past != null ? el('span', { class: 'dim', title: 'average move over the session after each of its last eight reports', text: `±${num(move.past, 1)}% PAST` }) : null,
+      move?.implied != null ? el('span', { class: move.tone, title: `ATM straddle to ${move.expiry}, from the options snapshot: it prices the whole period to expiry, not the report alone${move.ratio ? ` · ${num(move.ratio, 2)}× the past average` : ''}`, text: `±${num(move.implied, 1)}% IMPL` }) : null,
       event.theme ? el('span', { class: 'dim', title: `share of the ${event.theme.label} bellwethers' market cap`, text: `${num(event.theme.share, 0)}% of ${event.theme.key}` }) : null,
       el('span', {}, [el('span', { class: 'dim', text: 'EST ' }), event.eps_forecast === null ? DASH : `$${num(event.eps_forecast, 2)}`]),
       event.last_year_eps === null ? null : el('span', { class: 'dim', text: `YR AGO $${num(event.last_year_eps, 2)}` }),
@@ -466,6 +524,7 @@ function keyReleaseCard(event) {
       ]),
     ]),
     market ? rangeBar(market) : null,
+    ...responseLines(event.response).slice(0, 2).map((line) => el('div', { class: 'stat-note cat-response', text: line })),
     others > 0 ? el('div', { class: 'stat-note', title: (event.expectations || []).map(formatExpectation).join('\n'), text: `+${others} more forecast${others === 1 ? '' : 's'} · hover` }) : null,
   ]);
 }
@@ -653,7 +712,7 @@ export default async function renderCatalysts(root, data, _manifest, ctx = {}) {
       || a.symbol.localeCompare(b.symbol));
     const columns = [];
     if (filter.lane !== 'single_name') columns.push(laneColumn('MACRO & BROAD INDEX', macro, weekEnd, (e) => macroRow(e, data.certainty_labels)));
-    if (filter.lane !== 'macro') columns.push(laneColumn('SINGLE NAME · EARNINGS', names, weekEnd, earningsRow));
+    if (filter.lane !== 'macro') columns.push(laneColumn('SINGLE NAME · EARNINGS', names, weekEnd, (e) => earningsRow(e, moves)));
     host.append(el('div', { class: columns.length > 1 ? 'grid two' : '' }, columns.map((c) => el('div', { class: 'card' }, [c]))));
   };
   const set = (key) => (value) => { filter[key] = value; saveFilter({ ...filter, query: undefined }); draw(); };
@@ -665,6 +724,10 @@ export default async function renderCatalysts(root, data, _manifest, ctx = {}) {
   // The sector grid sits under the strip it details; an older build has none.
   const heat = heatmapCard(data.heatmap);
   if (heat) root.append(heat);
+  // Past and implied earnings moves (EVIDENCE), joined onto the earnings rows; optional.
+  let moves = null;
+  const evidence = await ctx.loadArtifact?.('evidence').catch(() => null);
+  if (evidence?.names) moves = evidence.names;
   const events = await ctx.loadArtifact?.('events').catch(() => null);
   const lead = events && events.as_of === data.as_of ? await eventLead(events) : null;
   if (lead) root.append(lead);

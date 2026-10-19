@@ -140,7 +140,7 @@ def _prints(specs: list[dict], use_cache: bool, cache: dict) -> list[dict]:
 
 
 def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool,
-           sizes: dict | None = None) -> tuple[list[dict], dict[str, str], list[str]]:
+           sizes: dict | None = None, scenarios: dict | None = None) -> tuple[list[dict], dict[str, str], list[str]]:
     # High-importance releases are listed further out than the rest: an FOMC
     # decision five weeks away matters more than claims next Thursday.
     far = max(end, start + timedelta(days=int(settings.get("high_importance_horizon_days", 0))))
@@ -179,6 +179,8 @@ def _macro(ctx, settings: dict, start: date, end: date, use_cache: bool,
             "certainty_class": CERTAINTY[event["source_id"]],
             "importance": importance,
             "importance_basis": basis,
+            # What this release has done to rates and stocks, from SCENARIOS.
+            "response": C.surprise_response(release.get("measure"), scenarios),
             "source_id": event["source_id"],
             "source_url": event["url"],
             # The rule's name (monthly_opex, quad_witching, vix_expiry...) tags expiry rows on the page.
@@ -425,7 +427,8 @@ def build(ctx, *, use_cache: bool = True, inputs: dict | None = None) -> dict:
 
     # How much each release has moved rates and stocks, measured by SCENARIOS this session.
     sizes = C.event_sizes((inputs or {}).get("scenarios"))
-    macro, failed, expected_missing = _macro(ctx, settings, session, end, use_cache, sizes)
+    macro, failed, expected_missing = _macro(ctx, settings, session, end, use_cache, sizes,
+                                             (inputs or {}).get("scenarios"))
     earnings_dates = [previous] + C.sessions(session, end)
     earnings, earnings_failed = _earnings(ctx, settings, earnings_dates, use_cache)
     # Reported by the calendar's date, but Nasdaq has not posted the actual yet.
