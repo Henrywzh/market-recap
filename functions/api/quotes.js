@@ -175,6 +175,10 @@ export function parseSpark(payload) {
       change: prev === null ? null : price - prev,
       change_pct: prev ? (price / prev - 1) * 100 : null,
       time: times[at],
+      // Yahoo's latest price including pre-market and after-hours trades.
+      // The spark call refuses includePrePost, but carries this field; the
+      // page reads it only outside the regular session.
+      extended_price: Number.isFinite(row?.fulldayPrice) ? row.fulldayPrice : null,
       session: Number.isFinite(row?.start) && Number.isFinite(row?.end) ? { start: row.start, end: row.end } : null,
       series: { t: times.slice(0, at + 1), c: closes.slice(0, at + 1).map((v) => (Number.isFinite(v) ? v : null)) },
     });
@@ -229,6 +233,7 @@ export async function buildBody(contract, nowMs = Date.now(), scope = 'default')
     // A board's session is the US cash session: its index or its stocks.
     return { fetched_at: new Date(nowMs).toISOString(), session: sessionOf(quotes, nowMs),
       refresh_seconds: board.refresh_seconds, closed_refresh_seconds: board.closed_refresh_seconds,
+      extended_refresh_seconds: board.extended_refresh_seconds,
       stale_after_seconds: contract.stale_after_seconds, quotes };
   }
   const [equities, rates] = await Promise.all([yahooSpark(contract.strip || []), rateRows(contract.rates || [])]);

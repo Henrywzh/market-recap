@@ -308,3 +308,29 @@ test('the five primary quotes lead in their own order; the rest follow in strip 
   assert.deepEqual(primary.map((q) => q.label), ['SPX', 'NDX', 'VIX', 'UST 10Y', 'DXY']);
   assert.deepEqual(rest.map((q) => q.label), ['UST 2Y', 'WTI', 'NVDA']);
 });
+
+test('a spark answer keeps Yahoo\'s extended-hours price apart from the regular one', () => {
+  const payload = spark({ NFLX: { t: [10, 20], c: [69, 68.69], prev: 69.85 } });
+  payload.NFLX.fulldayPrice = 64.75;
+  const q = parseSpark(payload).get('NFLX');
+  assert.equal(q.price, 68.69);
+  assert.equal(q.extended_price, 64.75);
+  assert.ok(Math.abs(L.extendedMove(q) - (64.75 / 68.69 - 1) * 100) < 1e-9);
+  assert.equal(L.extendedMove({ price: 10, extended_price: 10 }), null);   // no extended trade
+  assert.equal(L.extendedMove({ price: 10, extended_price: null }), null);
+});
+
+test('the trading day by the New York clock, and the heat map\'s schedule across it', () => {
+  const at = (iso) => Date.parse(iso);          // October: New York is UTC-4
+  assert.equal(L.marketPhase(at('2026-10-20T08:00:00Z')), 'pre');
+  assert.equal(L.marketPhase(at('2026-10-20T13:30:00Z')), 'regular');
+  assert.equal(L.marketPhase(at('2026-10-20T20:00:00Z')), 'post');
+  assert.equal(L.marketPhase(at('2026-10-21T00:00:00Z')), 'closed');
+  assert.equal(L.marketPhase(at('2026-10-24T15:00:00Z')), 'closed');   // Saturday
+  const body = { refresh_seconds: 300, closed_refresh_seconds: 900, extended_refresh_seconds: 900, session: { open: true } };
+  assert.equal(L.boardDelay(body, false, at('2026-10-20T14:00:00Z')), 300);
+  assert.equal(L.boardDelay(body, false, at('2026-10-20T21:00:00Z')), 900);
+  assert.equal(L.boardDelay(body, false, at('2026-10-21T00:00:00Z')), 8 * 3600);   // overnight: wake at 04:00
+  assert.equal(L.boardDelay(body, false, at('2026-10-24T03:30:00Z')), 52.5 * 3600); // Friday 23:30 ET: Monday 04:00
+  assert.equal(L.boardDelay(body, true, at('2026-10-20T21:00:00Z')), null);
+});

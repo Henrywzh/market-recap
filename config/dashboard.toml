@@ -143,6 +143,9 @@ server_cache_seconds = 15   # repeated clicks and readers share one fetch per wi
 stale_after_seconds = 1200  # during the session, an older price is marked STALE
 board_refresh_seconds = 300   # heat map and index charts, while the session is open
 board_closed_refresh_seconds = 900
+# The heat map in pre-market (04:00-09:30 ET) and after hours (16:00-20:00 ET).
+# Overnight and at weekends it asks only on REFRESH, and wakes at 04:00 ET.
+board_extended_refresh_seconds = 900
 board_cache_seconds = 60
 manual_min_seconds = 30     # REFRESH asks again, but not sooner than this after the last fetch
 # The strip: cash indices, volatility, the dollar and two commodities (Yahoo

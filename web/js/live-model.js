@@ -64,3 +64,54 @@ export function bondHoliday(isoDate) {
   if (month === 11) return (day === 11 && weekday >= 1 && weekday <= 5) || (day === 12 && weekday === 1);
   return false;
 }
+
+// Which part of the US trading day it is in New York, by the clock: 'pre'
+// (04:00-09:30), 'regular' (09:30-16:00), 'post' (16:00-20:00) or 'closed'
+// (overnight and weekends). Holidays are not known here; a quiet holiday shows
+// no extended trades, so its tiles stay grey rather than wrong.
+const NY_CLOCK = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+function newYorkClock(nowMs) {
+  const parts = Object.fromEntries(NY_CLOCK.formatToParts(new Date(nowMs)).map((p) => [p.type, p.value]));
+  return { weekday: parts.weekday, minutes: (Number(parts.hour) % 24) * 60 + Number(parts.minute) };
+}
+
+export function marketPhase(nowMs) {
+  const { weekday, minutes } = newYorkClock(nowMs);
+  if (weekday === 'Sat' || weekday === 'Sun') return 'closed';
+  if (minutes >= 240 && minutes < 570) return 'pre';
+  if (minutes >= 570 && minutes < 960) return 'regular';
+  if (minutes >= 960 && minutes < 1200) return 'post';
+  return 'closed';
+}
+
+// Seconds from now to the next 04:00 New York on a weekday, by stepping in
+// minutes from the next whole minute (at most three days and a bit).
+export function secondsToPreMarket(nowMs) {
+  let t = Math.floor(nowMs / 60000) * 60000 + 60000;
+  for (let i = 0; i < 5 * 24 * 60; i += 1, t += 60000) {
+    const { weekday, minutes } = newYorkClock(t);
+    if (minutes === 240 && weekday !== 'Sat' && weekday !== 'Sun') return Math.round((t - nowMs) / 1000);
+  }
+  return null;
+}
+
+// The heat map's schedule. The regular session keeps the board's own cadence;
+// pre-market and after hours ask every extended_refresh_seconds; overnight
+// and at weekends nothing is asked until 04:00 New York (REFRESH still works).
+export function boardDelay(body, hidden, nowMs) {
+  if (hidden) return null;
+  const phase = marketPhase(nowMs);
+  if (phase === 'regular') return nextDelay(body, false);
+  if (phase === 'pre' || phase === 'post') return body?.extended_refresh_seconds ?? body?.closed_refresh_seconds ?? 900;
+  return secondsToPreMarket(nowMs);
+}
+
+// A name's move outside the regular session: its latest extended-hours price
+// against its last regular-session price. Null when there is no extended
+// price, or it equals the regular price (no extended trade to show).
+export function extendedMove(quote) {
+  const ext = quote?.extended_price;
+  const base = quote?.price;
+  if (!Number.isFinite(ext) || !Number.isFinite(base) || base <= 0 || ext === base) return null;
+  return (ext / base - 1) * 100;
+}

@@ -69,7 +69,8 @@ def live_contract(config: dict | None = None, *, weighted_names: list[str] | Non
     candidates = (weighted_names or [])[:limit] if weighted_names else live.get("premarket_movers", [])
     candidates = list(dict.fromkeys([*candidates, *(e["ticker"] for e in config.get("watchlist", []))]))
     board = {"refresh_seconds": live.get("board_refresh_seconds", 300),
-             "closed_refresh_seconds": live.get("board_closed_refresh_seconds", 900)}
+             "closed_refresh_seconds": live.get("board_closed_refresh_seconds", 900),
+             "extended_refresh_seconds": live.get("board_extended_refresh_seconds", 900)}
     boards = {"indices": {**board, "series": True, "symbols": [e["symbol"] for e in live.get("index_board", [])],
                           "labels": {e["symbol"]: e["label"] for e in live.get("index_board", [])}}}
     if weighted_names:

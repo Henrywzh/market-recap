@@ -34,8 +34,10 @@ export function withFresh(url) {
 
 // `onData(body)` after each answer; `node` is the element the feed belongs to:
 // once it leaves the page the feed stops, so a reader on another tab is not
-// polling for this one.
-export function createFeed(url, { node, onData, onTick }) {
+// polling for this one. `delayFor(body, hidden, nowMs)` replaces the default
+// schedule (the heat map's follows pre-market and after hours).
+export function createFeed(url, { node, onData, onTick, delayFor = null }) {
+  const delay = (body, hidden) => (delayFor ? delayFor(body, hidden, Date.now()) : nextDelay(body, hidden));
   const state = { body: null, lastFetch: 0, nextAt: null, timer: null, ticker: null, inflight: false, error: null, stopped: false };
   const button = el('button', { type: 'button', class: 'live-refresh', text: 'REFRESH' });
   const status = el('span', { class: 'live-status', text: 'LOADING…' });
@@ -79,15 +81,17 @@ export function createFeed(url, { node, onData, onTick }) {
     }
     if (state.stopped || !node.isConnected) { stop(); return; }
     if (state.body && !state.error) onData(state.body);
-    schedule(nextDelay(state.body, document.hidden));
+    schedule(delay(state.body, document.hidden));
     tick();
   }
 
   function onVisibility() {
     if (document.hidden) { schedule(null); tick(); return; }
     const now = Date.now();
-    if (dueOnShow(state.lastFetch, state.body, now)) fetchNow(false);
-    else schedule((state.lastFetch + nextDelay(state.body, false) * 1000 - now) / 1000);
+    const wait = delay(state.body, false);
+    if (wait === null) { schedule(null); tick(); return; }
+    if (!state.lastFetch || (delayFor ? now - state.lastFetch >= wait * 1000 : dueOnShow(state.lastFetch, state.body, now))) fetchNow(false);
+    else schedule((state.lastFetch + wait * 1000 - now) / 1000);
   }
 
   function stop() {

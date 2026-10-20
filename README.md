@@ -640,6 +640,14 @@ did not arrive is a dash, never a number from elsewhere. Everything else on
 the page is the nightly build's close; LIVE is the heat map's default only
 while the session is open.
 
+The heat map's **EXT HRS** window colours pre-market (04:00–09:30 ET) and
+after-hours (16:00–20:00 ET) moves: each name's latest extended-hours price
+(the spark answer's `fulldayPrice`, no extra request) against its last
+regular-session price; a name with no extended trade stays grey. It is the
+default in those hours. The board asks every `board_extended_refresh_seconds`
+(15 minutes) then, only while the tab is visible; overnight and at weekends it
+asks only on REFRESH and wakes at 04:00 ET.
+
 Three more blocks take live prices **only when the reader presses REFRESH**,
 and never fetch on their own:
 
