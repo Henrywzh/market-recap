@@ -1,5 +1,7 @@
 import { el, card, num, pct, sectionTitle, notice, DASH } from '../fmt.js';
 import { resolveTicker } from '../routes.js';
+import renderReverseDcf from './reverse-dcf.js';
+import { viewTabs } from '../view-tabs.js';
 
 const DCF_BASE = 'artifacts/dcf';
 const M = 1e6;
@@ -30,7 +32,24 @@ async function loadCompany(symbol) {
   return response.json();
 }
 
-export default async function renderDcf(root, data, _manifest, ctx = {}) {
+export default async function renderDcf(root, data, manifest, ctx = {}) {
+  // Keep each mode's unsaved inputs when switching between the two tools.
+  const tabs = viewTabs([['reverse', 'REVERSE DCF'], ['forward', 'BUILD YOUR OWN']], 'reverse', {
+    label: 'DCF mode', idPrefix: 'dcf-mode',
+    build: async (mode, pane) => {
+      try {
+        if (mode === 'reverse') await renderReverseDcf(pane, data, manifest, ctx);
+        else await renderForwardDcf(pane, data, manifest, ctx);
+      } catch (error) {
+        pane.replaceChildren(notice(`DCF inputs unavailable: ${error.message}`));
+      }
+    },
+  });
+  root.append(tabs.nav, ...tabs.panes);
+  await tabs.show('reverse');
+}
+
+async function renderForwardDcf(root, data, _manifest, ctx = {}) {
   root.append(sectionTitle('DISCOUNTED CASH FLOW', 'BUILD-YOUR-OWN MODEL · LEARNING TOOL'));
   root.append(notice(
     'For learning purposes only. This is a teaching model, not a target price or investment advice. '

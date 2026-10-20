@@ -145,6 +145,7 @@ def build(ctx, *, tickers: list[str] | None = None, use_cache: bool = True) -> d
         "market_proxy": proxy_ticker,
         "beta_weeks": int(settings["beta_weeks"]),
         "forecast_years": int(settings["forecast_years"]),
+        "reverse": settings.get("reverse"),
         "note": (
             "Historical columns are extracted from the company's own 10-K XBRL facts and carry "
             "the filing date they were published with. Forecast columns, discount rate and exit "

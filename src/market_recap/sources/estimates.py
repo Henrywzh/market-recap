@@ -31,6 +31,15 @@ GIVE_UP_AFTER = 8
 PERIODS = ("0q", "+1q", "0y", "+1y")
 
 
+def observed_at(symbol: str) -> str | None:
+    """Cache observation time, not Yahoo's last estimate-revision time."""
+    try:
+        stamp = cache.modified(cache.path_for(NAMESPACE, symbol.replace("/", "_"), suffix=".json"))
+    except OSError:
+        return None
+    return stamp.isoformat() if stamp is not None else None
+
+
 def _raw(node: Any) -> float | None:
     if isinstance(node, dict):
         node = node.get("raw")

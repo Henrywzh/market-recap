@@ -2194,6 +2194,34 @@ history_years = 5
 beta_weeks = 104
 beta_min_weeks = 52
 
+[dcf.reverse]
+# Visible research scenarios, not company forecasts or fitted expectations.
+years = 10
+margin_transition_years = 5
+wacc_pct = 9.0
+tax_pct = 25.0
+terminal_growth_pct = 2.5
+terminal_roic_pct = 15.0
+net_investment_pct = 5.0
+growth_pct = 5.0
+growth_grid_pct = [-5.0, 0.0, 5.0, 10.0, 15.0, 20.0]
+margin_grid_pct = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0, 60.0]
+margin_bounds_pct = [0.0, 100.0]
+# Historical comparisons are context, not scenario probabilities or forecasts.
+reference_years = 5
+peer_min_count = 3
+# A peer TTM is excluded if its reported period end is older than this at as_of.
+peer_max_age_days = 400
+history_cagr_years = [3, 5]
+chart_growth_step_pct = 1.0
+sensitivity_wacc_shifts_pp = [-2.0, 0.0, 2.0]
+sensitivity_investment_shifts_pp = [-2.0, 0.0, 2.0]
+excluded_sectors = ["Financials", "Real Estate", "Utilities"]
+excluded_subindustries = ["Biotechnology"]
+cycle_warning_subindustries = ["Semiconductors", "Semiconductor Materials & Equipment", "Oil & Gas Exploration & Production", "Integrated Oil & Gas", "Steel"]
+annual_max_age_days = 550
+capital_warning_share = 0.10
+
 [macro]
 # Monthly prints shown in the inflation table.
 releases = 12

@@ -20,6 +20,7 @@ import math
 import pandas as pd
 
 from ..compute import valuation as V
+from ..compute.reverse_dcf_context import revenue_context
 from ..config import VALUATION_ARTIFACT_DIR
 from ..sources import estimates, forward_pe_history, sec, snapshot_store
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, company_name, prune_stale, write_json
@@ -506,6 +507,9 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         fallback_cap = estimates.market_cap(symbol) if not data.trailing["shares"] and price is not None else None
         row = _row(symbol, meta.get(symbol, {}), data, price, indices.get(symbol, []), ctx.splits, history, ntm, fallback_cap,
                    V.fiscal_path(trends.get(symbol), ntm), fiscal)
+        # Uses the same response already fetched for forward EPS: no new
+        # requests, and no revenue assumption inferred from adjusted EPS.
+        row["revenue_consensus"] = revenue_context(trends.get(symbol), estimates.observed_at(symbol))
         rows.append(row)
         prices = ctx.prices.get(symbol)
         if (prices is not None and data.eps_history and row["market_cap"] and price and row["cik"] not in companies

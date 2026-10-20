@@ -1476,3 +1476,66 @@ a.today-tile:hover { background: var(--panel-alt); }
 .today-rsi-bar { display: inline-block; width: 44px; height: 5px; background: color-mix(in srgb, var(--border) 70%, transparent); border-radius: 2px; overflow: hidden; }
 .today-rsi-bar > span { display: block; height: 100%; background: var(--accent); opacity: 0.55; }
 .today-rsi.is-deep .today-rsi-bar > span { opacity: 1; }
+/* Reverse DCF keeps measured facts separate from editable scenarios. */
+.reverse-dcf .stat-strip { margin-bottom: 14px; }
+.reverse-controls { align-items: flex-start; padding: 10px 0; }
+.reverse-controls .field { flex: 1 1 180px; min-width: 160px; max-width: 280px; }
+.reverse-controls input { width: 100%; box-sizing: border-box; }
+.reverse-controls input, #reverse-ticker { background: var(--panel); color: var(--text); border: 1px solid var(--border-strong); padding: 7px 8px; font: inherit; }
+.reverse-controls .sub { max-width: 260px; line-height: 1.5; }
+.reverse-caution { border-left: 2px solid var(--accent); padding-left: 10px; }
+.reverse-map th, .reverse-map td { text-align: center; }
+.reverse-map th:first-child { text-align: left; }
+.reverse-map td { padding: 3px; }
+.reverse-cell { width: 100%; min-width: 58px; padding: 11px 7px; background: transparent; color: var(--text-dim); border: 1px solid var(--border); font: inherit; cursor: pointer; }
+.reverse-cell.reverse-covered { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); }
+.reverse-cell[aria-pressed="true"], .reverse-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; color: var(--text); }
+.reverse-results .stat-value { font-size: 24px; }
+.reverse-reference-above .stat-value, .reverse-reference-key.reverse-reference-above { color: var(--accent); }
+.reverse-reference-below .stat-value, .reverse-reference-key.reverse-reference-below { color: var(--blue); }
+.reverse-reference-key { margin: 6px 0 10px; font-size: 11px; line-height: 1.6; color: var(--text-dim); }
+.reverse-evidence { margin: 12px 0; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.reverse-evidence-title { font-size: 12px; letter-spacing: .04em; margin: 0 0 8px; }
+.reverse-evidence-gap { color: var(--text-dim); font-size: 11px; line-height: 1.6; border-left: 2px solid var(--border-strong); padding-left: 9px; }
+.reverse-purpose { color: var(--text-dim); font-size: 12px; line-height: 1.6; margin: 6px 0 14px; }
+.reverse-key-stats, .reverse-results .stat-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.reverse-key-stats .stat, .reverse-results .stat { min-width: 0; }
+.reverse-key-stats .stat-value { font-size: 24px; font-weight: 700; }
+.reverse-assumptions { color: var(--text-dim); font-size: 11px; line-height: 1.6; margin: 6px 0; }
+.reverse-chart-guide { border-top: 1px solid var(--border); padding-top: 12px; font-size: 11px; line-height: 1.6; color: var(--text-dim); }
+.reverse-editor { border: 1px solid var(--border); padding: 8px 10px; margin: 12px 0; }
+.reverse-editor > summary { font-size: 12px; }
+.reverse-editor-actions { padding-top: 10px; }
+.reverse-chart-fold > summary { padding: 8px 0; font-size: 12px; }
+.reverse-sensitivity-summary { margin: 4px 0 8px; font-size: 12px; line-height: 1.6; }
+.reverse-origin { display: block; color: var(--text-dim); font-size: 9px; letter-spacing: .04em; margin: 3px 0 7px; min-height: 22px; }
+.reverse-origin[data-origin="history"] { color: var(--blue); }
+.reverse-origin[data-origin="user"] { color: var(--accent); }
+.reverse-reference { display: block; margin-top: 9px; line-height: 1.6; color: var(--text-dim); font-size: 11px; }
+.reverse-controls .field { max-width: none; }
+.reverse-chart { width: 100%; height: 320px; min-width: 0; }
+.reverse-checks p { line-height: 1.7; margin: 8px 0; }
+.reverse-comparison { font-weight: 600; }
+#reverse-history-metric { max-width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--border-strong); padding: 6px; font: inherit; }
+@media (max-width: 600px) {
+  .reverse-results .stat-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reverse-results .stat { min-width: 0; }
+  .reverse-dcf .card-head { flex-wrap: wrap; gap: 8px; }
+  .reverse-chart { height: 300px; }
+  .reverse-results .stat-value { font-size: 21px; }
+}
+@media (max-width: 400px) {
+  .reverse-controls .field { flex-basis: 100%; min-width: 0; }
+  .reverse-origin { min-height: 0; }
+}
+
+/* Reverse DCF margin bar: own range, peers and the required margin on one scale. */
+.reverse-bar { margin: 12px 0 6px; }
+.reverse-bar-track { position: relative; height: 18px; border-radius: 3px; background: color-mix(in srgb, var(--border) 55%, transparent); }
+.reverse-bar-range { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--text-dim) 45%, transparent); border-radius: 2px; }
+.reverse-bar-peer { position: absolute; top: 50%; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%; background: var(--text-dim); opacity: 0.8; }
+.reverse-bar-required { position: absolute; top: -4px; width: 12px; height: 12px; margin-left: -6px; transform: rotate(45deg) translateY(6px); background: var(--text); border: 1px solid var(--panel); }
+.reverse-bar-required.reverse-reference-above { background: var(--accent); }
+.reverse-bar-required.reverse-reference-below { background: var(--blue); }
+.reverse-bar-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-top: 3px; }
+.reverse-bar-legend { margin-top: 2px; }

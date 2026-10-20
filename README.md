@@ -55,6 +55,35 @@ audit and its limitations are documented in `docs/blackout_audit.md`.
 The trial UI is dark-only. The theme selector and light palette are removed;
 old `mr-theme` preferences are retired without clearing monitor/watchlist data.
 
+**Reverse DCF trial (2026-10-20).** TOOLS → DCF opens a conditional operating
+scenario map, using the full valuation universe and existing annual statements;
+BUILD YOUR OWN retains the manual forward model. Growth × sustainable operating
+margin cells compare model EV with an editable published EV proxy, not share-price
+upside. WACC, net reinvestment, tax and terminal assumptions remain explicit user
+scenarios, never calibrated forecasts. Unsupported business types and missing
+critical facts show a reason instead of invented inputs. Historical input sessions
+retain their dates. See [the model contract](docs/reverse_dcf.md).
+Assumption-source labels and company annual-history references now accompany
+the controls. Three chart sections show history against a separate hypothetical
+path, growth / required-margin curves under WACC scenarios, and EV sensitivity
+to discount / reinvestment choices; terminal dependence and numeric source folds
+remain explicit. These add context, not calibrated forecasts or probability bands.
+Required margins are colored relative to the company's recent reported range;
+the same section shows dated Yahoo FY revenue estimates and dated GICS-industry
+actual margins where peer coverage is adequate. These are context references,
+not an automatic cheap/expensive call or long-term forecast.
+The default reading order is now **company history → price requirements →
+sensitivity**. Only the required-margin frontier is expanded initially; the
+assumption editor, historical chart, sensitivity chart and EV audit details are
+folded. Headline requirements remain conditional scenarios; see
+[the evidence definitions and limitations](docs/reverse_dcf.md).
+The headline now leads with the **implied discount rate** (the rate at which
+model EV equals working EV, against the 10-year Treasury) beside the required
+margin, and one bar sets the required margin against the company's own range and
+its peers. Growth opens on analysts' FY revenue growth (else the reported CAGR),
+labelled and editable; the frontier shades an **own-evidence box** (analyst
+growth low–high × reported margin range) on axes fitted to the company.
+
 **CPI view (2026-10-15).** RATES & MACRO opens on **Treasury rates**, with
 **CPI & macro** and **PPI · AI prices** as the other views. The latest official BLS headline/core
 MoM SA and YoY NSA prints sit against retrospective calendar consensus,
