@@ -666,17 +666,29 @@ export function splitRows(rows, shown = 2) {
 // Reports heavy enough to move an index (or on the watchlist): the next
 // week's cards, and the ones the last session traded on. Only the first two
 // upcoming reporters show; the rest fold, so a long week does not bury the page.
-async function eventLead(events) {
+// The earnings cards come from a separate file (events.json). When its date
+// differs from the calendar's (a partial rebuild, or a browser holding one
+// file from an older build), the cards still show, labelled with their own
+// date, rather than vanishing without a word.
+export function leadDateNote(eventsAsOf, calendarAsOf) {
+  if (!eventsAsOf || !calendarAsOf || eventsAsOf === calendarAsOf) return null;
+  return `Earnings cards are as of ${eventsAsOf}; the calendar is as of ${calendarAsOf}. `
+    + (eventsAsOf < calendarAsOf ? 'They are older: reload, or wait for the next build.' : 'The calendar is the older file: reload.');
+}
+
+async function eventLead(events, calendarAsOf) {
   if (!events || (!events.upcoming?.length && !events.reported?.length)) return null;
   const t = events.thresholds || {};
-  const nodes = [];
+  const nodes = [sectionTitle('EARNINGS AHEAD', `REPORTING IN THE NEXT ${events.lead_days} DAYS · SPX ≥ ${t.SPX}% OR NDX ≥ ${t.NDX}% OR WATCHLIST`)];
+  const note = leadDateNote(events.as_of, calendarAsOf);
+  if (note) nodes.push(el('div', { class: 'notice', text: note }));
   if (events.reported?.length) {
     nodes.push(el('div', { class: 'section-sub', text: `JUST REPORTED · TRADED ${events.as_of}` }));
     nodes.push(el('div', { class: 'event-lead' }, events.reported.map((p) => outcomeCard(p, { compact: true }))));
   }
   if (events.upcoming?.length) {
     const prices = await Promise.all(events.upcoming.map((p) => loadPrices(p.symbol)));
-    nodes.push(el('div', { class: 'section-sub', text: `REPORTING IN THE NEXT ${events.lead_days} DAYS · SPX ≥ ${t.SPX}% OR NDX ≥ ${t.NDX}% OR WATCHLIST` }));
+    nodes.push(el('div', { class: 'section-sub', text: `${events.upcoming.length} REPORTING · NEXT ${events.lead_days} DAYS` }));
     const cards = events.upcoming.map((p, i) => eventCard(p, events.as_of, { compact: true, prices: prices[i] }));
     const { shown, folded } = splitRows(cards, 2);
     nodes.push(el('div', { class: 'event-lead' }, shown));
@@ -745,7 +757,7 @@ export default async function renderCatalysts(root, data, _manifest, ctx = {}) {
   const evidence = await ctx.loadArtifact?.('evidence').catch(() => null);
   if (evidence?.names) moves = evidence.names;
   const events = await ctx.loadArtifact?.('events').catch(() => null);
-  const lead = events && events.as_of === data.as_of ? await eventLead(events) : null;
+  const lead = events ? await eventLead(events, data.as_of) : null;
   if (lead) root.append(lead);
   const keys = keyReleases(data);
   if (keys) root.append(keys);

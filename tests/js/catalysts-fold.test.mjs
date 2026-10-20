@@ -16,3 +16,11 @@ test('a short list folds nothing, and a missing list is empty', () => {
 test('the split size can be set', () => {
   assert.deepEqual(splitRows([1, 2, 3], 1), { shown: [1], folded: [2, 3] });
 });
+
+test('earnings cards from another build are labelled with their date, not hidden', async () => {
+  const { leadDateNote } = await import('../../web/js/tabs/catalysts.js');
+  assert.equal(leadDateNote('2026-10-20', '2026-10-20'), null);
+  assert.equal(leadDateNote(null, '2026-10-20'), null);
+  assert.match(leadDateNote('2026-10-19', '2026-10-20'), /as of 2026-10-19.*older/);
+  assert.match(leadDateNote('2026-10-21', '2026-10-20'), /calendar is the older file/);
+});
