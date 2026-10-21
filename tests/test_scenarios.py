@@ -260,6 +260,29 @@ def test_panel_assembles_measurements_without_inventing_any():
     assert payload["regime_response"]["status"] in ("ok", "insufficient") and "event_size" not in by_key["missing"]
 
 
+def test_latest_release_is_the_last_row_of_its_table_and_the_published_tick_is_kept():
+    cfg = _config(drivers=[{"key": "payrolls", "label": "Nonfarm payrolls", "title": "Non Farm Payrolls", "unit": "k",
+                            "miss_threshold": 5},
+                           {"key": "missing", "label": "Not on the calendar", "title": "No Such Line", "unit": "k"}])
+    idx, closes, y10, y2 = _market()
+    rows = _calendar(idx)
+    payload = P.assemble(as_of=date(2026, 10, 9), closes=closes, y10=y10, y2=y2, rows=rows, upcoming=[],
+                         sectors={"Information Technology": "XLK"}, market="SPY", cfg=cfg)
+    by_key = {d["key"]: d for d in payload["drivers"]}
+    nfp, missing = by_key["payrolls"], by_key["missing"]
+    last = max((r for r in rows if r["title"] == "Non Farm Payrolls"), key=lambda r: r["date"])
+    day = pd.Timestamp(last["date"][:10])
+    surprise = last["actual"] - last["forecast"]
+    assert nfp["miss_threshold"] == 5 and missing["miss_threshold"] is None
+    assert nfp["latest"]["date"] == day.date().isoformat()
+    assert nfp["latest"]["actual"] == last["actual"] and nfp["latest"]["forecast"] == 150.0
+    assert nfp["latest"]["surprise"] == pytest.approx(surprise)
+    assert nfp["latest"]["cls"] == ("above" if surprise > 5 else "below" if surprise < -5 else "inline")
+    assert nfp["latest"]["dY2"] == pytest.approx(float(y2.diff().loc[day] * 100), abs=1e-3)
+    assert nfp["latest"]["SPY"] == pytest.approx(float(closes["SPY"].pct_change().loc[day] * 100), abs=1e-3)
+    assert "latest" not in missing and missing["status"] == "insufficient"
+
+
 def test_a_session_after_the_last_yield_is_reported_as_one_the_yields_do_not_reach():
     cfg = _config(drivers=[])
     idx, closes, y10, y2 = _market()

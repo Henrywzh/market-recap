@@ -337,6 +337,7 @@ export function unusualNodes(unusual, view) {
     );
   }
   nodes.push(oversoldBlock(unusual?.oversold || []));
+  nodes.push(watchBlock(unusual?.watch || []));
   if (ongoing.length) {
     nodes.push(el('div', {
       class: 'today-ongoing dim',
@@ -371,6 +372,20 @@ function oversoldBlock(items) {
     el('div', { class: 'today-block-title', text: 'OVERSOLD · RSI(6), INDICES & SECTOR FUNDS' }),
     ...listNodes(items.map(oversoldRow), (row) => row, 'No index or sector fund is below 30.'),
     items.length ? el('div', { class: 'today-detail dim', text: items[0].detail }) : null,
+  ]);
+}
+
+// SCENARIO WATCH: hand-written conditions that are triggered, or changed state at
+// this build. The page itself (#watch) has every scenario and the scheduled branches.
+function watchRow(item) {
+  const state = item.extra?.state;
+  return rowNode(item, { detail: null, extras: [tag(String(state || '').toUpperCase(), state === 'triggered' ? 'warn' : 'info')] });
+}
+
+function watchBlock(items) {
+  return el('div', { class: 'today-block' }, [
+    el('div', { class: 'today-block-title', text: 'SCENARIO WATCH' }),
+    ...listNodes(items.map(watchRow), (row) => row, 'No scenario is triggered or changed state.'),
   ]);
 }
 

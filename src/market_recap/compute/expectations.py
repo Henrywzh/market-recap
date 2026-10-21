@@ -333,6 +333,22 @@ def kalshi_quote(event: dict, spec: dict) -> dict | None:
     return quote
 
 
+def kalshi_ladder(event: dict, spec: dict) -> list[list[float]]:
+    """The strike ladder behind ``kalshi_quote``: each strike with the market's
+    probability of reaching it, strikes scaled as the quantiles are, sorted by
+    strike. Fewer than two points is an empty ladder."""
+    scale = spec.get("scale", 1.0)
+    ladder = []
+    for market in event.get("markets") or []:
+        strike = _strike(market.get("yes_sub_title") or "")
+        probability, _spread = _probability(market)
+        if strike is not None and probability is not None:
+            ladder.append([round(strike * scale, 4), round(probability, 4)])
+    if len(ladder) < 2:
+        return []
+    return sorted(ladder, key=lambda point: point[0])
+
+
 def kalshi_fits(event: dict, spec: dict, release: str, reference: str | None = None) -> bool:
     """True when the contract closes on this release and is this print."""
     if kalshi_close(event) != release:

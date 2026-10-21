@@ -30,7 +30,7 @@ SEVERITIES = ("error", "warning", "notice")
 # down must not hold back the prices every other tab needs.
 OPTIONAL_SOURCES = re.compile(r"^(catalysts_\w+|(ssga|ishares|vanguard|invesco)_xray_holdings|yahoo_estimates(_quarter)?|factset_insight(_pdf)?|earnings_season_nasdaq"
                               # THEMES' industry data: each is one card's content, never the page's.
-                              r"|sec_capex|sec_releases(_guidance)?|nasdaq_earnings_history|mops_revenue|korea_customs|motie_trade|eia_weekly|fred_(housing|banks|consumer)|alfred_releases|tradingview_forecasts|finnhub_news|adata_market_watch|pcpartpicker|korea_customs_memory|fred_chip_prices|altdata_\w+|chain_\w+|index_put_call_\w+|ssga_\w+_map|bls_(cpi|ppi)|(cpi|ppi)_consensus|(cpi|ppi)_fred_\w+)$")
+                              r"|sec_capex|sec_releases(_guidance)?|nasdaq_earnings_history|mops_revenue|korea_customs|motie_trade|eia_weekly|fred_(housing|banks|consumer)|alfred_releases|tradingview_forecasts|finnhub_news|adata_market_watch|pcpartpicker|korea_customs_memory|fred_chip_prices|altdata_\w+|chain_\w+|index_put_call_\w+|ssga_\w+_map|bls_(cpi|ppi)|(cpi|ppi)_consensus|(cpi|ppi)_fred_\w+|watch_\w+)$")
 
 
 @dataclass(frozen=True)
@@ -253,7 +253,7 @@ def _today_items(payload: dict):
     just_out, coming_up, unusual = payload.get("just_out") or {}, payload.get("coming_up") or {}, payload.get("unusual") or {}
     lists = [just_out.get("macro"), just_out.get("earnings"), coming_up.get("later")]
     lists += [day.get("items") for day in coming_up.get("days") or [] if isinstance(day, dict)]
-    lists += [unusual.get(name) for name in ("moves", "states", "events", "ongoing", "oversold")]
+    lists += [unusual.get(name) for name in ("moves", "states", "events", "ongoing", "oversold", "watch")]
     for entries in lists:
         for item in entries or []:
             if isinstance(item, dict):

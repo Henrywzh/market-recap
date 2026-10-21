@@ -112,6 +112,19 @@ def test_claims_ladder_is_read_in_thousands_and_surveys_stay_labeled():
     assert rows[-1]["open_interest"] == 35
 
 
+def test_kalshi_ladder_lists_each_strike_with_its_probability_in_strike_order():
+    contract = _contract(
+        "Initial jobless claims for the week ending September 19, 2026", "2026-09-24T12:25:00Z", [
+        _market("At least 220,000", "0.05", "0.09", oi="5"),
+        _market("Any other value", "0.10", "0.12"),
+        _market("At least 180,000", "0.95", "0.99", oi="10"),
+        _market("At least 200,000", "0.40", "0.60", last="0.50", oi="20"),
+    ])
+    assert X.kalshi_ladder(contract, {"series": "KXJOBLESSCLAIMS", "scale": 0.001}) == [[180.0, 0.97], [200.0, 0.5], [220.0, 0.07]]
+    assert X.kalshi_ladder(contract, {}) == [[180000.0, 0.97], [200000.0, 0.5], [220000.0, 0.07]]
+    assert X.kalshi_ladder({"markets": [_market("At least 200,000", "0.40", "0.60")]}, {}) == []   # one strike is no ladder
+
+
 def test_polymarket_picks_the_decision_that_ends_on_the_meeting_day():
     events = [
         {"title": "Fed Decision in October?", "endDate": "2026-10-28T16:00:00Z",

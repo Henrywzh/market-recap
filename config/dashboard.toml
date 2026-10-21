@@ -3040,3 +3040,89 @@ check_min_liabilities = 1_000_000_000
 [credit.watch]
 # The AI borrowers: neoclouds and the hyperscalers borrowing most for data centres.
 ai_borrowers = ["CRWV", "NBIS", "ORCL", "META", "MSFT", "AMZN", "GOOGL"]
+
+# SCENARIO WATCH (panels/watch.py). Two layers, no opinion probabilities:
+# - Scheduled: each SCENARIOS release and the FOMC decision inside event_days,
+#   with Kalshi's price of each branch and what past releases in it did. Automatic.
+# - Conditions: the scenarios below, written by hand and checked at each build.
+#   A trigger's threshold is fixed when the scenario is added (`added`); move it
+#   and you have a new scenario, so change `added` too. `horizon` is the review
+#   date: after it the scenario is listed as expired with whether it triggered.
+#   match = "all" needs every trigger, "any" one. `kill` ends it for good.
+[watch]
+event_days = 14
+history_sessions = 260
+# Years of history for the episode count (context, not a forecast).
+history_years = 10
+# SCENARIOS driver -> PRICED (Kalshi) release key.
+kalshi_keys = { cpi = "cpi_mom", core_cpi = "core_cpi_mom", core_pce = "core_pce_mom", payrolls = "nfp", unemployment = "unrate", claims = "claims" }
+
+# The series triggers read. source "yahoo" (symbol), "fred" (id), or "ratio" (of two keys).
+[watch.series]
+usdjpy = { label = "USD/JPY", source = "yahoo", symbol = "JPY=X" }
+brent = { label = "Brent", source = "yahoo", symbol = "BZ=F", unit = "$" }
+spx = { label = "S&P 500", source = "yahoo", symbol = "^GSPC" }
+qqq = { label = "QQQ", source = "yahoo", symbol = "QQQ" }
+us10y = { label = "10Y Treasury yield", source = "yahoo", symbol = "^TNX", unit = "%" }
+vix = { label = "VIX", source = "yahoo", symbol = "^VIX" }
+vix3m = { label = "VIX3M", source = "yahoo", symbol = "^VIX3M" }
+vix_term = { label = "VIX / VIX3M", source = "ratio", of = ["vix", "vix3m"] }
+
+[[watch.scenarios]]
+key = "yen_carry"
+name = "Yen carry unwind"
+thesis = "A fast yen rally forces trades funded in yen to close, as in August 2024: risk assets sold together."
+added = "2026-10-21"
+horizon = "2027-03-31"
+match = "any"
+triggers = [
+  { series = "usdjpy", measure = "change_pct", sessions = 20, op = "below", threshold = -5, near = -3 },
+  { series = "usdjpy", measure = "level", op = "below", threshold = 145, near = 150 },
+]
+
+[[watch.scenarios]]
+key = "stocks_bonds_down"
+name = "Stocks and bonds fall together"
+thesis = "Stocks drop while yields do not fall: bonds stop hedging, so buying the dip has no cushion."
+added = "2026-10-21"
+horizon = "2027-03-31"
+match = "all"
+triggers = [
+  { series = "spx", measure = "change_pct", sessions = 10, op = "below", threshold = -4, near = -2.5 },
+  { series = "us10y", measure = "change_bp", sessions = 10, op = "above", threshold = 0, near = -5 },
+]
+
+[[watch.scenarios]]
+key = "oil_shock"
+name = "Oil supply shock"
+thesis = "A Gulf or Hormuz disruption lifts crude fast, feeding inflation and holding rates up."
+added = "2026-10-21"
+horizon = "2027-03-31"
+match = "any"
+triggers = [
+  { series = "brent", measure = "change_pct", sessions = 20, op = "above", threshold = 15, near = 10 },
+  { series = "brent", measure = "level", op = "above", threshold = 120, near = 112 },
+]
+
+[[watch.scenarios]]
+key = "growth_ignores_oil"
+name = "Growth stocks ignore expensive oil"
+thesis = "QQQ rallies while Brent stays above $100: equities price a benign path that oil does not."
+added = "2026-10-21"
+horizon = "2027-03-31"
+match = "all"
+triggers = [
+  { series = "qqq", measure = "change_pct", sessions = 20, op = "above", threshold = 5, near = 3 },
+  { series = "brent", measure = "level", op = "above", threshold = 100, near = 95 },
+]
+
+[[watch.scenarios]]
+key = "vix_inversion"
+name = "VIX curve inverts"
+thesis = "One-month implied volatility above three-month: the market pays up for protection now."
+added = "2026-10-21"
+horizon = "2027-03-31"
+match = "any"
+triggers = [
+  { series = "vix_term", measure = "level", op = "above", threshold = 1.0, near = 0.95 },
+]

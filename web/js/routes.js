@@ -34,6 +34,8 @@ export const VIEWS = [
   { id: 'catalysts', label: 'CALENDAR', group: 'calendar', artifact: 'catalysts', module: 'catalysts' },
   { id: 'earnings', label: 'EARNINGS', group: 'calendar', artifact: 'earnings', module: 'earnings' },
   { id: 'scenarios', label: 'SCENARIOS', group: 'calendar', artifact: 'scenarios', module: 'scenarios', takesArg: true },
+  // Scheduled releases and the FOMC decision in the next days, and the conditions written in config.
+  { id: 'watch', label: 'SCENARIO WATCH', group: 'calendar', artifact: 'watch', module: 'watch' },
   { id: 'technicals', label: 'TECHNICALS', group: 'tools', artifact: 'technicals', module: 'technicals', takesArg: true },
   { id: 'trade', label: 'TRADE DESK', group: 'tools', artifact: 'technicals', module: 'trade', takesArg: true },
   { id: 'xray', label: 'ETF X-RAY', group: 'tools', artifact: 'xray', module: 'xray' },

@@ -195,7 +195,7 @@ def build(ctx) -> dict:
             quote = E.kalshi_quote(event, spec)
             if quote:
                 releases.append({"key": key, "label": catalog.get("label"), "unit": catalog.get("unit"),
-                                 "release": release, **quote})
+                                 "release": release, "ladder": E.kalshi_ladder(event, spec), **quote})
     releases.sort(key=lambda r: (r["release"], r["key"]))
     per_key: dict[str, int] = {}
     kept = []

@@ -458,7 +458,7 @@ def test_empty_inputs_still_give_every_key(tmp_path):
     out = _run(inputs=inputs, events_dir=tmp_path)
     assert set(validate.TODAY_KEYS) <= set(out)
     assert len(out["unavailable"]) >= len(today.INPUTS)
-    assert out["unusual"] == {"moves": [], "states": [], "events": [], "ongoing": [], "oversold": []}
+    assert out["unusual"] == {"moves": [], "states": [], "events": [], "ongoing": [], "oversold": [], "watch": []}
 
 
 # --- validate ----------------------------------------------------------------

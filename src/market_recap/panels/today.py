@@ -30,7 +30,8 @@ from ..sources.http import get_text
 from ..util import describe_error
 
 # Panels TODAY reads, all required to be from this session (build passes them as inputs).
-INPUTS = ("catalysts", "moves", "market_state", "risk", "positioning", "monitor", "catalyst_log", "themes", "evidence")
+INPUTS = ("catalysts", "moves", "market_state", "risk", "positioning", "monitor", "catalyst_log", "themes", "evidence",
+          "watch")
 IMPORTANCE_RANK = {"high": 0, "medium": 1, "low": 2}
 # Calendar event types shown under their own kind; every other macro type is "macro".
 EVENT_KINDS = {"central_bank": "fed", "treasury_auction": "auction"}
@@ -523,6 +524,49 @@ def _oversold_items(closes: pd.DataFrame, watch: dict, period: int) -> list[dict
     return sorted(items, key=lambda i: i["value"])
 
 
+# --- unusual: scenario watch --------------------------------------------------
+
+def _trigger_text(t: dict) -> str:
+    unit = t.get("unit") or ""
+
+    def shown(value, signed: bool = False) -> str:
+        text = f"{value:+g}" if signed else f"{value:g}"
+        return f"${text}" if unit == "$" else f"{text}{unit}"
+
+    sign = "≥" if t["op"] == "above" else "≤"
+    return f"{t['label']} {shown(t['value'], t.get('measure') != 'level')} (triggers at {sign} {shown(t['threshold'])})"
+
+
+def _watch_items(watch: dict, as_of: str) -> list[dict]:
+    """Scenarios that are triggered, and any that changed state at this build. A scenario
+    sitting near its trigger is on the SCENARIO WATCH page, not here, until it moves."""
+    items = []
+    for s in watch.get("scenarios") or []:
+        state, was, changed = s.get("state"), s.get("previous_state"), bool(s.get("changed"))
+        hits = [t for t in s.get("triggers") or [] if t.get("value") is not None
+                and (t.get("met") if state == "triggered" else t.get("is_near") or t.get("met"))]
+        reading = "; ".join(_trigger_text(t) for t in hits)
+        if state == "triggered":
+            title = f"{s['name']} triggered" + (f": {reading}" if reading else "")
+        elif not changed:
+            continue
+        elif state == "near":
+            title = f"{s['name']} near its trigger" + (f": {reading}" if reading else "")
+        elif state == "quiet":
+            title = f"{s['name']} no longer {was}"
+        elif state == "expired":
+            title = f"{s['name']} reached its review date: {s.get('outcome')}"
+        elif state == "killed":
+            title = f"{s['name']} ended: its kill condition was met"
+        else:
+            continue
+        items.append(_item("watch", s["name"], as_of, title, link="#watch", detail=s.get("thesis"),
+                           importance="high" if state == "triggered" and changed else "medium",
+                           new=changed, since=s.get("since"),
+                           extra={"state": state, "previous_state": was, "name": s["name"]}))
+    return _order(items)
+
+
 # --- unusual: events ---------------------------------------------------------
 
 def _monitor_items(monitor: dict, cfg: dict, as_of: str) -> list[dict]:
@@ -662,6 +706,7 @@ def build(ctx, *, inputs: dict, events_dir: Path = EVENTS_ARTIFACT_DIR) -> dict:
                          + _reaction_items(recent.get("earnings_reacted") or [], moves_by, cfg, session)),
         "ongoing": _order(market_ongoing + matrix_ongoing + ([blackout] if blackout else [])),
         "oversold": _oversold_items(_watch_closes(ctx), cfg.get("oversold_watch") or {}, int(cfg.get("oversold_period", 6))),
+        "watch": _watch_items(src["watch"], as_of),
     }
 
     return {

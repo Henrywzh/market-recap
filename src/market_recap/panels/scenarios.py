@@ -149,7 +149,8 @@ def assemble(*, as_of: date, closes: pd.DataFrame, y10: pd.Series, y2: pd.Series
         entry: dict = {"key": d["key"], "label": d["label"], "unit": d["unit"], "n": int(len(table)),
                        "first": table.index.min().date().isoformat() if len(table) else None,
                        "last": table.index.max().date().isoformat() if len(table) else None,
-                       "scale": _num(scale, 3), "next": _next_release(upcoming, d, as_of)}
+                       "scale": _num(scale, 3), "next": _next_release(upcoming, d, as_of),
+                       "miss_threshold": d.get("miss_threshold")}
         if scale is None or len(table) < min_era:
             entry["status"] = "insufficient"
             drivers.append(entry)
@@ -160,6 +161,10 @@ def assemble(*, as_of: date, closes: pd.DataFrame, y10: pd.Series, y2: pd.Series
         entry["event_size"] = {k: (_num(v, 2) if isinstance(v, float) else v) for k, v in size.items()}
         z = table["z"]
         j = outcomes.reindex(table.index)
+        row, move = table.iloc[-1], j.iloc[-1]
+        entry["latest"] = {"date": table.index[-1].date().isoformat(), "actual": _num(row["actual"]),
+                           "forecast": _num(row["forecast"]), "surprise": _num(row["surprise"]), "cls": row["cls"],
+                           "dY2": _num(move["dY2"]), "SPY": _num(move["SPY"])}
         entry["rates_per_sd"] = {"dY2": _slope(S.slope_t(z, j["dY2"], min_n=min_era), 2),
                                  "dY10": _slope(S.slope_t(z, j["dY10"], min_n=min_era), 2)}
         entry["spy_per_sd"] = _slope(S.slope_t(z, j["SPY"], min_n=min_era), 3)
