@@ -7,9 +7,11 @@ import { boardDelay, extendedMove, marketPhase } from '../live-model.js';
 import { unusualCard, selloffBanner } from '../moves-card.js';
 
 const ETF_BASE = 'artifacts/etfs';
+// LIVE is whatever is trading now: the session's move against the previous
+// close while it is open; in pre-market and after hours, the extended-hours
+// move against the last regular-session price.
 const LIVE = 'LIVE';
-// Pre-market and after hours: the move against the last regular-session price.
-const EXT = 'EXT HRS';
+const extendedPhase = (phase) => phase === 'pre' || phase === 'post';
 // Colour by each stock's own part of the session's move, in its own σ (MOVES).
 const SIGMA = 'OWN σ';
 const SIGMA_CAP = 3;
@@ -29,14 +31,11 @@ function liveCaption(state) {
     + `${Math.round((body.refresh_seconds || 300) / 60)} minutes while the session is open; the time is in the card's corner).`;
 }
 
-// What the EXT HRS tiles are. Extended-hours trading is thin, a few names
-// trade at all, and a print can be one small order: said on the page, not
-// only here.
+// What the LIVE tiles are in pre-market and after hours. Extended-hours
+// trading is thin, only some names trade, and a print can be one small order:
+// said on the page, not only here.
 export function extendedCaption(state, phase) {
   const body = state.body;
-  if (phase !== 'pre' && phase !== 'post') {
-    return 'EXT HRS colours pre-market (04:00–09:30 ET) and after-hours (16:00–20:00 ET) moves. Outside those hours the tiles are grey; REFRESH works any time.';
-  }
   if (!body) return state.error ? `Extended-hours prices unavailable: ${state.error}.` : 'Loading extended-hours prices…';
   const moved = body.quotes.filter((q) => extendedMove(q) !== null).length;
   const label = phase === 'pre' ? 'PRE-MARKET' : 'AFTER HOURS';
@@ -88,8 +87,9 @@ export default function renderHeatmaps(root, data, manifest, ctx = {}) {
   // Nasdaq 100), each sized by its own tracking fund's published weights.
   // LIVE colours the tiles by today's move so far (the quote function's
   // heat-map board, every few minutes); the other windows are the build's
-  // closes. During the session LIVE is shown first unless the reader has
-  // picked a window; after the close the page opens on the close.
+  // closes. During the session, pre-market and after hours LIVE is shown
+  // first unless the reader has picked a window; overnight the page opens on
+  // the close.
   // An older build carries no `primary`: its map was the S&P 500 by SPY weight.
   const maps = [{ key: 'SPX', label: 'S&P 500', weight_source: 'SPY', ...data.primary, constituents: data.constituents },
     ...(data.index_maps || []).filter((m) => m.constituents?.length)];
@@ -106,13 +106,14 @@ export default function renderHeatmaps(root, data, manifest, ctx = {}) {
   // smoke test (rightly) fails on.
   const hasMoves = Boolean(manifest?.panels?.includes('moves') && ctx.loadArtifact);
   let moves = new Map();
-  const stockPeriods = [LIVE, EXT, ...periods, ...(hasMoves ? [SIGMA] : [])];
+  const stockPeriods = [LIVE, ...periods, ...(hasMoves ? [SIGMA] : [])];
   let stockPeriod = defaultPeriod;
   let picked = false;
   let live = new Map();
 
-  const valueOf = (row, period) => (period === LIVE ? live.get(row.ticker)?.change_pct ?? null
-    : period === EXT ? (['pre', 'post'].includes(marketPhase(Date.now())) ? extendedMove(live.get(row.ticker)) : null)
+  const liveValue = (ticker) => (extendedPhase(marketPhase(Date.now())) ? extendedMove(live.get(ticker))
+    : live.get(ticker)?.change_pct ?? null);
+  const valueOf = (row, period) => (period === LIVE ? liveValue(row.ticker)
     : period === SIGMA ? moves.get(row.ticker)?.z_own ?? null : row.returns[period]);
   const shown = (v, period) => (v === null || v === undefined ? DASH
     : period === SIGMA ? `${v > 0 ? '+' : ''}${num(v, 1)}σ` : pct(v));
@@ -127,22 +128,22 @@ export default function renderHeatmaps(root, data, manifest, ctx = {}) {
         key: row.ticker,
         value: row.weight || 0,
         color: returnColor(ret, period === SIGMA ? SIGMA_CAP
-          : period === defaultPeriod || period === LIVE || period === EXT ? RETURN_COLOUR_CAP.day : RETURN_COLOUR_CAP.period),
+          : period === defaultPeriod || period === LIVE ? RETURN_COLOUR_CAP.day : RETURN_COLOUR_CAP.period),
         label: row.ticker,
         sublabel: shown(ret, period),
         payload: row,
       });
     });
-    liveNote.textContent = period === LIVE ? liveCaption(feed.state) : period === EXT ? extendedCaption(feed.state, marketPhase(Date.now())) : '';
+    liveNote.textContent = period === LIVE ? captionNow(feed.state) : '';
     drawTreemap(stockNode, [...bySector.entries()].map(([group, items]) => ({ group, items })),
       (row, event) => {
         const now = live.get(row.ticker);
         const head = valueOf(row, period);
         showTooltip(
-          `<div class="t-head">${row.ticker} <span class="${dirClass(head)}">${shown(head, period)}</span>${period === LIVE ? ' <span class="dim">LIVE</span>' : period === EXT ? ' <span class="dim">EXTENDED HOURS</span>' : period === SIGMA ? ' <span class="dim">own part, in its own σ</span>' : ''}</div>
+          `<div class="t-head">${row.ticker} <span class="${dirClass(head)}">${shown(head, period)}</span>${period === LIVE ? ` <span class="dim">${extendedPhase(marketPhase(Date.now())) ? 'EXTENDED HOURS' : 'LIVE'}</span>` : period === SIGMA ? ' <span class="dim">own part, in its own σ</span>' : ''}</div>
            <div class="t-meta">${row.name}<br>${row.sector} · ${row.sub_sector}<br>weight ${num(row.weight, 2)}% · close $${num(row.price)}`
           + (now && now.price !== null && now.price !== undefined ? `<br>live $${num(now.price)} · ${pct(now.change_pct)} · ${clock(now.time)}` : '')
-          + (period === EXT && now && Number.isFinite(now.extended_price) ? `<br>extended $${num(now.extended_price)} vs last regular $${num(now.price)}` : '')
+          + (period === LIVE && extendedPhase(marketPhase(Date.now())) && now && Number.isFinite(now.extended_price) ? `<br>extended hours $${num(now.extended_price)} vs last regular $${num(now.price)}` : '')
           + `</div><table>${rowsHtml(row.returns, periods, (v) => pct(v))}</table>`, event);
       },
       hideTooltip,
@@ -173,26 +174,26 @@ export default function renderHeatmaps(root, data, manifest, ctx = {}) {
       if (stockPeriod === SIGMA) drawStocks(SIGMA);
     }).catch((error) => movesHost.replaceChildren(el('div', { class: 'gap', text: `Unusual moves are unavailable: ${error.message}.` })));
   }
+  const captionNow = (state) => {
+    const phase = marketPhase(Date.now());
+    return extendedPhase(phase) ? extendedCaption(state, phase) : liveCaption(state);
+  };
   const feed = createFeed('api/quotes?board=heatmap', {
     node: stockNode,
     delayFor: boardDelay,
     onData: (body) => {
       live = new Map(body.quotes.filter((q) => q.price !== null && q.price !== undefined).map((q) => [q.symbol, q]));
-      // The page opens on what is trading now unless the reader has picked:
-      // LIVE in the session, EXT HRS in pre-market and after hours.
-      const phase = marketPhase(Date.now());
-      const wanted = body.session?.open ? LIVE : phase === 'pre' || phase === 'post' ? EXT : null;
-      if (!picked && wanted && stockPeriod !== wanted) {
-        [...stockSwitch.children].find((b) => b.textContent === wanted)?.click();
-        picked = false;              // the page chose, not the reader
-      } else if (stockPeriod === LIVE || stockPeriod === EXT) {
-        drawStocks(stockPeriod);
+      // The page opens on LIVE whenever something is trading (the session,
+      // pre-market, after hours) unless the reader has picked a window.
+      const wanted = body.session?.open || extendedPhase(marketPhase(Date.now()));
+      if (!picked && wanted && stockPeriod !== LIVE) {
+        [...stockSwitch.children].find((b) => b.textContent === LIVE)?.click();
+        picked = false;              // the page chose LIVE, not the reader
+      } else if (stockPeriod === LIVE) {
+        drawStocks(LIVE);
       }
     },
-    onTick: (state) => {
-      if (stockPeriod === LIVE) liveNote.textContent = liveCaption(state);
-      else if (stockPeriod === EXT) liveNote.textContent = extendedCaption(state, marketPhase(Date.now()));
-    },
+    onTick: (state) => { if (stockPeriod === LIVE) liveNote.textContent = captionNow(state); },
   });
   stockCard.querySelector('.card-head').append(feed.controls);
 
