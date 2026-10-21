@@ -230,11 +230,11 @@ def _same_quarter(reported: dict | None, consensus: float | None) -> bool:
 
 
 # A parsed guide is shown only when its range is at most this wide (against its
-# mid) and its mid this close to the street's number for the same period. The
+# mid) and its mid within 10% of the street's number for the same period. The
 # release parser reads tables loosely: GE's $9.1B operating profit once came out
 # as an EPS guide of 9.10-9.40 against a street at 7.92.
 GUIDE_MAX_WIDTH = 0.2
-GUIDE_MAX_GAP = 0.2
+GUIDE_MAX_GAP = 0.1
 
 
 def _plausible_guide(guide: dict | None, before: dict | None) -> dict | None:

@@ -62,3 +62,6 @@ def test_a_guide_is_shown_only_when_it_is_plausible_against_the_street():
     # A range from two unrelated numbers.
     assert events._plausible_guide({"eps_low": 0.06, "eps_high": 11.1, "eps_horizon": "year"}, before) is None
     assert events._plausible_guide(good, None) is None
+    # 16.7% above the street at the mid: GE's operating profit again, against a later consensus.
+    later = {**before, "0y": {**before["0y"], "eps": 7.93}}
+    assert events._plausible_guide({"eps_low": 9.1, "eps_high": 9.4, "eps_horizon": "year"}, later) is None
