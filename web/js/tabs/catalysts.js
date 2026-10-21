@@ -664,8 +664,8 @@ export function splitRows(rows, shown = 2) {
 }
 
 // Reports heavy enough to move an index (or on the watchlist): the next
-// week's cards, and the ones the last session traded on. Only the first two
-// upcoming reporters show; the rest fold, so a long week does not bury the page.
+// week's cards, and the ones the recent sessions traded on. Only the next
+// session's reporters show in full; the rest fold, so a long week does not bury the page.
 // The earnings cards come from a separate file (events.json). When its date
 // differs from the calendar's (a partial rebuild, or a browser holding one
 // file from an older build), the cards still show, labelled with their own
@@ -676,6 +676,39 @@ export function leadDateNote(eventsAsOf, calendarAsOf) {
     + (eventsAsOf < calendarAsOf ? 'They are older: reload, or wait for the next build.' : 'The calendar is the older file: reload.');
 }
 
+// The reports the last sessions traded on: the one traded in the build's own
+// session is open; the rest fold under the last N sessions.
+export function splitReported(rows, sessions = 10) {
+  const list = rows || [];
+  return {
+    just: list.filter((p) => p.outcome?.sessions_since === 0),
+    earlier: list.filter((p) => p.outcome?.sessions_since !== 0),
+    sessions,
+  };
+}
+
+// What an upcoming report weighs on the indices: the largest points move it
+// implies among them, and the largest weight.
+function indexImpact(p) {
+  const rows = Object.values(p.card?.impact?.indices || {});
+  return {
+    points: Math.max(0, ...rows.map((x) => x.points_pct || 0)),
+    weight: Math.max(0, ...rows.map((x) => x.weight || 0)),
+  };
+}
+
+// The reports that trade on the earliest reaction session are the next
+// session's: they open, heaviest index impact first. The rest keep their order.
+export function splitUpcoming(upcoming) {
+  const rows = upcoming || [];
+  const days = rows.map((p) => p.card?.reaction_session).filter(Boolean);
+  if (!days.length) return { next: [], rest: rows };
+  const day = days.reduce((a, b) => (b < a ? b : a));
+  const next = rows.filter((p) => p.card?.reaction_session === day)
+    .sort((a, b) => indexImpact(b).points - indexImpact(a).points || indexImpact(b).weight - indexImpact(a).weight);
+  return { next, rest: rows.filter((p) => p.card?.reaction_session !== day) };
+}
+
 async function eventLead(events, calendarAsOf) {
   if (!events || (!events.upcoming?.length && !events.reported?.length)) return null;
   const t = events.thresholds || {};
@@ -683,19 +716,30 @@ async function eventLead(events, calendarAsOf) {
   const note = leadDateNote(events.as_of, calendarAsOf);
   if (note) nodes.push(el('div', { class: 'notice', text: note }));
   if (events.reported?.length) {
-    nodes.push(el('div', { class: 'section-sub', text: `JUST REPORTED · TRADED ${events.as_of}` }));
-    nodes.push(el('div', { class: 'event-lead' }, events.reported.map((p) => outcomeCard(p, { compact: true }))));
+    const { just, earlier, sessions } = splitReported(events.reported, events.reported_sessions ?? 10);
+    if (just.length) {
+      nodes.push(el('div', { class: 'section-sub', text: `JUST REPORTED · TRADED ${events.as_of}` }));
+      nodes.push(el('div', { class: 'event-lead' }, just.map((p) => outcomeCard(p, { compact: true }))));
+    }
+    if (earlier.length) {
+      nodes.push(el('details', { class: 'event-more' }, [
+        el('summary', { text: `EARLIER · LAST ${sessions} SESSIONS` }),
+        el('div', { class: 'event-lead' }, earlier.map((p) => outcomeCard(p, { compact: true }))),
+      ]));
+    }
   }
   if (events.upcoming?.length) {
-    const prices = await Promise.all(events.upcoming.map((p) => loadPrices(p.symbol)));
-    nodes.push(el('div', { class: 'section-sub', text: `${events.upcoming.length} REPORTING · NEXT ${events.lead_days} DAYS` }));
-    const cards = events.upcoming.map((p, i) => eventCard(p, events.as_of, { compact: true, prices: prices[i] }));
-    const { shown, folded } = splitRows(cards, 2);
-    nodes.push(el('div', { class: 'event-lead' }, shown));
-    if (folded.length) {
+    const { next, rest } = splitUpcoming(events.upcoming);
+    const ordered = [...next, ...rest];
+    const prices = await Promise.all(ordered.map((p) => loadPrices(p.symbol)));
+    const cards = ordered.map((p, i) => eventCard(p, events.as_of, { compact: true, prices: prices[i] }));
+    const k = next.length;
+    nodes.push(el('div', { class: 'section-sub', text: `${k ? `${k} TRADE NEXT SESSION · ` : ''}${events.upcoming.length} REPORTING · NEXT ${events.lead_days} DAYS` }));
+    if (k) nodes.push(el('div', { class: 'event-lead' }, cards.slice(0, k)));
+    if (rest.length) {
       nodes.push(el('details', { class: 'event-more' }, [
-        el('summary', { text: `${folded.length} more reporting` }),
-        el('div', { class: 'event-lead' }, folded),
+        el('summary', { text: `${rest.length} more reporting` }),
+        el('div', { class: 'event-lead' }, cards.slice(k)),
       ]));
     }
   }

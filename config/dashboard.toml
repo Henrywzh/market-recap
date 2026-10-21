@@ -390,6 +390,8 @@ card_horizon_days = 30
 lead_days = 7
 lead_min_spx_weight = 0.25
 lead_min_ndx_weight = 0.5
+# Reports stay on the page as REPORT CARDS for this many sessions after the one they traded on.
+reported_sessions = 10
 # Read-through: the candidates are the names whose daily excess returns were
 # most correlated over the lookback; each is scored on the company's own
 # reaction sessions, and needs readthrough_min_reports of them.

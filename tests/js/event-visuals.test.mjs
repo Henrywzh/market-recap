@@ -142,3 +142,38 @@ test('surpriseRows runs oldest to newest, counts beats and rises, skips reports 
   assert.deepEqual(r.rows.map((x) => x.date), ['2026-01-13', '2026-04-14', '2026-07-14']);
   assert.equal(V.surpriseRows(null).n, 0);
 });
+
+test('the report scale takes the actual in when it lands outside the analysts range', () => {
+  const inside = V.scorecardScale(1.91, 2.10, 2.02, 2.00);
+  assert.equal(inside.range, true);
+  assert.equal(inside.actualOutside, false);
+  const above = V.scorecardScale(1.91, 2.10, 2.02, 2.25);
+  assert.equal(above.actualOutside, true);
+  assert.ok(above.actualAt > above.boxLeft + above.boxWidth, 'the marker sits right of the box');
+  assert.ok(above.actualAt <= 100 && above.consensusAt < above.actualAt);
+  const below = V.scorecardScale(1.91, 2.10, 2.02, 1.5);
+  assert.ok(below.actualAt < below.boxLeft && below.actualAt >= 0);
+});
+
+test('a report scale without a range still places the consensus and the actual; nothing gives none', () => {
+  const bare = V.scorecardScale(null, null, 12.9e9, 13.28e9);
+  assert.equal(bare.range, false);
+  assert.equal(bare.boxWidth, 0);
+  assert.ok(bare.consensusAt < bare.actualAt);
+  assert.equal(bare.actualOutside, false);
+  assert.equal(V.scorecardScale(2.10, 1.91, 2.02, 2.0).range, false, 'a range that runs backwards is no range');
+  assert.equal(V.scorecardScale(null, null, null, null), null);
+});
+
+test('the move band is the implied ± around zero, the move on the same scale, flagged outside it', () => {
+  const inside = V.moveBandGeometry(5, -4);
+  assert.equal(inside.half, 5);
+  assert.equal(inside.outside, false);
+  assert.ok(inside.bandLeft < 50 && inside.bandLeft + inside.bandWidth > 50, 'the band straddles zero');
+  assert.ok(inside.moveAt < 50 && inside.moveAt > inside.bandLeft, 'a -4 move is left of zero, inside the band');
+  const outside = V.moveBandGeometry(5, 8);
+  assert.equal(outside.outside, true);
+  assert.ok(outside.moveAt <= 100 && outside.moveAt > outside.bandLeft + outside.bandWidth);
+  assert.equal(V.moveBandGeometry(null, 3), null);
+  assert.equal(V.moveBandGeometry(5, null), null);
+});

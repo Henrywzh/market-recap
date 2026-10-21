@@ -933,6 +933,11 @@ tr.picked td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 .ec-rbar-box { position: absolute; top: 2px; bottom: 2px; background: color-mix(in srgb, var(--blue) 26%, transparent); border-left: 2px solid var(--blue); border-right: 2px solid var(--blue); }
 .ec-rbar-point { position: absolute; top: 1px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--accent); }
 .ec-rbar-point.outside { outline: 1px solid var(--down); outline-offset: 1px; }
+.ec-rbar-actual { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px; border-radius: 1px; background: var(--text); }
+.ec-rbar-actual.up { background: var(--up); }
+.ec-rbar-actual.down { background: var(--down); }
+.ec-rbar-actual.outside { outline: 1px solid var(--text-dim); outline-offset: 1px; }
+.event-report-line { font-size: 12px; margin: -2px 0 8px; }
 .ec-rbar-ref { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--text-dim); }
 .ec-rbar-labels { display: flex; justify-content: space-between; gap: 6px; font-size: 10px; color: var(--text-dim); margin-top: 2px; }
 .ec-rbar-mid { color: var(--text-faint); }

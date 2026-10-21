@@ -138,6 +138,84 @@ def fetch_trends(symbols: list[str], *, use_cache: bool = True) -> tuple[dict[st
     return found, failed
 
 
+REPORTED_NAMESPACE = "estimates_reported"
+
+
+def _fetch_reported_one(symbol: str) -> str:
+    import yfinance as yf
+
+    payload = yf.Ticker(symbol)._quote._fetch(["earnings"])
+    if not payload:
+        raise RuntimeError("empty quoteSummary answer")
+    return json.dumps(payload)
+
+
+def parse_reported(payload: Any) -> dict | None:
+    """The latest reported quarter: Yahoo's actual and estimate for it, and its revenue.
+
+    ``None`` when there is no quarterly history, or while the last row is still
+    the quarter to be reported (Yahoo rolls its rows over only after the release).
+    """
+    try:
+        result = payload["quoteSummary"]["result"]
+        earnings = result[0]["earnings"] if result else None
+    except (KeyError, IndexError, TypeError):
+        return None
+    if not isinstance(earnings, dict):
+        return None
+    chart = earnings.get("earningsChart") or {}
+    rows = [r for r in (chart.get("quarterly") or []) if isinstance(r, dict)]
+    if not rows:
+        return None
+    last = rows[-1]
+    label = last.get("date") if isinstance(last.get("date"), str) else None
+    if label is None:
+        return None
+    quarter, year = chart.get("currentQuarterEstimateDate"), _raw(chart.get("currentQuarterEstimateYear"))
+    next_quarter = f"{quarter}{int(year)}" if isinstance(quarter, str) and year else None
+    if label == next_quarter:
+        return None
+    revenue = None
+    for row in (earnings.get("financialsChart") or {}).get("quarterly") or []:
+        if isinstance(row, dict) and row.get("date") == label:
+            revenue = _raw(row.get("revenue"))
+    return {"quarter": label, "eps": _raw(last.get("actual")), "eps_estimate": _raw(last.get("estimate")),
+            "revenue": revenue, "next_quarter": next_quarter}
+
+
+def fetch_reported(symbols: list[str], *, use_cache: bool = True) -> tuple[dict[str, dict], dict[str, str]]:
+    """The latest reported quarter per symbol, and the reason for every symbol without one."""
+    found: dict[str, dict] = {}
+    failed: dict[str, str] = {}
+    lock = threading.Lock()
+    streak = {"n": 0}
+
+    def one(symbol: str) -> None:
+        with lock:
+            if streak["n"] >= GIVE_UP_AFTER:
+                failed[symbol] = "not asked: Yahoo refused the preceding requests"
+                return
+        try:
+            text = cache.fetch_text(REPORTED_NAMESPACE, symbol.replace("/", "_"), lambda: _fetch_reported_one(symbol),
+                                    kind="daily_file", suffix=".json", use_cache=use_cache)
+            parsed = parse_reported(json.loads(text))
+        except Exception as exc:  # noqa: BLE001 - one name must not fail the rest
+            with lock:
+                streak["n"] += 1
+                failed[symbol] = str(exc)[:ERROR_DETAIL_CHARS] or type(exc).__name__
+            return
+        with lock:
+            streak["n"] = 0
+            if parsed is None:
+                failed[symbol] = "Yahoo has no reported quarter for this name yet"
+            else:
+                found[symbol] = parsed
+
+    with ThreadPoolExecutor(WORKERS) as pool:
+        list(pool.map(one, symbols))
+    return found, failed
+
+
 def _fetch_price_module(symbol: str) -> str:
     import yfinance as yf
 

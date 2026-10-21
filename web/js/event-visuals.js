@@ -4,7 +4,7 @@
 // builders only place what those return. Nothing here is scored or
 // forecast: it draws numbers the EVENTS panel already baked.
 
-import { el, num, DASH } from './fmt.js';
+import { el, num, dirClass, DASH } from './fmt.js';
 import { spark } from './spark.js';
 
 const clamp = (v) => Math.max(0, Math.min(100, v));
@@ -170,6 +170,47 @@ export function priceGeometry(dates, close, marks = [], sessions = 252) {
   };
 }
 
+// The report card's EPS and revenue scale: the analysts' low-to-high box, the
+// consensus and the actual on one axis. The axis takes in the actual when it
+// lands outside the range, so the marker is always on the drawing. A figure
+// that is missing leaves its mark out.
+export function scorecardScale(low, high, consensus, actual) {
+  const range = finite(low) && finite(high) && high >= low;
+  const members = [...(range ? [low, high] : []), ...(finite(consensus) ? [consensus] : []), ...(finite(actual) ? [actual] : [])];
+  if (!members.length) return null;
+  // Without the analysts' range, the consensus sits in the middle of a scale twice
+  // the surprise wide (at least ±1%), so a small miss reads as small.
+  if (!range && finite(consensus) && finite(actual)) {
+    const half = Math.max(Math.abs(actual - consensus) * 2, Math.abs(consensus) * 0.01) || 1;
+    members.push(consensus - half, consensus + half);
+  }
+  const min = Math.min(...members);
+  const max = Math.max(...members);
+  const pad = (max - min || Math.abs(max) || 1) * 0.06;
+  const lo = min - pad;
+  const span = max + pad - lo;
+  const at = (v) => clamp(((v - lo) / span) * 100);
+  return {
+    range,
+    boxLeft: range ? at(low) : 0,
+    boxWidth: range ? at(high) - at(low) : 0,
+    consensusAt: finite(consensus) ? at(consensus) : null,
+    actualAt: finite(actual) ? at(actual) : null,
+    actualOutside: range && finite(actual) && (actual < low || actual > high),
+  };
+}
+
+// The move the report brought against the straddle priced for it: a band of
+// ±implied around zero, the actual move on the same scale. Null without an
+// implied move or a move.
+export function moveBandGeometry(implied, move) {
+  if (!finite(move) || !finite(implied)) return null;
+  const half = Math.abs(implied);
+  const scale = Math.max(half, Math.abs(move)) * 1.1 || 1;
+  const at = (v) => clamp(50 + (v / scale) * 50);
+  return { half, bandLeft: at(-half), bandWidth: at(half) - at(-half), moveAt: at(move), outside: Math.abs(move) > half };
+}
+
 // --- nodes ---
 
 function labelled(left, middle, right) {
@@ -269,6 +310,32 @@ export function surpriseNode(rows) {
 
 export function figure(value, digits = 2) {
   return finite(value) ? num(value, digits) : DASH;
+}
+
+// The consensus tick and the actual on the analysts' box (`scale` from
+// scorecardScale). The actual takes the tone of its position: green above,
+// red below.
+export function scorecardNode(scale, { low, high, consensus, actual, fmt, tone = '' }) {
+  if (!scale) return null;
+  const track = el('div', { class: 'ec-rbar' }, [
+    scale.range ? el('div', { class: 'ec-rbar-box', style: `left:${scale.boxLeft}%;width:${scale.boxWidth}%` }) : null,
+    scale.consensusAt !== null ? el('div', { class: 'ec-rbar-point', style: `left:${scale.consensusAt}%`, title: `consensus ${fmt(consensus)}` }) : null,
+    scale.actualAt !== null ? el('div', { class: `ec-rbar-actual ${tone}${scale.actualOutside ? ' outside' : ''}`, style: `left:${scale.actualAt}%`, title: `actual ${fmt(actual)}` }) : null,
+  ]);
+  return el('div', { class: 'ec-rbar-wrap' }, [track,
+    labelled(scale.range ? fmt(low) : DASH, finite(consensus) ? `┆ consensus ${fmt(consensus)}` : '', scale.range ? fmt(high) : DASH)]);
+}
+
+// The implied band around zero with the actual move marked on it.
+export function moveBandNode(implied, move) {
+  const g = moveBandGeometry(implied, move);
+  if (!g) return null;
+  const track = el('div', { class: 'ec-rbar' }, [
+    el('div', { class: 'ec-rbar-box', style: `left:${g.bandLeft}%;width:${g.bandWidth}%` }),
+    el('div', { class: 'ec-rbar-ref', style: 'left:50%', title: 'no move' }),
+    el('div', { class: `ec-rbar-actual ${dirClass(move)}${g.outside ? ' outside' : ''}`, style: `left:${g.moveAt}%`, title: `move ${num(move, 1)}%` }),
+  ]);
+  return el('div', { class: 'ec-rbar-wrap' }, [track, labelled(`-${num(g.half, 1)}%`, '0', `+${num(g.half, 1)}%`)]);
 }
 
 const SVG = 'http://www.w3.org/2000/svg';

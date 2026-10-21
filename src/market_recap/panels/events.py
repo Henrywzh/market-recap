@@ -12,7 +12,9 @@ Two outputs:
 
 - ``events.json``: the cards the CATALYSTS page leads with -- reports in the
   next few days from names heavy enough to move an index (or on the
-  watchlist), and the reports the last session traded on, with the outcome;
+  watchlist), and the reports traded in the last ``reported_sessions`` sessions,
+  each with its report card (expected against reported, the guide, the
+  estimates since, the drift);
   plus the high-importance macro dates every timeline shares.
 - ``events/{ticker}.json``: per name, its card (when a report is on the
   calendar), its read-through in both directions, and its timeline events.
@@ -206,6 +208,77 @@ def _outcome(symbol: str, event: dict, entry: dict, history: pd.DataFrame, exces
         "implied": implied,
         "vs_implied": round(abs(reaction["move_pct"]) / implied["straddle_pct"], 2) if implied and implied["straddle_pct"] else None,
         "peers": peers,
+    }
+
+
+def _before(recorded: dict[str, dict[str, dict]], symbol: str, report: str) -> tuple[str | None, dict | None]:
+    """The last recorded consensus strictly before the report day: what was expected."""
+    for day in sorted(recorded, reverse=True):
+        if day < report and symbol in recorded[day]:
+            return day, recorded[day][symbol]
+    return None, None
+
+
+def _same_quarter(reported: dict | None, consensus: float | None) -> bool:
+    """Yahoo's last reported row is this report's quarter: its estimate is the
+    consensus the report was measured against. Before Yahoo rolls over, its last
+    row is the quarter before, with that quarter's estimate."""
+    estimate = (reported or {}).get("eps_estimate")
+    if estimate is None or not consensus:
+        return False
+    return abs(estimate / consensus - 1) <= 0.03 or abs(estimate - consensus) <= 0.015
+
+
+# A parsed guide is shown only when its range is at most this wide (against its
+# mid) and its mid this close to the street's number for the same period. The
+# release parser reads tables loosely: GE's $9.1B operating profit once came out
+# as an EPS guide of 9.10-9.40 against a street at 7.92.
+GUIDE_MAX_WIDTH = 0.2
+GUIDE_MAX_GAP = 0.2
+
+
+def _plausible_guide(guide: dict | None, before: dict | None) -> dict | None:
+    """The guide with only the figures that pass the checks above, each set
+    against the street; None when none passes (or no consensus to check with)."""
+    compared = E.guide_vs_consensus(guide, before) or {}
+    kept = {}
+    for key, entry in compared.items():
+        low, high, street = entry["low"], entry["high"], entry["consensus"]
+        mid = (low + high) / 2
+        if mid <= 0 or street <= 0 or (high - low) / mid > GUIDE_MAX_WIDTH or abs(mid / street - 1) > GUIDE_MAX_GAP:
+            continue
+        kept[key] = entry
+    if not kept:
+        return None
+    dropped = {f"{k}_{part}" for k in ("eps", "revenue") if k not in kept for part in ("low", "high", "horizon")}
+    return {**{k: v for k, v in guide.items() if k not in dropped}, "vs_consensus": kept}
+
+
+def _report_card(event: dict, history_rows: list[dict], before_day: str | None, before: dict | None,
+                 now: dict | None, reported: dict | None, sessions_since: int) -> dict:
+    """What a report was expected to show against what it showed: EPS and revenue
+    against the consensus recorded before it, the guide it gave against the
+    street, the estimates since, and the drift after the first session."""
+    row = (before or {}).get("0q") or {}
+    consensus = event.get("eps_forecast") if event.get("eps_forecast") is not None else row.get("eps")
+    yahoo = reported if _same_quarter(reported, consensus) else None
+    eps, source = event.get("eps"), "nasdaq"
+    if eps is None and yahoo and yahoo.get("eps") is not None:
+        eps, source = yahoo["eps"], "yahoo"
+    history = next((r for r in history_rows if r["date"] == event["date"]), {})
+    guide = _plausible_guide(history.get("guide"), before)
+    return {
+        "sessions_since": sessions_since,
+        "scorecard": {
+            "quarter": yahoo.get("quarter") if yahoo else None,
+            "consensus_day": before_day,
+            "eps": E.score_line(eps, consensus, row.get("low"), row.get("high"), source, kind="eps"),
+            "revenue": E.score_line(yahoo.get("revenue") if yahoo else None, row.get("revenue"), None, None, "yahoo",
+                                    kind="revenue"),
+        },
+        "guide": guide,
+        "revisions": E.revisions_since(before, now),
+        "drift": {"5d": history.get("drift_5d"), "20d": history.get("drift_20d")},
     }
 
 
@@ -743,6 +816,23 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     kept_events = _kept_events(settings.get("company_events") or [], ctx.as_of)
 
     lap("finnhub_events")
+    # Report cards: heavy or watched names whose last report traded within the
+    # last reported_sessions sessions, with Yahoo's reported EPS and revenue
+    # (Nasdaq posts a day or more late) and the consensus recorded before.
+    sessions = ctx.closes.index[ctx.closes.index <= pd.Timestamp(as_of)]
+    keep = int(settings.get("reported_sessions", 10))
+    first_kept = sessions[-keep].date().isoformat() if len(sessions) >= keep else ""
+    recently = {s: rs[0] for s, rs in reactions.items()
+                if rs and (rs[0].get("session") or "") >= first_kept and s in meta
+                and (_heavy({"weights": meta[s].get("weights") or {}}, settings) or meta[s].get("watchlist"))}
+    reported, reported_missing = estimates.fetch_reported(sorted(recently)) if recently else ({}, {})
+    ctx.log.add(SourceRecord("yahoo_estimates_reported", "Reported EPS and revenue for recent reports (Yahoo earnings)",
+                             estimates.URL.format(symbol="{symbol}").replace("earningsTrend", "earnings"), ctx.as_of,
+                             rows=len(reported), status="ok" if not reported_missing else "partial",
+                             error=f"{len(reported_missing)} of {len(recently)} without a reported quarter" if reported_missing else None))
+    oldest = min((r["date"] for r in recently.values()), default=ctx.as_of)
+    recorded = snapshot_store.consensus_history(date.fromisoformat(oldest) - timedelta(days=7), as_of)
+    lap("report_cards")
     snapshot = snapshot_store.latest_options_summary(as_of)
     history = snapshot_store.options_summaries(as_of - timedelta(days=400), as_of) if snapshot else pd.DataFrame()
 
@@ -803,10 +893,19 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
             before = [r for r in payload["history"] if r["date"] < payload["card"]["date"]]
             last_guide = before[0].get("guide") if before else None
             payload["card"]["vs_guide"] = E.against_guide(last_guide, payload["card"]["consensus"])
-        if symbol in recent_symbols:
-            event = next(e for e in recent_events if e["symbol"] == symbol)
+        latest = recently.get(symbol)
+        event = next((e for e in recent_events if e["symbol"] == symbol), None)
+        if latest and not (event and event["date"] == latest["date"]):
+            cal = calendar.get(latest["date"]) or {}
+            event = {"symbol": symbol, "date": latest["date"], "timing": latest.get("timing"),
+                     "eps": cal.get("eps"), "eps_forecast": cal.get("eps_forecast"), "surprise_pct": cal.get("surprise_pct")}
+        if event:
             outcome = _outcome(symbol, event, entry, history, excess, readthrough)
             if outcome:
+                before_day, before = _before(recorded, symbol, event["date"])
+                since = int((sessions > pd.Timestamp(outcome["session"])).sum())
+                outcome |= _report_card(event, payload["history"], before_day, before, trends.get(symbol),
+                                        reported.get(symbol), since)
                 payload["outcome"] = outcome
         write_json(EVENTS_ARTIFACT_DIR / f"{symbol}.json", payload)
         written.append(symbol)
@@ -819,7 +918,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
 
     cards.sort(key=lambda c: (c["card"]["date"], {"bmo": 0, "intraday": 1, "amc": 2}.get(c["card"]["timing"], 3),
                               -max(c["weights"].values(), default=0)))
-    outcomes.sort(key=lambda c: -max(c["weights"].values(), default=0))
+    outcomes.sort(key=lambda c: (c["outcome"]["sessions_since"], -max(c["weights"].values(), default=0)))
     ctx.log.add(SourceRecord(
         "finnhub_news", "Company news headlines on large-move days (Finnhub)", finnhub.PAGE_URL,
         ctx.as_of if news else None, rows=len(news),
@@ -859,6 +958,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         "thresholds": {"SPX": settings.get("lead_min_spx_weight"), "NDX": settings.get("lead_min_ndx_weight")},
         "upcoming": cards,
         "reported": outcomes,
+        "reported_sessions": keep,
         "macro": _macro(catalysts, ctx.as_of, int(settings.get("timeline_days_ahead", 45))),
         "covered": len(written),
         "carded": len(carded),

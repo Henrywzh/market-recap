@@ -7,7 +7,7 @@ import { el, card, num, pct, tag, table, dirClass, periodSwitch, DASH } from './
 import { render } from './charts.js';
 import { tickerHref } from './routes.js';
 import { availableRanges, sliceRange } from './range.js';
-import { rangeGeometry, rangeBarNode, splitBarNode, trailLevels, trailSummary, trailNode, reactionNode, surpriseRows, surpriseNode, figure, sectorHue, priceGeometry, priceNode } from './event-visuals.js';
+import { rangeGeometry, rangeBarNode, splitBarNode, trailLevels, trailSummary, trailNode, reactionNode, surpriseRows, surpriseNode, figure, sectorHue, priceGeometry, priceNode, scorecardScale, scorecardNode, moveBandNode } from './event-visuals.js';
 
 const TIMING = { bmo: 'BEFORE OPEN', amc: 'AFTER CLOSE', intraday: 'DURING SESSION' };
 // A timeline reads events, not a decade of price: the longer ranges stay on
@@ -289,24 +289,163 @@ export function eventCard(payload, asOf, { compact = false, prices = null } = {}
   return card(title, right, body);
 }
 
-// A report the last session traded on: what it printed, and how it and its
-// peers moved against what was priced.
+// --- The report card: what a report printed, against what was expected ---
+
+const isNum = (v) => v !== null && v !== undefined && Number.isFinite(v);
+const SOURCE = { nasdaq: 'Nasdaq', yahoo: 'Yahoo' };
+const POSITION_WORD = { above_range: 'ABOVE EVERY ESTIMATE', beat: 'BEAT', inline: 'IN LINE', miss: 'MISS', below_range: 'BELOW EVERY ESTIMATE' };
+const GUIDE_WORD = { above: 'above the street', below: 'below the street', inside: 'in line with the street' };
+
+// The words under a scorecard line: where the actual sits against the range
+// and the consensus. DASH when the build could not place it.
+export function positionWord(position) {
+  return POSITION_WORD[position] ?? DASH;
+}
+
+// The colour of a position: green for a beat or above the range, red for a
+// miss or below it, plain for in line.
+export function positionTone(position) {
+  if (position === 'above_range' || position === 'beat') return 'up';
+  if (position === 'below_range' || position === 'miss') return 'down';
+  return '';
+}
+
+// The name a build's source goes by on the card, or null for one it does not know.
+export function sourceLabel(source) {
+  return SOURCE[source] ?? null;
+}
+
+// "reported 2026-10-20 BMO · traded 2026-10-20 · 2 sessions ago".
+export function reportLine(o) {
+  const parts = [`reported ${o.date || DASH}${o.timing ? ` ${o.timing.toUpperCase()}` : ''}`, `traded ${o.session || DASH}`];
+  if (isNum(o.sessions_since) && o.sessions_since > 0) parts.push(`${o.sessions_since} ${o.sessions_since === 1 ? 'session' : 'sessions'} ago`);
+  return parts.join(' · ');
+}
+
+// The guide's range in its own figures and period: "EPS 7.10–7.40 · FY2026".
+export function guideRange(g) {
+  if (!g) return null;
+  const parts = [];
+  if (isNum(g.eps_low) && isNum(g.eps_high)) parts.push(`EPS ${num(g.eps_low)}–${num(g.eps_high)}`);
+  if (isNum(g.revenue_low) && isNum(g.revenue_high)) parts.push(`revenue ${billions(g.revenue_low)}–${billions(g.revenue_high)}`);
+  if (!parts.length) return null;
+  return [parts.join(' · '), g.period].filter(Boolean).join(' · ');
+}
+
+// The guide against the street for the same period: where the guide's middle
+// sits against the consensus, and by how much. Null when the build has no
+// comparison.
+export function guideStreet(g) {
+  const v = g?.vs_consensus;
+  if (!v) return null;
+  const rows = [['EPS', v.eps, (x) => num(x.consensus)], ['revenue', v.revenue, (x) => billions(x.consensus)]]
+    .filter(([, x]) => x && x.position && GUIDE_WORD[x.position]);
+  if (!rows.length) return null;
+  return rows.map(([label, x, fmt]) => {
+    const mid = isNum(x.vs_mid_pct) ? ` (${signed(x.vs_mid_pct)} at mid)` : '';
+    return `${rows.length > 1 ? `${label} ` : ''}street ${fmt(x)} → guide ${GUIDE_WORD[x.position]}${mid}`;
+  }).join(' · ');
+}
+
+// One consensus revision: "Next quarter 2.30 → 2.41 (+4.8%)".
+export function revisionText(r) {
+  const change = isNum(r.change_pct) ? ` (${signed(r.change_pct)})` : '';
+  return `${r.label ?? r.period ?? DASH} ${num(r.before)} → ${num(r.now)}${change}`;
+}
+
+// The excess return N sessions after the reaction, or DASH while it is not yet there.
+export function driftText(value, sessions) {
+  return isNum(value) ? `${pct(value, 1)} vs S&P ${sessions} sessions later` : DASH;
+}
+
+// What "before" means on this card: the consensus snapshot the build used.
+export function reportFieldNote(consensusDay) {
+  const before = consensusDay
+    ? `the consensus recorded on ${consensusDay} (Yahoo, Nasdaq for the EPS point)`
+    : 'the consensus recorded before the report (Yahoo, Nasdaq for the EPS point)';
+  return `Before = ${before}. Range = the analysts' low and high. Move vs priced: the straddle before the report; it spans more than the report day.`;
+}
+
+// The EPS line of the card: the scorecard's, or the build's own EPS fields when
+// it wrote no scorecard (the position is then worked out from the cents).
+function epsLine(o) {
+  if (o.scorecard?.eps) return o.scorecard.eps;
+  const actual = o.eps ?? null;
+  const consensus = o.eps_forecast ?? null;
+  let position = null;
+  if (isNum(actual) && isNum(consensus)) {
+    const a = Math.round(actual * 100);
+    const c = Math.round(consensus * 100);
+    position = a === c ? 'inline' : a > c ? 'beat' : 'miss';
+  }
+  return { actual, consensus, low: null, high: null, surprise_pct: o.surprise_pct ?? null, position, source: null };
+}
+
+// A report figure as a visual: the actual large, the consensus and the surprise
+// beside it, the range with both marked, and the position under it.
+function scoreVisual(label, line, fmt, missing) {
+  if (!line) return visual(label, DASH, missing, null);
+  const surprise = line.surprise_pct;
+  const vs = isNum(line.consensus) ? `vs ${fmt(line.consensus)} consensus${isNum(surprise) ? ` · ${pct(surprise, 1)}` : ''}` : 'no consensus on file';
+  const source = sourceLabel(line.source);
+  const drawing = scorecardNode(scorecardScale(line.low, line.high, line.consensus, line.actual),
+    { low: line.low, high: line.high, consensus: line.consensus, actual: line.actual, fmt, tone: positionTone(line.position) });
+  return visual(label, fmt(line.actual), `${positionWord(line.position)}${source ? ` · ${source}` : ''}`, drawing, {
+    cls: dirClass(surprise),
+    tail: el('span', { class: `ec-vis-yoy ${dirClass(surprise)}`, text: vs }),
+  });
+}
+
+// A block of the strip with no drawing: a label and its lines.
+function block(label, lines) {
+  return el('div', { class: 'stat ec-vis' }, [el('div', { class: 'stat-label', text: label }), ...lines]);
+}
+
+// The name as the card's title: its symbol and, when the build has it, its name.
+function titleOf(payload) {
+  return payload.name ? `${payload.symbol} · ${payload.name.toUpperCase()}` : payload.symbol;
+}
+
+// A report the last session traded on, as a report card: what it printed
+// against the consensus before it, the guide it gave against the street, how
+// the estimates moved since, and how the stock took it against the priced
+// move. TICKER draws it in full; CATALYSTS' lead strip draws it compact.
 export function outcomeCard(payload, { compact = false } = {}) {
   const o = payload.outcome;
   if (!o) return null;
+  const sc = o.scorecard || {};
   const surprise = o.surprise_pct;
   const ratio = o.vs_implied;
   const right = el('span', { class: 'tag-row' }, [
     surprise === null || surprise === undefined ? null : tag(`EPS ${surprise >= 0 ? 'BEAT' : 'MISS'} ${pct(surprise, 1)}`, surprise >= 0 ? 'up' : 'down'),
     ratio ? tag(ratio > 1 ? `MOVED ${num(ratio, 1)}× IMPLIED` : `INSIDE IMPLIED (${num(ratio, 1)}×)`, ratio > 1 ? 'warn' : 'dim') : null,
-    el('span', { class: 'dim', text: `reported ${o.date} ${(o.timing || '').toUpperCase()} · traded ${o.session}` }),
   ]);
-  const stats = el('div', { class: 'stat-strip event-stats' }, [
-    stat('EPS', o.eps === null || o.eps === undefined ? DASH : num(o.eps), o.eps_forecast !== null && o.eps_forecast !== undefined ? `vs ${num(o.eps_forecast)} consensus` : null,
-      dirClass(surprise)),
-    stat('REACTION', pct(o.move_pct, 1), o.excess_pct !== null && o.excess_pct !== undefined ? `${pct(o.excess_pct, 1)} vs S&P 500` : null, dirClass(o.move_pct)),
-    stat('IMPLIED BEFORE', o.implied ? `±${num(o.implied.straddle_pct, 1)}%` : DASH, o.implied ? `${o.implied.snapshot_day} snapshot` : 'no snapshot the day before'),
+  const implied = o.implied;
+  const typical = payload.card?.priced?.mean_abs;
+  const moveNote = [isNum(o.excess_pct) ? `${pct(o.excess_pct, 1)} vs S&P 500` : null,
+    !implied && isNum(typical) ? `typical ±${num(typical, 1)}%` : null].filter(Boolean).join(' · ');
+  const move = visual('MOVE VS PRICED', pct(o.move_pct, 1), moveNote || null,
+    (implied && moveBandNode(implied.straddle_pct, o.move_pct)) || el('div', { class: 'dim ec-vis-note', text: DASH }),
+    { cls: dirClass(o.move_pct) });
+  const guide = o.guide
+    ? block('GUIDE GIVEN', [el('div', { class: 'stat-value ec-vis-small', text: guideRange(o.guide) || DASH }),
+      el('div', { class: 'stat-note', text: guideStreet(o.guide) || 'no street figure for that period' })])
+    : block('GUIDE GIVEN', [el('div', { class: 'stat-note', text: 'no guide found in the release' })]);
+  const revisions = o.revisions || [];
+  const estimates = block('ESTIMATES SINCE', revisions.length
+    ? revisions.map((r) => el('div', { class: `stat-note ${dirClass(r.change_pct)}`, text: revisionText(r) }))
+    : [el('div', { class: 'stat-note', text: sc.consensus_day ? 'no change yet' : 'no recorded consensus before the report' })]);
+  const drift = o.drift || {};
+  const after = block('AFTER', [
+    el('div', { class: `stat-value ec-vis-small ${dirClass(drift['5d'])}`, text: driftText(drift['5d'], 5) }),
+    el('div', { class: `stat-value ec-vis-small ${dirClass(drift['20d'])}`, text: driftText(drift['20d'], 20) }),
   ]);
+  const strip = el('div', { class: 'stat-strip event-stats visual' }, [
+    scoreVisual('EPS', epsLine(o), (v) => figure(v), 'no EPS figure yet'),
+    scoreVisual('REVENUE', sc.revenue ?? null, billions, 'no revenue figure yet'),
+    move, guide, estimates, after,
+  ]);
+  const line = el('div', { class: 'dim event-report-line', text: reportLine(o) });
   const peerRows = (o.peers || []).map((r) => el('tr', {}, [
     el('td', {}, [link(r.symbol)]),
     el('td', { class: 'dim', text: num(r.beta, 2) }),
@@ -316,11 +455,13 @@ export function outcomeCard(payload, { compact = false } = {}) {
   const peers = peerRows.length ? table(['PEER', 'BETA', 'HISTORY SAYS', 'ACTUAL (VS S&P)'], peerRows) : null;
   if (compact) {
     return el('div', { class: 'card event-card compact' }, [
-      el('div', { class: 'card-head' }, [el('a', { class: 'card-title', href: tickerHref(payload.symbol), text: `${payload.symbol} · ${(payload.name || '').toUpperCase()}` }), right]),
-      stats, peers,
+      el('div', { class: 'card-head' }, [el('a', { class: 'card-title', href: tickerHref(payload.symbol), text: titleOf(payload) }), right]),
+      line, strip, peers,
     ]);
   }
-  return card('LAST REPORT · OUTCOME', right, [stats, peers ? el('div', { class: 'card-title', text: 'READ-THROUGH ON THE SESSION' }) : null, peers]);
+  return card(titleOf(payload), right, [line, strip,
+    peers ? el('div', { class: 'card-title', text: 'READ-THROUGH ON THE SESSION' }) : null, peers,
+    el('div', { class: 'field-note', text: reportFieldNote(sc.consensus_day) })]);
 }
 
 // --- Report history, revisions, the industry since the last report, filings ---

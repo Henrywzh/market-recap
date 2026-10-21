@@ -161,7 +161,7 @@ next year's EPS, the next report with its implied move, and MONITOR's state,
 with short neutral tags where a pattern is plain. Under it, four sub-tabs, each
 built when first opened and kept in the hash (`#ticker/NVDA/VALUATION`; REPORTS
 is the default and left out, and the old RECENT and REPORT links open it). REPORTS: what's new --
-a report the last session traded on, the evidence for and against (MONITOR's,
+the REPORT CARD of a report traded in the last ten sessions (`reported_sessions`): EPS and revenue against the consensus and the analysts' low–high range recorded before it (Yahoo's reported figures when Nasdaq has not posted), the guide the release gave against the street's number for that period, the estimates since, the move against the straddle and the drift after it; the evidence for and against (MONITOR's,
 plus insider buying from Form 4, short interest and rating changes for focus
 names), recent 8-Ks and the industry data since the last report -- then the next
 report: the event card, a timeline of its own events and what is ahead

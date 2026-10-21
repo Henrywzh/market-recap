@@ -338,6 +338,44 @@ def against_guide(guide: dict | None, consensus: dict) -> dict | None:
     return out or None
 
 
+# A revenue print within this share of the consensus counts as in line.
+REVENUE_INLINE = 0.0025
+
+
+def position(actual: float | None, consensus: float | None, low: float | None, high: float | None, *,
+             kind: str) -> str | None:
+    """Where a reported figure sits: beyond the analysts' range, or beat, miss
+    or inline against the consensus. EPS is compared at cents, revenue within
+    REVENUE_INLINE. None without an actual or a consensus."""
+    if kind not in ("eps", "revenue"):
+        raise ValueError(f"unknown kind {kind!r}")
+    if actual is None or consensus is None:
+        return None
+    if high is not None and actual > high:
+        return "above_range"
+    if low is not None and actual < low:
+        return "below_range"
+    if kind == "eps":
+        actual, consensus = round(actual, 2), round(consensus, 2)
+        inline = actual == consensus
+    else:
+        inline = abs(actual - consensus) <= REVENUE_INLINE * abs(consensus)
+    if inline:
+        return "inline"
+    return "beat" if actual > consensus else "miss"
+
+
+def score_line(actual: float | None, consensus: float | None, low: float | None, high: float | None, source: str,
+               *, kind: str) -> dict | None:
+    """One line of the report card: the figure, the consensus and range it was
+    set against, the surprise in percent and where it sits. None without an actual."""
+    if actual is None:
+        return None
+    surprise = round((actual / consensus - 1) * 100, 2) if consensus is not None and consensus > 0 else None
+    return {"actual": actual, "consensus": consensus, "low": low, "high": high, "surprise_pct": surprise,
+            "position": position(actual, consensus, low, high, kind=kind), "source": source}
+
+
 REVISION_WINDOWS = (("7d", "eps_7d"), ("30d", "eps_30d"), ("60d", "eps_60d"), ("90d", "eps_90d"))
 REVISION_PERIODS = (("0q", "This quarter"), ("+1q", "Next quarter"), ("0y", "This year"), ("+1y", "Next year"))
 
@@ -359,6 +397,59 @@ def revision_table(trend: dict | None) -> list[dict]:
                      "up_30d": row.get("up_30d"), "down_30d": row.get("down_30d"), "analysts": row.get("analysts"),
                      "spread_pct": None if spread is None else round(spread, 1)})
     return rows
+
+
+def revisions_since(before: dict | None, now: dict | None) -> list[dict]:
+    """Each forward period's consensus before the report against the same fiscal
+    period now. Yahoo rolls the period names after a report, so the match is on
+    the period's end date, not its name. A quarter is matched only to a quarter
+    and a year only to a year: the reported quarter can share its end date with
+    the fiscal year."""
+    if not before or not now:
+        return []
+    labels = dict(REVISION_PERIODS)
+    out = []
+    for period in ("+1q", "0y", "+1y"):
+        row = before.get(period) or {}
+        end, eps = row.get("end"), row.get("eps")
+        if not end or eps is None:
+            continue
+        same_kind = ("0q", "+1q") if period == "+1q" else ("0y", "+1y")
+        match = next((now[k] for k in same_kind if k in now and (now[k] or {}).get("end") == end
+                      and (now[k] or {}).get("eps") is not None), None)
+        if match is None:
+            continue
+        out.append({"period": period, "label": labels[period], "end": end, "before": eps, "now": match["eps"],
+                    "change_pct": round((match["eps"] / eps - 1) * 100, 2) if eps > 0 else None})
+    return out
+
+
+def guide_vs_consensus(guide: dict | None, before: dict | None) -> dict | None:
+    """The guide this release gave against the consensus held for the same period
+    before the report. A quarterly guide is set against next quarter; a full-year
+    one against this year, or next year once the reported quarter closed the year."""
+    if not guide or not before:
+        return None
+    quarter_end = (before.get("0q") or {}).get("end")
+    year_period = "+1y" if quarter_end and quarter_end == (before.get("0y") or {}).get("end") else "0y"
+    out = {}
+    for key in ("eps", "revenue"):
+        horizon = guide.get(f"{key}_horizon")
+        against = "+1q" if horizon == "quarter" else year_period if horizon == "year" else None
+        low, high = guide.get(f"{key}_low"), guide.get(f"{key}_high")
+        if against is None or low is None or high is None:
+            continue
+        row = before.get(against) or {}
+        consensus = row.get("eps") if key == "eps" else row.get("revenue")
+        if consensus is None:
+            continue
+        entry = {"low": low, "high": high, "consensus": consensus, "against": against,
+                 "position": "above" if consensus < low else "below" if consensus > high else "inside"}
+        # A percentage of a negative consensus reads backwards, so it is left out.
+        if consensus > 0:
+            entry["vs_mid_pct"] = round(((low + high) / 2 / consensus - 1) * 100, 1)
+        out[key] = entry
+    return out or None
 
 
 # --- Large moves and what explains them ---------------------------------------

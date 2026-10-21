@@ -122,7 +122,7 @@ def configured_root() -> str:
 
 def consensus_history(since: date, until: date) -> dict[str, dict[str, dict]]:
     """{day: {symbol: trend}} from the recorded consensus files, each trend in
-    estimates.parse_trend's shape (end, eps, low, high per period)."""
+    estimates.parse_trend's shape (end, eps, low, high and revenue per period)."""
     base = root() / "consensus"
     out: dict[str, dict[str, dict]] = {}
     day = since
@@ -140,7 +140,8 @@ def consensus_history(since: date, until: date) -> dict[str, dict[str, dict]]:
                         "end": None if pd.isna(row.end) else str(row.end),
                         "eps": None if pd.isna(row.eps) else float(row.eps),
                         "low": None if pd.isna(row.eps_low) else float(row.eps_low),
-                        "high": None if pd.isna(row.eps_high) else float(row.eps_high)}
+                        "high": None if pd.isna(row.eps_high) else float(row.eps_high),
+                        "revenue": None if pd.isna(getattr(row, "revenue", None)) else float(row.revenue)}
                 out[day.isoformat()] = trends
         day += timedelta(days=1)
     return out
