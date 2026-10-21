@@ -455,3 +455,40 @@ def test_a_filing_with_no_exhibit_is_remembered_as_having_none(monkeypatch, tmp_
     assert releases._exhibit(1, "0000000001-26-000001") is None
     assert releases._exhibit(1, "0000000001-26-000001") is None
     assert len(fetched) == 1
+
+
+def test_a_fred_maintenance_page_is_not_data_and_the_last_good_copy_is_served(tmp_path, monkeypatch):
+    from market_recap import cache, config
+    from market_recap.sources import fred
+
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    good = "observation_date,DGS2\n2026-10-19,3.51\n2026-10-20,3.49\n"
+    page = "<!doctype html>\n<html><title>Site Maintenance | St. Louis Fed</title></html>"
+    monkeypatch.setattr(fred, "get_text", lambda url, timeout: good)
+    first, _ = fred.fetch_series("DGS2", use_cache=False)
+    monkeypatch.setattr(fred, "get_text", lambda url, timeout: page)
+    again, _ = fred.fetch_series("DGS2", use_cache=False)
+    assert again["value"].tolist() == first["value"].tolist() == [3.51, 3.49]
+    # The page was never written over the good copy.
+    cached, _ = fred.fetch_series("DGS2")
+    assert len(cached) == 2
+
+
+def test_a_maintenance_page_already_in_the_cache_is_refetched_and_fails_without_a_good_copy(tmp_path, monkeypatch):
+    from market_recap import cache, config
+    from market_recap.sources import fred
+    from market_recap.sources.http import FetchError
+
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    page = "<!doctype html>\n<html></html>"
+    path = cache.path_for("fred", "DGS10", ".csv")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(page)
+    monkeypatch.setattr(fred, "get_text", lambda url, timeout: page)
+    with pytest.raises(FetchError):
+        fred.fetch_series("DGS10")
+    monkeypatch.setattr(fred, "get_text", lambda url, timeout: "observation_date,DGS10\n2026-10-20,4.1\n")
+    frame, _ = fred.fetch_series("DGS10")
+    assert frame["value"].tolist() == [4.1]

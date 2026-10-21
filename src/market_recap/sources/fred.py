@@ -14,10 +14,25 @@ from io import StringIO
 import pandas as pd
 
 from .. import cache
-from .http import get_text
+from .http import FetchError, get_text
 
 CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
 NAMESPACE = "fred"
+
+
+def _is_csv(text: str) -> bool:
+    first = text.lstrip().split("\n", 1)[0]
+    return not first.startswith("<") and "," in first
+
+
+def _csv(url: str) -> str:
+    """The CSV, or a FetchError. During maintenance FRED answers 200 with an HTML
+    page; taken as data it replaced the cached series and failed every panel
+    reading FRED (2026-10-21). As an error, the cache serves its last good copy."""
+    text = get_text(url, timeout=45.0)
+    if not _is_csv(text):
+        raise FetchError(f"FRED served no CSV for {url} (a maintenance page?)")
+    return text
 
 
 def fetch_series(series_id: str, *, use_cache: bool = True) -> tuple[pd.DataFrame, str]:
@@ -26,11 +41,16 @@ def fetch_series(series_id: str, *, use_cache: bool = True) -> tuple[pd.DataFram
     text = cache.fetch_text(
         NAMESPACE,
         series_id,
-        lambda: get_text(url, timeout=45.0),
+        lambda: _csv(url),
         kind="macro_series",
         suffix=".csv",
         use_cache=use_cache,
     )
+    if not _is_csv(text):
+        # A page cached before the check above: never data. Fetch again, past the cache.
+        if not use_cache:
+            raise FetchError(f"FRED served no CSV for {url} (a maintenance page?)")
+        return fetch_series(series_id, use_cache=False)
     frame = pd.read_csv(StringIO(text))
     date_col = frame.columns[0]
     value_col = frame.columns[1]
