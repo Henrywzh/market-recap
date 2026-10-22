@@ -20,6 +20,11 @@ const RSI_NOTE = 'Wilder RSI on closes. The lines describe how stretched a fall 
 // The range buttons; the PERIOD select offers every range in T.RANGES.
 const BUTTON_RANGES = ['1M', '3M', '6M', 'YTD', '1Y', '2Y', '5Y', '10Y', 'MAX'];
 const VOLUME_WINDOW = 20;
+// The y-axis pads the visible range by this share of its span on each side.
+const FIT_PAD = 0.04;
+const BAND_FILL = 'rgba(232,163,61,0.13)';
+// The legend icon is a small square: the fill's own alpha would be invisible there.
+const BAND_ICON = 'rgba(232,163,61,0.55)';
 
 const payloads = new Map();
 
@@ -166,35 +171,44 @@ function volumeLabel(v) {
 
 // The price chart. LINE draws the close; CANDLES (`view.bars`, the ohlcv
 // block) draws the bars with a volume pane under them. Either way the moving
-// averages and the band sit on `view.close`, and `view.start` is the first
-// index shown.
+// averages and the band sit on `view.close`. Every series is the full history:
+// the range is a zoom window from `view.start` to the last session, so the
+// reader can pan and zoom past it. The y-axis fits the visible candles (or
+// closes) and the visible averages; the band is left to be clipped.
 function priceChart(node, view) {
   const { bars, dates, close, averages, bandLines, start, log, ticker } = view;
-  render(node, (option, p) => {
+  const last = dates.length - 1;
+  const lines = Object.values(averages);
+  const fit = (from, to) => {
+    const extent = T.visibleExtent({ low: bars ? bars.low : close, high: bars ? bars.high : close, lines }, from, to, FIT_PAD);
+    if (!extent) return {};
+    // A log axis needs positive bounds; prices are, so this only guards a stray zero.
+    return log && extent.min <= 0 ? { max: extent.max } : extent;
+  };
+  const chart = render(node, (option, p) => {
     const colors = MA_COLORS(p);
-    const xDates = cut(dates, start);
     const maEntries = Object.entries(averages).map(([w, values], i) => ({
-      w, name: maName(w), color: colors[i % colors.length], data: cut(values, start),
+      w, name: maName(w), color: colors[i % colors.length], data: values,
     }));
     // The band is a stacked invisible base plus a filled span, so it reads
     // as an envelope rather than two unrelated lines.
     const bandSeries = bandLines ? [
-      { name: BAND_BASE, type: 'line', data: cut(bandLines.lower, start), stack: 'band', showSymbol: false,
+      { name: BAND_BASE, type: 'line', data: bandLines.lower, stack: 'band', showSymbol: false,
         lineStyle: { opacity: 0 }, areaStyle: { opacity: 0 }, silent: true, tooltip: { show: false } },
       { name: `±${view.sigma}σ band`, type: 'line', stack: 'band', showSymbol: false, silent: true,
-        data: cut(bandLines.upper, start).map((v, i) => {
-          const low = bandLines.lower[start + i];
+        data: bandLines.upper.map((v, i) => {
+          const low = bandLines.lower[i];
           return v === null || low === null ? null : v - low;
         }),
-        lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(232,163,61,0.13)' }, tooltip: { show: false } },
+        lineStyle: { opacity: 0 }, areaStyle: { color: BAND_FILL }, itemStyle: { color: BAND_ICON }, tooltip: { show: false } },
     ] : [];
     const maSeries = maEntries.map(({ name, color, data }) => ({
-      name, type: 'line', data, showSymbol: false, lineStyle: { width: 1, color }, z: 3,
+      name, type: 'line', data, showSymbol: false, lineStyle: { width: 1, color }, itemStyle: { color }, z: 3,
     }));
     const tip = (params) => {
       const first = [].concat(params)[0];
       if (!first) return '';
-      const k = start + first.dataIndex;
+      const k = first.dataIndex;
       const rows = [`<b>${dates[k]}</b>`];
       if (bars) rows.push(`O ${num(bars.open[k])}  H ${num(bars.high[k])}  L ${num(bars.low[k])}  C ${num(bars.close[k])}`);
       else rows.push(`Close <b>${num(close[k])}</b>`);
@@ -208,39 +222,48 @@ function priceChart(node, view) {
       formatter: tip,
       axisPointer: { ...option.tooltip.axisPointer, link: [{ xAxisIndex: 'all' }] },
     };
-    const yPrice = { ...option.yAxis, gridIndex: 0, type: log ? 'log' : 'value' };
+    // The fitted ends are padded data values, not round numbers: label only the ticks between them.
+    const yPrice = { ...option.yAxis, gridIndex: 0, type: log ? 'log' : 'value', ...fit(start, last),
+      axisLabel: { ...option.yAxis.axisLabel, showMinLabel: false, showMaxLabel: false } };
+    const zoomAxes = bars ? [0, 1] : [0];
+    const dataZoom = [
+      { type: 'inside', xAxisIndex: zoomAxes, filterMode: 'weakFilter', startValue: start, endValue: last },
+      { type: 'slider', xAxisIndex: zoomAxes, filterMode: 'weakFilter', height: 18, bottom: 22, startValue: start, endValue: last },
+    ];
 
     if (!bars) {
       return withLegend(option, p, {
         ...option,
         tooltip: axisTooltip,
-        grid: { ...option.grid, bottom: 52 },
-        xAxis: { ...option.xAxis, data: xDates },
+        grid: { ...option.grid, bottom: 64 },
+        dataZoom,
+        xAxis: { ...option.xAxis, data: dates },
         yAxis: yPrice,
         series: [
           ...bandSeries,
-          { name: `${ticker} Close`, type: 'line', data: cut(close, start), showSymbol: false,
+          { name: `${ticker} Close`, type: 'line', data: close, showSymbol: false,
             lineStyle: { width: 1.4, color: p.text }, z: 5 },
           ...maSeries,
         ],
       });
     }
 
-    const O = cut(bars.open, start);
-    const H = cut(bars.high, start);
-    const L = cut(bars.low, start);
-    const C = cut(close, start);
-    const V = cut(bars.volume, start);
+    const O = bars.open;
+    const H = bars.high;
+    const L = bars.low;
+    const C = close;
+    const V = bars.volume;
     return withLegend(option, p, {
       ...option,
       tooltip: axisTooltip,
       grid: [
-        { left: 52, right: 16, top: 12, height: '62%' },
-        { left: 52, right: 16, top: '78%', height: '13%' },
+        { left: 52, right: 16, top: 12, height: '68%' },
+        { left: 52, right: 16, top: '74%', height: '12%' },
       ],
+      dataZoom,
       xAxis: [
-        { ...option.xAxis, data: xDates, gridIndex: 0, boundaryGap: true, axisLabel: { show: false } },
-        { ...option.xAxis, data: xDates, gridIndex: 1, boundaryGap: true },
+        { ...option.xAxis, data: dates, gridIndex: 0, boundaryGap: true, axisLabel: { show: false } },
+        { ...option.xAxis, data: dates, gridIndex: 1, boundaryGap: true },
       ],
       yAxis: [
         yPrice,
@@ -261,6 +284,14 @@ function priceChart(node, view) {
       ],
     }, [`${ticker} OHLC`, 'Volume']);
   });
+  // Zooming or panning re-fits the y-axis to what is now on screen.
+  chart?.on('datazoom', (event) => {
+    const e = event.batch?.[0] || event;
+    const from = Math.floor(((e.start ?? 0) / 100) * last);
+    const to = Math.ceil(((e.end ?? 100) / 100) * last);
+    chart.setOption({ yAxis: [fit(from, to)] });
+  });
+  return chart;
 }
 
 // The band's invisible base series exists only to lift the fill, and the
@@ -480,10 +511,11 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
   const stPeriod = periodSelect(T.RANGES.map((r) => r.key), range);
   let candlesOn = true;
   let logOn = false;
+  let bandOn = true;
   let shownWindows = [...defaults.ma_periods].sort((a, b) => a - b);
   const summaryHost = el('div', {});
   const priceTitle = el('div', { class: 'card-title', text: '' });
-  const stPriceNode = el('div', { class: 'chart tall' });
+  const stPriceNode = el('div', { class: 'chart price-tall' });
   const statHost = el('div', { class: 'tech-stats' });
   const slopeTitle = el('span', { class: 'card-title', text: '' });
   const slopeNode = el('div', { class: 'chart short' });
@@ -510,9 +542,18 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
       loadSingle();
     },
   });
+  // BAND hides the ±σ envelope; it is on by default and does not change the y-axis fit.
+  const bandButton = el('button', {
+    type: 'button', text: 'BAND', 'aria-pressed': 'true',
+    onclick: () => {
+      bandOn = !bandOn;
+      bandButton.setAttribute('aria-pressed', String(bandOn));
+      loadSingle();
+    },
+  });
   const toolNote = el('span', { class: 'tech-note', text: '' });
   const toolbar = el('div', { class: 'tech-toolbar' }, [
-    modeSwitch, rangeSwitch, el('div', { class: 'period-switch' }, [logButton]), toolNote,
+    modeSwitch, rangeSwitch, el('div', { class: 'period-switch' }, [logButton, bandButton]), toolNote,
   ]);
 
   function pickRange(key) {
@@ -595,9 +636,10 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
 
       summaryHost.replaceChildren(summaryTable(payload, readings, { zWindow, slopeWindow }));
       priceTitle.textContent = `${candles ? 'PRICE, CANDLES' : 'PRICE'}, ${windows.join('/')}-DAY SMA & ${defaults.band_sigma}σ BAND (${zWindow} DMA)`;
+      // The whole series goes to the chart; the range is the zoom window.
       priceChart(stPriceNode, {
         bars: candles, dates: series.dates, close: series.close, averages: readings.averages,
-        bandLines: readings.bandLines, sigma: defaults.band_sigma, start: T.rangeStart(series.dates, range),
+        bandLines: bandOn ? readings.bandLines : null, sigma: defaults.band_sigma, start: T.rangeStart(series.dates, range),
         log: logOn, ticker: payload.ticker,
       });
       statHost.replaceChildren(...statItems(payload, series, readings, windows).map(([label, text, tone]) => el('div', { class: 'tech-stat' }, [

@@ -10,7 +10,17 @@ export const HORIZONS = [1, 5, 20];
 // Sessions in each lookback; null is the whole history.
 export const LOOKBACKS = { ALL: null, '5Y': 1260, '1Y': 252 };
 export const DEFAULT_GAP = 5;
+// Forward returns after an episode's worst day, in sessions.
+export const FORWARD_SESSIONS = [1, 5, 20];
+// Bucket edges for SIMILAR SETUPS: VIX level, and the drop from the 1Y high in percent.
+export const VIX_EDGES = [15, 20, 30];
+export const DRAWDOWN_EDGES = [5, 10, 20];
+// Fewer episodes than this in a bucket are too few to read.
+export const SETUP_MIN = 5;
 const YEAR_MS = 365.25 * 864e5;
+const DAY_MS = 864e5;
+// How far back a VIX level may be taken when its own date has none.
+const CALENDAR_SLACK_DAYS = 5;
 const MINUS = '−';
 
 const finite = (value) => typeof value === 'number' && Number.isFinite(value);
@@ -210,12 +220,6 @@ export function ordinal(value) {
   return `${k}${{ 1: 'st', 2: 'nd', 3: 'rd' }[k % 10] || 'th'}`;
 }
 
-function percentileText(value) {
-  if (value < 1) return 'under the 1st percentile';
-  if (value > 99) return 'over the 99th percentile';
-  return `the ${ordinal(value)} percentile`;
-}
-
 // Years in words; a window shorter than a year reads as a fraction.
 function yearsText(years) {
   if (!finite(years)) return 'the history';
@@ -226,6 +230,142 @@ function perYearText(value) {
   return value >= 2 ? `${Math.round(value)}` : value.toFixed(1);
 }
 
+// Index of the last date on or before `date` (ISO dates sort by day), or -1.
+function lastOnOrBefore(dates, date) {
+  let lo = 0;
+  let hi = dates.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (dates[mid] <= date) { found = mid; lo = mid + 1; } else { hi = mid - 1; }
+  }
+  return found;
+}
+
+function sessionIndex(dates, date) {
+  return Array.isArray(dates) ? dates.indexOf(date) : -1;
+}
+
+// Percent the close the session before `date` sits below the highest close in
+// the `lookback` sessions ending there (0 or below). Null unless the whole
+// window is in the build, so a short history never gives a partial high.
+export function drawdownBefore(dates, close, date, lookback = 252) {
+  const i = sessionIndex(dates, date) - 1;
+  if (i < 0 || !Number.isInteger(lookback) || lookback < 1 || i - lookback + 1 < 0) return null;
+  if (!finite(close[i])) return null;
+  let high = -Infinity;
+  for (let k = i - lookback + 1; k <= i; k += 1) {
+    if (finite(close[k])) high = Math.max(high, close[k]);
+  }
+  if (!finite(high) || high === 0) return null;
+  return (close[i] / high - 1) * 100;
+}
+
+// Percent change over the `sessions` before `date`'s session: from the close
+// `sessions` back to the close the session before. Null when either is missing.
+export function returnBefore(dates, close, date, sessions = 20) {
+  const i = sessionIndex(dates, date);
+  if (i < 0 || !Number.isInteger(sessions) || sessions < 1) return null;
+  const end = i - 1;
+  const start = i - 1 - sessions;
+  if (start < 0 || !finite(close[end]) || !finite(close[start]) || close[start] === 0) return null;
+  return (close[end] / close[start] - 1) * 100;
+}
+
+// The value on `date`; else the last one before it within five calendar days
+// (a VIX close on a day the index did not publish); else null.
+export function valueOn(dates, values, date) {
+  if (!Array.isArray(dates) || !Array.isArray(values) || !dates.length) return null;
+  const day = Date.parse(date);
+  if (!Number.isFinite(day)) return null;
+  for (let j = lastOnOrBefore(dates, date); j >= 0; j -= 1) {
+    if (day - Date.parse(dates[j]) > CALENDAR_SLACK_DAYS * DAY_MS) break;
+    if (finite(values[j])) return values[j];
+  }
+  return null;
+}
+
+// Mid-rank percentile (0 lowest, 100 highest) of `value` among the finite
+// `values`, ties counted half. Pass the history up to the date it is read on.
+export function percentileOf(values, value) {
+  if (!finite(value)) return null;
+  const data = (values || []).filter(finite);
+  if (!data.length) return null;
+  let below = 0;
+  let equal = 0;
+  for (const x of data) {
+    if (x < value) below += 1;
+    else if (x === value) equal += 1;
+  }
+  return ((below + equal / 2) / data.length) * 100;
+}
+
+// The context of an episode's day: the ticker's drop from its 1Y high and its
+// prior 20-session return, and the VIX level, its percentile since the VIX
+// history began and its change from the session before. `vix` is
+// { dates, close } or null; a missing part is null.
+export function contextOn({ dates, close, vix = null, date }) {
+  const usable = vix && Array.isArray(vix.dates) && Array.isArray(vix.close) ? vix : null;
+  const i = sessionIndex(dates, date);
+  const previous = i > 0 ? dates[i - 1] : null;
+  const level = usable ? valueOn(usable.dates, usable.close, date) : null;
+  const before = usable && previous ? valueOn(usable.dates, usable.close, previous) : null;
+  const k = level === null ? -1 : lastOnOrBefore(usable.dates, date);
+  return {
+    fromHigh: drawdownBefore(dates, close, date),
+    prior20: returnBefore(dates, close, date, 20),
+    vix: level,
+    vixPct: k < 0 ? null : percentileOf(usable.close.slice(0, k + 1), level),
+    vixChange: level !== null && before !== null ? level - before : null,
+  };
+}
+
+// Which bucket a value is in: how many of the edges it reaches (0 below the first).
+export function bucketOf(value, edges) {
+  if (!finite(value) || !Array.isArray(edges)) return null;
+  return edges.filter((edge) => value >= edge).length;
+}
+
+// The drop from the 1Y high as a bucket: the size of the drop, so 0 is within 5%.
+export function drawdownBucket(fromHigh) {
+  return finite(fromHigh) ? bucketOf(-fromHigh, DRAWDOWN_EDGES) : null;
+}
+
+function share(values) {
+  const data = values.filter(finite);
+  return data.length ? data.filter((v) => v > 0).length / data.length : null;
+}
+
+// n, and the median and the share positive of the +5 and +20 session returns,
+// and the median max drawdown, over rows (episodes).
+function summarize(rows) {
+  const at = (session) => rows.map((r) => r.forward[FORWARD_SESSIONS.indexOf(session)]);
+  return {
+    n: rows.length,
+    median5: median(at(5)),
+    positive5: share(at(5)),
+    median20: median(at(20)),
+    positive20: share(at(20)),
+    medianDrawdown: median(rows.map((r) => r.drawdown)),
+  };
+}
+
+// Episodes whose VIX bucket and drop-from-high bucket match today's, and all
+// episodes for comparison. Rows carry fromHigh, vix, forward (FORWARD_SESSIONS
+// order) and drawdown; `today` carries fromHigh and vix.
+export function similarSetups(rows, today) {
+  const vixBucket = bucketOf(today?.vix, VIX_EDGES);
+  const ddBucket = drawdownBucket(today?.fromHigh);
+  const matches = (r) => vixBucket !== null && ddBucket !== null
+    && bucketOf(r.vix, VIX_EDGES) === vixBucket && drawdownBucket(r.fromHigh) === ddBucket;
+  return {
+    vixBucket,
+    drawdownBucket: ddBucket,
+    matched: summarize((rows || []).filter(matches)),
+    all: summarize(rows || []),
+  };
+}
+
 // The page's headline, from the whole-history check of the move. Figures in
 // the text are absent-safe: a missing figure reads as a dash, never NaN.
 export function moveSentence({ ticker, horizon, move, date, all }) {
@@ -234,13 +374,11 @@ export function moveSentence({ ticker, horizon, move, date, all }) {
   const down = move < 0;
   const verb = down ? 'fell' : 'rose';
   if (!all.worse) return `${head} In ${yearsText(all.years)} of history no day ${verb} this far.`;
-  const sharePct = `${(all.share * 100).toFixed(1)}%`;
-  const detail = [
-    `(${sharePct}, ${percentileText(all.percentile)})`,
-    all.perYear === null ? null : `about ${perYearText(all.perYear)} a year`,
-  ].filter(Boolean).join(', ');
+  // "Only" where the move is rare; a common one is stated plainly.
+  const shareText = `${(all.share * 100).toFixed(1)}%`;
+  const sharePhrase = all.share < 0.001 ? 'Fewer than 0.1%' : all.share < 0.05 ? `Only ${shareText}` : shareText;
+  const span = all.years === null ? 'of trading days' : `of trading days in ${yearsText(all.years)}`;
+  const rate = all.perYear === null ? '' : ` (about ${perYearText(all.perYear)} a year)`;
   const last = all.lastWorse ? `the last was ${all.lastWorse}` : 'no earlier day was that far';
-  const count = `${all.worse.toLocaleString('en-US')} of ${all.n.toLocaleString('en-US')} days`;
-  const years = all.years === null ? '' : `In ${yearsText(all.years)} of history `;
-  return `${head} ${years}${count} ${verb} further ${detail}; ${last}.`;
+  return `${head} ${sharePhrase} ${span} ${verb} this far or further${rate}; ${last}.`;
 }

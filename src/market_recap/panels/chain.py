@@ -256,7 +256,8 @@ def _node(node: dict, s: C.Series | None, reps: list[C.Report], upcoming: dict |
           as_of: date, season: dict) -> dict:
     last = next((r for r in reversed(reps) if r.own_at is not None), None)
     return {
-        "key": node["key"], "name": node["name"], "layer": node["layer"], "market": node["market"],
+        "key": node["key"], "name": node["name"], "short": node.get("short"), "us": node.get("us"),
+        "layer": node["layer"], "market": node["market"],
         "site": (EVENTS_ARTIFACT_DIR / f"{node['key']}.json").exists(),
         "priced": s is not None,
         "ret_1m": _ret(s, 21), "ret_3m": _ret(s, 63),

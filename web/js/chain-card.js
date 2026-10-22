@@ -29,6 +29,8 @@ export function surpriseText(value) {
 }
 
 export function nodeHref(node) {
+  // A home listing with a US line opens that line's ticker page.
+  if (node.us) return tickerHref(node.us);
   return node.site ? tickerHref(node.key) : `#chain/${encodeURIComponent(node.key)}`;
 }
 

@@ -93,20 +93,163 @@ function putCallSection(data) {
 
 // ------------------------------------------------------------ trend followers
 
-function trendCard(t) {
-  const node = el('div', { class: 'chart' });
+const SIGMA_MOVES = [-2, -1, 0, 1, 2];
+
+// Dollar text for a range of $bn, one decimal below $10bn.
+const bnText = (v) => (Math.abs(v) >= 10 ? num(v, 0) : num(v, 1));
+
+// A signed $bn range: "+$4.8–9.6bn" for buying, "-$32–64bn" for selling.
+export function flowText(low, high) {
+  if (!present(low) || !present(high)) return DASH;
+  const lo = Math.min(Math.abs(low), Math.abs(high));
+  const hi = Math.max(Math.abs(low), Math.abs(high));
+  if (hi === 0) return '$0bn';
+  const sign = (low + high) / 2 >= 0 ? '+' : '-';
+  return lo === hi ? `${sign}$${bnText(hi)}bn` : `${sign}$${bnText(lo)}–${bnText(hi)}bn`;
+}
+
+// The same range in words: "about $5–10bn of buying".
+function flowWords(row) {
+  if (!present(row.flow_bn_low) || !present(row.flow_bn_high)) return 'no dollar estimate for this index';
+  const lo = Math.min(Math.abs(row.flow_bn_low), Math.abs(row.flow_bn_high));
+  const hi = Math.max(Math.abs(row.flow_bn_low), Math.abs(row.flow_bn_high));
+  const side = row.position_change >= 0 ? 'buying' : 'selling';
+  return lo === hi ? `about $${bnText(hi)}bn of ${side}` : `about $${bnText(lo)}–${bnText(hi)}bn of ${side}`;
+}
+
+// The answer to "what does a move do": flat, then a 2-sigma fall and rally, over five sessions.
+export function scenarioSentences(t) {
+  const rows = t?.model?.scenarios || [];
+  const pick = (moveSd) => rows.find((r) => r.sessions === 5 && r.move_sd === moveSd);
+  const flat = pick(0);
+  const fall = pick(-2);
+  const rally = pick(2);
+  if (![flat, fall, rally].every((r) => r && present(r.position_change))) return [];
+  const verb = (d) => (d > 0 ? 'ADDS' : 'CUTS');
+  const pts = (d) => num(Math.abs(d), 0);
+  const flatLine = Math.abs(flat.position_change) < 0.5
+    ? `If the ${t.label} is flat for 5 sessions, the model HOLDS its position.`
+    : `If the ${t.label} is flat for 5 sessions, the model ${verb(flat.position_change)} ${pts(flat.position_change)} pts ${flat.position_change > 0 ? '(calmer volatility)' : '(wilder volatility)'}: ${flowWords(flat)}.`;
+  const shockLine = (word, r) => (Math.abs(r.position_change) < 0.5
+    ? `A 2σ ${word} over 5 sessions leaves the model's position unchanged.`
+    : `A 2σ ${word} over 5 sessions makes the model ${verb(r.position_change)} ${pts(r.position_change)} pts: ${flowWords(r)}.`);
+  return [flatLine, shockLine('drop', fall), shockLine('rally', rally)];
+}
+
+// Model position on a −100…+100 scale, with the marker and the room to each limit.
+function positionBar(pos) {
+  const track = el('div', { class: 'pos-bar', 'aria-hidden': 'true' }, [el('div', { class: 'pos-bar-zero' })]);
+  if (present(pos)) {
+    track.append(el('div', { class: `pos-bar-mark ${pos >= 0 ? 'up' : 'down'}`, style: `left: ${(((pos + 100) / 200) * 100).toFixed(1)}%` }));
+  }
+  return el('div', { class: 'pos-bar-wrap' }, [
+    track,
+    el('div', { class: 'pos-bar-scale' }, [el('span', { text: '−100 max short' }), el('span', { text: '0' }), el('span', { text: '+100 max long' })]),
+  ]);
+}
+
+function modelHead(t) {
+  const pos = t.model.position;
+  const tone = present(pos) ? (pos > 0 ? 'up' : pos < 0 ? 'down' : '') : 'dim';
+  const room = t.model.room || {};
+  const roomText = present(room.to_max_long) && present(room.to_max_short)
+    ? `room to max long: ${num(room.to_max_long, 0)} pts · to max short: ${num(room.to_max_short, 0)} pts`
+    : DASH;
+  return el('div', { class: 'trend-model' }, [
+    el('div', { class: 'anchor-head' }, [
+      el('span', { class: `anchor-value ${tone}`, text: present(pos) ? `${signed(pos, 0, '%')} ${pos >= 0 ? 'of max long' : 'of max short'}` : DASH }),
+      tag(t.state || DASH, STATE_TONE[t.state] || 'dim'),
+      el('span', { class: 'dim', text: `vote score ${signed(t.score, 2)}` }),
+      el('span', { class: 'dim', text: `close ${num(t.close, 0)} · ${t.as_of}` }),
+    ]),
+    positionBar(pos),
+    el('div', { class: 'field-note', text: roomText }),
+  ]);
+}
+
+// Each move, one and five sessions: the path, the position change and the dollar range.
+function flowsTable(t) {
+  const pick = (sessions, moveSd) => t.model.scenarios.find((r) => r.sessions === sessions && r.move_sd === moveSd) || {};
+  const moveLabel = (m) => (m === 0 ? 'flat' : `${m > 0 ? '+' : '-'}${Math.abs(m)}σ`);
+  const tone = (d) => (present(d) ? (d > 0.5 ? 'up' : d < -0.5 ? 'down' : 'dim') : 'dim');
+  const cells = (r) => [
+    el('td', { text: present(r.move_pct) ? signed(r.move_pct, 1, '%') : DASH }),
+    el('td', { class: tone(r.position_change), text: present(r.position_change) ? signed(r.position_change, 0, ' pts') : DASH }),
+    el('td', { class: tone(r.position_change), text: flowText(r.flow_bn_low, r.flow_bn_high) }),
+  ];
+  return el('table', { class: 'data pos-table pos-flows' }, [
+    el('thead', {}, [el('tr', {}, ['MOVE', 'PATH 1D', 'POSITION 1D', '$ 1D', 'PATH 5D', 'POSITION 5D', '$ 5D'].map((h) => el('th', { text: h })))]),
+    el('tbody', {}, SIGMA_MOVES.map((m) => el('tr', {}, [
+      el('td', { text: moveLabel(m) }), ...cells(pick(1, m)), ...cells(pick(5, m)),
+    ]))),
+  ]);
+}
+
+// Two value axes, each with its own bounds; every line names the axis it reads.
+function twoAxisChart(node, lines, axes) {
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, left: 56, right: 56, bottom: 52 },
+    legend: { bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9 },
+    tooltip: { ...option.tooltip, valueFormatter: (x) => (present(x) ? num(x, 1) : DASH) },
+    xAxis: { ...option.xAxis, type: 'time', boundaryGap: false },
+    yAxis: axes.map((axis, i) => ({
+      ...option.yAxis,
+      min: axis.min,
+      max: axis.max,
+      position: i ? 'right' : 'left',
+      splitLine: i ? { show: false } : option.yAxis.splitLine,
+      axisLabel: { ...option.yAxis.axisLabel, formatter: axis.format },
+    })),
+    series: lines.map((line) => ({
+      name: line.name, type: 'line', yAxisIndex: line.axis === 1 ? 1 : 0,
+      data: line.dates.map((d, k) => [d, line.values[k]]),
+      showSymbol: false, connectNulls: false,
+      itemStyle: { color: line.color(p) },
+      lineStyle: { color: line.color(p), width: line.width || 1.4 },
+    })),
+  }));
+}
+
+// The listed trend-following ETF's equity beta against the model position. A check, not a holding.
+function checkBlock(check) {
+  const title = `CHECK: LISTED TREND ETF (${check?.etf || 'DBMF'}) EQUITY BETA · ${check?.window || 63}-SESSION`;
+  if (!check || check.unavailable) {
+    return el('div', { class: 'trend-check' }, [
+      el('div', { class: 'stat-label', text: title }),
+      el('div', { class: 'gap', text: `Not built this session${check?.unavailable ? `: ${check.unavailable}` : ''}.` }),
+    ]);
+  }
+  const node = el('div', { class: 'chart check-chart', 'aria-label': 'Equity beta of a listed trend-following ETF and the S&P 500 model position' });
+  requestAnimationFrame(() => twoAxisChart(node, [
+    { name: `${check.etf} equity beta (left)`, dates: check.dates, values: check.beta, axis: 0, color: (p) => p.blue, width: 1.4 },
+    { name: 'model position (right)', dates: check.dates, values: check.position, axis: 1, color: (p) => p.accent, width: 1.2 },
+  ], [{ format: (v) => num(v, 1) }, { min: -100, max: 100, format: (v) => num(v, 0) }]));
+  const corrText = (v) => (present(v) ? num(v, 2) : DASH);
+  const corr = `corr with the model: levels ${corrText(check.corr_levels)} · quarterly changes ${corrText(check.corr_with_model)}`;
+  return el('div', { class: 'trend-check' }, [
+    el('div', { class: 'stat-label', text: title }),
+    node,
+    el('div', { class: 'field-note', text: `beta now ${present(check.beta_now) ? num(check.beta_now, 2) : DASH} as of ${check.as_of || DASH} · ${corr}` }),
+  ]);
+}
+
+function trendCard(t, check) {
   const dates = t.history.score.dates;
-  let range = initialRange(dates, '1Y');
+  const title = `${t.label.toUpperCase()} · TREND FOLLOWERS`;
+  if (!t.model) return card(title, null, el('div', { class: 'gap', text: 'Model not built this session.' }));
+  const node = el('div', { class: 'chart trend-chart' });
+  const model = t.model;
+  let range = initialRange(model.history.position.dates.length ? model.history.position.dates : dates, '1Y');
   const draw = () => {
-    const s = sliceRange(t.history.score.dates, { values: t.history.score.values }, range);
-    const c = sliceRange(t.history.close.dates, { values: t.history.close.values }, range);
-    timeLines(node, [
-      { name: 'trend score (left)', ...s, color: (p) => p.accent, width: 1.4 },
-      { name: `${t.label} (right)`, ...c, axis: 1, color: (p) => p.faint, width: 1 },
-    ], {
-      value: (v, line) => (line.axis === 1 ? num(v, 0) : num(v, 2)),
-      markY: [{ y: 0 }],
-    });
+    const pos = sliceRange(model.history.position.dates, { values: model.history.position.values }, range);
+    const vc = sliceRange(model.history.vol_control.dates, { values: model.history.vol_control.values }, range);
+    const close = sliceRange(t.history.close.dates, { values: t.history.close.values }, range);
+    twoAxisChart(node, [
+      { name: 'model position (left)', ...pos, axis: 0, color: (p) => p.accent, width: 1.4 },
+      { name: 'vol-control exposure (left)', ...vc, axis: 0, color: (p) => p.blue, width: 1 },
+      { name: `${t.label} (right)`, ...close, axis: 1, color: (p) => p.faint, width: 1 },
+    ], [{ min: -100, max: 100, format: (v) => num(v, 0) }, { format: (v) => num(v, 0) }]);
   };
   requestAnimationFrame(draw);
 
@@ -130,14 +273,23 @@ function trendCard(t) {
     ]),
   ]);
 
-  return card(`${t.label.toUpperCase()} · TREND FOLLOWERS`, rangeSwitch(dates, range, (label) => { range = label; draw(); }), [
-    el('div', { class: 'anchor-head' }, [
-      el('span', { class: `anchor-value ${STATE_TONE[t.state] === 'up' ? 'up' : STATE_TONE[t.state] === 'down' ? 'down' : ''}`, text: signed(t.score, 2) }),
-      tag(t.state || DASH, STATE_TONE[t.state] || 'dim'),
-      el('span', { class: 'dim', text: `close ${num(t.close, 0)} · ${t.as_of}` }),
-    ]),
+  const lines = scenarioSentences(t);
+  const [low, high] = model.flow_assumption_bn || [];
+  return card(title, rangeSwitch(model.history.position.dates.length ? model.history.position.dates : dates, range, (label) => { range = label; draw(); }), [
+    modelHead(t),
+    lines.length
+      ? el('div', { class: 'trend-answer-block' }, lines.map((text) => el('p', { class: 'trend-answer', text })))
+      : el('div', { class: 'gap', text: 'No scenario reading for this index.' }),
+    el('div', { class: 'table-scroll' }, [flowsTable(t)]),
     node,
+    check ? checkBlock(check) : null,
     el('div', { class: 'table-scroll' }, [flips]),
+    el('details', { class: 'sx-fold' }, [el('summary', { text: 'Method & limits' }),
+      el('div', { class: 'note-text', text: `Model position: a continuous trend strength times a volatility scale. Each lookback's return is measured in its own volatility (the 60-session daily sigma times the square root of its length) and capped at ±1, so a lookback one sigma up is fully long and one near zero is near flat; the strength is their average. Unlike the vote above, crossing a flip level moves it a little, not all at once. The 60-session volatility is scaled to 15% a year, leverage is capped at 2×, and +100 is the maximum long (−100 the maximum short). Vol-control exposure is a long-only book that targets 10% volatility, capped at 1.5×: it buys when volatility falls, whatever the trend.` }),
+      el('div', { class: 'note-text', text: `Scenarios step the close by a whole number of daily sigmas per session (sigma from the last 20 daily returns) and recompute both readings at the end. They are arithmetic on the model, not forecasts.` }),
+      el('div', { class: 'note-text', text: low && high ? `Dollar figures assume a notional range for trend-following futures at a full model long: $${num(low, 0)}–${num(high, 0)}bn. That range is an assumption, not observed; the page does not show a fund's position.` : 'No dollar estimate: the assumed notional range is not set for this index.' }),
+      el('div', { class: 'note-text', text: 'The check: the listed trend-following ETF\'s equity beta is a rolling 63-session regression of its daily returns on SPY, IEF, UUP, GLD and USO, estimated from prices. It is not read from its holdings.' }),
+    ]),
   ]);
 }
 
@@ -244,8 +396,9 @@ function blackoutSection(b) {
     ],
   })));
   return el('div', { class: 'blackout-section' }, [
-    card('S&P 500 WEIGHT IN AN ESTIMATED BUYBACK BLACKOUT', el('span', { class: 'dim', text: `as of ${b.as_of}` }), [
+    card('S&P 500 WEIGHT IN A BUYBACK BLACKOUT · ESTIMATED BY CONVENTION', el('span', { class: 'dim', text: `as of ${b.as_of}` }), [
       strip, node,
+      el('div', { class: 'note-text', text: 'A convention, not data: no company publishes its window, and many keep buying through it under 10b5-1 plans.' }),
       el('details', { class: 'sx-fold' }, [el('summary', { text: 'Method & limits' }),
         el('div', { class: 'note-text', text: `A proxy for potentially reduced discretionary repurchase demand, not observed buyback flow or a price forecast. Each member counts from ${b.before_days} calendar days before each report to ${b.after_days} days after, weighted by today's S&P 500 weight. Report dates come from the member's past filings, the next one from the earnings calendar, or a projection from its usual gap (${b.projected} names). A convention, not any company's policy: prearranged 10b5-1 plans may keep buying through a blackout.` }),
         el('div', { class: 'note-text', text: `Windows are calendar days, not trading sessions. Dashed values after ${b.as_of} are schedule scenarios, not observed changes. Report-date coverage is ${present(b.weight_covered_pct) ? `${num(b.weight_covered_pct, 1)}%` : DASH} of current weight: ${b.scheduled} scheduled, ${b.projected} projected, ${b.missing} unknown next dates.` }),
@@ -352,8 +505,6 @@ export default function renderPositioning(root, data) {
   root.append(putCallSection(data.index_put_call));
   root.append(el('h2', { class: 'section-title', text: 'SHORT INTEREST' }));
   root.append(shortSection(si));
-  root.append(el('h2', { class: 'section-title', text: 'BUYBACK BLACKOUT' }));
-  root.append(blackoutSection(data.blackout));
   root.append(el('h2', { class: 'section-title', text: 'INSIDER BUYING' }));
   root.append(insiderSection(data.insiders));
 
@@ -374,5 +525,8 @@ export default function renderPositioning(root, data) {
   }
 
   root.append(el('h2', { class: 'section-title', text: 'TREND FOLLOWERS' }));
-  root.append(el('div', { class: 'grid two' }, data.trend.map(trendCard)));
+  root.append(el('div', { class: 'grid two' }, data.trend.map((t) => trendCard(t, t.key === 'SPX' ? data.trend_check : null))));
+
+  root.append(el('h2', { class: 'section-title', text: 'BUYBACK BLACKOUT' }));
+  root.append(blackoutSection(data.blackout));
 }

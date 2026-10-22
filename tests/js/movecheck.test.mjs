@@ -221,18 +221,24 @@ test('ordinals take the teen and the 1-2-3 endings right', () => {
 
 const ALL = { n: 2515, worse: 61, share: 61 / 2515, percentile: 2.41, perYear: 6.1, lastWorse: '2026-08-14', years: 9.99 };
 
-test('the headline reads as the page states it, for a fall', () => {
+test('the headline leads with the share of days, for a fall', () => {
   assert.equal(
     M.moveSentence({ ticker: 'QQQ', horizon: 1, move: -3, date: '2026-10-21', all: ALL }),
-    'QQQ −3.0% over 1 day (2026-10-21). In 10 years of history 61 of 2,515 days fell further '
-      + '(2.4%, the 2nd percentile), about 6 a year; the last was 2026-08-14.',
+    'QQQ −3.0% over 1 day (2026-10-21). Only 2.4% of trading days in 10 years fell this far or further '
+      + '(about 6 a year); the last was 2026-08-14.',
   );
+});
+
+test('a common move is stated plainly, without "Only"', () => {
+  const common = { ...ALL, worse: 381, share: 381 / 2511, perYear: 38 };
+  const text = M.moveSentence({ ticker: 'QQQ', horizon: 1, move: 1.21, date: '2026-10-19', all: common });
+  assert.ok(text.includes('(2026-10-19). 15.2% of trading days'), text);
 });
 
 test('the headline reads for a rise, and names the horizon in sessions', () => {
   const text = M.moveSentence({ ticker: 'SPY', horizon: 5, move: 3, date: '2026-10-21', all: { ...ALL, percentile: 97.6 } });
-  assert.equal(text, 'SPY +3.0% over 5 sessions (2026-10-21). In 10 years of history 61 of 2,515 days rose further '
-    + '(2.4%, the 98th percentile), about 6 a year; the last was 2026-08-14.');
+  assert.equal(text, 'SPY +3.0% over 5 sessions (2026-10-21). Only 2.4% of trading days in 10 years rose this far or further '
+    + '(about 6 a year); the last was 2026-08-14.');
 });
 
 test('the headline says when no day was as far, and when there was no earlier day', () => {
@@ -240,13 +246,123 @@ test('the headline says when no day was as far, and when there was no earlier da
   assert.equal(none, 'QQQ −9.0% over 1 day (2026-10-21). In 10 years of history no day fell this far.');
   const first = M.moveSentence({ ticker: 'QQQ', horizon: 1, move: -3, date: '2026-10-21',
     all: { n: 500, worse: 1, share: 0.002, percentile: 0.1, perYear: 0.5, lastWorse: null, years: 2 } });
-  assert.equal(first, 'QQQ −3.0% over 1 day (2026-10-21). In 2 years of history 1 of 500 days fell further '
-    + '(0.2%, under the 1st percentile), about 0.5 a year; no earlier day was that far.');
+  assert.equal(first, 'QQQ −3.0% over 1 day (2026-10-21). Only 0.2% of trading days in 2 years fell this far or further '
+    + '(about 0.5 a year); no earlier day was that far.');
+});
+
+test('a share under a tenth of a percent reads as fewer than that, and a missing window drops its years', () => {
+  const tiny = M.moveSentence({ ticker: 'QQQ', horizon: 1, move: -9, date: '2026-10-21',
+    all: { n: 9000, worse: 3, share: 3 / 9000, percentile: 0.01, perYear: null, lastWorse: '1987-10-19', years: null } });
+  assert.equal(tiny, 'QQQ −9.0% over 1 day (2026-10-21). Fewer than 0.1% of trading days fell this far or further; '
+    + 'the last was 1987-10-19.');
 });
 
 test('the headline is a plain sentence when there is no history to place the move in', () => {
   assert.equal(M.moveSentence({ ticker: 'QQQ', horizon: 1, move: -3, date: '2026-10-21', all: null }),
     'QQQ −3.0% over 1 day (2026-10-21). Not enough history to place this move.');
+});
+
+// --- episode context ------------------------------------------------------------
+
+const CONTEXT_DATES = Array.from({ length: 10 }, (_, i) => `d${i}`);
+const CONTEXT_CLOSE = [100, 110, 105, 120, 118, 115, 130, 128, 127, 125];
+
+test('the drop from the high is taken on the session before, against the highest close in the full year', () => {
+  const dates = Array.from({ length: 300 }, (_, i) => dayAt(i));
+  const close = Array.from({ length: 300 }, (_, i) => (i === 250 ? 200 : 100));
+  near(M.drawdownBefore(dates, close, dayAt(260)), -50);
+  // A year is not all in the build: no partial high.
+  assert.equal(M.drawdownBefore(CONTEXT_DATES, CONTEXT_CLOSE, 'd9'), null);
+  assert.equal(M.drawdownBefore(CONTEXT_DATES, CONTEXT_CLOSE, 'd1', 2), null, 'the window runs before the first session');
+  assert.equal(M.drawdownBefore(CONTEXT_DATES, CONTEXT_CLOSE, 'nope', 2), null);
+  near(M.drawdownBefore(CONTEXT_DATES, CONTEXT_CLOSE, 'd3', 3), (105 / 110 - 1) * 100, 1e-9);
+  assert.equal(M.drawdownBefore(CONTEXT_DATES, [100, 110, null, 120], 'd3', 3), null, 'a missing close on the session before');
+});
+
+test('the return over the sessions before the move runs from the close back to the close the session before', () => {
+  near(M.returnBefore(CONTEXT_DATES, CONTEXT_CLOSE, 'd3', 2), 5);
+  assert.equal(M.returnBefore(CONTEXT_DATES, CONTEXT_CLOSE, 'd2', 2), null, 'too early in the history');
+  assert.equal(M.returnBefore(CONTEXT_DATES, [100, 110, 105, 120, 118, null, 130], 'd6', 3), null, 'a missing close');
+});
+
+test('a value on a date, else the last one before it within five calendar days', () => {
+  const vd = ['2020-01-02', '2020-01-03', '2020-01-06'];
+  const vv = [10, null, 12];
+  assert.equal(M.valueOn(vd, vv, '2020-01-02'), 10);
+  assert.equal(M.valueOn(vd, vv, '2020-01-03'), 10, 'a missing value falls back to the day before');
+  assert.equal(M.valueOn(vd, vv, '2020-01-04'), 10, 'a Saturday takes the last session before it');
+  assert.equal(M.valueOn(vd, vv, '2020-01-06'), 12);
+  assert.equal(M.valueOn(vd, vv, '2020-01-15'), null, 'nothing within five days');
+  assert.equal(M.valueOn(vd, vv, '2019-12-01'), null, 'before the history');
+  assert.equal(M.valueOn(vd, vv, 'nope'), null);
+  assert.equal(M.valueOn(null, null, '2020-01-02'), null);
+});
+
+test('a percentile is the mid-rank among the finite values, and null with none', () => {
+  near(M.percentileOf([1, 2, 3, 4, 5], 3), 50);
+  near(M.percentileOf([1, 2, 3], 0), 0);
+  near(M.percentileOf([1, 2, 3], 9), 100);
+  near(M.percentileOf([null, 2, 3], 2), 25);
+  assert.equal(M.percentileOf([], 1), null);
+  assert.equal(M.percentileOf([1, 2], null), null);
+});
+
+test('the context of a day gives the drop, the prior return, and the VIX level, its percentile and its change', () => {
+  const isoDates = CONTEXT_DATES.map((_, i) => dayAt(i));
+  const vix = { dates: isoDates, close: [10, 12, 11, 14, 13, 15, 9, 16, 17, 18] };
+  const c = M.contextOn({ dates: isoDates, close: CONTEXT_CLOSE, vix, date: dayAt(5) });
+  assert.equal(c.fromHigh, null, 'a short history has no full year');
+  assert.equal(c.prior20, null);
+  assert.equal(c.vix, 15);
+  near(c.vixChange, 2, 1e-9);
+  near(c.vixPct, (5 + 0.5) / 6 * 100, 1e-9);
+  const none = M.contextOn({ dates: isoDates, close: CONTEXT_CLOSE, vix: null, date: dayAt(5) });
+  assert.equal(none.vix, null);
+  assert.equal(none.vixPct, null);
+  assert.equal(none.vixChange, null);
+});
+
+test('buckets count the edges a value reaches, and the drop is bucketed by its size', () => {
+  assert.equal(M.bucketOf(14.9, M.VIX_EDGES), 0);
+  assert.equal(M.bucketOf(15, M.VIX_EDGES), 1);
+  assert.equal(M.bucketOf(19.99, M.VIX_EDGES), 1);
+  assert.equal(M.bucketOf(20, M.VIX_EDGES), 2);
+  assert.equal(M.bucketOf(30, M.VIX_EDGES), 3);
+  assert.equal(M.bucketOf(null, M.VIX_EDGES), null);
+  assert.equal(M.drawdownBucket(-3), 0);
+  assert.equal(M.drawdownBucket(-5), 1);
+  assert.equal(M.drawdownBucket(-10), 2);
+  assert.equal(M.drawdownBucket(-25), 3);
+  assert.equal(M.drawdownBucket(0), 0);
+  assert.equal(M.drawdownBucket(undefined), null);
+});
+
+test('similar setups match on both buckets, and summarise the forward returns and the drawdown', () => {
+  const rows = [
+    { vix: 12, fromHigh: -2, forward: [1, 3, 5], drawdown: -1 },
+    { vix: 13, fromHigh: -3, forward: [0, 2, -1], drawdown: -2 },
+    { vix: 14, fromHigh: -1, forward: [-1, 4, 6], drawdown: -3 },
+    { vix: 16, fromHigh: -12, forward: [2, -2, 10], drawdown: -15 },
+    { vix: 40, fromHigh: -25, forward: [3, -4, 1], drawdown: -30 },
+    { vix: 11, fromHigh: -4, forward: [0.5, 1, 2], drawdown: -6 },
+  ];
+  const s = M.similarSetups(rows, { vix: 12, fromHigh: -2 });
+  assert.equal(s.vixBucket, 0);
+  assert.equal(s.drawdownBucket, 0);
+  assert.equal(s.matched.n, 4);
+  near(s.matched.median5, 2.5);
+  near(s.matched.positive5, 1);
+  near(s.matched.median20, 3.5);
+  near(s.matched.positive20, 0.75);
+  near(s.matched.medianDrawdown, -2.5);
+  assert.equal(s.all.n, 6);
+  near(s.all.median5, 1.5);
+  near(s.all.positive5, 4 / 6);
+  near(s.all.median20, 3.5);
+  near(s.all.medianDrawdown, -4.5);
+  const noVix = M.similarSetups(rows, { vix: null, fromHigh: -2 });
+  assert.equal(noVix.matched.n, 0, 'no VIX today, nothing matches');
+  assert.equal(noVix.all.n, 6);
 });
 
 // --- the page ----------------------------------------------------------------------
@@ -343,7 +459,7 @@ test('the page renders the headline, stats, histogram and episodes with no bad f
     return textOf(root);
   });
   assert.ok(text.includes('FIX'), 'names the ticker');
-  assert.ok(text.includes('fell further'), 'a fall is read as a fall');
+  assert.ok(text.includes('fell this far or further'), 'a fall is read as a fall');
   assert.ok(text.includes('EPISODES BEYOND THIS MOVE'));
   assert.ok(text.includes('IN TODAY\'S VOLATILITY'));
   assert.ok(text.includes('Description, not a signal'));
@@ -397,3 +513,36 @@ test('a ticker whose file fails to load says so, without a bad figure', async ()
   assert.ok(text.includes('SPY could not be loaded'));
   assert.ok(!BAD.test(text));
 });
+
+test('the page reads the VIX history and shows the episode context, the setups and the move row', async () => {
+  const vix = { dates: isoDays(300), close: Array.from({ length: 300 }, (_, i) => 15 + Math.sin(i) * 3) };
+  const ctx = ctxWith({ FIX: fixtureTicker(), 'context/vix': vix });
+  const data = { available: ['FIX'] };
+  const text = await withBrowser(async () => {
+    const root = new FakeNode('div');
+    await renderMoveCheck(root, data, null, ctx);
+    return textOf(root);
+  });
+  assert.ok(text.includes('SIMILAR SETUPS'));
+  assert.ok(text.includes('MATCHING TODAY'));
+  assert.ok(text.includes('ALL EPISODES'));
+  assert.ok(text.includes('FROM 1Y HIGH'));
+  assert.ok(!text.includes('VIX history was not available'));
+  assert.ok(!BAD.test(text), `bad figure in page text: ${text.match(BAD)?.[0]}`);
+});
+
+test('without the VIX file the VIX columns are dashes and a note says so', async () => {
+  const ctx = ctxWith({ FIX: fixtureTicker() });
+  const data = { available: ['FIX'] };
+  const text = await withBrowser(async () => {
+    const root = new FakeNode('div');
+    await renderMoveCheck(root, data, null, ctx);
+    return textOf(root);
+  });
+  assert.ok(text.includes('VIX history was not available in this build'));
+  assert.ok(!BAD.test(text), `bad figure in page text: ${text.match(BAD)?.[0]}`);
+});
+
+function isoDays(count) {
+  return Array.from({ length: count }, (_, i) => dayAt(i));
+}

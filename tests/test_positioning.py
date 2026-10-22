@@ -1,9 +1,12 @@
 """POSITIONING: the trend-follower proxy and the FINRA helpers."""
 
 from datetime import date
+import json
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from market_recap.compute import positioning as P
 from market_recap.panels import positioning as panel
@@ -133,3 +136,166 @@ def test_insider_scan_reads_new_filings_within_budget_and_reports_coverage(tmp_p
     assert len(fetched) == 2 and second["coverage"]["complete"]          # the parse of the first was kept
     assert second["clusters"][0]["ticker"] == "AAA" and second["clusters"][0]["count"] == 2
     assert "OTHER" not in str(second)                                    # not an index member
+
+
+# --- vol-scaled model position, scenarios and the trend check --------------------
+
+def _noisy_uptrend(sessions=400, daily_sd=0.01, drift=0.0008, seed=3):
+    rng = np.random.default_rng(seed)
+    return _close(100 * np.exp(np.cumsum(drift + daily_sd * rng.standard_normal(sessions))))
+
+
+def test_model_position_is_bounded_and_signed_by_the_trend():
+    up = P.model_position(_noisy_uptrend())
+    assert up.iloc[-1] > 0 and up.abs().max() <= 100
+    down = P.model_position(_noisy_uptrend(drift=-0.0008))
+    assert down.iloc[-1] < 0 and down.abs().max() <= 100
+    exposure = P.vol_control_exposure(_noisy_uptrend())
+    assert exposure.min() >= 0 and exposure.max() <= 100
+
+
+def test_flat_prices_for_five_sessions_lift_position_and_vol_control_when_volatility_falls():
+    # A rising, noisy series: the trend is long and the volatility is below the cap.
+    close = _noisy_uptrend()
+    rows = {(r["sessions"], r["move_sd"]): r for r in P.scenario_flows(close)}
+    flat = rows[(5, 0)]
+    assert flat["move_pct"] == 0 and flat["close"] == float(close.iloc[-1])
+    # Five unchanged closes add zero returns, which pull the trailing volatility down.
+    assert flat["position_change"] > 0 and flat["vc_change"] > 0
+
+
+def test_scenario_flows_gives_ten_rows_and_a_zero_move_is_no_price_change():
+    rows = P.scenario_flows(_noisy_uptrend())
+    assert len(rows) == 10
+    assert {r["sessions"] for r in rows} == {1, 5}
+    assert {r["move_sd"] for r in rows} == {-2, -1, 0, 1, 2}
+    assert all(r["move_pct"] == 0 for r in rows if r["move_sd"] == 0)
+    two_up = next(r for r in rows if r["sessions"] == 5 and r["move_sd"] == 2)
+    assert two_up["move_pct"] > 0 and two_up["close"] > float(_noisy_uptrend().iloc[-1])
+
+
+def test_room_and_dollar_flows_follow_the_assumed_notional():
+    assert P.room(62.0) == {"to_max_long": 38.0, "to_max_short": 162.0}
+    assert P.room(None) == {"to_max_long": None, "to_max_short": None}
+    low, high = P.flow_range_bn(6.0, "^GSPC")
+    assert round(low, 2) == 4.8 and round(high, 2) == 9.6
+    assert P.flow_range_bn(-40.0, "^GSPC") == (-32.0, -64.0)
+    assert P.flow_range_bn(6.0, "UNKNOWN") == (None, None)
+
+
+def test_implied_equity_beta_recovers_a_known_loading_on_synthetic_returns():
+    rng = np.random.default_rng(7)
+    index = pd.bdate_range("2020-01-01", periods=300)
+    factors = pd.DataFrame({"SPY": 0.01 * rng.standard_normal(300), "IEF": 0.004 * rng.standard_normal(300)},
+                           index=index)
+    etf = 0.5 * factors["SPY"] - 0.2 * factors["IEF"] + 0.0005 * rng.standard_normal(300)
+    beta = P.implied_equity_beta(etf, factors, window=63)
+    assert len(beta) == 300 - 62
+    assert abs(beta.iloc[-1] - 0.5) < 0.02
+
+
+def test_implied_equity_beta_leaves_a_window_missing_when_too_few_rows_are_complete():
+    index = pd.bdate_range("2020-01-01", periods=80)
+    factors = pd.DataFrame({"SPY": np.linspace(-0.01, 0.01, 80)}, index=index)
+    etf = factors["SPY"] * 0.5
+    etf.iloc[:20] = np.nan                       # the first window has 43 complete rows, under 90% of 63
+    beta = P.implied_equity_beta(etf, factors, window=63)
+    assert beta.index[0] == index[76]            # the first window with 57 complete rows
+
+
+def test_change_correlation_needs_enough_monthly_changes():
+    index = pd.bdate_range("2020-01-01", periods=21 * 30)
+    a = pd.Series(np.sin(np.arange(len(index)) / 10.0), index=index)
+    assert P.change_correlation(a, a) == pytest.approx(1.0)
+    assert P.change_correlation(a.iloc[:200], a.iloc[:200]) is None
+
+
+def _trend_ctx(close, *, log=None):
+    spec = SimpleNamespace(key="SPX", symbol="^GSPC", label="S&P 500", primary=True)
+    return spec, SimpleNamespace(index_closes=pd.DataFrame({"^GSPC": close}), as_of="2026-10-16",
+                                 primary=spec, log=log or SimpleNamespace(add=lambda record: None))
+
+
+def test_trend_payload_with_the_model_is_json_clean():
+    close = _noisy_uptrend(sessions=600)
+    spec, ctx = _trend_ctx(close)
+    payload = panel._trend(ctx, spec, {"history_years": 3})
+    model = payload["model"]
+    assert model["flow_assumption_bn"] == [80, 160]
+    assert len(model["scenarios"]) == 10
+    assert model["room"]["to_max_long"] == round(100 - model["position"], 1)
+    assert set(model["history"]) == {"position", "vol_control"}
+    json.dumps(payload, allow_nan=False)
+
+
+def test_trend_model_has_no_dollar_assumption_for_an_unknown_index():
+    close = _noisy_uptrend(sessions=600)
+    spec = SimpleNamespace(key="X", symbol="^XYZ", label="Other", primary=False)
+    ctx = SimpleNamespace(index_closes=pd.DataFrame({"^XYZ": close}), as_of="2026-10-16", log=None)
+    payload = panel._trend(ctx, spec, {"history_years": 3})
+    assert payload["model"]["flow_assumption_bn"] is None
+    assert all(row["flow_bn_low"] is None for row in payload["model"]["scenarios"])
+    json.dumps(payload, allow_nan=False)
+
+
+def test_trend_check_reads_the_listed_etf_beta_and_logs_its_prices(monkeypatch):
+    rng = np.random.default_rng(11)
+    index = pd.bdate_range("2021-01-04", periods=400)
+    spy = 0.01 * rng.standard_normal(400)
+    prices = pd.DataFrame({
+        "SPY": 100 * np.exp(np.cumsum(spy)),
+        "IEF": 100 * np.exp(np.cumsum(0.002 * rng.standard_normal(400))),
+        "UUP": 100 * np.exp(np.cumsum(0.003 * rng.standard_normal(400))),
+        "GLD": 100 * np.exp(np.cumsum(0.008 * rng.standard_normal(400))),
+        "USO": 100 * np.exp(np.cumsum(0.015 * rng.standard_normal(400))),
+    }, index=index)
+    dbmf = 100 * np.exp(np.cumsum(0.5 * spy + 0.0002 * rng.standard_normal(400)))
+    prices["DBMF"] = dbmf
+    calls = []
+
+    def fake_fetch(symbols, *, period):
+        calls.append((tuple(symbols), period))
+        return prices[list(symbols)]
+
+    monkeypatch.setattr(panel.yahoo, "fetch_closes", fake_fetch)
+    close = pd.Series(100 * np.exp(np.cumsum(0.001 + 0.01 * rng.standard_normal(400))), index=index)
+    logged = []
+    ctx = SimpleNamespace(index_closes=pd.DataFrame({"^GSPC": close}), primary=SimpleNamespace(symbol="^GSPC", label="S&P 500"),
+                          log=SimpleNamespace(add=logged.append))
+    out = panel._trend_check(ctx, {"history_years": 2})
+    assert calls == [(("DBMF", "SPY", "IEF", "UUP", "GLD", "USO"), "2y")]
+    assert abs(out["beta_now"] - 0.5) < 0.05
+    assert out["etf"] == "DBMF" and out["window"] == 63
+    assert len(out["beta"]) == len(out["dates"]) == len(out["position"])
+    assert logged[0].source_id == "trend_check_prices" and logged[0].status == "ok"
+    json.dumps(out, allow_nan=False)
+
+
+def test_trend_check_is_unavailable_with_a_reason_when_prices_fail(monkeypatch):
+    def failing(symbols, *, period):
+        raise RuntimeError("Yahoo returned 502")
+
+    monkeypatch.setattr(panel.yahoo, "fetch_closes", failing)
+    logged = []
+    ctx = SimpleNamespace(index_closes=pd.DataFrame(), primary=SimpleNamespace(symbol="^GSPC", label="S&P 500"),
+                          log=SimpleNamespace(add=logged.append))
+    out = panel._trend_check(ctx, {})
+    assert out == {"unavailable": "Yahoo returned 502"}
+    assert logged[0].status == "error"
+
+
+def test_model_position_moves_smoothly_through_a_flip_level():
+    rng = np.random.default_rng(7)
+    close = _close(100 * np.exp(np.cumsum(rng.normal(0.0004, 0.01, 340))))
+    flips = {f["lookback"]: f["flip_level"] for f in P.flip_levels(close)}
+    level = flips["1M"]
+    below = P.model_position(pd.concat([close, pd.Series([level * 0.999], index=[close.index[-1] + pd.offsets.BDay()])]))
+    above = P.model_position(pd.concat([close, pd.Series([level * 1.001], index=[close.index[-1] + pd.offsets.BDay()])]))
+    # A sign vote would jump 25 x scale points here; the continuous signal barely moves.
+    assert abs(float(above.iloc[-1]) - float(below.iloc[-1])) < 3
+
+
+def test_level_correlation_needs_a_year_of_overlap():
+    a = _close(np.linspace(1, 2, 300))
+    assert P.level_correlation(a, a * 3) == pytest.approx(1.0)
+    assert P.level_correlation(a.iloc[:100], a.iloc[:100]) is None

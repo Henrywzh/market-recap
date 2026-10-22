@@ -6,6 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderSingleTicker } from '../../web/js/tabs/technicals.js';
+import * as T from '../../web/js/technicals-math.js';
 
 class FakeNode {
   constructor(tag) {
@@ -93,8 +94,14 @@ globalThis.getComputedStyle = () => ({ getPropertyValue: () => '' });
 globalThis.window = {
   echarts: {
     init: (node) => {
-      const chart = { setOption(option) { node.option = option; }, getModel: () => undefined, resize() {}, dispose() {} };
-      charts.push({ node, chart });
+      // A full setOption replaces the option; a partial one merges, as ECharts does.
+      const handlers = {};
+      const chart = {
+        setOption(option, notMerge) { node.option = notMerge || !node.option ? option : { ...node.option, ...option }; },
+        on(type, fn) { handlers[type] = fn; },
+        getModel: () => undefined, resize() {}, dispose() {},
+      };
+      charts.push({ node, chart, handlers });
       return chart;
     },
   },
@@ -116,7 +123,9 @@ async function mount(payloads, symbol = 'TST') {
 }
 
 // The option of the price chart: the node with the tall chart class.
-const priceOption = (charts) => charts.find(({ node }) => node.className === 'chart tall').node.option;
+const priceOption = (charts) => charts.find(({ node }) => node.className === 'chart price-tall').node.option;
+// The handlers of the latest price chart: a re-render makes a new chart on the same node.
+const priceHandlers = (charts) => [...charts].reverse().find(({ node }) => node.className === 'chart price-tall').handlers;
 
 test('a ticker with bars opens on candles: OHLC, a volume pane and the moving averages on the candles', async () => {
   const { root, charts } = await mount({ TST: fixture() });
@@ -131,6 +140,73 @@ test('a ticker with bars opens on candles: OHLC, a volume pane and the moving av
   assert.equal(volume.data.length, option.xAxis[0].data.length);
   assert.equal(volume.data.filter((v) => v === null).length, 1, 'the missing bar is a gap, not a zero');
   assert.match(textOf(root), /PRICE, CANDLES/);
+  assert.doesNotMatch(textOf(root), /NaN|undefined|\[object Object\]/);
+});
+
+test('the price chart zooms over the full history on both panes, with the range as the window', async () => {
+  const { root, charts } = await mount({ TST: fixture() });
+  let option = priceOption(charts);
+  assert.equal(option.xAxis[0].data.length, 520, 'the chart holds every bar, not the cut range');
+  assert.equal(option.dataZoom.length, 2);
+  for (const zoom of option.dataZoom) assert.deepEqual(zoom.xAxisIndex, [0, 1]);
+  assert.equal(option.dataZoom[0].type, 'inside');
+  assert.equal(option.dataZoom[1].type, 'slider');
+  assert.equal(option.dataZoom[0].endValue, 519);
+  assert.equal(option.dataZoom[0].startValue, 519 - 252, '1Y starts 252 sessions before the last');
+  buttonNamed(root, '3M').dispatch('click');
+  await flush();
+  option = priceOption(charts);
+  assert.equal(option.dataZoom[0].startValue, 519 - 63);
+  buttonNamed(root, 'LINE').dispatch('click');
+  await flush();
+  option = priceOption(charts);
+  for (const zoom of option.dataZoom) assert.deepEqual(zoom.xAxisIndex, [0]);
+});
+
+test('the MA legend icons take the line colour, and the band a stronger shade of its fill', async () => {
+  const { charts } = await mount({ TST: fixture() });
+  const option = priceOption(charts);
+  for (const s of option.series.filter((x) => x.name.startsWith('SMA '))) {
+    assert.equal(s.itemStyle.color, s.lineStyle.color, s.name);
+  }
+  const band = option.series.find((s) => s.name === '±1.5σ band');
+  assert.equal(band.itemStyle.color.slice(0, 16), band.areaStyle.color.slice(0, 16));
+  assert.notEqual(band.itemStyle.color, band.areaStyle.color);
+});
+
+// The y-range the chart should show for bars [from, to], from the candles and their averages only.
+function expectedExtent(bars, from, to, windows = [20, 50, 200]) {
+  const lines = windows.map((w) => T.sma(bars.close, w));
+  return T.visibleExtent({ low: bars.low, high: bars.high, lines }, from, to, 0.04);
+}
+
+test('the y-axis fits the visible candles and averages, never the band; BAND off removes it', async () => {
+  const data = fixture();
+  const { root, charts } = await mount({ TST: data });
+  let option = priceOption(charts);
+  // The axis is exactly the bars and averages over the 1Y window: a band term would move it.
+  const want = expectedExtent(data.ohlcv, 519 - 252, data.ohlcv.close.length - 1);
+  assert.ok(Math.abs(option.yAxis[0].min - want.min) < 1e-9 && Math.abs(option.yAxis[0].max - want.max) < 1e-9);
+  assert.ok(option.series.some((s) => s.name === '±1.5σ band'), 'the band is drawn, and it is not part of the fit');
+  buttonNamed(root, 'BAND').dispatch('click');
+  await flush();
+  option = priceOption(charts);
+  assert.ok(!option.series.some((s) => s.name.startsWith('±')), 'no band series when BAND is off');
+  assert.ok(!option.legend.data.some((name) => name.startsWith('±')));
+  buttonNamed(root, 'BAND').dispatch('click');
+  await flush();
+  assert.ok(priceOption(charts).series.some((s) => s.name === '±1.5σ band'));
+});
+
+test('zooming re-fits the y-axis to the window on screen', async () => {
+  const data = fixture();
+  const { root, charts } = await mount({ TST: data });
+  // The first 10% of the 520 bars: from index 0 to 52.
+  priceHandlers(charts).datazoom({ start: 0, end: 10 });
+  const zoomed = priceOption(charts).yAxis[0];
+  const want = expectedExtent(data.ohlcv, 0, 52);
+  assert.ok(Math.abs(zoomed.min - want.min) < 1e-9 && Math.abs(zoomed.max - want.max) < 1e-9);
+  assert.ok(zoomed.max < 170, 'the early window tops out well below the latest prices');
   assert.doesNotMatch(textOf(root), /NaN|undefined|\[object Object\]/);
 });
 
@@ -166,7 +242,8 @@ test('LINE draws the close, LOG switches the price axis, and a short range keeps
   await flush();
   const option = priceOption(charts);
   assert.ok(option.series.some((s) => s.type === 'candlestick'));
-  assert.equal(option.xAxis[0].data.length, 63 + 1);
+  assert.equal(option.xAxis[0].data.length, 520, 'the full series; the 3M window is the zoom');
+  assert.equal(option.dataZoom[0].startValue, 519 - 63);
   buttonNamed(root, 'LOG').dispatch('click');
   await flush();
   assert.equal(priceOption(charts).yAxis[0].type, 'log');

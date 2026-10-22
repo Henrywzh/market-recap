@@ -12,12 +12,14 @@ const HORIZON_NAMES = { 1: '1D', 5: '5D', 20: '20D' };
 const LOOKBACKS = [['ALL', 'ALL'], ['5Y', '5Y'], ['1Y', '1Y']];
 const LOOKBACK_NAMES = { ALL: 'ALL HISTORY', '5Y': '5 YEARS', '1Y': '1 YEAR' };
 const EPISODE_ROWS = 25;
-const FORWARD_SESSIONS = [1, 5, 20];
 const DRAWDOWN_SESSIONS = 20;
 const VOLATILITY_WINDOW = 20;
 const BINS = 40;
 const EPISODE_NOTE = 'Description, not a signal: what followed past moves of this size; episodes overlap with '
   + 'the market\'s own regime, and N is small.';
+const VIX_MISSING = 'VIX history was not available in this build, so the VIX columns are dashes.';
+const VIX_BUCKET_NAMES = ['under 15', '15–20', '20–30', '30 and over'];
+const DRAWDOWN_BUCKET_NAMES = ['within 5% of its 1Y high', '5–10% below its 1Y high', '10–20% below its 1Y high', 'over 20% below its 1Y high'];
 
 const isClose = (value) => typeof value === 'number' && Number.isFinite(value);
 
@@ -33,24 +35,44 @@ function switchOf(options, active, onPick) {
   return wrap;
 }
 
-// Sigma as a reader reads it: −2.1σ, a plus only on a rise.
-function sigmaText(value) {
+// A signed figure as a reader reads it: −2.1σ, a plus only on a rise.
+function signedText(value, suffix = '') {
   if (!isClose(value)) return DASH;
   const sign = value < 0 ? '−' : value > 0 ? '+' : '';
-  return `${sign}${num(Math.abs(value), 1)}σ`;
+  return `${sign}${num(Math.abs(value), 1)}${suffix}`;
+}
+
+// The VIX level's percentile as the cell's title reads it.
+function vixTitle(percentile) {
+  if (!isClose(percentile)) return null;
+  const word = percentile < 1 ? 'under 1st' : percentile > 99 ? 'over 99th' : M.ordinal(percentile);
+  return `${word} percentile of all VIX closes up to that day`;
+}
+
+// Fetches the VIX history for the episode context. It is optional: a failure is null.
+async function loadVix(ctx) {
+  try {
+    const payload = await ctx.loadArtifact('context/vix');
+    return Array.isArray(payload?.dates) && Array.isArray(payload?.close) ? payload : null;
+  } catch {
+    return null;
+  }
 }
 
 // The stat tile for one lookback: the share of days beyond the move, with the
-// percentile, the yearly rate and the last such day beneath it.
+// count, the percentile, the yearly rate and the last such day beneath it.
 function lookbackTile(key, stat) {
   const share = isClose(stat.share) ? `${num(stat.share * 100, 1)}%` : DASH;
   const perYear = isClose(stat.perYear) ? num(stat.perYear, stat.perYear >= 2 ? 0 : 1) : DASH;
   const percentile = !isClose(stat.percentile) ? DASH
     : stat.percentile < 1 ? 'under 1st' : stat.percentile > 99 ? 'over 99th' : M.ordinal(stat.percentile);
   return el('div', { class: 'stat' }, [
-    el('div', { class: 'stat-label', text: `${LOOKBACK_NAMES[key]} · ${stat.worse} OF ${num(stat.n, 0)} DAYS` }),
+    el('div', { class: 'stat-label', text: `${LOOKBACK_NAMES[key]} · ${share} OF DAYS` }),
     el('div', { class: 'stat-value', text: share }),
-    el('div', { class: 'stat-note', text: `${percentile} percentile · ${perYear} a year · last ${stat.lastWorse || DASH}` }),
+    el('div', {
+      class: 'stat-note',
+      text: `${num(stat.worse, 0)} of ${num(stat.n, 0)} days · ${percentile} percentile · ${perYear} a year · last ${stat.lastWorse || DASH}`,
+    }),
   ]);
 }
 
@@ -62,8 +84,8 @@ function histogramChart(node, { edges, counts }, move) {
   const labels = counts.map((_, k) => `${num((edges[k] + edges[k + 1]) / 2, 1)}%`);
   render(node, (option, p) => ({
     ...option,
-    grid: { ...option.grid, top: 10, bottom: 24 },
-    xAxis: { ...option.xAxis, data: labels, boundaryGap: true },
+    grid: { ...option.grid, top: 26, bottom: 30, left: 36, right: 12, containLabel: true },
+    xAxis: { ...option.xAxis, data: labels, boundaryGap: true, axisLabel: { hideOverlap: true, interval: 'auto' } },
     yAxis: { ...option.yAxis, min: 0, scale: false },
     series: [{
       name: 'Returns', type: 'bar', barCategoryGap: '20%',
@@ -74,21 +96,37 @@ function histogramChart(node, { edges, counts }, move) {
       markLine: {
         silent: true, symbol: 'none', data: moveBin === null ? [] : [{ xAxis: moveBin }],
         lineStyle: { color: p.accent, type: 'dashed', width: 1 },
-        label: { color: p.accent, fontSize: 10, formatter: M.signedPct(move) },
+        label: { color: p.accent, fontSize: 10, position: 'end', formatter: M.signedPct(move) },
       },
     }],
   }));
 }
 
-const EPISODE_HEAD = ['START', 'WORST DAY', 'WORST MOVE', '+1 SESSION', '+5 SESSIONS', '+20 SESSIONS', 'MAX DRAWDOWN, 20'];
+const EPISODE_HEAD = ['START', 'WORST DAY', 'WORST MOVE', 'FROM 1Y HIGH', 'PRIOR 20D', 'VIX', 'VIX CHANGE',
+  '+1 SESSION', '+5 SESSIONS', '+20 SESSIONS', 'MAX DRAWDOWN, 20'];
+const PCT_FORMAT = { text: (v) => pct(v, 1), cls: dirClass };
+const LEVEL_FORMAT = { text: (v) => num(v, 1) };
+const POINTS_FORMAT = { text: (v) => signedText(v) };
+const SHARE_FORMAT = { text: (v) => `${num(v * 100, 0)}%` };
 
-function episodeLine(row) {
-  return el('tr', {}, [
+// A value as a cell, or a dash when it is missing.
+function valueCell(value, format, attrs = {}) {
+  if (!isClose(value)) return el('td', { text: DASH });
+  return el('td', { class: format.cls ? format.cls(value) : null, text: format.text(value), ...attrs });
+}
+
+// One episode, or the move itself (emphasised) with dashes for the forward returns.
+function episodeLine(row, emphasis = false) {
+  return el('tr', { class: emphasis ? 'emphasis' : null }, [
     el('td', { class: 'dim', text: row.start }),
     el('td', { text: row.worstDate }),
-    el('td', { class: dirClass(row.worst), text: pct(row.worst, 1) }),
-    ...row.forward.map((v) => el('td', { class: dirClass(v), text: v === null ? DASH : pct(v, 1) })),
-    el('td', { class: dirClass(row.drawdown), text: row.drawdown === null ? DASH : pct(row.drawdown, 1) }),
+    valueCell(row.worst, PCT_FORMAT),
+    valueCell(row.fromHigh, PCT_FORMAT),
+    valueCell(row.prior20, PCT_FORMAT),
+    valueCell(row.vix, LEVEL_FORMAT, { title: vixTitle(row.vixPct) }),
+    valueCell(row.vixChange, POINTS_FORMAT),
+    ...row.forward.map((v) => valueCell(v, PCT_FORMAT)),
+    valueCell(row.drawdown, PCT_FORMAT),
   ]);
 }
 
@@ -98,41 +136,88 @@ function wrapTable(thead, rows, foot = null) {
   return el('div', { class: 'table-scroll' }, [el('table', { class: 'data' }, parts)]);
 }
 
-// Median of each numeric column over every episode, with the count when some are missing.
-function medianCell(values, total) {
+// Median of one column over every episode, with the count when some are missing.
+function medianCell(values, total, format) {
   const m = M.median(values);
   if (m === null) return el('td', { text: DASH });
   const present = values.filter(isClose).length;
-  return el('td', { class: dirClass(m), text: `${pct(m, 1)}${present < total ? ` (n ${present})` : ''}` });
+  return el('td', {
+    class: format.cls ? format.cls(m) : null,
+    text: `${format.text(m)}${present < total ? ` (n ${present})` : ''}`,
+  });
 }
 
-function episodesBlock(rows) {
-  if (!rows.length) return notice('No day in this window moved this far, so there are no episodes.');
-  const columns = [
-    rows.map((r) => r.worst),
-    ...FORWARD_SESSIONS.map((_, k) => rows.map((r) => r.forward[k])),
-    rows.map((r) => r.drawdown),
-  ];
+// The numeric columns, in table order after the dates: the footer takes each one's median.
+const MEDIAN_COLUMNS = [
+  [(r) => r.worst, PCT_FORMAT],
+  [(r) => r.fromHigh, PCT_FORMAT],
+  [(r) => r.prior20, PCT_FORMAT],
+  [(r) => r.vix, LEVEL_FORMAT],
+  [(r) => r.vixChange, POINTS_FORMAT],
+  ...M.FORWARD_SESSIONS.map((_, k) => [(r) => r.forward[k], PCT_FORMAT]),
+  [(r) => r.drawdown, PCT_FORMAT],
+];
+
+function episodesBlock(rows, thisRow) {
+  if (!rows.length) {
+    return el('div', {}, [
+      notice('No day in this window moved this far, so there are no episodes.'),
+      wrapTable(EPISODE_HEAD, [episodeLine(thisRow, true)]),
+    ]);
+  }
   const foot = el('tfoot', {}, [el('tr', { class: 'emphasis' }, [
     el('td', { class: 'dim', text: `MEDIAN · ${rows.length} EPISODES` }),
     el('td', { text: '' }),
-    ...columns.map((values) => medianCell(values, rows.length)),
+    ...MEDIAN_COLUMNS.map(([get, format]) => medianCell(rows.map(get), rows.length, format)),
   ])]);
-  const main = wrapTable(EPISODE_HEAD, rows.slice(0, EPISODE_ROWS).map(episodeLine), foot);
+  const main = wrapTable(EPISODE_HEAD, [episodeLine(thisRow, true), ...rows.slice(0, EPISODE_ROWS).map((r) => episodeLine(r))], foot);
   if (rows.length <= EPISODE_ROWS) return main;
   const older = rows.slice(EPISODE_ROWS);
   return el('div', {}, [
     main,
     el('details', { class: 'method-fold' }, [
       el('summary', { text: `Show ${older.length} older episodes` }),
-      wrapTable(EPISODE_HEAD, older.map(episodeLine)),
+      wrapTable(EPISODE_HEAD, older.map((r) => episodeLine(r))),
     ]),
+  ]);
+}
+
+// Episodes that sit in today's VIX band and drop from the 1Y high, beside all episodes.
+function setupsBlock(setups) {
+  const bucket = (names, index) => (index === null ? DASH : names[index]);
+  const today = `Today: VIX ${bucket(VIX_BUCKET_NAMES, setups.vixBucket)}; `
+    + `${bucket(DRAWDOWN_BUCKET_NAMES, setups.drawdownBucket)}.`;
+  const line = (label, s) => {
+    const cells = [el('td', { class: 'dim', text: label }), el('td', { text: num(s.n, 0) })];
+    if (s.n < M.SETUP_MIN) {
+      cells.push(el('td', { colspan: '5', text: `n = ${s.n}: too few to read` }));
+    } else {
+      cells.push(
+        valueCell(s.median5, PCT_FORMAT), valueCell(s.positive5, SHARE_FORMAT),
+        valueCell(s.median20, PCT_FORMAT), valueCell(s.positive20, SHARE_FORMAT),
+        valueCell(s.medianDrawdown, PCT_FORMAT),
+      );
+    }
+    return el('tr', {}, cells);
+  };
+  return el('div', {}, [
+    el('div', { class: 'card-title', text: 'SIMILAR SETUPS' }),
+    el('div', { class: 'field-note', text: today }),
+    wrapTable(['SETUP', 'EPISODES', '+5 MEDIAN', '+5 SHARE UP', '+20 MEDIAN', '+20 SHARE UP', 'MAX DRAWDOWN 20, MEDIAN'], [
+      line('MATCHING TODAY', setups.matched),
+      line('ALL EPISODES', setups.all),
+    ]),
+    el('div', {
+      class: 'field-note',
+      text: 'Same VIX band and same drop from the 1Y high as today. Share up: the share of episodes whose later return was positive.',
+    }),
   ]);
 }
 
 export default async function renderMoveCheck(root, data, _manifest, ctx = {}) {
   const tickers = data?.available || [];
   const available = new Set(tickers);
+  const vix = await loadVix(ctx);
   root.append(sectionTitle('MOVE CHECK', 'HOW EXTREME IS THIS MOVE IN ITS OWN HISTORY'));
 
   let horizon = 1;
@@ -162,7 +247,7 @@ export default async function renderMoveCheck(root, data, _manifest, ctx = {}) {
 
   const lookbackSwitch = switchOf(LOOKBACKS, lookback, (key) => { lookback = key; check(); });
   const distTitle = el('span', { class: 'card-title', text: '' });
-  const distNode = el('div', { class: 'chart short' });
+  const distNode = el('div', { class: 'chart movecheck-dist' });
   const distNote = el('div', { class: 'field-note', text: '' });
   const distCard = el('div', { class: 'card' }, [
     el('div', { class: 'card-head' }, [distTitle, lookbackSwitch]),
@@ -170,10 +255,14 @@ export default async function renderMoveCheck(root, data, _manifest, ctx = {}) {
     distNote,
   ]);
 
+  const vixNote = el('div', { class: 'field-note', text: vix ? '' : VIX_MISSING });
   const episodesHost = el('div', {});
+  const setupsHost = el('div', {});
   const episodesCard = card('EPISODES BEYOND THIS MOVE', null, [
     el('div', { class: 'field-note', text: EPISODE_NOTE }),
+    vixNote,
     episodesHost,
+    setupsHost,
   ]);
 
   const methodCopy = metaRow(
@@ -186,6 +275,11 @@ export default async function renderMoveCheck(root, data, _manifest, ctx = {}) {
       'Episodes merge days beyond the move that come within 5 sessions of each other, and show the worst day in each. Forward '
         + 'returns start at the worst day\'s close. Max drawdown is the lowest close in the 20 sessions after it, against that close, '
         + 'and is a dash when those sessions are not all in the build.',
+      'FROM 1Y HIGH is the close the session before the worst day, against the highest close of the 252 sessions ending there '
+        + '(a dash when the year is not all in the build). PRIOR 20D is the return over the 20 sessions before that session. '
+        + 'VIX is Cboe\'s daily close, since 1990, on the worst day, with its change from the session before; its percentile '
+        + 'is against the VIX closes up to that day. SIMILAR SETUPS groups episodes by VIX (under 15, 15–20, 20–30, 30 and over) '
+        + 'and by the drop from the 1Y high (within 5%, 5–10%, 10–20%, over 20%), and reads no median from fewer than 5.',
       '5- and 20-session returns overlap, so their counts are of overlapping windows, not independent episodes. In today\'s '
         + 'volatility, the move is divided by the stdev of the 20 daily returns before it, scaled by the square root of the horizon.',
     ],
@@ -245,6 +339,7 @@ export default async function renderMoveCheck(root, data, _manifest, ctx = {}) {
       statHost.replaceChildren();
       distNode.replaceChildren();
       episodesHost.replaceChildren();
+      setupsHost.replaceChildren();
       return;
     }
 
@@ -273,7 +368,7 @@ export default async function renderMoveCheck(root, data, _manifest, ctx = {}) {
       ...LOOKBACKS.map(([key]) => lookbackTile(key, stats[key])),
       el('div', { class: 'stat' }, [
         el('div', { class: 'stat-label', text: 'IN TODAY\'S VOLATILITY' }),
-        el('div', { class: `stat-value ${dirClass(sigma)}`, text: sigmaText(sigma) }),
+        el('div', { class: `stat-value ${dirClass(sigma)}`, text: signedText(sigma, 'σ') }),
         el('div', { class: 'stat-note', text: `${VOLATILITY_WINDOW}-session window` }),
       ]),
     );
@@ -284,12 +379,21 @@ export default async function renderMoveCheck(root, data, _manifest, ctx = {}) {
     distNote.textContent = `${num(windowed.length, 0)} returns in the window. Dashed line: the move. Coloured bars are at or beyond it.`;
     histogramChart(distNode, hist, move);
 
-    const rows = M.episodes(windowed, move).reverse().map((ep) => ({
+    const context = (day) => M.contextOn({ dates, close, vix, date: day });
+    // The move's own session is THIS MOVE, not a past episode: it has no forward returns yet.
+    const rows = M.episodes(windowed, move).filter((ep) => ep.worstDate !== date).reverse().map((ep) => ({
       ...ep,
-      forward: FORWARD_SESSIONS.map((s) => M.forward(dates, close, ep.worstDate, s)),
+      ...context(ep.worstDate),
+      forward: M.FORWARD_SESSIONS.map((s) => M.forward(dates, close, ep.worstDate, s)),
       drawdown: M.maxDrawdownAfter(dates, close, ep.worstDate, DRAWDOWN_SESSIONS),
     }));
-    episodesHost.replaceChildren(episodesBlock(rows));
+    const today = context(date);
+    const thisRow = {
+      start: 'THIS MOVE', worstDate: date, worst: move, ...today,
+      forward: M.FORWARD_SESSIONS.map(() => null), drawdown: null,
+    };
+    episodesHost.replaceChildren(episodesBlock(rows, thisRow));
+    setupsHost.replaceChildren(setupsBlock(M.similarSetups(rows, today)));
 
     status.textContent = `${symbol} · ${num(series.length, 0)} ${HORIZON_NAMES[horizon]} returns to ${date}`;
   }

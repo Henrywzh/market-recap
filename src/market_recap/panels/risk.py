@@ -14,13 +14,15 @@ from datetime import date, timedelta
 import time
 from typing import Callable
 
+import numpy as np
 import pandas as pd
 
 from ..compute import anchor as A
 from ..compute import risk as R
 from ..compute import sentiment as S
+from ..config import ARTIFACT_DIR
 from ..sources import cboe, cftc, damodaran, fred, shiller, snapshot_store, treasury, yahoo
-from ..util import SourceRecord, describe_error, to_iso_date
+from ..util import SourceRecord, describe_error, to_iso_date, write_json
 
 CBOE_INDICES = ("VIX", "VIX9D", "VIX3M", "VIX6M", "VIX1Y", "VVIX", "SKEW", "COR1M")
 # Cboe's secondary indices were launched after their first row; the earlier
@@ -374,6 +376,30 @@ def _sentiment(inputs: _Inputs) -> dict:
     return S.gauge(raw, calendar, history_sessions=len(calendar))
 
 
+def vix_context(series: pd.Series, as_of: str | None) -> dict:
+    """The daily Cboe VIX closes MOVE CHECK reads for episode context: finite
+    values only, rounded to cents, cut at the page's session."""
+    clean = pd.to_numeric(series, errors="coerce").dropna()
+    clean = clean[np.isfinite(clean.to_numpy(dtype=float))]
+    if as_of:
+        clean = clean[clean.index <= pd.Timestamp(as_of)]
+    return {
+        "as_of": as_of,
+        "source": "Cboe VIX",
+        "dates": [d.strftime("%Y-%m-%d") for d in pd.to_datetime(clean.index)],
+        "close": [round(float(v), 2) for v in clean.to_numpy(dtype=float)],
+    }
+
+
+def _write_vix_context(ctx, inputs: _Inputs) -> None:
+    """Writes context/vix.json for MOVE CHECK. It is optional, so a failure only logs."""
+    try:
+        write_json(ARTIFACT_DIR / "context" / "vix.json",
+                   vix_context(inputs.cboe.get("VIX", pd.Series(dtype=float)), ctx.as_of))
+    except Exception as exc:  # noqa: BLE001 - the context is optional; RISK still renders
+        ctx.log.fail("risk:vix_context", exc)
+
+
 def _round(value: float | None, digits: int) -> float | None:
     return None if value is None else round(float(value), digits)
 
@@ -448,6 +474,7 @@ def build(ctx) -> dict:
     settings = ctx.config.get("risk", {})
     inputs = _Inputs(ctx)
     inputs.load(settings)
+    _write_vix_context(ctx, inputs)
     builders = _builders(inputs)
 
     sections = []

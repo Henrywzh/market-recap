@@ -120,7 +120,9 @@ def _placeholder(row, column):
 def _risk():
     """A matrix with a change into elevated, a change back to calm, two stressed cells, a grey cell
     that was stressed (no reading now, so no change) and a placeholder."""
-    return {"matrix": {
+    return {"sections": [{"key": "volatility", "label": "VOLATILITY",
+                          "tiles": [{"key": "vix", "value": 19.03, "change_1d": 2.35, "date": AS_OF}]}],
+            "matrix": {
         "rows": [{"key": "credit", "label": "CREDIT"}, {"key": "equities", "label": "EQUITIES"},
                  {"key": "macro", "label": "MACRO"}],
         "columns": [{"key": "structure", "label": "STRUCTURE"}, {"key": "technical", "label": "TECHNICAL"},
@@ -555,3 +557,132 @@ def test_a_watch_name_in_the_outer_tail_of_its_own_history_is_listed_once():
     assert item["kind"] == "tail" and item["link"] == "#movecheck/QQQ" and item["extra"]["horizon"] == 1
     assert item["title"].startswith("Nasdaq-100 (QQQ) fell 3.0% today: never further since 2016")
     assert item["importance"] == "high"
+
+
+# --- board, headline, move flags ---------------------------------------------
+
+def _walk(periods, seed=3):
+    """A daily close path ending on the session, with 1% daily noise."""
+    rng = np.random.default_rng(seed)
+    return pd.Series(100 * np.cumprod(1 + rng.normal(0, 0.01, periods)),
+                     index=pd.bdate_range(end=AS_OF, periods=periods))
+
+
+def _board_ctx(frames):
+    """A context whose watch list is the given {symbol: (label, closes)}, closes read from etf_closes."""
+    ctx = _ctx()
+    ctx.config["today"]["oversold_watch"] = {symbol: label for symbol, (label, _) in frames.items()}
+    ctx.etf_closes = pd.DataFrame({symbol: close for symbol, (_, close) in frames.items()})
+    return ctx
+
+
+def test_board_row_maths_share_rsi_and_stale_names_skipped(tmp_path):
+    walk = _walk(300)
+    crash = walk.copy()
+    crash.iloc[-1] = crash.iloc[-2] * 0.9  # -10% on the session, further than any past day in this walk
+    falling = pd.Series(100 * 0.98 ** np.arange(40), index=pd.bdate_range(end=AS_OF, periods=40))
+    ctx = _board_ctx({"^NDX": ("Nasdaq-100", crash), "XLE": ("Energy (XLE)", falling),
+                      "XLU": ("Utilities (XLU)", _walk(300, seed=5).iloc[:-1])})  # XLU's last close is a session old
+    rows = _run(ctx=ctx, events_dir=tmp_path)["board"]["rows"]
+    assert [r["symbol"] for r in rows] == ["^NDX", "XLE"]  # config order; XLU skipped
+    ndx, xle = rows
+    assert ndx["group"] == "index" and ndx["short"] == "Nasdaq-100" and ndx["ret_pct"] == -10.0
+    rets = crash.pct_change().dropna() * 100
+    assert ndx["z"] == pytest.approx(round(rets.iloc[-1] / rets.iloc[-61:-1].std(), 2))
+    assert ndx["share_pct"] == 0.0  # no past day fell this far
+    assert 0 <= ndx["rsi6"] <= 100
+    assert xle["group"] == "sector" and xle["short"] == "Energy" and xle["ret_pct"] == -2.0
+    assert xle["z"] is None and xle["share_pct"] is None  # too little history for either
+    assert xle["rsi6"] == 0.0  # forty closes all lower: RSI(6) at its floor
+
+
+def _row(symbol, label, group, ret, share=None):
+    return {"symbol": symbol, "label": label, "short": today.SHORT_LABEL.get(symbol, label), "group": group,
+            "ret_pct": ret, "z": None, "share_pct": share, "rsi6": None}
+
+
+def _day_board(vix=None, sectors=None, spx=-1.2):
+    rows = [_row("^GSPC", "S&P 500", "index", spx), _row("^NDX", "Nasdaq-100", "index", -2.9)]
+    rows += sectors if sectors is not None else [
+        _row("SOXX", "Semiconductors (SOXX)", "sector", -6.79, share=0.5),
+        _row("XLK", "Technology (XLK)", "sector", -3.3, share=12.0),
+        _row("XLP", "Consumer staples (XLP)", "sector", 3.3),
+        _row("XLU", "Utilities (XLU)", "sector", 2.1),
+        _row("XLE", "Energy (XLE)", "sector", -0.2),
+    ]
+    return {"as_of": AS_OF, "rows": rows, "vix": {"value": 19.03, "change": 2.35} if vix is None else vix}
+
+
+def test_headline_text_is_the_fixed_template():
+    out = today.headline(_day_board())
+    assert out == {"text": "S&P 500 −1.2%, Nasdaq-100 −2.9%. Weakest: Semis −6.8% (rare: 0.5% of days), Tech −3.3%. "
+                           "Strongest: Staples +3.3%, Utilities +2.1%. VIX 19.0 (+2.4).", "tone": "down"}
+
+
+def test_headline_drops_a_missing_vix_and_a_sector_part_with_no_sector_up():
+    no_vix = today.headline(_day_board(vix={"value": None, "change": None}))
+    assert no_vix["text"].endswith("Strongest: Staples +3.3%, Utilities +2.1%.")
+    down_only = [_row("SOXX", "Semiconductors (SOXX)", "sector", -6.79, share=0.5),
+                 _row("XLK", "Technology (XLK)", "sector", -3.3, share=12.0),
+                 _row("XLE", "Energy (XLE)", "sector", -0.2)]
+    text = today.headline(_day_board(vix={"value": 19.03, "change": None}, sectors=down_only))["text"]
+    assert "Strongest" not in text and text.endswith("VIX 19.0.")
+
+
+def test_headline_tone_is_flat_inside_three_tenths_and_none_under_three_rows():
+    assert today.headline(_day_board(spx=-0.2))["tone"] == "flat"
+    assert today.headline(_day_board(spx=0.5))["tone"] == "up"
+    assert today.headline({"rows": _day_board()["rows"][:2]}) is None
+
+
+def test_move_items_carry_earnings_flag_and_sparkline(tmp_path):
+    ctx = _ctx()
+    ctx.closes = pd.DataFrame({"NVDA": _walk(40)})
+    inputs = _inputs()
+    inputs["moves"]["unusual"] = ["NVDA", "XOM", "TRV"]
+    inputs["catalysts"]["recent"]["earnings_reacted"].append(
+        {"symbol": "XOM", "date": AS_OF, "eps": 1.0, "eps_forecast": 0.9, "surprise_pct": 11.1, "return_1d": 2.4,
+         "index_weights": {"SPX": 0.3}})
+    moves = {m["subject"]: m for m in _run(ctx=ctx, inputs=inputs, events_dir=tmp_path)["unusual"]["moves"]}
+    assert moves["XOM"]["extra"]["earnings"] is True  # an earnings reaction this session
+    assert moves["TRV"]["extra"]["earnings"] is True  # reported, per the moves row
+    assert moves["NVDA"]["extra"]["earnings"] is False
+    spark = moves["NVDA"]["extra"]["spark"]
+    assert len(spark) == 20 and spark[-1] == float(f"{ctx.closes['NVDA'].iloc[-1]:.4g}")
+    assert moves["XOM"]["extra"]["spark"] == []  # no frame holds XOM
+
+
+def test_reaction_for_a_listed_move_is_dropped_from_events(tmp_path):
+    inputs = _inputs()
+    inputs["catalysts"]["recent"]["earnings_reacted"].append(
+        {"symbol": "XOM", "date": AS_OF, "eps": 1.0, "eps_forecast": 0.9, "surprise_pct": 11.1, "return_1d": 2.4,
+         "index_weights": {"SPX": 0.3}})
+    out = _run(inputs=inputs, events_dir=tmp_path)
+    reactions = [i["subject"] for i in out["unusual"]["events"] if i["kind"] == "reaction"]
+    assert reactions == ["TRV"]  # XOM is already a move row, so no second row for it
+    assert not any(i["subject"] == "XOM" for i in out["unusual"]["events"])
+
+
+def test_payload_is_strict_json_with_board_and_headline(tmp_path):
+    ctx = _board_ctx({"^GSPC": ("S&P 500", _walk(300)), "XLK": ("Technology (XLK)", _walk(300, seed=8)),
+                      "XLP": ("Consumer staples (XLP)", _walk(300, seed=9))})
+    out = _run(ctx=ctx, events_dir=tmp_path)
+    json.dumps(out, allow_nan=False)
+    assert out["board"]["vix"] == {"value": 19.03, "change": 2.35}
+    assert [r["symbol"] for r in out["board"]["rows"]] == ["^GSPC", "XLK", "XLP"]
+    assert out["headline"]["text"].startswith("S&P 500 ") and out["headline"]["tone"] in ("up", "down", "flat")
+    empty = _run(events_dir=tmp_path)
+    assert empty["board"]["rows"] == [] and empty["headline"] is None
+    json.dumps(empty, allow_nan=False)
+
+
+def test_sparkline_and_board_round_to_four_significant_digits():
+    assert today._round(1.23456, 2) == 1.23 and today._round(float("nan"), 2) is None
+    close = pd.Series([123.456789, 124.0], index=pd.bdate_range(end=AS_OF, periods=2))
+    assert today._spark(SimpleNamespace(closes=pd.DataFrame({"AB": close})), "AB", AS_OF) == [123.5, 124.0]
+
+
+def test_board_vix_is_left_out_when_the_tile_is_from_another_session():
+    risk = {"sections": [{"tiles": [{"key": "vix", "value": 16.7, "change_1d": -0.6, "date": "2026-10-21"}]}]}
+    assert today._vix(risk, "2026-10-22") == {"value": None, "change": None}
+    assert today._vix(risk, "2026-10-21") == {"value": 16.7, "change": -0.6}

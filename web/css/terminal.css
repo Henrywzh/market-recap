@@ -248,6 +248,26 @@ table.data td.wrap-cell { overflow-wrap: anywhere; }
 .chart { width: 100%; height: 300px; }
 .chart.tall { height: 380px; }
 .chart.short { height: 170px; }
+.chart.price-tall { height: 560px; }
+.chart.movecheck-dist { height: 240px; }
+.chart.trend-chart { height: 260px; }
+.chart.check-chart { height: 200px; }
+.pos-bar-wrap { display: block; margin: 8px 0 4px; }
+.pos-bar { position: relative; height: 8px; border: 1px solid var(--border); border-radius: 4px; }
+.pos-bar-zero { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--border-strong); }
+.pos-bar-mark { position: absolute; top: -3px; bottom: -3px; width: 3px; transform: translateX(-50%); border-radius: 2px; background: var(--accent); }
+.pos-bar-mark.up { background: var(--up); }
+.pos-bar-mark.down { background: var(--down); }
+.pos-bar-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); }
+.trend-model { margin-bottom: 8px; }
+.trend-answer-block { margin: 8px 0; }
+.trend-answer { margin: 4px 0; font-size: 12px; line-height: 1.4; }
+.trend-check { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px; }
+.pos-flows td { font-variant-numeric: tabular-nums; }
+.risk-changes { list-style: none; margin: 0; padding: 0; font-size: 11px; }
+.risk-changes li { padding: 3px 0; border-bottom: 1px solid var(--border); }
+.risk-tile.gauge.missing { opacity: 0.6; }
+@media (max-width: 700px) { .chart.price-tall { height: 420px; } }
 
 /* ---------- Treemap ---------- */
 .treemap { position: relative; width: 100%; height: 620px; overflow: hidden; border: 1px solid var(--border); }
@@ -1621,3 +1641,32 @@ a.today-tile:hover { background: var(--panel-alt); }
 
 /* MOVE CHECK: the headline sentence reads as the lead line. */
 .move-headline { font-size: 15px; line-height: 1.5; margin: 4px 0 12px; }
+
+/* TODAY: headline, board, signal chips, movers table, three-day calendar. */
+.today-headline { font-size: 20px; font-weight: 700; line-height: 1.3; margin: 10px 0 14px; }
+.today-headline.up { color: var(--up); }
+.today-headline.down { color: var(--down); }
+.today-headline.flat { color: var(--text); }
+.today-board-chart { margin: 4px 0 10px; }
+.today-chips-label { min-width: 84px; font-size: 10px; letter-spacing: 0.1em; color: var(--text-dim); align-self: center; }
+.chip { display: inline-flex; align-items: center; max-width: 100%; padding: 2px 7px; border: 1px solid var(--border); font-size: 11px; color: var(--text-dim); text-decoration: none; overflow-wrap: anywhere; }
+a.chip:hover { background: var(--panel-alt); }
+.chip.up { color: var(--up); border-color: var(--up); }
+.chip.down { color: var(--down); border-color: var(--down); }
+.chip.warn { color: var(--accent); border-color: var(--accent); }
+.chip.info { color: var(--blue); border-color: var(--blue); }
+.today-movers td { font-size: 12px; padding: 4px 6px; white-space: nowrap; }
+.today-movers tr.is-strong td { font-weight: 700; }
+.today-mover-ticker { display: inline-flex; align-items: center; gap: 6px; }
+.today-spark { width: 60px; }
+.today-spark-svg { display: block; }
+.today-spark-svg path { fill: none; stroke: var(--text-dim); stroke-width: 1.2; }
+.today-sector-line { display: block; font-size: 12px; font-weight: 600; padding: 6px 0; border-bottom: 1px solid var(--border); color: inherit; text-decoration: none; }
+.today-macro td.is-above, .today-macro td.is-below { color: var(--accent); }
+.today-pending { font-size: 11px; line-height: 1.6; margin: 8px 0; }
+.today-days { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.today-row.is-high { font-weight: 700; }
+.today-later td { font-size: 11.5px; padding: 4px 6px; }
+@media (max-width: 900px) { .today-days { grid-template-columns: minmax(0, 1fr); } }
+.today-later td, .today-later th { white-space: nowrap; }
+table.today-later td:nth-child(3), table.today-later th:nth-child(3) { text-align: left; white-space: normal; }

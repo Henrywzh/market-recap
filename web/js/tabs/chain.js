@@ -55,10 +55,10 @@ function chip(node, state) {
     : [el('span', { class: 'dim', text: node.next ? `next ${node.next.date.slice(5)}` : 'no date' })];
   return el('button', {
     type: 'button', class: cls.join(' '), onclick: () => state.pick(node.key),
-    title: `${node.name} (${node.key}, ${node.market})${role ? ` · ${ROLE_LABEL[role]} of ${state.selected}` : ''}`,
+    title: `${node.name} (${node.key}, ${node.market}${node.us ? `; US ${node.us}` : ''})${role ? ` · ${ROLE_LABEL[role]} of ${state.selected}` : ''}`,
   }, [
     el('div', { class: 'chain-chip-name', text: node.name }),
-    el('div', { class: 'chain-chip-key dim', text: `${node.key}${node.market !== 'US' ? ` · ${node.market}` : ''}` }),
+    el('div', { class: 'chain-chip-key dim', text: `${node.key}${node.market !== 'US' ? ` · ${node.market}` : ''}${node.us ? ` · US ${node.us}` : ''}` }),
     el('div', { class: 'chain-chip-status' }, status),
   ]);
 }

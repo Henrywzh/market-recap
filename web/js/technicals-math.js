@@ -276,6 +276,20 @@ export function change(values, index) {
   return finite(now) && finite(before) && before !== 0 ? (now / before - 1) * 100 : null;
 }
 
+// The y-axis range for a window of sessions [from, to] (inclusive): the lowest
+// and highest of the `low` and `high` arrays and of each line, missing values
+// skipped, padded by `pad` of the span on each side. Null when nothing is finite.
+export function visibleExtent({ low = [], high = [], lines = [] }, from, to, pad = 0) {
+  const a = Math.max(0, from);
+  const seen = [...low.slice(a, to + 1), ...high.slice(a, to + 1), ...lines.flatMap((line) => line.slice(a, to + 1))]
+    .filter(finite);
+  if (!seen.length) return null;
+  const min = Math.min(...seen);
+  const max = Math.max(...seen);
+  const span = max - min || Math.abs(max) || 1;
+  return { min: min - pad * span, max: max + pad * span };
+}
+
 // Highest and lowest value over the last `window` sessions, missing sessions
 // skipped. Null until the history holds a full window.
 export function stats52w(values, window = TRADING_DAYS_PER_YEAR) {

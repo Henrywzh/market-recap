@@ -105,3 +105,13 @@ test('relative volume is today over the mean of the 20 sessions before it', () =
   assert.equal(T.relVolume(Array(20).fill(100), 20), null);
   assert.equal(T.relVolume([], 20), null);
 });
+
+test('the visible extent covers the window only, skips missing values and pads by the span', () => {
+  const series = { low: [1, 5, null, 2], high: [9, 6, 7, 3], lines: [[null, 4, 4, 4]] };
+  assert.deepEqual(T.visibleExtent(series, 1, 2, 0), { min: 4, max: 7 });
+  const padded = T.visibleExtent(series, 1, 2, 0.04);
+  assert.ok(Math.abs(padded.min - (4 - 0.04 * 3)) < 1e-9);
+  assert.ok(Math.abs(padded.max - (7 + 0.04 * 3)) < 1e-9);
+  assert.equal(T.visibleExtent({ low: [null], high: [null], lines: [[null]] }, 0, 0, 0.04), null);
+  assert.equal(T.visibleExtent(series, 5, 9, 0), null);
+});

@@ -4,7 +4,7 @@
 // render with the live feeds stubbed out.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import renderToday, { dayLabel, whenText, unusualNodes, comingUpSection, justOutSection, median, epsVerdict, earningsSummary, forecastOf, surpriseDirection } from '../../web/js/tabs/today.js';
+import renderToday, { dayLabel, whenText, moversNodes, comingUpSection, justOutSection, median, epsVerdict, earningsSummary, forecastOf, surpriseDirection } from '../../web/js/tabs/today.js';
 import { VIEWS, DEFAULT_VIEW, parseHash, viewById } from '../../web/js/routes.js';
 
 class FakeNode {
@@ -48,8 +48,10 @@ function textOf(node) {
 // Runs a synchronous render with the browser globals and the timers stubbed, so the
 // live strip and the live feeds create nothing that outlives the test.
 function withBrowser(run) {
-  const saved = { document: globalThis.document, setTimeout: globalThis.setTimeout, setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval };
+  const saved = { document: globalThis.document, window: globalThis.window, setTimeout: globalThis.setTimeout, setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval };
   globalThis.document = fakeDocument();
+  // No ECharts here: the board's chart draws nothing, and the page still builds.
+  globalThis.window = {};
   globalThis.setTimeout = () => 0;
   globalThis.setInterval = () => 0;
   globalThis.clearInterval = () => {};
@@ -79,7 +81,7 @@ const fixture = () => ({
         extra: { expectations: [{ kind: 'survey', value: 3.2, unit: '%', decimals: 1, source: 'Survey' }] } }),
       item({ kind: 'expiry', subject: 'Monthly options expiry', title: 'Monthly options expiry settled this session', importance: 'medium' }),
     ],
-    earnings: [item({ kind: 'earnings', subject: 'TRV', title: 'TRV beat expected EPS: 9.18 against 7.07', link: '#ticker/TRV', z: 0.9, extra: { return_1d: 1.47, surprise_pct: 29.84, weight: 0.12 } })],
+    earnings: [item({ kind: 'earnings', subject: 'TRV', title: 'TRV beat expected EPS: 9.18 against 7.07', link: '#ticker/TRV', z: 0.9, extra: { eps: 9.18, return_1d: 1.47, surprise_pct: 29.84, weight: 0.12 } })],
   },
   coming_up: {
     days: [
@@ -123,31 +125,110 @@ test('dates read as calendar days, and an item shows its clock time, else its ti
   assert.equal(whenText(item({})), '');
 });
 
-test('the page draws the title, the three section headings, the coming-up days and LATER', () => withBrowser(() => {
+// The page with the figure blocks: the board, the headline, the signal chips and the
+// movers' earnings flags and sparklines, as the build now gives them.
+const BOARD_ROWS = [
+  { symbol: '^GSPC', label: 'S&P 500', short: 'S&P 500', group: 'index', ret_pct: -1.2, z: -1.9, share_pct: 30.1, rsi6: 41.0 },
+  { symbol: '^NDX', label: 'Nasdaq-100', short: 'Nasdaq-100', group: 'index', ret_pct: -2.9, z: -3.4, share_pct: 4.1, rsi6: 27.2 },
+  { symbol: 'DIA', label: 'Dow (DIA)', short: 'Dow', group: 'index', ret_pct: -0.8, z: -1.2, share_pct: 20.0, rsi6: 44.0 },
+  { symbol: 'IWM', label: 'Russell 2000 (IWM)', short: 'Russell 2000', group: 'index', ret_pct: -1.5, z: -2.0, share_pct: 8.0, rsi6: 35.0 },
+  { symbol: 'RSP', label: 'S&P 500 equal weight (RSP)', short: 'Equal weight', group: 'index', ret_pct: -1.0, z: -1.5, share_pct: 25.0, rsi6: 38.0 },
+  { symbol: 'SOXX', label: 'Semiconductors (SOXX)', short: 'Semis', group: 'sector', ret_pct: -6.79, z: -3.1, share_pct: 0.5, rsi6: 20.4 },
+  { symbol: 'XLK', label: 'Technology (XLK)', short: 'Tech', group: 'sector', ret_pct: -3.27, z: -2.4, share_pct: 2.3, rsi6: 28.0 },
+  { symbol: 'XLC', label: 'Communication services (XLC)', short: 'Comm services', group: 'sector', ret_pct: -1.9, z: -1.6, share_pct: 12.0, rsi6: 25.1 },
+  { symbol: 'XLF', label: 'Financials (XLF)', short: 'Financials', group: 'sector', ret_pct: -0.5, z: -0.6, share_pct: 40.0, rsi6: 45.0 },
+  { symbol: 'XLY', label: 'Consumer discretionary (XLY)', short: 'Discretionary', group: 'sector', ret_pct: -0.2, z: -0.3, share_pct: 45.0, rsi6: 50.0 },
+  { symbol: 'XLE', label: 'Energy (XLE)', short: 'Energy', group: 'sector', ret_pct: 0.9, z: 0.8, share_pct: 35.0, rsi6: 55.0 },
+  { symbol: 'XLU', label: 'Utilities (XLU)', short: 'Utilities', group: 'sector', ret_pct: 2.1, z: 2.2, share_pct: 3.0, rsi6: 70.0 },
+  { symbol: 'XLP', label: 'Consumer staples (XLP)', short: 'Staples', group: 'sector', ret_pct: 3.3, z: 3.0, share_pct: 0.4, rsi6: 75.0 },
+];
+
+const HEADLINE = 'S&P 500 −1.2%, Nasdaq-100 −2.9%. Weakest: Semis −6.8% (rare: 0.5% of days), Tech −3.3%. Strongest: Staples +3.3%, Utilities +2.1%. VIX 19.0 (+2.4).';
+
+// The fixture with the new payload keys: the board, the headline, the signal kinds,
+// and the movers' earnings flags and sparklines.
+const pageFixture = () => {
+  const data = fixture();
+  data.board = { as_of: '2026-10-16', rows: BOARD_ROWS, vix: { value: 19.03, change: 2.35 } };
+  data.headline = { text: HEADLINE, tone: 'down' };
+  data.unusual.moves = [item({
+    kind: 'move', subject: 'NVDA', title: 'NVIDIA fell far beyond its usual move', z: -3.4, evidence: 'tested', importance: 'high', link: '#ticker/NVDA',
+    extra: { ret_pct: -6.1, own_pct: -5.2, market_pct: -0.9, sector_pct: -0.4, earnings: true, spark: [10, 10.5, null, 11, 9.8] },
+  }), item({
+    kind: 'move', subject: 'CSX', title: 'CSX rose 2.1%, 2.2 times its usual move', z: 2.2, importance: 'medium', link: '#ticker/CSX',
+    extra: { ret_pct: 2.1, own_pct: 1.9, market_pct: -0.2, sector_pct: 0.1, spark: [] },
+  })];
+  data.unusual.oversold = [item({
+    kind: 'oversold', subject: 'Semiconductors (SOXX)', title: 'Semiconductors (SOXX) oversold: first close below 30 on RSI(6)', value: 20.4,
+    detail: 'How stretched the fall is, not a rebound call.', link: '#technicals/SOXX', extra: { symbol: 'SOXX', rsi: 20.4, line: 20 },
+  })];
+  data.unusual.tails = [item({
+    kind: 'tail', subject: 'Consumer staples (XLP)', title: 'Consumer staples (XLP) rose 3.3% today', value: 3.3, unit: '%',
+    detail: 'How rare in its own history.', link: '#movecheck/XLP', extra: { symbol: 'XLP', share_pct: 0.4 },
+  })];
+  data.just_out.earnings = [
+    item({ kind: 'earnings', subject: 'TRV', title: 'TRV beat expected EPS: 9.18 against 7.07', link: '#ticker/TRV', extra: { eps: 9.18, return_1d: 1.47, surprise_pct: 29.84, weight: 0.12 } }),
+    ...['WDC', 'NEM', 'BE', 'FIX', 'VRSN', 'OMC', 'DECK'].map((name, i) => item({
+      kind: 'earnings', subject: name, title: `${name} reports after the close`, timing: 'amc', link: `#ticker/${name}`, importance: 'low',
+      extra: { eps: null, weight: 0.2 - i * 0.02, eps_forecast: 1.2 },
+    })),
+  ];
+  return data;
+};
+
+// Every node under a root whose class names the given class.
+function byClass(node, name, found = []) {
+  if (node?.className?.split(' ').includes(name)) found.push(node);
+  for (const child of node?.children || []) byClass(child, name, found);
+  return found;
+}
+
+const BAD = /NaN|undefined|\[object Object\]/;
+
+test('the page reads headline first, then the board card, then signals, movers and the columns', () => withBrowser(() => {
+  const root = new FakeNode('main');
+  renderToday(root, pageFixture(), null, {});
+  const page = root.children[0];
+  const order = page.children.map((child) => child.className || child.tagName);
+  const at = (cls) => order.findIndex((c) => String(c).split(' ').includes(cls));
+  assert.ok(at('today-headline') > at('today-live'), 'the headline follows the live strip');
+  assert.ok(at('card') > at('today-headline'), 'the board card follows the headline');
+  assert.ok(at('today-columns') > at('card'), 'the two columns follow the board');
+  const text = textOf(root);
+  assert.ok(text.includes(HEADLINE), 'the headline is the build text');
+  assert.equal(byClass(root, 'today-headline')[0].className, 'today-headline down');
+  assert.ok(text.includes('THE DAY BY INDEX AND SECTOR'));
+  assert.ok(byClass(root, 'today-board-chart').length === 1);
+  assert.doesNotMatch(text, BAD);
+}));
+
+test('the page draws the title, the section headings, the coming-up days and LATER', () => withBrowser(() => {
   const root = new FakeNode('main');
   renderToday(root, fixture(), null, {});
   const text = textOf(root);
-  for (const heading of ['TODAY', 'JUST OUT', 'COMING UP', 'UNUSUAL NOW']) assert.ok(text.includes(heading), `missing ${heading}`);
+  for (const heading of ['TODAY', 'JUST OUT', 'COMING UP', 'UNUSUAL NOW', 'MOVERS']) assert.ok(text.includes(heading), `missing ${heading}`);
   assert.ok(text.includes('MON OCT 19') && text.includes('TUE OCT 20') && text.includes('WED OCT 21'));
   assert.ok(text.includes('LATER · HIGH IMPORTANCE · TO SUN NOV 1'));
-  assert.ok(text.includes('Fifth Third reports before the open'));
-  assert.ok(text.includes('EPS estimate 1.09 · implied ±4.2%'));
-  assert.ok(text.includes('CPI') && text.includes('3.40%') && text.includes('vs forecast 3.20%'), 'the macro card carries the actual and the forecast');
-  assert.ok(text.includes('Monthly options expiry settled this session'), 'a release with no number is a chip');
+  assert.ok(text.includes('FITB') && text.includes('implied ±4.2%'), 'a coming-up row is its subject and its figure');
+  assert.ok(text.includes('CPI') && text.includes('3.40%') && text.includes('VS FORECAST') && text.includes('3.20%'), 'the macro table carries the actual and the forecast');
+  assert.ok(text.includes('Also: Monthly options expiry'), 'a release with no number is named on one line');
   assert.ok(text.includes('TRV') && text.includes('BEAT') && text.includes('+29.8%') && text.includes('+1.5%'), 'the earnings tile carries the verdict, surprise and move');
   assert.ok(text.includes('SESSION CLOSE · OCT 16, 2026'), 'the header carries the session close');
 }));
 
-test('a day with no items, an empty unusual list and the ongoing line read as the page says', () => withBrowser(() => {
+test('a day with no items, an empty movers list and the empty signals read as the page says', () => withBrowser(() => {
   const text = textOf(comingUpSection(fixture().coming_up));
   assert.ok(text.includes('Nothing on the calendar this session that matters here.'));
-  const quiet = textOf({ children: unusualNodes(nothing().unusual, { live: null, asOf: '2026-10-16' }) });
+  const quiet = textOf({ children: moversNodes(nothing().unusual, { live: null, asOf: '2026-10-16' }) });
   assert.ok(quiet.includes('Nothing crossed a threshold this session.'));
-  assert.ok(!quiet.includes('MOVES'), 'no block headings when nothing moved');
-  const busy = textOf({ children: unusualNodes(fixture().unusual, { live: null, asOf: '2026-10-16' }) });
-  assert.ok(busy.includes('Ongoing: Small caps lagging the S&P 500 (26 sessions)'));
-  assert.ok(busy.includes('TESTED'), 'a tested row carries the TESTED tag');
-  assert.ok(busy.includes('AS OF OCT 16, 2026 CLOSE'));
+  assert.ok(!quiet.includes('NVDA'), 'no mover, no table');
+  const busy = textOf({ children: moversNodes(fixture().unusual, { live: null, asOf: '2026-10-16' }) });
+  assert.ok(busy.includes('NVDA') && busy.includes('AS OF OCT 16, 2026 CLOSE'));
+  assert.ok(!busy.includes('TESTED'), 'no tag beyond the E badge');
+  assert.ok(moversNodes(fixture().unusual, { live: null, asOf: '2026-10-16' }).every(Boolean), 'no null node: replaceChildren would print it');
+  const signals = new FakeNode('main');
+  renderToday(signals, nothing(), null, {});
+  assert.ok(textOf(signals).includes('No signal this session.'));
 }));
 
 test('an empty macro or earnings list reads as one dim line each, not a gap', () => withBrowser(() => {
@@ -156,14 +237,14 @@ test('an empty macro or earnings list reads as one dim line each, not a gap', ()
   assert.ok(text.includes('No index-weight earnings came out last session.'));
 }));
 
-test('the live MOVES list replaces the close, and says it is provisional with the quote time', () => withBrowser(() => {
-  const live = { items: [{ ticker: 'MU', name: 'Micron', ret_pct: 4.2, z: 3.1, z_own: 2.6, time: 1800000000 }], time: 1800000000 };
-  const text = textOf({ children: unusualNodes(fixture().unusual, { live, asOf: '2026-10-16' }) });
+test('the live MOVERS list replaces the close, and says it is provisional with the quote time', () => withBrowser(() => {
+  const live = { items: [{ ticker: 'MU', name: 'Micron', ret_pct: 4.2, z: 3.1, own_pct: 3.0, z_own: 2.6, time: 1800000000 }], time: 1800000000 };
+  const text = textOf({ children: moversNodes(fixture().unusual, { live, asOf: '2026-10-16' }) });
   assert.ok(text.includes('LIVE · PROVISIONAL'));
-  assert.ok(text.includes('Micron'));
-  assert.ok(!text.includes('NVIDIA fell far beyond'), 'the close list is not shown while live');
+  assert.ok(text.includes('MU'), 'the live row is the ticker');
+  assert.ok(!text.includes('NVDA'), 'the close list is not shown while live');
   assert.ok(!text.includes('CLOSE'), 'no close stamp while live');
-  const none = textOf({ children: unusualNodes(nothing().unusual, { live: { items: [], time: 1800000000 }, asOf: '2026-10-16' }) });
+  const none = textOf({ children: moversNodes(nothing().unusual, { live: { items: [], time: 1800000000 }, asOf: '2026-10-16' }) });
   assert.ok(none.includes('LIVE · PROVISIONAL') && none.includes('Nothing crossed a threshold this session.'));
 }));
 
@@ -181,7 +262,7 @@ test('a page with a moves file that fails keeps the close list and no live feed'
     return node;
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.ok(textOf(root).includes('NVIDIA fell far beyond its usual move'));
+  assert.ok(textOf(root).includes('NVDA'));
 });
 
 test('the median is the middle value, the mean of the middle two, or null when there is none', () => {
@@ -222,16 +303,9 @@ test('the forecast is the survey row, and the surprise is read only when the uni
   assert.equal(surpriseDirection(item({ value: 3.4, unit: 'bp', extra: { expectations: [survey] } })), null, 'mixed units are not compared');
 });
 
-// Every node under a root whose class names the given class.
-function byClass(node, name, found = []) {
-  if (node?.className?.split(' ').includes(name)) found.push(node);
-  for (const child of node?.children || []) byClass(child, name, found);
-  return found;
-}
-
 test('the earnings tiles lead with the heaviest reporter, fold past eight, and scale the bar to the largest move', () => withBrowser(() => {
   const earnings = Array.from({ length: 10 }, (_, i) => item({
-    kind: 'earnings', subject: `T${i}`, link: `#ticker/T${i}`, extra: { weight: 1 + i, surprise_pct: 1, return_1d: i === 0 ? 4 : 1 },
+    kind: 'earnings', subject: `T${i}`, link: `#ticker/T${i}`, extra: { eps: 1, weight: 1 + i, surprise_pct: 1, return_1d: i === 0 ? 4 : 1 },
   }));
   const root = justOutSection({ session: '2026-10-16', macro: [], earnings });
   const grids = byClass(root, 'today-tiles');
@@ -246,10 +320,35 @@ test('the earnings tiles lead with the heaviest reporter, fold past eight, and s
   assert.equal(fills[9].style.width, '100%', 'T0 is the largest move');
 }));
 
-test('the oversold gauge maps RSI 0-30 onto the bar and clamps', async () => {
-  const { oversoldGauge } = await import('../../web/js/tabs/today.js');
-  assert.equal(oversoldGauge(15), 50);
-  assert.equal(oversoldGauge(45), 100);
-  assert.equal(oversoldGauge(-1), 0);
-  assert.equal(oversoldGauge(null), null);
+test('after-close reporters without a result collapse into one line of names by weight, not tiles', () => withBrowser(() => {
+  const root = justOutSection(pageFixture().just_out);
+  assert.equal(byClass(root, 'today-tile').length, 1, 'only TRV has a result');
+  const pending = byClass(root, 'today-pending');
+  assert.equal(pending.length, 1);
+  const line = textOf(pending[0]).replace(/\s+/g, ' ').replace(/ ,/g, ',');
+  assert.ok(line.startsWith('7 report after the close: WDC, NEM, BE, FIX, VRSN, OMC, DECK'), line);
+  assert.ok(line.endsWith('— results in the next build'));
+  assert.equal(byClass(pending[0], 'today-tile').length, 0);
+}));
+
+test('the page shows the signal chips by kind and the E badge on a reporter, with no HIGH or TESTED tags', () => withBrowser(() => {
+  const root = new FakeNode('main');
+  renderToday(root, pageFixture(), null, {});
+  const rows = byClass(root, 'today-chips');
+  assert.equal(rows.length, 3, 'OVERSOLD, RARE and ONGOING have chips; CHANGED and SCENARIO are empty');
+  assert.equal(byClass(root, 'chip').length, 3, 'one chip per signal');
+  const movers = textOf(byClass(root, 'today-movers-host')[0] || root);
+  assert.ok(!/\bHIGH\b/.test(movers) || movers.includes('LATER'), 'no HIGH tag in the movers');
+  assert.ok(!textOf(byClass(root, 'today-movers')[0] || root).includes('TESTED'));
+  const badges = byClass(root, 'tag-info').filter((n) => n.textContent === 'E');
+  assert.equal(badges.length, 1, 'NVDA is a reporter and CSX is not');
+  assert.doesNotMatch(textOf(root), BAD);
+}));
+
+test('LATER shows the priced move and EPS forecast as figures, not the sentence', async () => {
+  const { expectedOf } = await import('../../web/js/tabs/today.js');
+  assert.equal(expectedOf({ detail: 'EPS forecast 2.94; options price a 8.2% move' }), '±8.2% · EPS 2.94');
+  assert.equal(expectedOf({ detail: 'EPS forecast 0.87' }), 'EPS 0.87');
+  assert.equal(expectedOf({ detail: 'Expected: Kalshi P(hike) 6%; Polymarket P(hike) 6%' }), 'Kalshi P(hike) 6%; Polymarket…');
+  assert.equal(expectedOf({ detail: null }), '—');
 });

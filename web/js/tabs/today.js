@@ -1,21 +1,25 @@
-// TODAY, the landing page: what just came out, what is coming in the next three
-// sessions, and what is unusual now. The build's day is today.json; the one part
-// that moves during the session is UNUSUAL NOW's MOVES list, which re-ranks the
-// names by today's move (against yesterday's close) while the market is open.
+// TODAY, the landing page: the picture of the day first (the headline, the board by
+// index and sector), then what the signals say, the movers, what just came out and
+// what is coming in the next three sessions. The build's day is today.json; the one
+// part that moves during the session is the MOVERS table, which re-ranks the names
+// by today's move (against yesterday's close) while the market is open.
 
-import { el, num, sectionTitle, tag, dirClass, DASH } from '../fmt.js';
+import { el, num, sectionTitle, tag, dirClass, table, DASH } from '../fmt.js';
 import { mountLive } from '../live.js';
 import { createFeed } from '../live-feed.js';
-import { tickerHref } from '../routes.js';
 import { liveView } from '../today-live.js';
+import {
+  boardCard, headlineNode, signalGroups, signalsCard, moverRecords, moversTable, sectorLine, remainingEvents, eventNodes,
+} from '../today-board.js';
 
 const valid = (v) => typeof v === 'number' && Number.isFinite(v);
 const signed = (v, digits = 2, suffix = '%') => (valid(v) ? `${v > 0 ? '+' : ''}${num(v, digits)}${suffix}` : DASH);
-const sigma = (v) => signed(v, 1, 'σ');
 
 const ROWS_SHOWN = 10;
 // The earnings tiles are larger than rows, so fewer show before the fold.
 const TILES_SHOWN = 8;
+const LATER_SHOWN = 8;
+const LATER_HEAD = ['DATE', 'TIME', 'EVENT', 'EXPECTED'];
 const NOTHING_MOVED = 'Nothing crossed a threshold this session.';
 
 // Dates are calendar days, not instants: read them in UTC so no zone shifts them.
@@ -47,66 +51,19 @@ export function whenText(item) {
   return '';
 }
 
-// A value with its unit, as the reader scans it: 2.5%, +12.0 bp, 1.20×.
+// A value with its unit, as the reader scans it: 2.5%, +12.0 bp, 1.20×, 194k.
 function valueText(value, unit) {
   if (!valid(value)) return DASH;
   if (unit === 'bp') return `${value > 0 ? '+' : ''}${num(value, 1)} bp`;
   if (unit === 'pp') return `${value > 0 ? '+' : ''}${num(value, 2)} pp`;
   if (unit === 'x') return `${num(value, 2)}×`;
   if (unit === '%') return `${num(value, 2)}%`;
+  if (unit === 'k') return `${num(value, 0)}k`;
   return num(value, 2);
 }
 
-// The short expectation a coming-up row carries: the build's detail line, with
-// the implied move added when the build has one.
-function expectationText(item) {
-  const parts = [item.detail];
-  if (valid(item.extra?.implied_pct)) parts.push(`implied ±${num(item.extra.implied_pct, 1)}%`);
-  return parts.filter(Boolean).join(' · ') || null;
-}
-
-// One row of a list: when, subject, what happened, and the tags and numbers beside it.
-// The title, with its subject in bold: most titles already open with it ("NI rose
-// 3.5%"), so the subject is not printed twice; one that does not gets it in front.
-export function titleParts(subject, title) {
-  const s = String(subject ?? '');
-  const t = String(title ?? '');
-  if (!s) return ['', t];
-  return t.startsWith(s) ? [s, t.slice(s.length)] : [s, ` · ${t}`];
-}
-
-// Only HIGH is tagged: a tag on every row is a tag on none.
-function rowNode(item, { value = null, extras = [], detail = item.detail } = {}) {
-  const [lead, rest] = titleParts(item.subject, item.title);
-  const tags = [
-    item.importance === 'high' ? tag('HIGH', 'warn') : null,
-    item.evidence === 'tested' ? tag('TESTED', 'info', 'Backed by a research table already in the build') : null,
-    ...extras,
-  ];
-  const body = [
-    el('span', { class: 'today-when dim', text: whenText(item) }),
-    el('span', { class: 'today-text' }, [
-      el('span', { class: 'today-title' }, [el('b', { class: 'today-subject', text: lead }), rest]),
-      detail ? el('span', { class: 'today-detail dim', text: detail }) : null,
-    ]),
-    value,
-    el('span', { class: 'today-tags' }, tags.filter(Boolean)),
-  ];
-  const classes = `today-row${item.new === false ? ' is-ongoing' : ''}`;
-  return item.link ? el('a', { class: classes, href: item.link }, body) : el('div', { class: classes }, body);
-}
-
-// The rows of a list, with the rest behind a fold once there are many.
-function listNodes(items, toRow, emptyText) {
-  if (!items?.length) return [el('div', { class: 'today-empty dim', text: emptyText })];
-  const shown = items.slice(0, ROWS_SHOWN).map(toRow);
-  if (items.length <= ROWS_SHOWN) return shown;
-  const rest = items.slice(ROWS_SHOWN).map(toRow);
-  return [...shown, el('details', { class: 'today-more' }, [
-    el('summary', { text: `${rest.length} more` }),
-    ...rest,
-  ])];
-}
+// The shortened expectation text for the LATER table, the full line in its title.
+const shorten = (text, max = 56) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
 
 // The median of the numbers in a list, or null when there are none. The median
 // keeps one large move from setting the whole day's tone.
@@ -169,50 +126,52 @@ function gridNodes(items, toNode, shown, gridClass) {
   ])];
 }
 
-// The importance dot: filled for high, hollow for low; the word is for the tooltip.
-function importanceDot(importance) {
-  const level = ['high', 'medium', 'low'].includes(importance) ? importance : 'low';
-  return el('span', { class: `today-dot is-${level}`, title: `${level} importance`, 'aria-label': `${level} importance` });
+// The rows of a list, with the rest behind a fold once there are many.
+function listNodes(items, toRow, emptyText) {
+  if (!items?.length) return [el('div', { class: 'today-empty dim', text: emptyText })];
+  const shown = items.slice(0, ROWS_SHOWN).map(toRow);
+  if (items.length <= ROWS_SHOWN) return shown;
+  const rest = items.slice(ROWS_SHOWN).map(toRow);
+  return [...shown, el('details', { class: 'today-more' }, [
+    el('summary', { text: `${rest.length} more` }),
+    ...rest,
+  ])];
 }
 
-// One macro release as a card: its name, the actual large, the forecast beside it
-// when there is one, and the build's detail line.
-function macroCard(item) {
-  const forecast = forecastOf(item);
-  const direction = surpriseDirection(item);
-  const glyph = { above: '▲', below: '▼' }[direction] || '';
-  const body = [
-    el('span', { class: 'today-card-name' }, [importanceDot(item.importance), el('b', { text: item.subject })]),
-    el('span', { class: 'today-card-value', text: valueText(item.value, item.unit) }),
-    forecast ? el('span', { class: `today-card-forecast${direction ? ` is-${direction}` : ''}` }, [
-      glyph ? el('span', { class: 'today-glyph', text: glyph }) : null,
-      ` vs forecast ${valueText(forecast.value, forecast.unit)}`,
-    ]) : null,
-    item.detail ? el('span', { class: 'today-card-detail dim', text: item.detail }) : null,
-  ];
-  const classes = `today-card${item.importance === 'high' ? ' is-high' : ''}`;
-  return item.link
-    ? el('a', { class: classes, href: item.link, title: item.title }, body)
-    : el('div', { class: classes, title: item.title }, body);
+// The period a release covers: the print's own date, else the build's detail line.
+function periodOf(item) {
+  const period = item.extra?.prints?.[0]?.period || (item.detail ? String(item.detail).replace(/^For /, '') : null);
+  return period || DASH;
 }
 
-// A release with no number (an options expiry, say) as a dim chip on the line below the cards.
-function macroChips(items) {
-  return el('div', { class: 'today-chips' }, items.map((item) => {
-    const children = [importanceDot(item.importance), item.title];
-    return item.link
-      ? el('a', { class: 'today-chip dim', href: item.link }, children)
-      : el('span', { class: 'today-chip dim' }, children);
-  }));
+// The macro releases with a number as one table: the actual, the survey forecast
+// beside it with the direction it was read in, and the period. A release with no
+// number is named on one line under the table.
+function macroTable(items) {
+  const rows = items.map((item) => {
+    const forecast = forecastOf(item);
+    const direction = surpriseDirection(item);
+    const glyph = { above: '▲', below: '▼' }[direction] || '';
+    return el('tr', {}, [
+      el('td', {}, [item.importance === 'high' ? el('b', { text: item.subject }) : item.subject]),
+      el('td', { class: 'today-value', text: valueText(item.value, item.unit) }),
+      el('td', { class: `today-value${direction ? ` is-${direction}` : ''}` }, forecast ? [
+        glyph ? el('span', { class: 'today-glyph', text: glyph }) : null,
+        ` ${valueText(forecast.value, forecast.unit)}`,
+      ] : [DASH]),
+      el('td', { class: 'dim', text: periodOf(item) }),
+    ]);
+  });
+  return table(['EVENT', 'ACTUAL', 'VS FORECAST', 'PERIOD'], rows, { class: 'today-macro' });
 }
 
 function macroNodes(items) {
   if (!items.length) return [el('div', { class: 'today-empty dim', text: 'No macro release came out last session.' })];
   const numeric = items.filter((item) => valid(item.value));
-  const chips = items.filter((item) => !valid(item.value));
+  const quiet = items.filter((item) => !valid(item.value));
   return [
-    ...(numeric.length ? gridNodes(numeric, macroCard, ROWS_SHOWN, 'today-cards') : []),
-    ...(chips.length ? [macroChips(chips)] : []),
+    ...(numeric.length ? [macroTable(numeric)] : []),
+    ...(quiet.length ? [el('div', { class: 'today-detail dim', text: `Also: ${quiet.map((item) => item.subject).join(', ')}` })] : []),
   ];
 }
 
@@ -245,16 +204,36 @@ function earningsTile(item, maxMove) {
 // Heaviest index weight first, so the names that move the index lead.
 const byWeight = (a, b) => (b.extra?.weight ?? -1) - (a.extra?.weight ?? -1);
 
-function earningsNodes(items) {
-  if (!items.length) return [el('div', { class: 'today-empty dim', text: 'No index-weight earnings came out last session.' })];
-  const maxMove = Math.max(0, ...items.map((i) => i.extra?.return_1d).filter(valid).map(Math.abs));
-  return [
-    el('div', { class: 'today-tiles-summary dim', text: earningsSummary(items) }),
-    ...gridNodes([...items].sort(byWeight), (item) => earningsTile(item, maxMove), TILES_SHOWN, 'today-tiles'),
-  ];
+// A reporter with no result yet: one line, names by weight, each a link. Its
+// results come with the next build, so it gets no tile.
+function pendingLine(items) {
+  const names = items.flatMap((item, i) => [
+    i ? ', ' : '',
+    el(item.link ? 'a' : 'span', { href: item.link, text: item.subject }),
+  ]);
+  const lead = items.length === 1 ? 'Reports after the close: ' : `${items.length} report after the close: `;
+  return el('div', { class: 'today-pending dim' }, [lead, ...names, ' — results in the next build']);
 }
 
-// JUST OUT: the macro releases as cards and the earnings as tiles, for last session.
+// The reported earnings as tiles, then the reporters still waiting on a result.
+function earningsNodes(items) {
+  const reported = items.filter((item) => valid(item.extra?.eps)).sort(byWeight);
+  const pending = items.filter((item) => !valid(item.extra?.eps)).sort(byWeight);
+  const nodes = [];
+  if (reported.length) {
+    const maxMove = Math.max(0, ...reported.map((i) => i.extra?.return_1d).filter(valid).map(Math.abs));
+    nodes.push(
+      el('div', { class: 'today-tiles-summary dim', text: earningsSummary(reported) }),
+      ...gridNodes(reported, (item) => earningsTile(item, maxMove), TILES_SHOWN, 'today-tiles'),
+    );
+  } else if (!pending.length) {
+    nodes.push(el('div', { class: 'today-empty dim', text: 'No index-weight earnings came out last session.' }));
+  }
+  if (pending.length) nodes.push(pendingLine(pending));
+  return nodes;
+}
+
+// JUST OUT: the macro releases as a table and the earnings as tiles, for last session.
 export function justOutSection(justOut) {
   const macro = justOut?.macro || [];
   const earnings = justOut?.earnings || [];
@@ -267,150 +246,108 @@ export function justOutSection(justOut) {
   ]);
 }
 
-// COMING UP: one block per session, then the high-importance items beyond them.
+// The day's coming-up row: when, the subject, and the one figure the build has.
+function dayRow(item) {
+  const figure = valid(item.extra?.implied_pct) ? `implied ±${num(item.extra.implied_pct, 1)}%` : item.detail;
+  const classes = `today-row${item.importance === 'high' ? ' is-high' : ''}`;
+  const body = [
+    el('span', { class: 'today-when dim', text: whenText(item) }),
+    el('span', { class: 'today-subject', text: item.subject }),
+    figure ? el('span', { class: 'today-detail dim', text: figure }) : null,
+  ];
+  return item.link ? el('a', { class: classes, href: item.link }, body) : el('div', { class: classes }, body);
+}
+
+// The expected figure for the LATER table: the implied move, else the expectation text.
+export function expectedOf(item) {
+  const detail = item.detail || '';
+  const implied = valid(item.extra?.implied_pct) ? item.extra.implied_pct
+    : Number((detail.match(/options price an? ([\d.]+)% move/) || [])[1]);
+  const eps = (detail.match(/EPS forecast (-?[\d.]+)/) || [])[1];
+  const parts = [valid(implied) ? `±${num(implied, 1)}%` : null, eps ? `EPS ${eps}` : null].filter(Boolean);
+  if (parts.length) return parts.join(' · ');
+  return detail ? shorten(detail.replace(/^Expected:\s*/, ''), 30) : DASH;
+}
+
+// LATER: the high-importance items past the sessions, as one table, past eight a fold.
+function laterNodes(items, until) {
+  const high = (items || []).filter((item) => item.importance === 'high');
+  const head = el('div', { class: 'today-block-title', text: `LATER · HIGH IMPORTANCE${until ? ` · TO ${dayLabel(until)}` : ''}` });
+  if (!high.length) return [head, el('div', { class: 'today-empty dim', text: 'Nothing high-importance in the weeks after.' })];
+  const rowOf = (item) => el('tr', {}, [
+    el('td', { text: dayLabel(item.date) }),
+    el('td', { text: whenText(item) || DASH }),
+    el('td', { text: item.subject }),
+    el('td', { class: 'today-value', text: expectedOf(item), title: item.detail || '' }),
+  ]);
+  const rest = high.slice(LATER_SHOWN);
+  return [
+    head,
+    table(LATER_HEAD, high.slice(0, LATER_SHOWN).map(rowOf), { class: 'today-later' }),
+    ...(rest.length ? [el('details', { class: 'today-more' }, [
+      el('summary', { text: `${rest.length} more` }),
+      table(LATER_HEAD, rest.map(rowOf), { class: 'today-later' }),
+    ])] : []),
+  ];
+}
+
+// COMING UP: one column per session, then the high-importance items beyond them.
 export function comingUpSection(coming) {
   const days = coming?.days || [];
   const dayNodes = days.map((day) => el('div', { class: 'today-day' }, [
     el('div', { class: 'today-day-head', text: dayLabel(day.date) }),
-    ...listNodes(day.items, (item) => rowNode(item, { detail: expectationText(item) }),
-      'Nothing on the calendar this session that matters here.'),
+    ...listNodes(day.items, dayRow, 'Nothing on the calendar this session that matters here.'),
   ]));
-  const later = el('div', { class: 'today-day' }, [
-    el('div', { class: 'today-day-head', text: `LATER · HIGH IMPORTANCE${coming?.later_until ? ` · TO ${dayLabel(coming.later_until)}` : ''}` }),
-    ...listNodes(coming?.later, (item) => rowNode(item, { detail: expectationText(item) }),
-      'Nothing high-importance in the weeks after.'),
-  ]);
   return el('div', { class: 'today-section' }, [
     sectionTitle('COMING UP', days.length ? `· NEXT ${days.length} SESSIONS` : ''),
-    ...dayNodes,
-    later,
+    el('div', { class: 'today-days' }, dayNodes),
+    ...laterNodes(coming?.later, coming?.later_until),
   ]);
 }
 
-// A live move, in the terms the build uses: return, its σ, and the own part.
-function liveMoveRow(item) {
-  const detail = `${signed(item.ret_pct)} today · ${sigma(item.z)} of its own σ · own part ${sigma(item.z_own)}`;
-  return rowNode({
-    subject: item.ticker,
-    title: item.name,
-    link: tickerHref(item.ticker),
-    importance: null,
-    evidence: 'description',
-    time: null,
-    timing: null,
-    new: true,
-  }, {
-    value: el('span', { class: `today-value ${dirClass(item.ret_pct)}`, text: signed(item.ret_pct) }),
-    detail,
-  });
-}
-
-function officialMoveRow(item) {
-  const value = el('span', { class: `today-value ${dirClass(item.z)}`, text: sigma(item.z) });
-  return rowNode(item, { value });
-}
-
-// The UNUSUAL NOW block (MOVES, STATES, EVENTS) and its ongoing line. `view.live`
-// is the live list while the market is open (null for the build's close).
-export function unusualNodes(unusual, view) {
+// The MOVERS block: the build's close, or the live list while the market is open
+// (`view.live` is the live list, null for the close). The sector line, the table and
+// the rest of the events follow the stamp.
+export function moversNodes(unusual, view) {
   const live = view.live;
-  const moves = live ? live.items.map(liveMoveRow) : (unusual?.moves || []).map(officialMoveRow);
-  const states = unusual?.states || [];
-  const events = unusual?.events || [];
-  const ongoing = unusual?.ongoing || [];
+  const records = moverRecords(unusual, live ? live.items : null);
+  const events = remainingEvents(unusual);
+  const sector = sectorLine(unusual);
   const stamp = live
     ? el('span', { class: 'today-stamp' }, [tag('LIVE · PROVISIONAL', 'warn', 'Today\'s move so far, against the last close; not official'), ` ${clock(live.time)} quotes`])
     : `· AS OF ${longDay(view.asOf)} CLOSE`;
-  const nodes = [sectionTitle('UNUSUAL NOW', ''), el('div', { class: 'today-close-head' }, [stamp])];
-  const nothing = !moves.length && !states.length && !events.length;
-  if (nothing) {
-    nodes.push(el('div', { class: 'today-empty dim', text: NOTHING_MOVED }));
-  } else {
-    const block = (title, rows, empty) => el('div', { class: 'today-block' }, [
-      el('div', { class: 'today-block-title', text: title }),
-      ...listNodes(rows, (row) => row, empty),
-    ]);
-    nodes.push(
-      block('MOVES', moves, 'No name is beyond its own volatility.'),
-      block('STATES', states.map(officialStateRow), 'No market state started or ended.'),
-      block('EVENTS', events.map(officialStateRow), 'No event to report.'),
-    );
-  }
-  nodes.push(oversoldBlock(unusual?.oversold || []));
-  nodes.push(tailBlock(unusual?.tails || []));
-  nodes.push(watchBlock(unusual?.watch || []));
-  if (ongoing.length) {
-    nodes.push(el('div', {
-      class: 'today-ongoing dim',
-      // The count is added only where the title does not already give it.
-      text: `Ongoing: ${ongoing.map((o) => `${o.title}${valid(o.days) && !String(o.title).includes(String(o.days)) ? ` (${o.days} sessions)` : ''}`).join(' · ')}`,
-    }));
-  }
-  return nodes;
+  const nodes = [
+    el('div', { class: 'today-block-title', text: 'MOVERS' }),
+    el('div', { class: 'today-close-head' }, [stamp]),
+  ];
+  if (!records.length && !events.length && !sector) return [...nodes, el('div', { class: 'today-empty dim', text: NOTHING_MOVED })];
+  // replaceChildren would print a null as the word "null", so only nodes go out.
+  return [
+    ...nodes,
+    sector,
+    records.length ? moversTable(records) : null,
+    ...eventNodes(events),
+  ].filter(Boolean);
 }
 
-// Indices and sector funds whose RSI(6) closed under 30 or 20, deepest first.
-// The RSI sits in a small gauge (0-30 shown) so the depth reads at a glance.
-export function oversoldGauge(rsi) {
-  if (!valid(rsi)) return null;
-  return Math.max(0, Math.min(100, (rsi / 30) * 100));
-}
-
-function oversoldRow(item) {
-  const rsi = item.extra?.rsi ?? item.value;
-  const deep = item.extra?.line === 20;
-  const width = oversoldGauge(rsi);
-  const value = el('span', { class: `today-value today-rsi${deep ? ' is-deep' : ''}` }, [
-    num(rsi, 1),
-    width === null ? null : el('span', { class: 'today-rsi-bar' }, [el('span', { style: `width:${width.toFixed(0)}%` })]),
-  ]);
-  // The detail is the same for every row, so the block says it once.
-  return rowNode(item, { value, detail: null, extras: [tag(deep ? 'BELOW 20' : 'BELOW 30', deep ? 'warn' : 'info')] });
-}
-
-function oversoldBlock(items) {
-  return el('div', { class: 'today-block' }, [
-    el('div', { class: 'today-block-title', text: 'OVERSOLD · RSI(6), INDICES & SECTOR FUNDS' }),
-    ...listNodes(items.map(oversoldRow), (row) => row, 'No index or sector fund is below 30.'),
-    items.length ? el('div', { class: 'today-detail dim', text: items[0].detail }) : null,
+// The page's explanatory text, folded at the bottom: the build's notes, the detail
+// of the oversold and rare-move signals, and what the build could not make.
+function notesNode(data) {
+  const details = [
+    ...(data.notes || []),
+    data.unusual?.oversold?.[0]?.detail,
+    data.unusual?.tails?.[0]?.detail,
+  ].filter(Boolean);
+  const missing = (data.unavailable || []).map((u) => `${u.part}: ${u.reason}`);
+  if (!details.length && !missing.length) return null;
+  return el('details', { class: 'method-fold today-notes' }, [
+    el('summary', { text: 'ⓘ NOTES' }),
+    ...[...new Set(details)].map((text) => el('div', { class: 'method-copy', text })),
+    missing.length ? el('div', { class: 'field-note dim today-missing', text: `Not in this build · ${missing.join(' · ')}` }) : null,
   ]);
 }
 
-// Indices and sector funds whose move is in the outer 5% of their own history;
-// each row opens MOVE CHECK for that name.
-function tailRow(item) {
-  const share = item.extra?.share_pct;
-  const value = el('span', { class: `today-value ${dirClass(item.value)}`, text: signed(item.value) });
-  return rowNode(item, { value, detail: null, extras: [valid(share) ? tag(`${num(share, 1)}% OF HISTORY`, share <= 1 ? 'warn' : 'info') : null] });
-}
-
-function tailBlock(items) {
-  return el('div', { class: 'today-block' }, [
-    el('div', { class: 'today-block-title', text: 'RARE FOR ITS OWN HISTORY · INDICES & SECTOR FUNDS' }),
-    ...listNodes(items.map(tailRow), (row) => row, 'No index or sector fund moved beyond its own 5% tail.'),
-    items.length ? el('div', { class: 'today-detail dim', text: items[0].detail }) : null,
-  ]);
-}
-
-// SCENARIO WATCH: hand-written conditions that are triggered, or changed state at
-// this build. The page itself (#watch) has every scenario and the scheduled branches.
-function watchRow(item) {
-  const state = item.extra?.state;
-  return rowNode(item, { detail: null, extras: [tag(String(state || '').toUpperCase(), state === 'triggered' ? 'warn' : 'info')] });
-}
-
-function watchBlock(items) {
-  return el('div', { class: 'today-block' }, [
-    el('div', { class: 'today-block-title', text: 'SCENARIO WATCH' }),
-    ...listNodes(items.map(watchRow), (row) => row, 'No scenario is triggered or changed state.'),
-  ]);
-}
-
-function officialStateRow(item) {
-  return rowNode(item, { value: valid(item.z) ? el('span', { class: 'today-value', text: sigma(item.z) }) : null });
-}
-
-// The live part: the MOVES list follows today's quotes while the market is
+// The live part: the MOVERS table follows today's quotes while the market is
 // open. Both boards come from the same quote function the heat map uses, on the
 // same cadence; the feeds stop when the page leaves the screen. Until the moves
 // file and the first quotes arrive, the build's close stands.
@@ -420,7 +357,7 @@ function startLive(host, data, ctx) {
   const paint = () => {
     const live = liveView(state, data.live);
     showingLive = Boolean(live);
-    host.replaceChildren(...unusualNodes(data.unusual, { live, asOf: data.as_of }));
+    host.replaceChildren(...moversNodes(data.unusual, { live, asOf: data.as_of }));
   };
   ctx.loadArtifact('moves').then((moves) => {
     state.moves = moves.rows || [];
@@ -445,15 +382,22 @@ export default function renderToday(root, data, manifest, ctx = {}) {
   const sessions = (data.sessions || []).map(dayLabel).join(' · ');
   page.append(el('div', { class: 'today-close-head', text: `SESSION CLOSE · ${longDay(data.as_of)}${sessions ? ` · NEXT SESSIONS ${sessions}` : ''}` }));
   page.append(el('div', { class: 'today-live' }, [mountLive({ asOf: data.as_of })]));
-  const unusualHost = el('div', { class: 'today-unusual' });
-  unusualHost.replaceChildren(...unusualNodes(data.unusual, { live: null, asOf: data.as_of }));
+  const headline = headlineNode(data.headline);
+  if (headline) page.append(headline);
+  const board = boardCard(data.board);
+  if (board) page.append(board.node);
+  const moversHost = el('div', { class: 'today-movers-host' });
+  moversHost.replaceChildren(...moversNodes(data.unusual, { live: null, asOf: data.as_of }));
   page.append(el('div', { class: 'today-columns' }, [
     el('div', { class: 'today-col' }, [justOutSection(data.just_out), comingUpSection(data.coming_up)]),
-    el('div', { class: 'today-col' }, [unusualHost]),
+    el('div', { class: 'today-col' }, [
+      sectionTitle('UNUSUAL NOW', ''),
+      signalsCard(signalGroups(data.unusual, data.board?.rows)),
+      moversHost,
+    ]),
   ]));
-  // A part the build could not make is named in a footnote, not by a failed page
-  // and not above the news: most are a source that was late, not a broken page.
-  const missing = (data.unavailable || []).map((u) => `${u.part}: ${u.reason}`);
-  if (missing.length) page.append(el('div', { class: 'field-note dim today-missing', text: `Not in this build · ${missing.join(' · ')}` }));
-  if (ctx.loadArtifact && data.live) startLive(unusualHost, data, ctx);
+  const notes = notesNode(data);
+  if (notes) page.append(notes);
+  board?.draw();
+  if (ctx.loadArtifact && data.live) startLive(moversHost, data, ctx);
 }

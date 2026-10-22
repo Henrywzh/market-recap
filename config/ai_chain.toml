@@ -9,6 +9,8 @@
 #   exchange whose session and index the moves are measured on, releases the
 #   market whose hours a report with no clock time is read in (an ADR's home:
 #   ASML publishes at 07:00 in Amsterdam, TSMC in the Taipei afternoon).
+#   short is the graph's label when the name does not fit a box; us names a
+#   US line (an ADR) the page links to while moves stay on the home listing.
 # [[edges]]: type
 #   supplies  -- `from` sells to each of `to` (chips, tools, power, capacity).
 #   competes  -- the same customers' spend, so a beat can be share taken.
@@ -95,6 +97,7 @@ releases = "NL"
 [[nodes]]
 key = "AMAT"
 name = "Applied Materials"
+short = "Applied Mat."
 layer = "equipment"
 market = "US"
 [[nodes]]
@@ -115,6 +118,7 @@ market = "JP"
 [[nodes]]
 key = "ASM.AS"
 name = "ASM International"
+short = "ASM Intl"
 layer = "equipment"
 market = "NL"
 [[nodes]]
@@ -150,6 +154,7 @@ market = "US"
 [[nodes]]
 key = "4063.T"
 name = "Shin-Etsu Chemical"
+short = "Shin-Etsu"
 layer = "equipment"
 market = "JP"
 
@@ -176,6 +181,9 @@ market = "US"
 [[nodes]]
 key = "000660.KS"
 name = "SK hynix"
+# Its US ADR (1/10 of a share, Nasdaq since July 2026): the page links there, but
+# moves stay on the Seoul line, which has the history and opens first after a report.
+us = "SKHY"
 layer = "memory"
 market = "KR"
 # DART's filer name: its preliminary results ("영업(잠정)실적") come first.
@@ -183,6 +191,7 @@ dart = "SK하이닉스"
 [[nodes]]
 key = "005930.KS"
 name = "Samsung Electronics"
+short = "Samsung"
 layer = "memory"
 market = "KR"
 dart = "삼성전자"
@@ -315,6 +324,7 @@ market = "US"
 [[nodes]]
 key = "2317.TW"
 name = "Hon Hai (Foxconn)"
+short = "Foxconn"
 layer = "systems"
 market = "TW"
 [[nodes]]
@@ -347,11 +357,13 @@ market = "US"
 [[nodes]]
 key = "SU.PA"
 name = "Schneider Electric"
+short = "Schneider"
 layer = "power"
 market = "FR"
 [[nodes]]
 key = "2308.TW"
 name = "Delta Electronics"
+short = "Delta Elec."
 layer = "power"
 market = "TW"
 [[nodes]]
@@ -372,6 +384,7 @@ market = "US"
 [[nodes]]
 key = "CEG"
 name = "Constellation Energy"
+short = "Constellation"
 layer = "power"
 market = "US"
 [[nodes]]

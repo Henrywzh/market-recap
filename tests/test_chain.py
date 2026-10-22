@@ -178,6 +178,16 @@ def test_every_link_joins_two_companies_in_the_graph():
         assert set(members) <= set(keys)
 
 
+def test_short_labels_fit_a_box_and_us_lines_are_tickers():
+    graph = P.load_graph()
+    for node in graph["nodes"]:
+        if node.get("short"):
+            assert len(node["short"]) <= 14 and node["short"] != node["name"], node["key"]
+        if node.get("us"):
+            assert node["us"].isupper() and "." not in node["us"] and node["market"] != "US", node["key"]
+    assert next(n for n in graph["nodes"] if n["key"] == "000660.KS")["us"] == "SKHY"
+
+
 def test_the_evidence_file_covers_every_link():
     graph = P.load_graph()
     evidence = json.loads(CHAIN_EVIDENCE_PATH.read_text(encoding="utf-8"))["edges"]

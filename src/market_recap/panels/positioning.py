@@ -14,6 +14,8 @@ Two readings, each from its own public source:
   convention, not of any company's actual policy.
 - Insider buying: strict SEC Form 4 open-market purchases by the members'
   insiders, read from EDGAR's daily index, and clusters of them.
+- Trend check: a listed trend-following ETF's equity beta from its daily
+  prices, set against the S&P 500 model position.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ from .. import cache
 from ..compute import evidence as V
 from ..compute import positioning as P
 from ..compute.blackout import calendar_momentum
-from ..sources import finra, sec
+from ..sources import finra, sec, yahoo
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, company_name, history_payload, to_iso_date
 from .index_put_call import build_component
 
@@ -41,6 +43,46 @@ from .index_put_call import build_component
 # not declared here (loading its artifact would add nothing). A POSITIONING-only
 # build uses whatever RISK last cached; missing sessions stay blank.
 INPUTS = ("catalysts", "evidence")
+
+# The trend check: a listed trend-following ETF against the factor ETFs whose
+# daily returns explain its equity beta (returns only, not its holdings).
+CHECK_ETF = "DBMF"
+CHECK_FACTORS = ("SPY", "IEF", "UUP", "GLD", "USO")
+CHECK_WINDOW = 63
+YAHOO_HOME = "https://finance.yahoo.com"
+
+
+def _round_row(row: dict, digits: int) -> dict:
+    return {k: clean_float(v, digits) if isinstance(v, float) else v for k, v in row.items()}
+
+
+def _model(close: pd.Series, spec, settings) -> dict:
+    """The vol-scaled model position, volatility-control exposure and what a price move does to them."""
+    years = int(settings.get("history_years", 10))
+    position = P.model_position(close)
+    vol_control = P.vol_control_exposure(close)
+    vol_60 = P.realised_vol(close, P.CTA_VOL_WINDOW).iloc[-1]
+    vol_20 = P.realised_vol(close, P.VC_VOL_WINDOW).iloc[-1]
+    position_now = float(position.iloc[-1])
+    scenarios = []
+    for row in P.scenario_flows(close):
+        low, high = P.flow_range_bn(row["position_change"], spec.symbol)
+        scenarios.append({**_round_row(row, 2), "flow_bn_low": clean_float(low, 2), "flow_bn_high": clean_float(high, 2)})
+    notional = P.MAX_NOTIONAL_BN.get(spec.symbol)
+    return {
+        "position": clean_float(position_now, 1),
+        "vol_60d": clean_float(100 * vol_60, 1),
+        "vol_20d": clean_float(100 * vol_20, 1),
+        "leverage": clean_float(min(P.TARGET_VOL / vol_60, P.LEVERAGE_CAP), 2),
+        "vol_control": clean_float(vol_control.iloc[-1], 1),
+        "room": {k: clean_float(v, 1) for k, v in P.room(position_now).items()},
+        "scenarios": scenarios,
+        "flow_assumption_bn": list(notional) if notional else None,
+        "history": {
+            "position": history_payload(position, years=years, digits=1),
+            "vol_control": history_payload(vol_control, years=years, digits=1),
+        },
+    }
 
 
 def _trend(ctx, spec, settings) -> dict | None:
@@ -71,6 +113,45 @@ def _trend(ctx, spec, settings) -> dict | None:
             "score": [clean_float(v, 2) for v in scorecard_score],
             "close": [clean_float(v, 2) for v in scorecard_close],
         },
+        "model": _model(close, spec, settings),
+    }
+
+
+def _trend_check(ctx, settings) -> dict:
+    """The listed trend ETF's equity beta from daily prices, beside the S&P 500 model position."""
+    years = int(settings.get("history_years", 10))
+    symbols = [CHECK_ETF, *CHECK_FACTORS]
+    label = "Yahoo daily closes: a listed trend-following ETF and its factor ETFs"
+    try:
+        prices = yahoo.fetch_closes(symbols, period=f"{years}y")
+        missing = [s for s in symbols if s not in prices.columns or prices[s].dropna().empty]
+        if missing:
+            raise ValueError(f"no Yahoo closes for {', '.join(missing)}")
+    except Exception as exc:
+        ctx.log.add(SourceRecord("trend_check_prices", label, YAHOO_HOME, status="error",
+                                 error=str(exc)[:ERROR_DETAIL_CHARS]))
+        return {"unavailable": str(exc)[:ERROR_DETAIL_CHARS]}
+    ctx.log.add(SourceRecord("trend_check_prices", label, YAHOO_HOME, to_iso_date(prices.index[-1]),
+                             rows=int(prices.shape[0])))
+    returns = prices.sort_index().pct_change(fill_method=None)
+    beta = P.implied_equity_beta(returns[CHECK_ETF], returns[list(CHECK_FACTORS)], window=CHECK_WINDOW)
+    if beta.empty:
+        return {"unavailable": f"fewer than {CHECK_WINDOW} sessions with prices for every series"}
+    if ctx.primary.symbol not in ctx.index_closes:
+        return {"unavailable": f"no {ctx.primary.label} closes to compare with"}
+    close = ctx.index_closes[ctx.primary.symbol].dropna()
+    position = P.model_position(close)
+    return {
+        "etf": CHECK_ETF, "window": CHECK_WINDOW,
+        "dates": [d.strftime("%Y-%m-%d") for d in beta.index],
+        "beta": [clean_float(v, 3) for v in beta],
+        "position": [clean_float(v, 1) for v in position.reindex(beta.index)],
+        "as_of": to_iso_date(beta.index[-1]),
+        "beta_now": clean_float(beta.iloc[-1], 2),
+        # The beta is itself a 63-session regression, so only changes a full
+        # window apart are independent; shorter ones are mostly overlap.
+        "corr_levels": clean_float(P.level_correlation(beta, position), 2),
+        "corr_with_model": clean_float(P.change_correlation(beta, position, step=CHECK_WINDOW, min_samples=12), 2),
     }
 
 
@@ -352,6 +433,10 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     except Exception as exc:
         blackout = {"unavailable": str(exc)[:ERROR_DETAIL_CHARS]}
     try:
+        trend_check = _trend_check(ctx, settings) if trends else None
+    except Exception as exc:
+        trend_check = {"unavailable": str(exc)[:ERROR_DETAIL_CHARS]}
+    try:
         insiders = _insiders(ctx, settings)
         cover = insiders["coverage"]
         ctx.log.add(SourceRecord("sec_form4_daily", "SEC Form 4 filings for index members (EDGAR daily index)",
@@ -367,6 +452,7 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     return {
         "as_of": ctx.as_of,
         "trend": trends,
+        "trend_check": trend_check,
         "short_interest": shorts,
         "blackout": blackout,
         "insiders": insiders,

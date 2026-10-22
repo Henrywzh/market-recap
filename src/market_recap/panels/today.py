@@ -44,6 +44,20 @@ SESSIONS_AHEAD = 3
 RECENT_LOG_SESSIONS = 3
 OVERSOLD_DETAIL = ("How stretched the fall is, not a rebound call: in the lab, a close below 20 was followed by much "
                    "the same returns as one below 30, and the worst tenth fell 7-16% further within 20 sessions.")
+# The board: the watch names as the page's chart prints them, and which of them are indices rather than sectors.
+SHORT_LABEL = {"^GSPC": "S&P 500", "^NDX": "Nasdaq-100", "DIA": "Dow", "IWM": "Russell 2000", "RSP": "Equal weight",
+               "SOXX": "Semis", "XLB": "Materials", "XLC": "Comm services", "XLE": "Energy", "XLF": "Financials",
+               "XLI": "Industrials", "XLK": "Tech", "XLP": "Staples", "XLRE": "Real estate", "XLU": "Utilities",
+               "XLV": "Health care", "XLY": "Discretionary"}
+INDEX_SYMBOLS = ("^GSPC", "^NDX", "DIA", "IWM", "RSP")
+# z is a move against the stdev of this many past daily moves; the share is stated only with this much history.
+BOARD_SIGMA_SESSIONS = 60
+# A board share above this is common, not worth a word in the headline.
+BOARD_RARE_PCT = 1.0
+# The headline calls the S&P 500 flat inside this many percent.
+FLAT_MOVE_PCT = 0.3
+# A move listed by its own closes: the last this many, as the sparkline draws them.
+SPARK_POINTS = 20
 
 
 # --- small value helpers -----------------------------------------------------
@@ -535,14 +549,19 @@ MOVE_HORIZONS = (1, 5)
 MOVE_MIN_HISTORY = 252
 
 
+def _beyond_share(move: float, past: pd.Series) -> tuple[int, float]:
+    """Past sessions at or beyond the move in its direction, and that count as a share of all past sessions."""
+    beyond = int((past <= move).sum() if move < 0 else (past >= move).sum())
+    return beyond, beyond / len(past) * 100
+
+
 def _tail_item(symbol: str, label: str, moves: pd.Series, horizon: int) -> dict | None:
     """One name whose latest ``horizon``-session move is in the outer tail of its own history."""
     move, day = float(moves.iloc[-1]), moves.index[-1]
     past = moves.iloc[:-1]
     if len(past) < MOVE_MIN_HISTORY or move == 0:
         return None
-    beyond = int((past <= move).sum() if move < 0 else (past >= move).sum())
-    share = beyond / len(past) * 100
+    beyond, share = _beyond_share(move, past)
     if share > MOVE_TAIL_PCT:
         return None
     years = max((past.index[-1] - past.index[0]).days / 365.25, 1e-9)
@@ -704,6 +723,112 @@ def _history(previous: dict | None, as_of: str, unusual: dict, cap: int) -> list
     return sorted([today] + past, key=lambda h: h["as_of"], reverse=True)[:cap]
 
 
+# --- board, headline, sparklines ---------------------------------------------
+
+def _round(value, digits: int) -> float | None:
+    number = _number(value)
+    return None if number is None else round(number, digits)
+
+
+def _board_row(symbol: str, label: str, closes: pd.Series, as_of: str, period: int) -> dict | None:
+    """One watch name's day: its move, how many of its own sigmas, how rare, and RSI. None when its last close is not the session's."""
+    close = closes.dropna()
+    close = close[close.index <= pd.Timestamp(as_of)]
+    if len(close) < 2 or close.index[-1].strftime("%Y-%m-%d") != as_of:
+        return None
+    moves = ((close / close.shift(1) - 1) * 100).dropna()
+    ret, past = float(moves.iloc[-1]), moves.iloc[:-1]
+    sample = past.iloc[-BOARD_SIGMA_SESSIONS:]
+    stdev = float(sample.std()) if len(sample) == BOARD_SIGMA_SESSIONS else None
+    share = None
+    if len(past) >= MOVE_MIN_HISTORY and ret != 0:
+        _, share = _beyond_share(ret, past)
+        share = None if share > 50 else round(share, 2)
+    reading = oversold.reading(close, period)
+    return {"symbol": symbol, "label": label, "short": SHORT_LABEL.get(symbol, label),
+            "group": "index" if symbol in INDEX_SYMBOLS else "sector", "ret_pct": round(ret, 2),
+            "z": _round(ret / stdev, 2) if stdev else None, "share_pct": share,
+            "rsi6": _round(reading["rsi"], 1) if reading else None}
+
+
+def _board(closes: pd.DataFrame, watch: dict, as_of: str, period: int) -> list[dict]:
+    """Every watch name with a close this session, in config order."""
+    rows = []
+    for symbol, label in watch.items():
+        if symbol not in closes.columns:
+            continue
+        row = _board_row(symbol, label, closes[symbol], as_of, period)
+        if row:
+            rows.append(row)
+    return rows
+
+
+def _vix(risk: dict, as_of: str) -> dict:
+    """The VIX tile's level and one-session change; None where the tile has no reading
+    or its reading is from another session (Cboe's file can lag a day behind the closes)."""
+    tile = next((t for s in risk.get("sections") or [] for t in s.get("tiles") or [] if t.get("key") == "vix"), {})
+    if tile.get("date") != as_of:
+        return {"value": None, "change": None}
+    return {"value": _number(tile.get("value")), "change": _number(tile.get("change_1d"))}
+
+
+def _plain_signed(value: float, suffix: str = "") -> str:
+    """A signed figure with a true minus, as the headline prints it; zero reads as plus."""
+    sign = "−" if round(value, 1) < 0 else "+"
+    return f"{sign}{abs(value):.1f}{suffix}"
+
+
+def _headline_move(row: dict) -> str:
+    text = f"{row['short']} {_plain_signed(row['ret_pct'], '%')}"
+    share = row.get("share_pct")
+    if share is not None and share <= BOARD_RARE_PCT:
+        text += f" (rare: {share:.1f}% of days)"
+    return text
+
+
+def headline(board: dict) -> dict | None:
+    """The day in one fixed sentence cut from the board: indices, the weakest and strongest sectors, VIX.
+
+    None with fewer than three rows. The tone is the S&P 500's, flat inside FLAT_MOVE_PCT.
+    """
+    rows = board.get("rows") or []
+    if len(rows) < 3:
+        return None
+    by_symbol = {r["symbol"]: r for r in rows}
+    sectors = [r for r in rows if r["group"] == "sector"]
+    parts = []
+    indices = [by_symbol[s] for s in ("^GSPC", "^NDX") if s in by_symbol]
+    if indices:
+        parts.append(", ".join(f"{r['short']} {_plain_signed(r['ret_pct'], '%')}" for r in indices) + ".")
+    weakest = sorted((r for r in sectors if r["ret_pct"] < 0), key=lambda r: r["ret_pct"])[:2]
+    if weakest:
+        parts.append("Weakest: " + ", ".join(_headline_move(r) for r in weakest) + ".")
+    strongest = sorted((r for r in sectors if r["ret_pct"] > 0), key=lambda r: -r["ret_pct"])[:2]
+    if strongest:
+        parts.append("Strongest: " + ", ".join(_headline_move(r) for r in strongest) + ".")
+    vix = board.get("vix") or {}
+    if vix.get("value") is not None:
+        change = f" ({_plain_signed(vix['change'])})" if vix.get("change") is not None else ""
+        parts.append(f"VIX {vix['value']:.1f}{change}.")
+    if not parts:
+        return None
+    spx = by_symbol.get("^GSPC")
+    tone = "flat" if spx is None or abs(spx["ret_pct"]) < FLAT_MOVE_PCT else "down" if spx["ret_pct"] < 0 else "up"
+    return {"text": " ".join(parts), "tone": tone}
+
+
+def _spark(ctx, symbol: str, as_of: str) -> list[float]:
+    """The last closes of a name up to the session, four significant digits; [] when no frame holds it."""
+    for name in ("closes", "etf_closes"):
+        frame = getattr(ctx, name, None)
+        if isinstance(frame, pd.DataFrame) and symbol in frame.columns:
+            close = frame[symbol].dropna()
+            close = close[close.index <= pd.Timestamp(as_of)].tail(SPARK_POINTS)
+            values = [_number(v) for v in close]
+            return [float(f"{v:.4g}") for v in values if v is not None]
+    return []
+
+
 # --- live block and assembly -------------------------------------------------
 
 def _live(config: dict) -> dict:
@@ -756,21 +881,38 @@ def build(ctx, *, inputs: dict, events_dir: Path = EVENTS_ARTIFACT_DIR) -> dict:
     blackout = _blackout_item(positioning, as_of) if inputs.get("positioning") is not None else None
     floor = _session_back(date.fromisoformat(as_of), RECENT_LOG_SESSIONS - 1).isoformat()
 
+    # A reaction whose name is already in the moves is shown once, as a move, flagged as an earnings move.
+    reactions = _reaction_items(recent.get("earnings_reacted") or [], moves_by, cfg, session)
+    reacted = {i["subject"] for i in reactions}
+    move_items = _move_items(moves, cfg, sector, as_of)
+    for item in move_items:
+        if item["kind"] == "move":
+            item["extra"]["earnings"] = item["subject"] in reacted or bool(item["extra"].get("reported"))
+            item["extra"]["spark"] = _spark(ctx, item["subject"], as_of)
+    moved = {i["subject"] for i in move_items if i["kind"] == "move"}
+
+    watch, watch_closes = cfg.get("oversold_watch") or {}, _watch_closes(ctx)
+    period = int(cfg.get("oversold_period", 6))
+    board_rows = _board(watch_closes, watch, as_of, period)
+    board = {"as_of": as_of, "rows": board_rows, "vix": _vix(src["risk"], as_of)}
+
     unusual = {
-        "moves": _move_items(moves, cfg, sector, as_of),
+        "moves": move_items,
         "states": _order(market_changed + matrix_changed + _put_call_items(positioning, cfg, as_of)),
         "events": _order(_monitor_items(src["monitor"], cfg, as_of)
                          + _catalyst_items(src["catalyst_log"], floor, as_of)
-                         + _reaction_items(recent.get("earnings_reacted") or [], moves_by, cfg, session)),
+                         + [i for i in reactions if i["subject"] not in moved]),
         "ongoing": _order(market_ongoing + matrix_ongoing + ([blackout] if blackout else [])),
-        "oversold": _oversold_items(_watch_closes(ctx), cfg.get("oversold_watch") or {}, int(cfg.get("oversold_period", 6))),
+        "oversold": _oversold_items(watch_closes, watch, period),
         "watch": _watch_items(src["watch"], as_of),
-        "tails": _tail_items(_watch_closes(ctx), cfg.get("oversold_watch") or {}, as_of),
+        "tails": _tail_items(watch_closes, watch, as_of),
     }
 
     return {
         "as_of": as_of,
         "sessions": sessions,
+        "board": board,
+        "headline": headline(board),
         "just_out": {
             "session": session,
             "macro": _order([_just_out_macro(e) for e in recent.get("macro") or [] if e.get("date")]),

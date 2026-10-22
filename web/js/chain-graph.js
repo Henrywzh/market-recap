@@ -91,7 +91,7 @@ export function drawGraph(host, data, state) {
           opacity: faded ? 0.3 : 1,
         },
         label: { show: true, color: faded ? p.faint : p.text, fontSize: 10, width: NODE_W - 10, overflow: 'truncate',
-          formatter: () => n.name },
+          formatter: () => n.short || n.name },
       };
     })];
 
@@ -133,7 +133,7 @@ export function drawGraph(host, data, state) {
           if (!n) return '';
           const r = n.season?.reported;
           const role = roles.get(n.key);
-          return `<b>${escape(n.name)}</b> ${escape(n.key)} · ${escape(n.market)}${role ? ` · ${ROLE_LABEL[role]} of ${escape(state.selected)}` : ''}<br>`
+          return `<b>${escape(n.name)}</b> ${escape(n.key)} · ${escape(n.market)}${n.us ? ` · US ${escape(n.us)}` : ''}${role ? ` · ${ROLE_LABEL[role]} of ${escape(state.selected)}` : ''}<br>`
             + (r ? `${escape(data.season?.label || '')}: ${r.date} · EPS ${surpriseText(r.surprise)} · ${pct(r.move, 1)}` : `next ${n.next ? n.next.date : '—'}`);
         },
       },

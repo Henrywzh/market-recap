@@ -1,4 +1,5 @@
 from datetime import date
+import json
 
 import numpy as np
 import pandas as pd
@@ -148,3 +149,16 @@ def test_a_cboe_file_behind_the_session_is_asked_for_again_once_per_build(monkey
     monkeypatch.setattr(cboe, "_asked", set())
     cboe.fetch_index("VIX", session=date(2026, 10, 9))
     assert len(calls) == 2
+
+
+def test_vix_context_keeps_finite_closes_up_to_the_session():
+    from market_recap.panels import risk as RP
+
+    s = _series([18.0, np.nan, 20.456, np.inf, 22.0, 23.0], start="2026-01-02")
+    out = RP.vix_context(s, "2026-01-07")
+    assert out["source"] == "Cboe VIX" and out["as_of"] == "2026-01-07"
+    # Business days from Fri 2026-01-02: the NaN (01-05) and the inf (01-07) are dropped.
+    assert out["dates"] == ["2026-01-02", "2026-01-06"]
+    assert out["close"] == [18.0, 20.46]
+    assert RP.vix_context(pd.Series(dtype=float), None)["close"] == []
+    json.dumps(out, allow_nan=False)
