@@ -1568,3 +1568,56 @@ a.today-tile:hover { background: var(--panel-alt); }
 .reverse-bar-required.reverse-reference-below { background: var(--blue); }
 .reverse-bar-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-top: 3px; }
 .reverse-bar-legend { margin-top: 2px; }
+
+/* FUNDAMENTAL TRENDS grid (tabs/financials.js): six charts, two to a row. */
+.fund-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin-top: 6px; }
+.fund-cell { min-width: 0; }
+.fund-title { font-size: 10.5px; letter-spacing: 0.04em; color: var(--text-dim); margin: 4px 0 0; }
+.fund-grid .chart.fund-chart { height: 250px; }
+.fund-mode button:disabled { opacity: 0.4; cursor: not-allowed; }
+@media (max-width: 760px) { .fund-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- TECHNICALS: candles, range, MA chips, stat strip ---------- */
+.tech-toolbar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 8px 0 4px; }
+.tech-toolbar [hidden], .tech-chips [hidden] { display: none !important; }
+.tech-note { font-size: 11px; color: var(--text-dim); }
+.tech-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 6px; }
+.tech-chip-list { display: contents; }
+.tech-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text-dim);
+  background: var(--panel-alt); border: 1px solid var(--border-strong); border-radius: 2px;
+  padding: 2px 6px;
+}
+.tech-chip-x {
+  appearance: none; background: none; border: 0; padding: 0 2px;
+  color: inherit; font: inherit; cursor: pointer;
+}
+.tech-chip-x:hover { color: var(--text); }
+.tech-chip-x:disabled { opacity: 0.35; cursor: default; }
+.tech-chip-add {
+  appearance: none; background: var(--panel-alt); border: 1px dashed var(--border-strong); border-radius: 2px;
+  color: var(--text-dim); font: inherit; font-size: 11px; padding: 2px 8px; cursor: pointer;
+}
+.tech-chip-add:hover { color: var(--text); }
+.tech-chips input { width: 4.5em; font: inherit; font-size: 11px; }
+.tech-stats {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 1px; background: var(--border); border: 1px solid var(--border); margin: 6px 0 8px;
+}
+.tech-stat { background: var(--panel); padding: 6px 8px; min-width: 0; }
+.tech-stat-label {
+  display: block; font-size: 10px; letter-spacing: 0.06em; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tech-stat-value {
+  display: block; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+@media (max-width: 480px) {
+  .tech-stats { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+  .tech-stat-value { font-size: 13px; }
+}
+
+/* MOVE CHECK: the headline sentence reads as the lead line. */
+.move-headline { font-size: 15px; line-height: 1.5; margin: 4px 0 12px; }

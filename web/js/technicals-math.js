@@ -239,3 +239,59 @@ export function rsiReading(series, lines = RSI_LINES) {
   for (let i = last; i >= 0 && finite(series[i]) && series[i] < hit.below; i -= 1) days += 1;
   return { value, line: hit.below, verdict: hit.verdict, days };
 }
+
+// The display windows the TECHNICALS controls offer, in sessions. YTD is
+// calendar-based (see viewStart); MAX is the whole history.
+export const RANGES = [
+  { key: '1M', sessions: 21 },
+  { key: '3M', sessions: 63 },
+  { key: '6M', sessions: 126 },
+  { key: 'YTD', sessions: null },
+  { key: '1Y', sessions: TRADING_DAYS_PER_YEAR },
+  { key: '2Y', sessions: TRADING_DAYS_PER_YEAR * 2 },
+  { key: '3Y', sessions: TRADING_DAYS_PER_YEAR * 3 },
+  { key: '5Y', sessions: TRADING_DAYS_PER_YEAR * 5 },
+  { key: '10Y', sessions: TRADING_DAYS_PER_YEAR * 10 },
+  { key: 'MAX', sessions: Infinity },
+];
+
+// First index shown for a range key, on the same rule as viewStart.
+export function rangeStart(dates, key) {
+  const range = RANGES.find((r) => r.key === key);
+  if (!range) throw new Error(`unknown range ${key}`);
+  return viewStart(dates, range.sessions);
+}
+
+// True when a range's first shown session is on or after the first bar of a
+// shorter series (candles cover fewer sessions than the close history).
+export function rangeWithin(dates, key, firstDate) {
+  const start = rangeStart(dates, key);
+  return dates.length > 0 && dates[start] >= firstDate;
+}
+
+// Percent change of a value against the one before it; null when either is missing.
+export function change(values, index) {
+  const now = values[index];
+  const before = index > 0 ? values[index - 1] : null;
+  return finite(now) && finite(before) && before !== 0 ? (now / before - 1) * 100 : null;
+}
+
+// Highest and lowest value over the last `window` sessions, missing sessions
+// skipped. Null until the history holds a full window.
+export function stats52w(values, window = TRADING_DAYS_PER_YEAR) {
+  if (values.length < window) return { high: null, low: null };
+  const recent = values.slice(-window).filter(finite);
+  if (!recent.length) return { high: null, low: null };
+  return { high: Math.max(...recent), low: Math.min(...recent) };
+}
+
+// Today's volume over the mean of the `n` sessions before it. Null when today
+// or any of those sessions is missing.
+export function relVolume(volume, n = 20) {
+  const last = volume.length - 1;
+  if (last < n || !finite(volume[last])) return null;
+  const prior = volume.slice(last - n, last);
+  if (!prior.every(finite)) return null;
+  const average = prior.reduce((s, v) => s + v, 0) / n;
+  return average > 0 ? volume[last] / average : null;
+}

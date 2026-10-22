@@ -62,3 +62,46 @@ test('RSI is null until period changes exist, then names the deepest line and it
   assert.equal(T.rsiReading([50, 31]).line, null);
   assert.equal(T.rsiReading([50, null]), null);
 });
+
+test('a range starts at its window, YTD at the prior year-end, MAX at the first session', () => {
+  const dates = ['2025-12-30', '2025-12-31', '2026-01-02', '2026-01-05'];
+  assert.equal(T.rangeStart(dates, 'YTD'), 1);
+  assert.equal(T.rangeStart(dates, '1M'), 0);
+  assert.equal(T.rangeStart(dates, 'MAX'), 0);
+  const long = Array.from({ length: 2600 }, (_, i) => `d${String(i).padStart(4, '0')}`);
+  assert.equal(T.rangeStart(long, '1Y'), 2600 - 1 - 252);
+  assert.equal(T.rangeStart(long, '2Y'), 2600 - 1 - 504);
+  assert.equal(T.rangeStart(long, '10Y'), 2600 - 1 - 2520);
+  assert.throws(() => T.rangeStart(long, '2W'));
+});
+
+test('a range is within the bars when its first session is on or after their first date', () => {
+  const dates = Array.from({ length: 600 }, (_, i) => `d${String(i).padStart(4, '0')}`);
+  assert.equal(T.rangeWithin(dates, '1Y', 'd0100'), true);   // starts at d0347
+  assert.equal(T.rangeWithin(dates, '2Y', 'd0100'), false);  // starts at d0095
+  assert.equal(T.rangeWithin(dates, 'MAX', 'd0000'), true);
+  assert.equal(T.rangeWithin(dates, 'MAX', 'd0001'), false);
+});
+
+test('the change on a session is against the one before, null without it', () => {
+  assert.ok(Math.abs(T.change([100, 110], 1) - 10) < 1e-9);
+  assert.equal(T.change([100, 110], 0), null);
+  assert.equal(T.change([null, 110], 1), null);
+  assert.equal(T.change([0, 110], 1), null);
+});
+
+test('52-week extremes need a full year and skip missing sessions', () => {
+  assert.deepEqual(T.stats52w(Array(251).fill(1)), { high: null, low: null });
+  const values = Array.from({ length: 252 }, (_, i) => (i === 0 ? null : i));
+  assert.deepEqual(T.stats52w(values), { high: 251, low: 1 });
+  assert.deepEqual(T.stats52w([1, 2, 3].concat(Array(249).fill(null))), { high: 3, low: 1 });
+  assert.deepEqual(T.stats52w(Array(252).fill(null)), { high: null, low: null });
+});
+
+test('relative volume is today over the mean of the 20 sessions before it', () => {
+  assert.equal(T.relVolume([...Array(20).fill(100), 300], 20), 3);
+  assert.equal(T.relVolume([...Array(20).fill(100), null], 20), null);
+  assert.equal(T.relVolume([null, ...Array(19).fill(100), 300], 20), null);
+  assert.equal(T.relVolume(Array(20).fill(100), 20), null);
+  assert.equal(T.relVolume([], 20), null);
+});

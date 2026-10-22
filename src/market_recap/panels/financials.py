@@ -14,6 +14,11 @@ from ..sources import sec
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, company_name, prune_stale, write_json
 
 STATEMENT_LABELS = {"income": "INCOME STATEMENT", "balance": "BALANCE SHEET", "cash_flow": "CASH FLOW"}
+# Fiscal quarters shown beside the annual columns.
+QUARTER_COUNT = 24
+# A year more is read than shown, so the oldest quarter shown has its year-ago
+# quarter for growth and its trailing four for ROE and ROIC.
+QUARTER_LOOKBACK = 4
 
 
 def universe(ctx) -> list[str]:
@@ -33,6 +38,30 @@ def universe(ctx) -> list[str]:
 def cik_for(symbol: str, cik_map: dict[str, int]) -> int | None:
     """Yahoo writes share classes with a dash (BRK-B), SEC with a dot (BRK.B)."""
     return cik_map.get(symbol.replace("-", ".")) or cik_map.get(symbol)
+
+
+def _quarters(rows: list[dict]) -> dict:
+    """Quarterly columns oldest first: each line, whether a figure was derived
+    rather than filed, and the quarterly ratios. The ratios are computed over
+    every row read, then the first QUARTER_LOOKBACK are dropped."""
+    ratios = F.quarterly_ratio_table(rows)
+    rows, ratios = rows[-QUARTER_COUNT:], {key: series[-QUARTER_COUNT:] for key, series in ratios.items()}
+    columns = [
+        {
+            "period_end": row["period_end"],
+            "label": row["label"],
+            "fiscal_year": row["fiscal_year"],
+            "quarter": row["quarter"],
+            "filed": max((row[f"{item.key}_filed"] or "") for item in sec.LINE_ITEMS) or None,
+        }
+        for row in rows
+    ]
+    return {
+        "columns": columns,
+        "values": {item.key: [clean_float(row[item.key], 4) for row in rows] for item in sec.LINE_ITEMS},
+        "derived": {item.key: [bool(row[f"{item.key}_derived"]) for row in rows] for item in sec.LINE_ITEMS},
+        "ratios": {key: [clean_float(v, 4) for v in series] for key, series in ratios.items()},
+    }
 
 
 def _payload(symbol: str, extracted: dict, meta: dict) -> dict:
@@ -60,6 +89,7 @@ def _payload(symbol: str, extracted: dict, meta: dict) -> dict:
         "values": values,
         "ratios": ratios,
         "nwc_basis": [row["nwc_basis"] for row in rows],
+        "quarters": _quarters(extracted["quarterly_rows"]),
     }
 
 
@@ -89,7 +119,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
             skipped[symbol] = "no CIK in SEC's ticker map"
             continue
         try:
-            extracted = sec.extract_fundamentals(symbol, cik, years=years, use_cache=use_cache)
+            extracted = sec.extract_fundamentals(symbol, cik, years=years, quarters=QUARTER_COUNT + QUARTER_LOOKBACK, use_cache=use_cache)
         except Exception as exc:
             skipped[symbol] = str(exc)[:ERROR_DETAIL_CHARS]
             continue
@@ -129,7 +159,9 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         "note": (
             "Annual figures from each company's own 10-K / 20-F / 40-F XBRL facts, as most recently "
             "filed: a restated year shows its restated value, and each column shows when it was last "
-            "filed. A blank is a line the filer did not tag, never a zero. Share counts and EPS from "
+            "filed. Quarterly columns are the last fiscal quarters: a three-month figure as filed, or "
+            "derived from year-to-date figures where it was not (marked as derived). A blank is a line "
+            "the filer did not tag, never a zero. Share counts and EPS from "
             "years last filed before a stock split are put on today's share basis, using the split the "
             "company's own restatements reveal. Fiscal years are named by "
             "their period end; retailers whose year ends in late January call it the year before. "

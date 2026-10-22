@@ -3,7 +3,7 @@
 // indicator is computed here by technicals-math.js on the full history and
 // then cut to the chosen period.
 
-import { el, card, table, num, pct, dirClass, sectionTitle, periodSwitch, tag, DASH } from '../fmt.js';
+import { el, card, table, num, pct, dirClass, sectionTitle, tag, DASH } from '../fmt.js';
 import { render, multiLine, SERIES_COLORS } from '../charts.js';
 import * as T from '../technicals-math.js';
 import { resolveTicker } from '../routes.js';
@@ -17,6 +17,9 @@ const MAX_RSI_PERIOD = 50;
 const RSI_NOTE = 'Wilder RSI on closes. The lines describe how stretched a fall is, not a rebound call: since '
   + '1950 on the S&P 500 and since 2008 on the sector funds, a close below 20 was followed by much the same '
   + 'returns as one below 30, and the worst tenth still fell 7–16% further within 20 sessions.';
+// The range buttons; the PERIOD select offers every range in T.RANGES.
+const BUTTON_RANGES = ['1M', '3M', '6M', 'YTD', '1Y', '2Y', '5Y', '10Y', 'MAX'];
+const VOLUME_WINDOW = 20;
 
 const payloads = new Map();
 
@@ -37,13 +40,23 @@ async function loadTicker(symbol) {
 }
 
 const cut = (values, start) => values.slice(start);
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 
-function periodSelect(periods, selected) {
-  return el('select', {}, Object.keys(periods).map((label) => {
+function periodSelect(labels, selected) {
+  return el('select', {}, labels.map((label) => {
     const option = el('option', { value: label, text: label });
     if (label === selected) option.selected = true;
     return option;
   }));
+}
+
+// A row of exclusive buttons in the period-switch style. setActive marks one as pressed.
+function segmented(labels, active, onPick) {
+  const buttons = labels.map((label) => el('button', { type: 'button', text: label, onclick: () => onPick(label) }));
+  const wrap = el('div', { class: 'period-switch' }, buttons);
+  wrap.setActive = (value) => buttons.forEach((b, i) => b.setAttribute('aria-pressed', String(labels[i] === value)));
+  wrap.setActive(active);
+  return wrap;
 }
 
 function needs(window, sessions) {
@@ -58,25 +71,28 @@ export function rsiSettings(defaults) {
   return { period: defaults?.rsi?.period ?? 6, lines: defaults?.rsi?.lines ?? T.RSI_LINES };
 }
 
-function computeSingle(payload, { windows, slopeWindow, defaults, rsiPeriod }) {
+// `series` is the close the moving averages and the band are drawn on: the
+// close history, or the candles' close when candles are shown. Everything else
+// reads the close history, as before.
+function computeSingle(payload, { windows, slopeWindow, defaults, rsiPeriod, series }) {
   const close = payload.close;
   const n = close.length;
   const zWindow = defaults.zscore_window;
   const horizon = defaults.forward_return_days;
   const unavailable = {};
+  const line = series || close;
 
   const formed = windows.filter((w) => n >= w);
   windows.filter((w) => n < w).forEach((w) => { unavailable[`sma_${w}`] = needs(w, n); });
-  const averages = Object.fromEntries(formed.map((w) => [w, T.sma(close, w)]));
+  const averages = Object.fromEntries(windows.map((w) => [w, T.sma(line, w)]));
   const slopes = Object.fromEntries(formed.map((w) => [w, T.smaSlope(close, w, slopeWindow)]));
+  const bandLines = line.length >= zWindow ? T.band(line, zWindow, defaults.band_sigma) : null;
 
   let summary = { price: close[n - 1] };
   let z = [];
-  let bandLines = null;
   if (n >= zWindow) {
     const long = T.sma(close, zWindow);
     z = T.zscore(close, zWindow);
-    bandLines = T.band(close, zWindow, defaults.band_sigma);
     const lastZ = z[n - 1];
     const b = T.bandFor(lastZ);
     const slope = T.annualisedSlope(close, zWindow, slopeWindow);
@@ -111,48 +127,150 @@ function computeSingle(payload, { windows, slopeWindow, defaults, rsiPeriod }) {
   return { averages, slopes, z, bandLines, summary, forward, unavailable, rsi, rsiNow, rsiPeriod, lines };
 }
 
+// The stat strip: each reading from the series the price chart draws, dashed
+// where the history cannot form it. Z-SCORE and SLOPE are the single-ticker readings.
+function statItems(payload, series, readings, windows) {
+  const s = series.close;
+  const last = s.length - 1;
+  const day = T.change(s, last);
+  const { high, low } = T.stats52w(s);
+  const sma200 = T.sma(s, 200)[last];
+  const dist = isNum(sma200) && isNum(s[last]) ? (s[last] / sma200 - 1) * 100 : null;
+  const rel = T.relVolume(payload.ohlcv?.volume || [], VOLUME_WINDOW);
+  const { summary } = readings;
+  return [
+    ['PRICE', num(s[last]), ''],
+    ['DAY %', pct(day), dirClass(day)],
+    ['52W HIGH', num(high), ''],
+    ['52W LOW', num(low), ''],
+    ['REL VOL', rel === null ? DASH : `${num(rel, 2)}×`, ''],
+    ...windows.map((w) => [`SMA ${w}`, num(readings.averages[w][last]), '']),
+    ['DIST VS 200', pct(dist), dirClass(dist)],
+    ['Z-SCORE', num(summary.zscore), ''],
+    ['SLOPE (ANN.)', pct(summary.slope, 1), dirClass(summary.slope)],
+  ];
+}
+
 // ------------------------------------------------------------------ charts
 
 const BAND_BASE = 'band base';
+const maName = (w) => `SMA ${w}`;
+const MA_COLORS = (p) => [p.accent, p.blue, p.purple, ...SERIES_COLORS];
 
-function priceChart(node, payload, readings, start, defaults) {
-  const dates = cut(payload.dates, start);
-  const { bandLines } = readings;
-  render(node, (option, p) => withLegend(option, p, {
-    ...option,
-    grid: { ...option.grid, bottom: 52 },
-    xAxis: { ...option.xAxis, data: dates },
-    series: [
-      // The band is a stacked invisible base plus a filled span, so it reads
-      // as an envelope rather than two unrelated lines.
-      ...(bandLines ? [
-        { name: BAND_BASE, type: 'line', data: cut(bandLines.lower, start), stack: 'band', showSymbol: false,
-          lineStyle: { opacity: 0 }, areaStyle: { opacity: 0 }, silent: true, tooltip: { show: false } },
-        { name: `±${defaults.band_sigma}σ band`, type: 'line', stack: 'band', showSymbol: false, silent: true,
-          data: cut(bandLines.upper, start).map((v, i) => {
-            const low = bandLines.lower[start + i];
-            return v === null || low === null ? null : v - low;
-          }),
-          lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(232,163,61,0.13)' }, tooltip: { show: false } },
-      ] : []),
-      { name: `${payload.ticker} Close`, type: 'line', data: cut(payload.close, start), showSymbol: false,
-        lineStyle: { width: 1.4, color: p.text }, z: 5 },
-      ...Object.entries(readings.averages).map(([w, values], i) => ({
-        name: `${w}-day SMA`, type: 'line', data: cut(values, start), showSymbol: false,
-        lineStyle: { width: 1, color: SERIES_COLORS[i % SERIES_COLORS.length] },
-      })),
-    ],
-  }));
+// Volume labels on the pane's axis: 1.2M, 340K.
+function volumeLabel(v) {
+  if (!isNum(v)) return '';
+  const unit = [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']].find(([size]) => v >= size);
+  return unit ? `${num(v / unit[0], 1)}${unit[1]}` : num(v, 0);
 }
 
-// The band's invisible base series exists only to lift the fill; it has no
-// place in the legend.
-function withLegend(option, p, built) {
+// The price chart. LINE draws the close; CANDLES (`view.bars`, the ohlcv
+// block) draws the bars with a volume pane under them. Either way the moving
+// averages and the band sit on `view.close`, and `view.start` is the first
+// index shown.
+function priceChart(node, view) {
+  const { bars, dates, close, averages, bandLines, start, log, ticker } = view;
+  render(node, (option, p) => {
+    const colors = MA_COLORS(p);
+    const xDates = cut(dates, start);
+    const maEntries = Object.entries(averages).map(([w, values], i) => ({
+      w, name: maName(w), color: colors[i % colors.length], data: cut(values, start),
+    }));
+    // The band is a stacked invisible base plus a filled span, so it reads
+    // as an envelope rather than two unrelated lines.
+    const bandSeries = bandLines ? [
+      { name: BAND_BASE, type: 'line', data: cut(bandLines.lower, start), stack: 'band', showSymbol: false,
+        lineStyle: { opacity: 0 }, areaStyle: { opacity: 0 }, silent: true, tooltip: { show: false } },
+      { name: `±${view.sigma}σ band`, type: 'line', stack: 'band', showSymbol: false, silent: true,
+        data: cut(bandLines.upper, start).map((v, i) => {
+          const low = bandLines.lower[start + i];
+          return v === null || low === null ? null : v - low;
+        }),
+        lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(232,163,61,0.13)' }, tooltip: { show: false } },
+    ] : [];
+    const maSeries = maEntries.map(({ name, color, data }) => ({
+      name, type: 'line', data, showSymbol: false, lineStyle: { width: 1, color }, z: 3,
+    }));
+    const tip = (params) => {
+      const first = [].concat(params)[0];
+      if (!first) return '';
+      const k = start + first.dataIndex;
+      const rows = [`<b>${dates[k]}</b>`];
+      if (bars) rows.push(`O ${num(bars.open[k])}  H ${num(bars.high[k])}  L ${num(bars.low[k])}  C ${num(bars.close[k])}`);
+      else rows.push(`Close <b>${num(close[k])}</b>`);
+      rows.push(`Day ${pct(T.change(close, k))}`);
+      maEntries.forEach(({ w, name, color }) => rows.push(`<span style="color:${color}">${name}</span> ${num(averages[w][k])}`));
+      return rows.join('<br>');
+    };
+    const axisTooltip = {
+      ...option.tooltip,
+      valueFormatter: undefined,
+      formatter: tip,
+      axisPointer: { ...option.tooltip.axisPointer, link: [{ xAxisIndex: 'all' }] },
+    };
+    const yPrice = { ...option.yAxis, gridIndex: 0, type: log ? 'log' : 'value' };
+
+    if (!bars) {
+      return withLegend(option, p, {
+        ...option,
+        tooltip: axisTooltip,
+        grid: { ...option.grid, bottom: 52 },
+        xAxis: { ...option.xAxis, data: xDates },
+        yAxis: yPrice,
+        series: [
+          ...bandSeries,
+          { name: `${ticker} Close`, type: 'line', data: cut(close, start), showSymbol: false,
+            lineStyle: { width: 1.4, color: p.text }, z: 5 },
+          ...maSeries,
+        ],
+      });
+    }
+
+    const O = cut(bars.open, start);
+    const H = cut(bars.high, start);
+    const L = cut(bars.low, start);
+    const C = cut(close, start);
+    const V = cut(bars.volume, start);
+    return withLegend(option, p, {
+      ...option,
+      tooltip: axisTooltip,
+      grid: [
+        { left: 52, right: 16, top: 12, height: '62%' },
+        { left: 52, right: 16, top: '78%', height: '13%' },
+      ],
+      xAxis: [
+        { ...option.xAxis, data: xDates, gridIndex: 0, boundaryGap: true, axisLabel: { show: false } },
+        { ...option.xAxis, data: xDates, gridIndex: 1, boundaryGap: true },
+      ],
+      yAxis: [
+        yPrice,
+        { ...option.yAxis, gridIndex: 1, scale: false, min: 0, splitNumber: 2,
+          axisLabel: { ...option.yAxis.axisLabel, formatter: volumeLabel } },
+      ],
+      series: [
+        ...bandSeries,
+        { name: `${ticker} OHLC`, type: 'candlestick', z: 5,
+          data: O.map((_, i) => (isNum(O[i]) && isNum(H[i]) && isNum(L[i]) && isNum(C[i]) ? [O[i], C[i], L[i], H[i]] : '-')),
+          itemStyle: { color: p.up, color0: p.down, borderColor: p.up, borderColor0: p.down } },
+        ...maSeries,
+        { name: 'Volume', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, barMaxWidth: 6,
+          data: V.map((v, i) => (isNum(v) ? {
+            value: v,
+            itemStyle: { color: isNum(O[i]) && isNum(C[i]) ? (C[i] < O[i] ? p.down : p.up) : p.faint, opacity: 0.5 },
+          } : null)) },
+      ],
+    }, [`${ticker} OHLC`, 'Volume']);
+  });
+}
+
+// The band's invisible base series exists only to lift the fill, and the
+// candles and volume are read from the tooltip, so none of them is in the legend.
+function withLegend(option, p, built, hidden = []) {
   return {
     ...built,
     legend: {
       bottom: 0, textStyle: { color: p.dim, fontSize: 10 }, icon: 'rect', itemWidth: 9, itemHeight: 9,
-      data: built.series.map((s) => s.name).filter((name) => name !== BAND_BASE),
+      data: built.series.map((s) => s.name).filter((name) => name !== BAND_BASE && !hidden.includes(name)),
     },
   };
 }
@@ -288,7 +406,7 @@ export default async function renderTechnicals(root, data, _manifest, ctx = {}) 
   ]);
   const numInput = el('input', { value: firstNum, size: '8' });
   const denInput = el('input', { value: firstDen, size: '8' });
-  const rsPeriod = periodSelect(data.periods, defaults.ratio_period);
+  const rsPeriod = periodSelect(Object.keys(data.periods), defaults.ratio_period);
   presetSelect.addEventListener('change', () => {
     if (!presetSelect.value) return;
     [numInput.value, denInput.value] = presetSelect.value.split('/');
@@ -348,9 +466,9 @@ export default async function renderTechnicals(root, data, _manifest, ctx = {}) 
 
 // The single-ticker section on its own, so the ticker page can show the same
 // readings. `lockTicker` hides the ticker box when the page already names it.
-// ``compact`` is the ticker page's form: default windows, a period switch in
-// the card head instead of inputs, and no forward-return table (that and the
-// windows stay on TOOLS → TECHNICALS).
+// ``compact`` is the ticker page's form: default windows, no MA or period
+// inputs in the card, and no forward-return table (that and the windows stay
+// on TOOLS → TECHNICALS). The range, candles, log and MA chips work in both.
 export async function renderSingleTicker(root, data, { symbol, lockTicker = false, compact = false }) {
   const defaults = data.defaults;
   // ---------------- Single ticker ----------------------------------------
@@ -358,12 +476,15 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
   const tickerInput = el('input', { value: symbol, size: '8' });
   const maInput = el('input', { value: defaults.ma_periods.join(','), size: '12' });
   const slopeInput = el('input', { value: String(defaults.slope_window), size: '4', type: 'number', min: '1', max: String(MAX_SLOPE_WINDOW) });
-  const stPeriod = periodSelect(data.periods, defaults.single_ticker_period);
-  let compactPeriod = defaults.single_ticker_period;
-  const periodValue = () => (compact ? compactPeriod : stPeriod.value);
+  let range = T.RANGES.some((r) => r.key === defaults.single_ticker_period) ? defaults.single_ticker_period : '1Y';
+  const stPeriod = periodSelect(T.RANGES.map((r) => r.key), range);
+  let candlesOn = true;
+  let logOn = false;
+  let shownWindows = [...defaults.ma_periods].sort((a, b) => a - b);
   const summaryHost = el('div', {});
   const priceTitle = el('div', { class: 'card-title', text: '' });
   const stPriceNode = el('div', { class: 'chart tall' });
+  const statHost = el('div', { class: 'tech-stats' });
   const slopeTitle = el('span', { class: 'card-title', text: '' });
   const slopeNode = el('div', { class: 'chart short' });
   const zNode = el('div', { class: 'chart short' });
@@ -373,11 +494,83 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
   const fwdHost = el('div', {});
   const zWindow = defaults.zscore_window;
 
+  // Range buttons, candles and log. The buttons and the PERIOD select set the
+  // same window; a range the candles do not reach is drawn as a line, with a note.
+  const modeSwitch = segmented(['LINE', 'CANDLES'], 'CANDLES', (label) => {
+    candlesOn = label === 'CANDLES';
+    modeSwitch.setActive(label);
+    loadSingle();
+  });
+  const rangeSwitch = segmented(BUTTON_RANGES, range, (key) => pickRange(key));
+  const logButton = el('button', {
+    type: 'button', text: 'LOG', 'aria-pressed': 'false',
+    onclick: () => {
+      logOn = !logOn;
+      logButton.setAttribute('aria-pressed', String(logOn));
+      loadSingle();
+    },
+  });
+  const toolNote = el('span', { class: 'tech-note', text: '' });
+  const toolbar = el('div', { class: 'tech-toolbar' }, [
+    modeSwitch, rangeSwitch, el('div', { class: 'period-switch' }, [logButton]), toolNote,
+  ]);
+
+  function pickRange(key) {
+    range = key;
+    rangeSwitch.setActive(key);
+    stPeriod.value = key;
+    loadSingle();
+  }
+  stPeriod.addEventListener('change', () => pickRange(stPeriod.value));
+
+  // MA chips, kept in step with the MA PERIODS input: a chip removes its
+  // window, "+ MA" adds one. The last chip cannot be removed.
+  const chipHost = el('span', { class: 'tech-chip-list' });
+  const addInput = el('input', {
+    type: 'number', min: '2', max: String(MAX_MA_WINDOW), size: '4', hidden: '', 'aria-label': 'Moving-average period to add',
+  });
+  const addButton = el('button', {
+    type: 'button', class: 'tech-chip-add', text: '+ MA',
+    onclick: () => { addInput.hidden = false; addInput.focus(); },
+  });
+  const chipRow = el('div', { class: 'tech-chips' }, [chipHost, addInput, addButton]);
+  addInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { addInput.hidden = true; addInput.value = ''; return; }
+    if (event.key !== 'Enter' || !addInput.value.trim()) return;
+    try {
+      const next = T.parseWindows([...shownWindows, addInput.value].join(','), { max: MAX_MA_WINDOW });
+      addInput.hidden = true;
+      addInput.value = '';
+      setWindows(next);
+    } catch (error) {
+      stStatus.textContent = error.message;
+    }
+  });
+
+  function setWindows(list) {
+    maInput.value = list.join(', ');
+    loadSingle();
+  }
+
+  function drawChips() {
+    const removable = shownWindows.length > 1;
+    chipHost.replaceChildren(...shownWindows.map((w) => el('span', { class: 'tech-chip' }, [
+      `SMA ${w}`,
+      el('button', {
+        type: 'button', class: 'tech-chip-x', text: '×', 'aria-label': `Remove SMA ${w}`,
+        disabled: removable ? null : '',
+        onclick: () => setWindows(shownWindows.filter((x) => x !== w)),
+      }),
+    ])));
+  }
+
   async function loadSingle() {
     const symbol = resolveTicker(tickerInput.value.trim().toUpperCase(), (t) => (data.available || []).includes(t));
     stStatus.textContent = `Loading ${symbol}…`;
     try {
       const windows = T.parseWindows(maInput.value, { max: MAX_MA_WINDOW });
+      shownWindows = windows;
+      drawChips();
       const slopeWindow = Number(slopeInput.value);
       if (!Number.isInteger(slopeWindow) || slopeWindow < 1 || slopeWindow > MAX_SLOPE_WINDOW) {
         throw new Error(`Slope window must be a whole number from 1 to ${MAX_SLOPE_WINDOW}`);
@@ -387,13 +580,30 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
         throw new Error(`RSI period must be a whole number from 2 to ${MAX_RSI_PERIOD}`);
       }
       const payload = await loadTicker(symbol);
-      const readings = computeSingle(payload, { windows, slopeWindow, defaults, rsiPeriod });
-      const start = T.viewStart(payload.dates, data.periods[periodValue()]);
+      const bars = payload.ohlcv?.dates?.length ? payload.ohlcv : null;
+      modeSwitch.hidden = !bars;
+      const candles = candlesOn && bars && T.rangeWithin(payload.dates, range, bars.dates[0]) ? bars : null;
+      toolNote.textContent = candlesOn && bars && !candles
+        ? `Candles cover the last ${bars.dates.length} sessions; ${range} is drawn as a line.` : '';
+
+      // The price chart and its readings use the candles' close when candles
+      // are shown, else the close history the other charts use.
+      const series = candles ? { dates: candles.dates, close: candles.close } : { dates: payload.dates, close: payload.close };
+      const readings = computeSingle(payload, { windows, slopeWindow, defaults, rsiPeriod, series: series.close });
+      const start = T.rangeStart(payload.dates, range);
       const dates = cut(payload.dates, start);
 
       summaryHost.replaceChildren(summaryTable(payload, readings, { zWindow, slopeWindow }));
-      priceTitle.textContent = `PRICE, ${windows.join('/')}-DAY SMA & ${defaults.band_sigma}σ BAND (${zWindow} DMA)`;
-      priceChart(stPriceNode, payload, readings, start, defaults);
+      priceTitle.textContent = `${candles ? 'PRICE, CANDLES' : 'PRICE'}, ${windows.join('/')}-DAY SMA & ${defaults.band_sigma}σ BAND (${zWindow} DMA)`;
+      priceChart(stPriceNode, {
+        bars: candles, dates: series.dates, close: series.close, averages: readings.averages,
+        bandLines: readings.bandLines, sigma: defaults.band_sigma, start: T.rangeStart(series.dates, range),
+        log: logOn, ticker: payload.ticker,
+      });
+      statHost.replaceChildren(...statItems(payload, series, readings, windows).map(([label, text, tone]) => el('div', { class: 'tech-stat' }, [
+        el('span', { class: 'tech-stat-label', text: label }),
+        el('span', { class: `tech-stat-value ${tone}`, text }),
+      ])));
 
       slopeTitle.textContent = `SMA SLOPE (% PER DAY, OVER ${slopeWindow} SESSIONS)`;
       multiLine(slopeNode, dates, Object.fromEntries(
@@ -423,11 +633,9 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
   for (const input of [tickerInput, maInput, slopeInput, rsiInput]) {
     input.addEventListener('keydown', (event) => { if (event.key === 'Enter') loadSingle(); });
   }
-  stPeriod.addEventListener('change', () => loadSingle());
 
   if (compact) {
-    const switcher = periodSwitch(Object.keys(data.periods), compactPeriod, (label) => { compactPeriod = label; loadSingle(); });
-    root.append(card('PRICE & TREND', switcher, [priceTitle, stPriceNode, summaryHost, stStatus]));
+    root.append(card('PRICE & TREND', null, [priceTitle, toolbar, chipRow, statHost, stPriceNode, summaryHost, stStatus]));
     const slopeCard = card('', null, slopeNode);
     slopeCard.querySelector('.card-title').replaceWith(slopeTitle);
     root.append(el('div', { class: 'grid two' }, [slopeCard, card(`Z-SCORE VS ${zWindow} DMA`, null, zNode)]));
@@ -448,6 +656,9 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
     ]),
     summaryHost,
     priceTitle,
+    toolbar,
+    chipRow,
+    statHost,
     stPriceNode,
   ]));
 

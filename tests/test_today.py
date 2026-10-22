@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from market_recap import validate
@@ -458,7 +460,7 @@ def test_empty_inputs_still_give_every_key(tmp_path):
     out = _run(inputs=inputs, events_dir=tmp_path)
     assert set(validate.TODAY_KEYS) <= set(out)
     assert len(out["unavailable"]) >= len(today.INPUTS)
-    assert out["unusual"] == {"moves": [], "states": [], "events": [], "ongoing": [], "oversold": [], "watch": []}
+    assert out["unusual"] == {"moves": [], "states": [], "events": [], "ongoing": [], "oversold": [], "watch": [], "tails": []}
 
 
 # --- validate ----------------------------------------------------------------
@@ -538,3 +540,18 @@ def test_oversold_lists_watch_names_below_a_line_deepest_first(tmp_path):
 
 def test_oversold_is_empty_without_closes(tmp_path):
     assert _run(events_dir=tmp_path)["unusual"]["oversold"] == []
+
+
+def test_a_watch_name_in_the_outer_tail_of_its_own_history_is_listed_once():
+    idx = pd.bdate_range("2016-01-01", periods=1300)
+    rng = np.random.default_rng(7)
+    calm = pd.Series(100 * np.cumprod(1 + rng.normal(0, 0.005, len(idx))), index=idx)
+    crash = calm.copy()
+    crash.iloc[-1] = crash.iloc[-2] * 0.97
+    closes = pd.DataFrame({"QQQ": crash, "XLU": calm})
+    items = today._tail_items(closes, {"QQQ": "Nasdaq-100 (QQQ)", "XLU": "Utilities (XLU)"}, idx[-1].strftime("%Y-%m-%d"))
+    assert [i["subject"] for i in items] == ["Nasdaq-100 (QQQ)"]
+    item = items[0]
+    assert item["kind"] == "tail" and item["link"] == "#movecheck/QQQ" and item["extra"]["horizon"] == 1
+    assert item["title"].startswith("Nasdaq-100 (QQQ) fell 3.0% today: never further since 2016")
+    assert item["importance"] == "high"

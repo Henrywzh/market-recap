@@ -1168,6 +1168,197 @@ def _market_shares(facts: dict, diluted: dict, end: str, filed: str | None) -> d
     return {"shares": None, "shares_as_of": None, "shares_basis": "no complete share count filed"}
 
 
+# --- Quarterly statements -----------------------------------------------------
+# The annual table's lines, one row per fiscal quarter. A quarter is the three
+# months a 10-Q reports where it does; otherwise it is built from the year to
+# date figures the 10-Qs and the 10-K carry.
+
+QUARTER_SPAN_DAYS = (80, 100)
+# Quarters kept on the parsed filer; the panel shows the latest of them.
+QUARTERS_KEPT = 40
+# Mean length of a quarter, for naming the quarter from its day count.
+QUARTER_DAYS = 91.3125
+
+
+def _is_quarter_span(key: tuple) -> bool:
+    start, end = key
+    return start is not None and QUARTER_SPAN_DAYS[0] <= _days(start, end) <= QUARTER_SPAN_DAYS[1]
+
+
+def _nearest_period(periods: dict, end: str, accept) -> tuple | None:
+    """(key, entry) of the period ending within PERIOD_MATCH_DAYS of ``end`` that
+    ``accept`` admits: the nearest end, then the latest filed."""
+    found = [(key, entry) for key, entry in periods.items()
+             if accept(key) and abs(_days(key[1], end)) <= PERIOD_MATCH_DAYS]
+    if not found:
+        return None
+    found.sort(key=lambda item: item[1]["filed"], reverse=True)
+    return min(found, key=lambda item: abs(_days(item[0][1], end)))
+
+
+def _quarter_ends(periods: dict) -> list[tuple[str, bool]]:
+    """(end, is a fiscal year end), oldest first. Quarters come from three-month
+    spans of revenue or net income; fiscal years from their annual spans. Ends
+    within PERIOD_MATCH_DAYS of each other are one quarter, named by its year end."""
+    quarters, years = set(), set()
+    for tag in ("revenue", "net_income"):
+        for (start, end), entry in periods[tag].items():
+            if start is None:
+                continue
+            length = _days(start, end)
+            if _is_quarter_span((start, end)):
+                quarters.add(end)
+            elif ANNUAL_SPAN_DAYS[0] <= length <= ANNUAL_SPAN_DAYS[1] and entry["rank"][1] == 0:
+                years.add(end)
+    clusters: list[list[str]] = []
+    for end in sorted(quarters | years):
+        if clusters and _days(clusters[-1][-1], end) <= PERIOD_MATCH_DAYS:
+            clusters[-1].append(end)
+        else:
+            clusters.append([end])
+    out = []
+    for cluster in clusters:
+        year_end = next((end for end in cluster if end in years), None)
+        out.append((year_end or cluster[-1], year_end is not None))
+    return out
+
+
+def _fiscal_quarter(end: str, is_year_end: bool, year_ends: list[str]) -> tuple[int, int] | None:
+    """(fiscal year, quarter) of a quarter end. The fiscal year is the one
+    containing the quarter, named by fiscal_year(); the quarter is counted in
+    months from the previous fiscal year end, or back from the next one where
+    no earlier year end is known. None where neither is."""
+    prior = max((y for y in year_ends if _days(y, end) > PERIOD_MATCH_DAYS), default=None)
+    later = [y for y in year_ends if _days(end, y) > PERIOD_MATCH_DAYS]
+    if is_year_end:
+        containing = end
+    elif later:
+        containing = min(later)
+    elif prior is not None:
+        # The year in progress has no end yet: the previous one plus a year.
+        containing = (date.fromisoformat(prior) + timedelta(days=DAYS_PER_YEAR)).isoformat()
+    else:
+        return None
+    if prior is not None:
+        quarter = round(_days(prior, end) / QUARTER_DAYS)
+    else:
+        quarter = 4 - round(_days(end, containing) / QUARTER_DAYS)
+    return fiscal_year(containing), min(4, max(1, quarter))
+
+
+def _eps_quarter(periods: dict, end: str, quarter_ends: list[str], year_ends: list[str]) -> tuple | None:
+    """Diluted EPS for a quarter: as filed, or for the fourth quarter the year's
+    EPS less the three quarters' -- and only when all three are filed. EPS is
+    never differenced from year-to-date figures."""
+    span = _nearest_period(periods, end, _is_quarter_span)
+    if span is not None:
+        return span[1]["value"], span[1]["filed"], False
+    year = _nearest_period(periods, end, lambda key: key[0] is not None and ANNUAL_SPAN_DAYS[0] <= _days(*key) <= ANNUAL_SPAN_DAYS[1])
+    if year is None or end not in year_ends:
+        return None
+    start = year[0][0]
+    earlier = [q for q in quarter_ends if start < q < end and _days(q, end) > PERIOD_MATCH_DAYS]
+    if len(earlier) != 3:
+        return None
+    parts = [_nearest_period(periods, q, _is_quarter_span) for q in earlier]
+    if any(part is None for part in parts):
+        return None
+    return year[1]["value"] - sum(part[1]["value"] for part in parts), year[1]["filed"], True
+
+
+def _flow_quarter(periods: dict, end: str) -> tuple | None:
+    """A cash-flow or income figure for a quarter: the three months as filed;
+    else a year-to-date span ending at ``end`` less the same-start span one quarter
+    earlier (a fourth quarter is the year less nine months)."""
+    span = _nearest_period(periods, end, _is_quarter_span)
+    if span is not None:
+        return span[1]["value"], span[1]["filed"], False
+    candidates = [(key, entry) for key, entry in periods.items()
+                  if key[0] is not None and abs(_days(key[1], end)) <= PERIOD_MATCH_DAYS
+                  and QUARTER_SPAN_DAYS[1] < _days(*key) <= ANNUAL_SPAN_DAYS[1]]
+    for (start, ytd_end), ytd in sorted(candidates, key=lambda item: item[1]["filed"], reverse=True):
+        # The same tag on both sides: HIG's year is tagged ``Revenues`` and its
+        # nine months a narrower line, and their difference was a $5B "quarter".
+        prior = [entry for (s, e), entry in periods.items()
+                 if s == start and QUARTER_SPAN_DAYS[0] <= _days(e, ytd_end) <= QUARTER_SPAN_DAYS[1]
+                 and entry["priority"] == ytd["priority"]]
+        if prior:
+            return ytd["value"] - prior[0]["value"], ytd["filed"], True
+    return None
+
+
+def _quarter_figure(item: LineItem, periods: dict, end: str, quarter_ends: list[str], year_ends: list[str]) -> tuple | None:
+    """(value, filed, derived) for one line at a quarter end, or None."""
+    if item.instant:
+        found = _nearest_period(periods, end, lambda key: key[0] is None)
+        return None if found is None else (found[1]["value"], found[1]["filed"], False)
+    if item.key == "eps_diluted":
+        return _eps_quarter(periods, end, quarter_ends, year_ends)
+    if item.key == "shares":
+        # A share count is an average over a quarter; it is never built from a year.
+        found = _nearest_period(periods, end, _is_quarter_span)
+        return None if found is None else (found[1]["value"], found[1]["filed"], False)
+    return _flow_quarter(periods, end)
+
+
+def quarterly_statements(facts: dict) -> list[dict]:
+    """Every fiscal quarter the filer has reported, oldest first, one row each.
+
+    Each line carries ``{key}_filed`` (the filing its figure came from) and
+    ``{key}_derived`` (True where the figure was built, not filed as a three-month
+    figure: a cash-flow quarter as year-to-date less the one before, a fourth
+    quarter as the year less nine months, and EPS as the year less three quarters).
+    Balance-sheet items are read at the quarter end. A quarter whose fiscal year
+    cannot be named, or that has neither revenue nor net income, is left out.
+    """
+    splits = share_splits(facts)
+    periods = {item.key: _period_values(facts, item, splits) for item in LINE_ITEMS}
+    ends = _quarter_ends(periods)
+    quarter_ends = [end for end, _ in ends]
+    year_ends = [end for end, is_year in ends if is_year]
+    rows = []
+    for end, is_year in ends:
+        named = _fiscal_quarter(end, is_year, year_ends)
+        if named is None:
+            continue
+        fiscal, quarter = named
+        row: dict = {"period_end": end, "fiscal_year": fiscal, "quarter": quarter, "label": f"FY{fiscal} Q{quarter}"}
+        for item in LINE_ITEMS:
+            found = _quarter_figure(item, periods[item.key], end, quarter_ends, year_ends)
+            value, filed, derived = found if found is not None else (None, None, False)
+            row[item.key] = value
+            row[f"{item.key}_filed"] = filed
+            row[f"{item.key}_derived"] = derived
+        if row["revenue"] is None and row["net_income"] is None:
+            continue
+        rows.append(row)
+    _drop_stray_revenue(rows)
+    return rows
+
+
+# A quarter's revenue more than this many times above or below the median of the
+# quarters around it is taken from another line than its neighbours (ADM's 10-Qs
+# tag a $6B line some quarters and the $23B total others) and left blank.
+REVENUE_STRAY_FACTOR = 3.0
+REVENUE_STRAY_WINDOW = 4
+
+
+def _drop_stray_revenue(rows: list[dict]) -> None:
+    """Blank a quarter's revenue that is not on the scale of the quarters around
+    it, or not positive. Its margins then go blank with it, never wrong."""
+    values = [row["revenue"] for row in rows]
+    for i, row in enumerate(rows):
+        value = values[i]
+        if value is None:
+            continue
+        around = [v for v in values[max(0, i - REVENUE_STRAY_WINDOW):i] + values[i + 1:i + 1 + REVENUE_STRAY_WINDOW]
+                  if v is not None and v > 0]
+        if value <= 0 or (len(around) >= 3 and not
+                          sorted(around)[len(around) // 2] / REVENUE_STRAY_FACTOR <= value
+                          <= sorted(around)[len(around) // 2] * REVENUE_STRAY_FACTOR):
+            row["revenue"], row["revenue_derived"] = None, False
+
+
 @dataclass(frozen=True)
 class Filer:
     entity_name: str | None
@@ -1179,6 +1370,8 @@ class Filer:
     # {end, value, filed} per fiscal quarter: the scale a release's revenue
     # guidance is checked against.
     quarterly_revenue: tuple = ()
+    # The last QUARTERS_KEPT fiscal quarters, oldest first (quarterly_statements).
+    quarterly_rows: tuple = ()
     # (tag, ((end, filed, value), ...)) for the debt and share series CREDIT reads
     # (compute.credit.filed_facts), kept here so it needs no second parse.
     credit_facts: tuple = ()
@@ -1317,6 +1510,7 @@ def _parse_filer(cik: int, use_cache: bool) -> Filer:
         trailing=trailing_snapshot(facts) if rows else None,
         eps_history=tuple(eps_history(facts)) if rows else (),
         quarterly_revenue=tuple(_quarterly_revenue(facts)) if rows else (),
+        quarterly_rows=tuple(quarterly_statements(facts)[-QUARTERS_KEPT:]) if rows else (),
         credit_facts=tuple(_credit_facts(facts).items()) if rows else (),
     )
 
@@ -1347,12 +1541,13 @@ def unextracted_reason(taxonomies) -> str:
     return f"{reason} (taxonomies: {', '.join(taxonomies) or 'none'})"
 
 
-def extract_fundamentals(ticker: str, cik: int, *, years: int, use_cache: bool = True) -> dict:
+def extract_fundamentals(ticker: str, cik: int, *, years: int, quarters: int = 24, use_cache: bool = True) -> dict:
     data = filer(cik, use_cache)
     entity_name, ciks, rows = data.entity_name, data.ciks, data.rows
     if not rows:
         raise ValueError(f"{ticker}: {unextracted_reason(data.taxonomies)}")
     rows = [dict(row) for row in rows[-years:]]
+    quarterly = [dict(row) for row in data.quarterly_rows[-quarters:]] if quarters else []
     return {
         "ticker": ticker,
         "cik": cik,
@@ -1360,6 +1555,7 @@ def extract_fundamentals(ticker: str, cik: int, *, years: int, use_cache: bool =
         "entity_name": entity_name,
         "fiscal_years": [row["fiscal_year"] for row in rows],
         "rows": rows,
+        "quarterly_rows": quarterly,
         "source": "SEC XBRL company facts",
         "source_url": FACTS_URL.format(cik=cik),
     }

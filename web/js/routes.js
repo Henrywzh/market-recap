@@ -37,6 +37,8 @@ export const VIEWS = [
   // Scheduled releases and the FOMC decision in the next days, and the conditions written in config.
   { id: 'watch', label: 'SCENARIO WATCH', group: 'calendar', artifact: 'watch', module: 'watch' },
   { id: 'technicals', label: 'TECHNICALS', group: 'tools', artifact: 'technicals', module: 'technicals', takesArg: true },
+  // How extreme one move is in the ticker's own close history, with what followed such moves.
+  { id: 'movecheck', label: 'MOVE CHECK', group: 'tools', artifact: 'technicals', module: 'movecheck', takesArg: true },
   { id: 'trade', label: 'TRADE DESK', group: 'tools', artifact: 'technicals', module: 'trade', takesArg: true },
   { id: 'xray', label: 'ETF X-RAY', group: 'tools', artifact: 'xray', module: 'xray' },
   { id: 'dcf', label: 'DCF', group: 'tools', artifact: 'dcf', module: 'dcf', takesArg: true },

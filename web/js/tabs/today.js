@@ -337,6 +337,7 @@ export function unusualNodes(unusual, view) {
     );
   }
   nodes.push(oversoldBlock(unusual?.oversold || []));
+  nodes.push(tailBlock(unusual?.tails || []));
   nodes.push(watchBlock(unusual?.watch || []));
   if (ongoing.length) {
     nodes.push(el('div', {
@@ -371,6 +372,22 @@ function oversoldBlock(items) {
   return el('div', { class: 'today-block' }, [
     el('div', { class: 'today-block-title', text: 'OVERSOLD · RSI(6), INDICES & SECTOR FUNDS' }),
     ...listNodes(items.map(oversoldRow), (row) => row, 'No index or sector fund is below 30.'),
+    items.length ? el('div', { class: 'today-detail dim', text: items[0].detail }) : null,
+  ]);
+}
+
+// Indices and sector funds whose move is in the outer 5% of their own history;
+// each row opens MOVE CHECK for that name.
+function tailRow(item) {
+  const share = item.extra?.share_pct;
+  const value = el('span', { class: `today-value ${dirClass(item.value)}`, text: signed(item.value) });
+  return rowNode(item, { value, detail: null, extras: [valid(share) ? tag(`${num(share, 1)}% OF HISTORY`, share <= 1 ? 'warn' : 'info') : null] });
+}
+
+function tailBlock(items) {
+  return el('div', { class: 'today-block' }, [
+    el('div', { class: 'today-block-title', text: 'RARE FOR ITS OWN HISTORY · INDICES & SECTOR FUNDS' }),
+    ...listNodes(items.map(tailRow), (row) => row, 'No index or sector fund moved beyond its own 5% tail.'),
     items.length ? el('div', { class: 'today-detail dim', text: items[0].detail }) : null,
   ]);
 }

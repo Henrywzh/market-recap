@@ -133,3 +133,9 @@ test('the TICKER page keeps its sub-tab after the symbol, dotted symbols include
   assert.deepEqual(R.parseHash('#ticker/NVDA/x1'), { id: 'ticker', arg: 'NVDA' }, 'a malformed view keeps the symbol');
   assert.deepEqual(R.parseHash('#dcf/NVDA/REPORT'), { id: 'dcf', arg: null }, 'only TICKER takes a sub-tab');
 });
+
+test('MOVE CHECK is a TOOLS view after TECHNICALS, and takes a ticker', () => {
+  assert.deepEqual(R.viewsIn('tools').map((v) => v.id), ['technicals', 'movecheck', 'trade', 'xray', 'dcf']);
+  assert.deepEqual(R.parseHash('#movecheck/qqq'), { id: 'movecheck', arg: 'QQQ' });
+  assert.deepEqual(R.parseHash('#movecheck'), { id: 'movecheck', arg: null });
+});

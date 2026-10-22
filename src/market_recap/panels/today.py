@@ -524,6 +524,64 @@ def _oversold_items(closes: pd.DataFrame, watch: dict, period: int) -> list[dict
     return sorted(items, key=lambda i: i["value"])
 
 
+# --- unusual: moves in the tail of their own history ---------------------------
+
+# A watch-list index or sector fund is listed when its move is matched or
+# exceeded on at most this share of its own past sessions (in the same direction).
+MOVE_TAIL_PCT = 5.0
+# Over one session, then over a week; a name is listed once, for the first that qualifies.
+MOVE_HORIZONS = (1, 5)
+# Fewer past moves than this and the share is not worth stating.
+MOVE_MIN_HISTORY = 252
+
+
+def _tail_item(symbol: str, label: str, moves: pd.Series, horizon: int) -> dict | None:
+    """One name whose latest ``horizon``-session move is in the outer tail of its own history."""
+    move, day = float(moves.iloc[-1]), moves.index[-1]
+    past = moves.iloc[:-1]
+    if len(past) < MOVE_MIN_HISTORY or move == 0:
+        return None
+    beyond = int((past <= move).sum() if move < 0 else (past >= move).sum())
+    share = beyond / len(past) * 100
+    if share > MOVE_TAIL_PCT:
+        return None
+    years = max((past.index[-1] - past.index[0]).days / 365.25, 1e-9)
+    verb = "fell" if move < 0 else "rose"
+    span = "today" if horizon == 1 else f"over {horizon} sessions"
+    since = past.index[0].year
+    per_year = beyond / years
+    often = f"about {per_year:.0f} a year" if per_year >= 1.5 else f"about once every {1 / per_year:.0f} years" \
+        if per_year > 0 else ""
+    title = (f"{label} {verb} {abs(move):.1f}% {span}: {'further' if beyond else 'never further'}"
+             + (f" on {share:.1f}% of {'days' if horizon == 1 else 'windows'} since {since} ({often})"
+                if beyond else f" since {since}"))
+    iso = day.strftime("%Y-%m-%d")
+    return _item("tail", label, iso, title, link=f"#movecheck/{symbol}", value=move, unit="%",
+                 importance="high" if share <= 1 else "medium", new=True,
+                 detail="How rare in its own history, not what comes next: MOVE CHECK lists what followed past moves this size.",
+                 extra={"symbol": symbol, "horizon": horizon, "share_pct": round(share, 2), "beyond": beyond,
+                        "since": since})
+
+
+def _tail_items(closes: pd.DataFrame, watch: dict, as_of: str) -> list[dict]:
+    """Watch-list names whose move is in the outer MOVE_TAIL_PCT of their own history, rarest first."""
+    items = []
+    for symbol, label in watch.items():
+        if symbol not in closes.columns:
+            continue
+        close = closes[symbol].dropna()
+        close = close[close.index <= pd.Timestamp(as_of)]
+        for horizon in MOVE_HORIZONS:
+            moves = ((close / close.shift(horizon) - 1) * 100).dropna()
+            if moves.empty or moves.index[-1].strftime("%Y-%m-%d") != close.index[-1].strftime("%Y-%m-%d"):
+                continue
+            item = _tail_item(symbol, label, moves, horizon)
+            if item:
+                items.append(item)
+                break
+    return sorted(items, key=lambda i: i["extra"]["share_pct"])
+
+
 # --- unusual: scenario watch --------------------------------------------------
 
 def _trigger_text(t: dict) -> str:
@@ -707,6 +765,7 @@ def build(ctx, *, inputs: dict, events_dir: Path = EVENTS_ARTIFACT_DIR) -> dict:
         "ongoing": _order(market_ongoing + matrix_ongoing + ([blackout] if blackout else [])),
         "oversold": _oversold_items(_watch_closes(ctx), cfg.get("oversold_watch") or {}, int(cfg.get("oversold_period", 6))),
         "watch": _watch_items(src["watch"], as_of),
+        "tails": _tail_items(_watch_closes(ctx), cfg.get("oversold_watch") or {}, as_of),
     }
 
     return {

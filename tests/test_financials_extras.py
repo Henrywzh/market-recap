@@ -110,7 +110,7 @@ def _extracted(ticker: str, cik: int) -> dict:
         row[item.key] = 100.0
         row[f"{item.key}_filed"] = "2026-02-20"
     return {"entity_name": f"{ticker} Inc", "cik": cik, "source_ciks": [cik],
-            "source_url": "https://example.test/facts", "rows": [row]}
+            "source_url": "https://example.test/facts", "rows": [row], "quarterly_rows": []}
 
 
 def test_a_filer_with_no_statements_is_skipped_and_reported_not_faked(tmp_path, monkeypatch):
@@ -119,7 +119,7 @@ def test_a_filer_with_no_statements_is_skipped_and_reported_not_faked(tmp_path, 
     monkeypatch.setattr(sec, "fetch_ticker_cik_map", lambda *, use_cache=True: ciks)
     reason = sec.unextracted_reason(("dei", "ifrs-full"))
 
-    def extract(ticker, cik, *, years, use_cache=True):
+    def extract(ticker, cik, *, years, quarters=24, use_cache=True):
         if ticker == "VIK":
             raise ValueError(f"{ticker}: {reason}")
         return _extracted(ticker, cik)
