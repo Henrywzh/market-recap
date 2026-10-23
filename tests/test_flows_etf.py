@@ -301,3 +301,12 @@ def test_a_fund_whose_record_stopped_is_not_in_the_latest_week():
     out = F.aggregate({"LIVE": pd.Series(1e8, index=days), "STOPPED": pd.Series(5e8, index=days[:-10])})
     assert out["latest_funds"] == ["LIVE"]
     assert out["latest"]["flow_1w"] == pytest.approx(5e8)
+
+
+def test_a_fund_a_day_ahead_does_not_push_the_others_out_of_the_week():
+    days = _bdays(400)
+    out = F.aggregate({"A": pd.Series(1e8, index=days[:-1]), "B": pd.Series(1e8, index=days[:-1]),
+                       "C": pd.Series(1e8, index=days)})
+    assert out["latest_funds"] == ["A", "B", "C"]
+    assert out["latest_date"] == days[-2].strftime("%Y-%m-%d")
+    assert out["latest"]["flow_1w"] == pytest.approx(15 * 1e8)

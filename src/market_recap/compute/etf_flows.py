@@ -237,9 +237,16 @@ def aggregate(flows: dict[str, pd.Series], *, window: int = AGGREGATE_WINDOW) ->
     window_start = frame.index[-window] if len(frame.index) >= window else frame.index[0]
     included = [t for t in flows if flows[t].index[0] <= window_start]
     excluded = [t for t in flows if t not in included]
-    # The windows end on the long-history funds' latest date: a fund whose
-    # issuer publishes a day earlier or later does not move the week.
-    end = frame[included].dropna(how="all").index[-1] if included else frame.index[-1]
+    # The windows end on the funds' common latest date: the earliest last date
+    # within MAX_GAP_DAYS of the newest. Issuers publish a day apart (SPYM's
+    # file reached 2026-10-22 while SPY's and IVV's were at 10-21), and ending on
+    # the newest date dropped every fund a day behind from the week; a record
+    # further behind is stale and stays out rather than pulling the week back.
+    # The funds with a year on record set it where there are any: a fund
+    # recorded for weeks does not move the week's end.
+    ends = [d for t, d in lasts.items() if d is not None and (t in included or not included)]
+    newest = max(ends) if ends else frame.index[-1]
+    end = min((d for d in ends if (newest - d).days <= MAX_GAP_DAYS), default=newest)
     upto = frame.loc[:end]
 
     def recent(sessions: int) -> tuple[float | None, list[str]]:
