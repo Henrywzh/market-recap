@@ -691,7 +691,11 @@ backtest needs a separate user request.
 
 ## 21. Expectations: consensus, buy-side and market-implied (2026-10-23)
 
-Added at Henry's request; not scheduled. One question across the existing views
+Added at Henry's request; not scheduled. **Researched 2026-10-23:**
+`docs/expectations_research_v1.md` -- consensus is a low bar (83% beat; 47% of
+beats fell on the day); the median stock needed a beat of about 3% to rise; the
+pre-report run-up and a name's own beat-and-fall record are not usable bars;
+implied vs realised needs a season of snapshots. Proposed order there. One question across the existing views
 (event cards, REVISIONS, PRICED PATH, RATES & MACRO, DCF / reverse DCF): what is
 expected, by whom, and how firmly. Three sources of expectation, kept separate and
 never blended into one score.
