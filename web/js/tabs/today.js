@@ -106,13 +106,20 @@ export function forecastOf(item) {
   return (item.extra?.expectations || []).find((e) => e.kind === 'survey' && valid(e.value)) || null;
 }
 
-// Above or below the forecast, read only when both sides carry the same unit;
-// null when there is no forecast or the comparison would mix units.
-export function surpriseDirection(item) {
-  const forecast = forecastOf(item);
-  if (!forecast || !valid(item.value) || forecast.unit !== item.unit) return null;
-  if (item.value > forecast.value) return 'above';
-  if (item.value < forecast.value) return 'below';
+// What the market priced the release at the evening before (Kalshi, then
+// Polymarket), in the release's own unit; null when none was recorded or it
+// is a different quantity (a probability of a hike is not a rate).
+export function marketOf(item) {
+  const readings = item.extra?.market_before?.readings || [];
+  return readings.find((e) => valid(e.value) && e.unit === item.unit) || null;
+}
+
+// Above or below a reference (the survey forecast unless one is given), read only
+// when both sides carry the same unit; null when there is none or the units differ.
+export function surpriseDirection(item, reference = forecastOf(item)) {
+  if (!reference || !valid(item.value) || reference.unit !== item.unit) return null;
+  if (item.value > reference.value) return 'above';
+  if (item.value < reference.value) return 'below';
   return 'in-line';
 }
 
@@ -149,21 +156,26 @@ function periodOf(item) {
 // beside it with the direction it was read in, and the period. A release with no
 // number is named on one line under the table.
 function macroTable(items) {
-  const rows = items.map((item) => {
-    const forecast = forecastOf(item);
-    const direction = surpriseDirection(item);
+  // The actual against one reference: the glyph of its direction and the reference's figure.
+  const against = (item, reference, source = null) => {
+    const direction = surpriseDirection(item, reference);
     const glyph = { above: '▲', below: '▼' }[direction] || '';
+    return el('td', { class: `today-value${direction ? ` is-${direction}` : ''}`, title: source }, reference ? [
+      glyph ? el('span', { class: 'today-glyph', text: glyph }) : null,
+      ` ${valueText(reference.value, reference.unit)}`,
+    ] : [DASH]);
+  };
+  const rows = items.map((item) => {
+    const market = marketOf(item);
     return el('tr', {}, [
       el('td', {}, [item.importance === 'high' ? el('b', { text: item.subject }) : item.subject]),
       el('td', { class: 'today-value', text: valueText(item.value, item.unit) }),
-      el('td', { class: `today-value${direction ? ` is-${direction}` : ''}` }, forecast ? [
-        glyph ? el('span', { class: 'today-glyph', text: glyph }) : null,
-        ` ${valueText(forecast.value, forecast.unit)}`,
-      ] : [DASH]),
+      against(item, forecastOf(item), 'Survey consensus'),
+      against(item, market, market ? `${market.source_label || market.source} median, as priced at the ${item.extra.market_before.as_of} evening build` : null),
       el('td', { class: 'dim', text: periodOf(item) }),
     ]);
   });
-  return table(['EVENT', 'ACTUAL', 'VS FORECAST', 'PERIOD'], rows, { class: 'today-macro' });
+  return table(['EVENT', 'ACTUAL', 'VS FORECAST', 'VS MARKET', 'PERIOD'], rows, { class: 'today-macro' });
 }
 
 function macroNodes(items) {

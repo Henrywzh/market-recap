@@ -4,7 +4,7 @@
 // render with the live feeds stubbed out.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import renderToday, { dayLabel, whenText, moversNodes, comingUpSection, justOutSection, median, epsVerdict, earningsSummary, forecastOf, surpriseDirection } from '../../web/js/tabs/today.js';
+import renderToday, { dayLabel, whenText, moversNodes, comingUpSection, justOutSection, median, epsVerdict, earningsSummary, forecastOf, surpriseDirection, marketOf } from '../../web/js/tabs/today.js';
 import { VIEWS, DEFAULT_VIEW, parseHash, viewById } from '../../web/js/routes.js';
 
 class FakeNode {
@@ -355,4 +355,14 @@ test('LATER shows the priced move and EPS forecast as figures, not the sentence'
   assert.equal(expectedOf({ detail: 'EPS forecast 0.87' }), 'EPS 0.87');
   assert.equal(expectedOf({ detail: 'Expected: Kalshi P(hike) 6%; Polymarket P(hike) 6%' }), 'Kalshi P(hike) 6%; Polymarket…');
   assert.equal(expectedOf({ detail: null }), '—');
+});
+
+test('a release reads against what the market priced it at the evening before, in its own unit only', () => {
+  const claims = { value: 196, unit: 'k', extra: { expectations: [{ kind: 'survey', value: 190, unit: 'k' }],
+    market_before: { as_of: '2026-10-28', readings: [{ kind: 'market', source: 'kalshi', source_label: 'Kalshi', value: 187.5, unit: 'k' }] } } };
+  assert.equal(marketOf(claims).value, 187.5);
+  assert.equal(surpriseDirection(claims, marketOf(claims)), 'above');
+  const fed = { value: 3.75, unit: '%', extra: { market_before: { readings: [{ kind: 'market', value: 0.07, unit: 'p' }] } } };
+  assert.equal(marketOf(fed), null, 'a hike probability is not a rate');
+  assert.equal(marketOf({ value: 1, unit: '%', extra: {} }), null);
 });

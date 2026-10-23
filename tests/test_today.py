@@ -742,3 +742,17 @@ def test_a_board_row_carries_what_the_page_needs_to_read_the_next_session_live()
     assert up_moves[-1] == pytest.approx(moves.max(), abs=1e-3)
     five = next(m for m, share in row["ladder"]["up"] if share == 5)
     assert today._beyond_share(five, moves)[1] == pytest.approx(5, abs=0.3)
+
+
+def test_a_release_just_out_carries_what_the_market_priced_it_at_the_evening_before():
+    previous = {"as_of": "2026-10-15", "coming_up": {"days": [{"date": AS_OF, "items": [
+        {"key": "macro:Initial jobless claims:2026-10-16", "extra": {"expectations": [
+            {"kind": "survey", "source": "tradingview", "value": 196.0, "unit": "k"},
+            {"kind": "market", "source": "kalshi", "source_label": "Kalshi", "value": 187.5, "unit": "k"}]}}]}]}}
+    priced = today._priced_before(previous)
+    assert priced == {"macro:Initial jobless claims:2026-10-16": {"readings": [
+        {"kind": "market", "source": "kalshi", "source_label": "Kalshi", "value": 187.5, "unit": "k"}], "as_of": "2026-10-15"}}
+    item = today._with_market({"key": "macro:Initial jobless claims:2026-10-16", "extra": {}}, priced)
+    assert item["extra"]["market_before"]["readings"][0]["value"] == 187.5
+    assert today._with_market({"key": "macro:CPI:2026-10-16", "extra": {}}, priced)["extra"] == {}
+    assert today._priced_before(None) == {}

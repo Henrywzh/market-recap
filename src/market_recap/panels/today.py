@@ -166,6 +166,26 @@ def _just_out_macro(event: dict) -> dict:
                  extra={"prints": prints, "expectations": event.get("expectations") or []})
 
 
+def _with_market(item: dict, priced: dict[str, dict]) -> dict:
+    if item["key"] in priced:
+        item["extra"]["market_before"] = priced[item["key"]]
+    return item
+
+
+def _priced_before(previous: dict | None) -> dict[str, dict]:
+    """What the market priced each coming release at in the previous published
+    TODAY (Kalshi, Polymarket), by the item's key: the readings a release is read
+    against once it is out. Recorded the evening before, not at the release --
+    the market moves overnight, and a contract settles after the print."""
+    out = {}
+    for day in ((previous or {}).get("coming_up") or {}).get("days") or []:
+        for item in day.get("items") or []:
+            market = [e for e in (item.get("extra") or {}).get("expectations") or [] if e.get("kind") == "market"]
+            if market:
+                out[item["key"]] = {"readings": market, "as_of": previous.get("as_of")}
+    return out
+
+
 def _rounded(value, decimals):
     if not isinstance(value, (int, float)) or isinstance(value, bool) or decimals is None:
         return value
@@ -954,6 +974,13 @@ def build(ctx, *, inputs: dict, events_dir: Path = EVENTS_ARTIFACT_DIR) -> dict:
         unavailable.append({"part": "ended states", "reason": "the published TODAY is this session's own, so yesterday is unknown"})
     else:
         previous_active = _previously_active(previous)
+    # The previous session's prices for this session's releases. A rerun of the
+    # session reads its own published TODAY, whose JUST OUT already carries them.
+    if previous and previous.get("as_of") == as_of:
+        priced_before = {i["key"]: i["extra"]["market_before"] for i in (previous.get("just_out") or {}).get("macro") or []
+                         if (i.get("extra") or {}).get("market_before")}
+    else:
+        priced_before = _priced_before(previous)
 
     sector = (ctx.config.get("moves", {}).get("sector_selloff") or {}).get("sector") or "Sector"
     market_changed, market_ongoing, _active = _market_items(src["market_state"], as_of, previous_active)
@@ -998,7 +1025,8 @@ def build(ctx, *, inputs: dict, events_dir: Path = EVENTS_ARTIFACT_DIR) -> dict:
         "flows": (src["flows"].get("etf") or {}).get("headline"),
         "just_out": {
             "session": session,
-            "macro": _order([_just_out_macro(e) for e in recent.get("macro") or [] if e.get("date")]),
+            "macro": _order([_with_market(_just_out_macro(e), priced_before)
+                             for e in recent.get("macro") or [] if e.get("date")]),
             "earnings": _just_out_earnings(recent.get("earnings_reacted") or [],
                                            recent.get("earnings_after_close") or [], moves_by),
         },
