@@ -93,6 +93,9 @@ def _industry_fields(row: dict | None) -> dict:
             "90d": clean_float(revision.get("90d"), 1),
             "names": revision.get("names"),
         },
+        "breadth": row.get("breadth"),
+        "dispersion": row.get("dispersion"),
+        "stale_pct": row.get("stale_pct"),
         # The medians of the names' own multiples; the hub's P/E is the group's aggregate (see _multiples).
         "forward_pe_median": clean_float((row.get("forward_pe") or {}).get("median"), 1),
         "pe_percentile_median": clean_float((row.get("pe_percentile") or {}).get("median"), 0),

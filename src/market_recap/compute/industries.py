@@ -21,7 +21,8 @@ from ..util import clean_float
 
 RETURN_WINDOWS = ("1M", "3M", "6M")
 # Member columns a group is read from.
-MEMBER_FIELDS = ("name", "weight", "r1M", "r3M", "r6M", "drawdown", "above_ma", "rev30", "rev90", "fwd_pe", "pe_percentile")
+MEMBER_FIELDS = ("name", "weight", "r1M", "r3M", "r6M", "drawdown", "above_ma", "rev30", "rev90", "fwd_pe", "pe_percentile",
+                 "up30", "down30", "analysts", "spread", "stale")
 
 
 def revision(current: float | None, earlier: float | None, reported: float | None = None) -> float | None:
@@ -37,6 +38,31 @@ def revision(current: float | None, earlier: float | None, reported: float | Non
     if reported is not None and not math.isnan(reported):
         return float(reported)
     return (current / earlier - 1) * 100
+
+
+def spread(eps: float | None, low: float | None, high: float | None) -> float | None:
+    """How unsettled a consensus is: the analysts' high less low, over the
+    consensus, in percent. None off a loss or near zero, as a revision is."""
+    if eps is None or low is None or high is None or not eps > 0:
+        return None
+    return (high - low) / eps * 100
+
+
+def breadth(frame: pd.DataFrame) -> dict:
+    """Which way the analysts moved over 30 days: net upgrades over all analysts
+    covering the group's names, and the shares of names with more upgrades than
+    downgrades and the reverse. A name with no count is left out."""
+    counted = frame.dropna(subset=["up30", "down30"])
+    analysts = counted["analysts"].fillna(0).sum()
+    if counted.empty:
+        return {"net_pct": None, "upgraded_pct": None, "downgraded_pct": None, "names": 0}
+    net = (counted["up30"] - counted["down30"]).sum()
+    return {
+        "net_pct": clean_float(net / analysts * 100, 1) if analysts > 0 else None,
+        "upgraded_pct": clean_float((counted["up30"] > counted["down30"]).mean() * 100, 0),
+        "downgraded_pct": clean_float((counted["down30"] > counted["up30"]).mean() * 100, 0),
+        "names": int(len(counted)),
+    }
 
 
 def _median(values: pd.Series) -> float | None:
@@ -85,6 +111,11 @@ def group_row(frame: pd.DataFrame, settings: dict, *, sector: str, label: str, k
         "drawdown": clean_float(_median(frame["drawdown"]), 1),
         "above_ma": clean_float(None if not len(above) else float(above.astype(float).mean()) * 100, 0),
         "revision": {"30d": clean_float(rev30, 1), "90d": clean_float(rev90, 1), "names": _count(frame["rev90"])},
+        # How the consensus itself reads: the direction of the analysts' changes,
+        # how far apart their estimates sit, and how many have not moved.
+        "breadth": breadth(frame),
+        "dispersion": {"median": clean_float(_median(frame["spread"]), 1), "names": _count(frame["spread"])},
+        "stale_pct": clean_float(frame["stale"].dropna().mean() * 100, 0) if frame["stale"].notna().any() else None,
         "forward_pe": {"median": clean_float(_median(fwd_pe), 1), "names": _count(fwd_pe)},
         "pe_percentile": {"median": clean_float(pe_median, 0), "names": _count(pe_pct)},
         "worst": ({"ticker": str(ranked.index[0]), "return": clean_float(ranked.iloc[0], 1)} if len(ranked) else None),

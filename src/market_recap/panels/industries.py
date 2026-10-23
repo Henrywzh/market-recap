@@ -61,11 +61,18 @@ def _member_frame(members: pd.DataFrame, closes: pd.DataFrame, settings: dict, v
             "rev90": I.revision(expect.get("eps"), expect.get("eps_90d"), expect.get("change_90d_pct")),
             "fwd_pe": value.get("pe_forward"),
             "pe_percentile": value.get("pe_percentile"),
+            "up30": expect.get("up_30d"),
+            "down30": expect.get("down_30d"),
+            "analysts": expect.get("analysts"),
+            "spread": I.spread(expect.get("eps"), expect.get("low"), expect.get("high")),
+            # MONITOR's own "stale": no upgrade, no downgrade and no change over 30 days.
+            "stale": None if not expect.get("state") else expect.get("state") == "stale",
         }
     frame = pd.DataFrame.from_dict(records, orient="index")
-    numeric = [c for c in frame.columns if c not in ("sector", "sub_sector", "name", "above_ma")]
+    numeric = [c for c in frame.columns if c not in ("sector", "sub_sector", "name", "above_ma", "stale")]
     frame[numeric] = frame[numeric].apply(pd.to_numeric, errors="coerce")
     frame["above_ma"] = frame["above_ma"].astype("float")
+    frame["stale"] = frame["stale"].astype("float")
     return frame
 
 

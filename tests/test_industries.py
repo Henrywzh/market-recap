@@ -147,3 +147,16 @@ def test_validate_notes_an_input_the_scorecard_lacked_and_is_quiet_otherwise():
     assert validate._check_industries(None) == []
     # No groups at all is not a quiet market; it is a build that read nothing.
     assert validate._check_industries({"missing": [], "sub_industries": [], "sectors": []})[0].severity == "warning"
+
+
+def test_breadth_is_net_upgrades_over_analysts_and_the_shares_upgraded_and_downgraded():
+    frame = pd.DataFrame({"up30": [3, 0, 1, np.nan], "down30": [1, 2, 1, np.nan], "analysts": [10, 8, 2, 5]},
+                         index=["A", "B", "C", "D"])
+    b = I.breadth(frame)
+    assert b == {"net_pct": 0.0, "upgraded_pct": 33.0, "downgraded_pct": 33.0, "names": 3}  # (2 - 2 + 0) / 20
+    assert I.breadth(frame.iloc[3:])["net_pct"] is None
+
+
+def test_spread_is_the_analysts_range_over_the_consensus_and_none_off_a_loss():
+    assert I.spread(2.0, 1.8, 2.3) == pytest.approx(25.0)
+    assert I.spread(-0.5, -0.8, -0.2) is None and I.spread(None, 1, 2) is None

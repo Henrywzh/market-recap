@@ -119,6 +119,8 @@ function titledTable(headers, rows, titles = {}) {
 // The forward P/E is the aggregate (market cap over consensus EPS, as an index
 // is priced); P/E PCTL places the trailing P/E within its own ten years.
 const HUB_TITLES = {
+  'BREADTH 30D': 'FY1 EPS upgrades less downgrades in 30 days, over all analysts covering the names',
+  'EST. RANGE': 'half the median spread between the lowest and highest FY1 estimate, as a share of the consensus',
   'FWD P/E': 'aggregate NTM P/E: total market cap over total consensus EPS for the next twelve months',
   'P/E PCTL': 'where its trailing P/E sits within its own ten years of weekly readings',
 };
@@ -331,6 +333,17 @@ function valueCard(data, state, ctx) {
   ]);
 }
 
+// The direction of the analysts' 30-day changes: net upgrades over all analysts
+// covering the group, with the shares of names upgraded and downgraded on hover.
+export function breadthCell(b) {
+  if (!b || !present(b.net_pct)) return el('td', { class: 'dim', text: DASH });
+  return el('td', {
+    class: dirClass(b.net_pct),
+    text: `${b.net_pct > 0 ? '+' : ''}${num(b.net_pct, 0)}%`,
+    title: `Upgrades less downgrades of FY1 EPS in 30 days, over all analysts covering these names: ${num(b.upgraded_pct, 0)}% of names net upgraded, ${num(b.downgraded_pct, 0)}% net downgraded (${b.names} names)`,
+  });
+}
+
 function subTable(subs, state, ctx) {
   const period = state.period;
   const rows = subs.map((s) => {
@@ -346,12 +359,15 @@ function subTable(subs, state, ctx) {
       el('td', { text: share(s.above_200d, 0) }),
       el('td', { class: dirClass(s.median_drawdown), text: pct(s.median_drawdown, 1) }),
       el('td', { class: dirClass(rev['90d']), text: pct(rev['90d'], 1) }),
+      breadthCell(s.breadth),
+      el('td', { class: 'dim', text: present(s.dispersion?.median) ? `±${num(s.dispersion.median / 2, 0)}%` : DASH,
+        title: present(s.dispersion?.median) ? `Median analysts' high less low: ${num(s.dispersion.median, 0)}% of the FY1 consensus (${s.dispersion.names} names)${present(s.stale_pct) ? `; ${num(s.stale_pct, 0)}% of names with no estimate change in 30 days` : ''}` : null }),
       el('td', { text: multiple(s.forward_pe) }),
       el('td', { class: 'dim', text: ordinal(s.pe_percentile) }),
       el('td', {}, [s.theme ? link(s.theme.toUpperCase(), themeHref(s.theme), 'tag tag-info') : DASH]),
     ], ctx, s.key, `${s.label} · ${s.members} names`);
   });
-  return titledTable(['SUB-INDUSTRY', 'NAMES', 'WEIGHT', 'RETURN', 'VS S&P', 'ABOVE 200D', 'MEDIAN DRAWDOWN', 'EPS REV 90D', 'FWD P/E', 'P/E PCTL', 'THEME'], rows, HUB_TITLES);
+  return titledTable(['SUB-INDUSTRY', 'NAMES', 'WEIGHT', 'RETURN', 'VS S&P', 'ABOVE 200D', 'MEDIAN DRAWDOWN', 'EPS REV 90D', 'BREADTH 30D', 'EST. RANGE', 'FWD P/E', 'P/E PCTL', 'THEME'], rows, HUB_TITLES);
 }
 
 function hubNotes(data) {
@@ -360,6 +376,7 @@ function hubNotes(data) {
     'Market, then sector, then sub-industry, then names. A sector is one SPDR fund\'s GICS group of the S&P 500; a row opens it, and each sector page opens its sub-industries and their names.',
     'Returns are cap-weighted from the names\' heat-map returns. VS S&P is the sector\'s return less the index\'s over the same period, in percentage points. A theme tag opens the THEMES page for that group.',
     'ABOVE 200D is the share of names above their 200-day average. MEDIAN DRAWDOWN is the median name\'s fall from its 1-year high. EPS REV 90D is the median change in FY1 EPS consensus over 90 days.',
+    'BREADTH 30D is how the analysts moved, not by how much: FY1 EPS upgrades less downgrades in 30 days over all analysts covering the names (hover for the shares of names net upgraded and downgraded). EST. RANGE is how far apart they sit: half the median spread from the lowest to the highest estimate, as a share of the consensus; a wide range is a number not yet settled. Both are Yahoo\'s counts, as of this build.',
     'FWD P/E is aggregate: total market cap over total consensus EPS for the next twelve months, as an index is priced. P/E PCTL is where the trailing P/E sits within its own ten years.',
     noPe.length ? `No forward P/E in this build for: ${noPe.join(', ')}.` : null,
     ...(data.notes || []),
