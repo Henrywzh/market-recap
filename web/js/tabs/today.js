@@ -392,7 +392,7 @@ export default function renderToday(root, data, manifest, ctx = {}) {
     el('div', { class: 'today-col' }, [justOutSection(data.just_out), comingUpSection(data.coming_up)]),
     el('div', { class: 'today-col' }, [
       sectionTitle('UNUSUAL NOW', ''),
-      signalsCard(signalGroups(data.unusual, data.board?.rows)),
+      signalsCard(signalGroups(data.unusual, data.board?.rows, data.flows)),
       moversHost,
     ]),
   ]));

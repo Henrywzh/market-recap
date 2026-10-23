@@ -242,7 +242,7 @@ function scenarioText(item) {
 
 // The signal chips, one group per kind in the order the page reads them. A group
 // with no chip is left out. Each chip carries its full title as a tooltip.
-export function signalGroups(unusual, boardRows) {
+export function signalGroups(unusual, boardRows, flows) {
   const names = new Map((Array.isArray(boardRows) ? boardRows : []).filter(Boolean).map((r) => [r.symbol, r.short || r.label]));
   const nameOf = (item) => names.get(item.extra?.symbol) ?? item.subject;
   const groups = [
@@ -268,8 +268,30 @@ export function signalGroups(unusual, boardRows) {
     ['ONGOING', (unusual?.ongoing || []).map((item) => ({
       text: [item.subject, compactValue(item)].filter(Boolean).join(' · '), title: item.title, href: item.link, tone: 'dim',
     }))],
+    ['ETF FLOWS', flowChips(flows)],
   ];
   return groups.map(([label, chips]) => ({ label, chips })).filter((group) => group.chips.length);
+}
+
+// "+$4.4bn", "−$310m": a fund flow in dollars.
+export function flowDollars(v) {
+  if (!valid(v)) return DASH;
+  const a = Math.abs(v);
+  const sign = v > 0 ? '+' : v < 0 ? '−' : '';
+  return a >= 1e9 ? `${sign}$${num(a / 1e9, 1)}bn` : `${sign}$${num(a / 1e6, 0)}m`;
+}
+
+// The week's ETF flow: the US equity funds together, then the largest funds in and out.
+export function flowChips(flows) {
+  if (!flows || !valid(flows.us_equity_1w)) return [];
+  const rank = valid(flows.us_equity_1w_pct_rank) ? ` · ${num(flows.us_equity_1w_pct_rank, 0)}th pct` : '';
+  const title = `Creations less redemptions over five sessions to ${flows.date}, from the issuers' published shares outstanding; the percentile ranks it against three years of weeks.`;
+  const fund = ([ticker, flow]) => ({ text: `${ticker} ${flowDollars(flow)}`, title, href: '#flows', tone: flow < 0 ? 'down' : 'up' });
+  return [
+    { text: `US equity 1W ${flowDollars(flows.us_equity_1w)}${rank}`, title, href: '#flows', tone: flows.us_equity_1w < 0 ? 'down' : 'up' },
+    ...(flows.top_in || []).map(fund),
+    ...(flows.top_out || []).map(fund),
+  ];
 }
 
 const chipNode = (chip) => el(chip.href ? 'a' : 'span', { class: `chip ${chip.tone || 'dim'}`, href: chip.href, title: chip.title, text: chip.text });

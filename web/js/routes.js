@@ -24,6 +24,8 @@ export const VIEWS = [
   { id: 'rates', label: 'RATES & MACRO', group: 'risk', artifact: ['fixed_income', 'macro'], module: 'rates' },
   { id: 'priced', label: 'PRICED PATH', group: 'risk', artifact: 'priced', module: 'priced' },
   { id: 'positioning', label: 'POSITIONING', group: 'risk', artifact: 'positioning', module: 'positioning' },
+  // Who is buying, from published records: ETF creations, CFTC futures by trader type, Fed Z.1, hedge-fund filings.
+  { id: 'flows', label: 'FLOWS', group: 'risk', artifact: 'flows', module: 'flows' },
   { id: 'monitor', label: 'MONITOR', group: 'names', artifact: 'monitor', module: 'monitor' },
   { id: 'ticker', label: 'TICKER', group: 'names', artifact: 'valuation', module: 'ticker', takesArg: true },
   // Every company's multiples in one table. A company's P/E in detail is on its TICKER page;

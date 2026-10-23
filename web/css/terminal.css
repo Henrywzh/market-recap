@@ -1683,3 +1683,15 @@ a.today-index:hover { border-color: var(--border-strong); }
 .today-index.lead .today-index-move { font-size: 34px; }
 .today-index-note { font-size: 11px; }
 @media (max-width: 900px) { .today-board { grid-template-columns: minmax(0, 1fr); } }
+
+/* FLOWS */
+.flow-table .flow-group td { color: var(--accent); font-size: 10px; letter-spacing: .1em; padding-top: 8px; border-top: 1px solid var(--border-strong); }
+.flow-notes { margin-top: 6px; }
+.flow-sector-chart { height: 240px; }
+.flow-table td.flow-ticker .dim { margin-left: 4px; }
+.flows-z1-chart { height: 340px; }
+table.data tr.total td { font-weight: 600; border-top: 1px solid var(--border-strong); }
+.flows-13f-tilt { height: 320px; min-width: 0; }
+.flows-13f-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 10px 0; }
+.flows-13f-moves { min-width: 0; }
+@media (max-width: 640px) { .flows-13f-pair { grid-template-columns: 1fr; } }

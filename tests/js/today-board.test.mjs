@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   moveText, sigmaText, sparkPath, sparkSvg, headlineNode, boardSlots, boardLabel, boardOption, drawBoard, boardCard,
-  signalGroups, signalsCard, moverRecords, moversTable, sectorLine, remainingEvents, eventNodes,
+  signalGroups, signalsCard, flowChips, flowDollars, moverRecords, moversTable, sectorLine, remainingEvents, eventNodes,
 } from '../../web/js/today-board.js';
 import { tickerHref } from '../../web/js/routes.js';
 
@@ -332,3 +332,16 @@ test('the events under the table show six and fold the rest', () => withBrowser(
   assert.equal(nodes[0].children[1].textContent, '+2.5σ', 'a σ value where the build has one');
   assert.equal(eventNodes([]).length, 0);
 }));
+
+test('ETF flow chips: the US equity week with its rank, then the funds in and out, each linking to FLOWS', () => {
+  const flows = { date: '2026-10-22', us_equity_1w: -11.38e9, us_equity_1w_pct_rank: 11, top_in: [['SOXX', 4.39e9]], top_out: [['IWM', -5.07e9], ['XLE', -3.1e8]] };
+  const chips = flowChips(flows);
+  assert.deepEqual(chips.map((c) => c.text), ['US equity 1W −$11.4bn · 11th pct', 'SOXX +$4.4bn', 'IWM −$5.1bn', 'XLE −$310m']);
+  assert.deepEqual(chips.map((c) => c.tone), ['down', 'up', 'down', 'down']);
+  assert.ok(chips.every((c) => c.href === '#flows'));
+  const groups = signalGroups({}, [], flows);
+  assert.deepEqual(groups.map((g) => g.label), ['ETF FLOWS']);
+  assert.deepEqual(flowChips(null), []);
+  assert.deepEqual(flowChips({ us_equity_1w: null }), []);
+  assert.equal(flowDollars(null), '—');
+});

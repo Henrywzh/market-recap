@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from ..compute import returns as R
+from ..compute.etf_flows import daily_flow
 from ..config import ETF_ARTIFACT_DIR, period_sessions
 from ..sources import invesco, ishares, snapshot_store, ssga, vanguard, yahoo
 from ..util import SourceRecord, clean_float, company_name, prune_stale, to_iso_date, write_json
@@ -140,7 +141,7 @@ def _build_published_flow(
     shares = frame["shares_outstanding"]
     # Flow is the change in units priced at that day's NAV. Valuing it at the
     # market close instead would mix a creation with the day's premium.
-    flow = shares.diff() * frame["nav"]
+    flow = daily_flow(shares, frame["nav"])
 
     # Only State Street publishes a premium/discount series here; an iShares
     # fund simply has no premium line rather than a computed stand-in.

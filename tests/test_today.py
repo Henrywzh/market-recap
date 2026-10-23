@@ -169,6 +169,8 @@ def _inputs(events_dir=None):
             {"date": "2026-10-19", "kind": "earnings", "symbol": "XX"},
         ]}]},
         "evidence": {"names": {"META": {"options": {"implied_move": {"straddle_pct": 6.1, "expiry": "2026-11-06"}}}}},
+        "flows": {"etf": {"headline": {"date": AS_OF, "us_equity_1w": -1.1e10, "us_equity_1w_pct_rank": 11.0,
+                                       "top_in": [["SOXX", 4.4e9]], "top_out": [["IWM", -5.1e9]]}}},
     }
 
 
@@ -700,3 +702,12 @@ def test_board_vix_is_left_out_when_the_tile_is_from_another_session():
     risk = {"sections": [{"tiles": [{"key": "vix", "value": 16.7, "change_1d": -0.6, "date": "2026-10-21"}]}]}
     assert today._vix(risk, "2026-10-22") == {"value": None, "change": None}
     assert today._vix(risk, "2026-10-21") == {"value": 16.7, "change": -0.6}
+
+
+def test_flows_headline_is_carried_from_the_flows_panel_or_null(tmp_path):
+    out = _run(events_dir=tmp_path)
+    assert out["flows"]["us_equity_1w"] == -1.1e10
+    assert out["flows"]["top_out"] == [["IWM", -5.1e9]]
+    inputs = _inputs()
+    inputs["flows"] = {"etf": {"unavailable": "issuer files failed"}}
+    assert _run(inputs=inputs, events_dir=tmp_path)["flows"] is None

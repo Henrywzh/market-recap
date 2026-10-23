@@ -31,7 +31,7 @@ from ..util import describe_error
 
 # Panels TODAY reads, all required to be from this session (build passes them as inputs).
 INPUTS = ("catalysts", "moves", "market_state", "risk", "positioning", "monitor", "catalyst_log", "themes", "evidence",
-          "watch")
+          "watch", "flows")
 IMPORTANCE_RANK = {"high": 0, "medium": 1, "low": 2}
 # Calendar event types shown under their own kind; every other macro type is "macro".
 EVENT_KINDS = {"central_bank": "fed", "treasury_auction": "auction"}
@@ -965,6 +965,8 @@ def build(ctx, *, inputs: dict, events_dir: Path = EVENTS_ARTIFACT_DIR) -> dict:
         "sessions": sessions,
         "board": board,
         "headline": headline(board),
+        # The FLOWS tab's ETF summary: the US equity funds' week and the largest funds in and out.
+        "flows": (src["flows"].get("etf") or {}).get("headline"),
         "just_out": {
             "session": session,
             "macro": _order([_just_out_macro(e) for e in recent.get("macro") or [] if e.get("date")]),

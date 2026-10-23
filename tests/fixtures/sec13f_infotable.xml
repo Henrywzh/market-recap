@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Synthetic 13F information table: no real holdings. Namespace prefix as filing agents write it. -->
+<ns1:informationTable xmlns:ns1="http://www.sec.gov/edgar/document/thirteenf/informationtable">
+  <ns1:infoTable>
+    <ns1:nameOfIssuer>ALPHA CORP</ns1:nameOfIssuer>
+    <ns1:titleOfClass>COM</ns1:titleOfClass>
+    <ns1:cusip>020002101</ns1:cusip>
+    <ns1:value>1000000</ns1:value>
+    <ns1:shrsOrPrnAmt>
+      <ns1:sshPrnamt>5000</ns1:sshPrnamt>
+      <ns1:sshPrnamtType>SH</ns1:sshPrnamtType>
+    </ns1:shrsOrPrnAmt>
+    <ns1:investmentDiscretion>SOLE</ns1:investmentDiscretion>
+  </ns1:infoTable>
+  <ns1:infoTable>
+    <ns1:nameOfIssuer>ALPHA CORP</ns1:nameOfIssuer>
+    <ns1:titleOfClass>COM</ns1:titleOfClass>
+    <ns1:cusip>020002101</ns1:cusip>
+    <ns1:value>250000</ns1:value>
+    <ns1:shrsOrPrnAmt>
+      <ns1:sshPrnamt>1000</ns1:sshPrnamt>
+      <ns1:sshPrnamtType>SH</ns1:sshPrnamtType>
+    </ns1:shrsOrPrnAmt>
+    <ns1:investmentDiscretion>SOLE</ns1:investmentDiscretion>
+  </ns1:infoTable>
+  <ns1:infoTable>
+    <ns1:nameOfIssuer>ALPHA CORP</ns1:nameOfIssuer>
+    <ns1:titleOfClass>CALL</ns1:titleOfClass>
+    <ns1:cusip>020002101</ns1:cusip>
+    <ns1:value>90000</ns1:value>
+    <ns1:shrsOrPrnAmt>
+      <ns1:sshPrnamt>300</ns1:sshPrnamt>
+      <ns1:sshPrnamtType>SH</ns1:sshPrnamtType>
+    </ns1:shrsOrPrnAmt>
+    <ns1:putCall>Call</ns1:putCall>
+    <ns1:investmentDiscretion>SOLE</ns1:investmentDiscretion>
+  </ns1:infoTable>
+  <ns1:infoTable>
+    <ns1:nameOfIssuer>BETA INC</ns1:nameOfIssuer>
+    <ns1:titleOfClass>COM</ns1:titleOfClass>
+    <ns1:cusip>030003102</ns1:cusip>
+    <ns1:value>400000</ns1:value>
+    <ns1:shrsOrPrnAmt>
+      <ns1:sshPrnamt>2000</ns1:sshPrnamt>
+      <ns1:sshPrnamtType>SH</ns1:sshPrnamtType>
+    </ns1:shrsOrPrnAmt>
+    <ns1:investmentDiscretion>SOLE</ns1:investmentDiscretion>
+  </ns1:infoTable>
+  <ns1:infoTable>
+    <ns1:nameOfIssuer>GAMMA BOND 5%</ns1:nameOfIssuer>
+    <ns1:titleOfClass>NOTE</ns1:titleOfClass>
+    <ns1:cusip>040004103</ns1:cusip>
+    <ns1:value>700000</ns1:value>
+    <ns1:shrsOrPrnAmt>
+      <ns1:sshPrnamt>700000</ns1:sshPrnamt>
+      <ns1:sshPrnamtType>PRN</ns1:sshPrnamtType>
+    </ns1:shrsOrPrnAmt>
+    <ns1:investmentDiscretion>SOLE</ns1:investmentDiscretion>
+  </ns1:infoTable>
+</ns1:informationTable>

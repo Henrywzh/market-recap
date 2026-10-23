@@ -131,7 +131,6 @@ function payload(overrides = {}) {
     short_interest: { unavailable: 'FINRA not built in this test' },
     blackout: { unavailable: 'not built in this test' },
     insiders: { unavailable: 'not built in this test' },
-    fund_flows: { status: 'missing', categories: [] },
     lookbacks: { '1M': 21, '3M': 63, '6M': 126, '12M': 252 },
     index_put_call: null,
     trend_check: {

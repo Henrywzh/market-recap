@@ -16,7 +16,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalyst_log, catalysts, chain, credit, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, heatmaps, industries, kshape, macro, market_state, markets, monitor, moves, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, sizek, themes, today, valuation, watch, xray
+from .panels import anchor, catalyst_log, catalysts, chain, credit, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, flows, heatmaps, industries, kshape, macro, market_state, markets, monitor, moves, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, sizek, themes, today, valuation, watch, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -58,6 +58,8 @@ PANELS = {
     "overnight": overnight.build,
     # Reads this session's catalysts and evidence (report dates), so after them.
     "positioning": positioning.build,
+    # Reads this session's POSITIONING (the trend model, for the CFTC check), so after it.
+    "flows": flows.build,
     # Reads this session's VALUATION (names, sectors, market caps) and the parsed filers;
     # THEMES reads it (the AI borrowers).
     "credit": credit.build,
@@ -191,6 +193,8 @@ def run(
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in sectors.INPUTS})
                 elif name == "positioning":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in positioning.INPUTS})
+                elif name == "flows":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in flows.INPUTS})
                 elif name == "events":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in events.INPUTS})
                 elif name == "kshape":

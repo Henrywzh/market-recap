@@ -1,0 +1,249 @@
+# Hedge-fund 13F crowding: the curated filers read by panels/flows_hf_13f.py.
+#
+# A proxy, not a census. Each CIK was checked on EDGAR (data.sec.gov submissions)
+# on 2026-10-23: the entity files 13F-HR for the 2026-06-30 quarter. Multi-strategy
+# platforms are style = "multi" and sit outside the default aggregate. Market
+# makers, banks, quant and pure index managers are deliberately absent.
+#
+# style: fundamental (discretionary long/short and value), growth, activist, multi.
+# label is ours; the EDGAR entity name is not used for display.
+
+[[filer]]
+cik = 1040273
+label = "Third Point"
+style = "activist"
+
+[[filer]]
+cik = 1061165
+label = "Lone Pine Capital"
+style = "fundamental"
+
+[[filer]]
+cik = 1103804
+label = "Viking Global Investors"
+style = "fundamental"
+
+[[filer]]
+cik = 1167483
+label = "Tiger Global Management"
+style = "growth"
+
+[[filer]]
+cik = 1135730
+label = "Coatue Management"
+style = "growth"
+
+[[filer]]
+cik = 1602189
+label = "Dragoneer Investment Group"
+style = "growth"
+
+[[filer]]
+cik = 1541617
+label = "Altimeter Capital Management"
+style = "growth"
+
+[[filer]]
+cik = 1387322
+label = "Whale Rock Capital"
+style = "growth"
+
+[[filer]]
+cik = 934639
+label = "Maverick Capital"
+style = "fundamental"
+
+[[filer]]
+cik = 1747057
+label = "D1 Capital Partners"
+style = "fundamental"
+
+[[filer]]
+cik = 1061768
+label = "Baupost Group"
+style = "fundamental"
+
+[[filer]]
+cik = 1656456
+label = "Appaloosa"
+style = "fundamental"
+
+[[filer]]
+cik = 1358706
+label = "Abrams Capital Management"
+style = "fundamental"
+
+[[filer]]
+cik = 1112520
+label = "Akre Capital Management"
+style = "fundamental"
+
+[[filer]]
+cik = 1029160
+label = "Soros Fund Management"
+style = "fundamental"
+
+[[filer]]
+cik = 1536411
+label = "Duquesne Family Office"
+style = "fundamental"
+
+[[filer]]
+cik = 1138995
+label = "Glenview Capital Management"
+style = "fundamental"
+
+[[filer]]
+cik = 1345471
+label = "Trian Fund Management"
+style = "activist"
+
+[[filer]]
+cik = 921669
+label = "Carl C. Icahn"
+style = "activist"
+
+[[filer]]
+cik = 1418814
+label = "ValueAct Holdings"
+style = "activist"
+
+[[filer]]
+cik = 1517137
+label = "Starboard Value"
+style = "activist"
+
+[[filer]]
+cik = 1791786
+label = "Elliott Investment Management"
+style = "activist"
+
+[[filer]]
+cik = 1998597
+label = "JANA Partners"
+style = "activist"
+
+[[filer]]
+cik = 1559771
+label = "Engaged Capital"
+style = "activist"
+
+[[filer]]
+cik = 1535472
+label = "Corvex Management"
+style = "activist"
+
+[[filer]]
+cik = 1582090
+label = "Sachem Head Capital"
+style = "activist"
+
+[[filer]]
+cik = 1647251
+label = "TCI Fund Management"
+style = "fundamental"
+
+[[filer]]
+cik = 1165408
+label = "Adage Capital Partners"
+style = "fundamental"
+
+[[filer]]
+cik = 1107310
+label = "Eminence Capital"
+style = "fundamental"
+
+[[filer]]
+cik = 1569049
+label = "Light Street Capital"
+style = "fundamental"
+
+[[filer]]
+cik = 1000097
+label = "Kingdon Capital"
+style = "fundamental"
+
+[[filer]]
+cik = 1608485
+label = "Lansdowne Partners"
+style = "fundamental"
+
+[[filer]]
+cik = 1425851
+label = "Pentwater Capital"
+style = "fundamental"
+
+[[filer]]
+cik = 1654648
+label = "Cat Rock Capital"
+style = "activist"
+
+[[filer]]
+cik = 1389507
+label = "Discovery Capital Management"
+style = "fundamental"
+
+[[filer]]
+cik = 1390202
+label = "Laurion Capital"
+style = "fundamental"
+
+[[filer]]
+cik = 1535392
+label = "Mangrove Partners"
+style = "fundamental"
+
+[[filer]]
+cik = 1569688
+label = "Kerrisdale Advisers"
+style = "fundamental"
+
+[[filer]]
+cik = 1424381
+label = "Lakewood Capital"
+style = "fundamental"
+
+[[filer]]
+cik = 1525234
+label = "Jericho Capital"
+style = "fundamental"
+
+[[filer]]
+cik = 1279150
+label = "Scopia Capital"
+style = "fundamental"
+
+[[filer]]
+cik = 1317904
+label = "Oasis Management"
+style = "fundamental"
+
+[[filer]]
+cik = 1491126
+label = "Chieftain Capital"
+style = "fundamental"
+
+[[filer]]
+cik = 2026053
+label = "Pershing Square"
+style = "activist"
+
+[[filer]]
+cik = 1423053
+label = "Citadel Advisors"
+style = "multi"
+
+[[filer]]
+cik = 1273087
+label = "Millennium Management"
+style = "multi"
+
+[[filer]]
+cik = 1603466
+label = "Point72"
+style = "multi"
+
+[[filer]]
+cik = 1218710
+label = "Balyasny Asset Management"
+style = "multi"
