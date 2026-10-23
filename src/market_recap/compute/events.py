@@ -617,3 +617,100 @@ def announced_events(rows: list[dict], symbol: str, name: str | None, today: dat
                         found[key] = {"date": when.isoformat(), "kind": kind, "text": sentence[:240], "source": r.get("source"),
                                       "url": r.get("url"), "published": published.isoformat()}
     return sorted(found.values(), key=lambda e: e["date"])
+
+
+# --- The bar: a name's usual beat (docs/expectations_research_v1.md) ----------
+# A beat moved a stock by how far it cleared the name's own usual beat, more
+# than by clearing the consensus: over 2024-26, beats above a name's median past
+# surprise rose on 60% of first sessions, beats at or below it on 42%.
+BAR_MIN_REPORTS = 3
+# A sub-industry's reaction profile is stated only on this many reports.
+BAR_MIN_INDUSTRY_REPORTS = 40
+# Sectors whose prices did not answer the EPS surprise (2024-26 slope about 0):
+# REITs trade on FFO, utilities on the rate base and rates. No EPS bar is shown.
+NO_EPS_BAR_SECTORS = ("Real Estate", "Utilities")
+
+
+def _median(values: list[float]) -> float | None:
+    values = sorted(values)
+    if not values:
+        return None
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
+
+
+def usual_beat(history: list[dict], before: str) -> dict | None:
+    """The median EPS surprise of a name's reports dated before ``before``, with
+    how many; None under BAR_MIN_REPORTS."""
+    past = [r["surprise_pct"] for r in history
+            if r.get("surprise_pct") is not None and (r.get("date") or "") < before]
+    if len(past) < BAR_MIN_REPORTS:
+        return None
+    return {"pct": round(_median(past), 2), "reports": len(past)}
+
+
+def _share_up(moves: list[float]) -> dict:
+    return {"n": len(moves), "up_pct": round(100 * sum(m > 0 for m in moves) / len(moves), 1) if moves else None,
+            "median": round(_median(moves), 2) if moves else None}
+
+
+def bar_profile(histories: dict[str, list[dict]], industry_of: dict[str, str]) -> dict:
+    """What a beat against the usual beat was worth across every name, and each
+    sub-industry's reaction profile, from the report histories of this build.
+
+    Each report is set against the usual beat of the name's earlier reports
+    only, so the split uses nothing a reader could not have known before the
+    report. Moves are first-session excess over the S&P 500.
+    """
+    above, below = [], []
+    by_industry: dict[str, list[dict]] = {}
+    for symbol, history in histories.items():
+        rows = sorted((r for r in history if r.get("surprise_pct") is not None and r.get("excess_pct") is not None
+                       and r.get("date")), key=lambda r: r["date"])
+        for i, row in enumerate(rows):
+            if industry_of.get(symbol):
+                by_industry.setdefault(industry_of[symbol], []).append({**row, "symbol": symbol})
+            if row["surprise_pct"] <= 0:
+                continue
+            usual = usual_beat(rows[:i], row["date"])
+            if usual is None:
+                continue
+            (above if row["surprise_pct"] > usual["pct"] else below).append(row["excess_pct"])
+    industries = {}
+    for name, rows in by_industry.items():
+        if len(rows) < BAR_MIN_INDUSTRY_REPORTS:
+            continue
+        beats = [r["excess_pct"] for r in rows if r["surprise_pct"] > 0]
+        misses = [r["excess_pct"] for r in rows if r["surprise_pct"] <= 0]
+        industries[name] = {
+            "reports": len(rows), "names": len({r["symbol"] for r in rows}),
+            "beat_rate_pct": round(100 * len(beats) / len(rows), 1),
+            "beats_fell_pct": round(100 * sum(m < 0 for m in beats) / len(beats), 1) if beats else None,
+            "median_beat": round(_median(beats), 2) if beats else None,
+            "median_miss": round(_median(misses), 2) if misses else None,
+            "median_surprise": round(_median([r["surprise_pct"] for r in rows]), 2),
+            "since": min(r["date"] for r in rows),
+        }
+    return {"above_usual": _share_up(above), "at_or_below_usual": _share_up(below), "industries": industries}
+
+
+def card_bar(history: list[dict], card_date: str, consensus_eps, sector: str | None, industry: str | None,
+             profile: dict) -> dict:
+    """The bar block of one coming report's card: the name's usual beat, the EPS
+    that would clear it, what clearing it was worth across names, and the
+    sub-industry's profile. A sector whose prices did not answer EPS gets the
+    reason instead of a bar."""
+    if sector in NO_EPS_BAR_SECTORS:
+        return {"no_eps_bar": sector}
+    usual = usual_beat(history, card_date)
+    eps = consensus_eps if isinstance(consensus_eps, (int, float)) else None
+    at_usual = round(eps * (1 + usual["pct"] / 100), 2) if usual and eps is not None and eps > 0 else None
+    return {
+        "usual_beat_pct": usual["pct"] if usual else None,
+        "usual_beat_reports": usual["reports"] if usual else 0,
+        "eps_at_usual_beat": at_usual,
+        "above_usual": profile.get("above_usual"),
+        "at_or_below_usual": profile.get("at_or_below_usual"),
+        "industry": industry,
+        "industry_profile": (profile.get("industries") or {}).get(industry or ""),
+    }

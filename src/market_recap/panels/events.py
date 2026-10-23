@@ -871,6 +871,9 @@ def build(ctx, *, inputs: dict | None = None, finnhub_started=None) -> dict:
     history = snapshot_store.options_summaries(as_of - timedelta(days=400), as_of) if snapshot else pd.DataFrame()
 
     written, cards, outcomes = [], [], []
+    # The bar on each card needs every name's history (bar_profile), so the
+    # carded payloads are kept and finished after the loop.
+    histories, with_card = {}, {}
     for symbol in sorted(set(ctx.closes.columns) & set(meta)):
         info = meta[symbol]
         entry = names.get(symbol) or {}
@@ -941,6 +944,9 @@ def build(ctx, *, inputs: dict | None = None, finnhub_started=None) -> dict:
                 outcome |= _report_card(event, payload["history"], before_day, before, trends.get(symbol),
                                         reported.get(symbol), since)
                 payload["outcome"] = outcome
+        histories[symbol] = payload["history"]
+        if "card" in payload:
+            with_card[symbol] = payload
         write_json(EVENTS_ARTIFACT_DIR / f"{symbol}.json", payload)
         written.append(symbol)
         if "card" in payload and _leads(payload, settings, as_of):
@@ -948,6 +954,15 @@ def build(ctx, *, inputs: dict | None = None, finnhub_started=None) -> dict:
         if "outcome" in payload and (_heavy(payload, settings) or payload["watchlist"]):
             outcomes.append(_summary(payload))
     lap("per_name")
+    # The bar: each coming report against the name's usual beat, and what
+    # clearing it was worth across names (docs/expectations_research_v1.md).
+    profile = E.bar_profile(histories, industry)
+    for symbol, payload in with_card.items():
+        card = payload["card"]
+        card["bar"] = E.card_bar(payload["history"], card["date"], (card.get("consensus") or {}).get("eps"),
+                                 payload.get("sector"), payload.get("industry"), profile)
+        write_json(EVENTS_ARTIFACT_DIR / f"{symbol}.json", payload)
+    lap("bar")
     prune_stale(EVENTS_ARTIFACT_DIR, written)
 
     cards.sort(key=lambda c: (c["card"]["date"], {"bmo": 0, "intraday": 1, "amc": 2}.get(c["card"]["timing"], 3),

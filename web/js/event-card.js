@@ -250,11 +250,54 @@ function intoTable(rt, limit, asOf) {
 }
 
 // The full card on TICKER; `compact` is the CATALYSTS lead strip's version.
+// The bar a coming report has to clear (docs/expectations_research_v1.md): the
+// name's usual beat -- the median of its earlier EPS surprises -- and the EPS
+// that clears it; what clearing a usual beat was worth across names; and the
+// sub-industry's reaction profile. Each as [label, value, note, tone]; a sector
+// whose prices did not answer EPS gets its reason instead.
+const signedPct = (v, digits = 1) => (isFinite(v) && v !== null ? `${v > 0 ? '+' : v < 0 ? '−' : ''}${num(Math.abs(v), digits)}%` : DASH);
+
+export function barStats(bar) {
+  if (!bar) return [];
+  if (bar.no_eps_bar) {
+    return [['THE BAR · EPS', 'Not shown', `${bar.no_eps_bar}: over 2024-26 the price did not answer the EPS surprise (FFO, the rate base and rates did), so no EPS bar is set`, 'dim']];
+  }
+  const out = [];
+  if (bar.usual_beat_pct !== null && bar.usual_beat_pct !== undefined) {
+    const eps = bar.eps_at_usual_beat !== null && bar.eps_at_usual_beat !== undefined ? ` · EPS ${num(bar.eps_at_usual_beat, 2)} matches it` : '';
+    const misses = bar.usual_beat_pct < 0 ? 'it usually reports below consensus: ' : '';
+    out.push(['THE BAR · USUAL BEAT', signedPct(bar.usual_beat_pct), `${misses}median EPS surprise of its last ${bar.usual_beat_reports} reports${eps}`, '']);
+  } else {
+    out.push(['THE BAR · USUAL BEAT', DASH, `fewer than 3 earlier reports with a surprise on record`, 'dim']);
+  }
+  const above = bar.above_usual;
+  const below = bar.at_or_below_usual;
+  if (above?.n && below?.n) {
+    out.push(['BEATS ABOVE THE USUAL BEAT', `${num(above.up_pct, 0)}% rose`,
+      `against ${num(below.up_pct, 0)}% at or below it · first session vs the S&P 500, all names (n ${above.n} and ${below.n}), each against its earlier reports only`, 'up']);
+  }
+  const ind = bar.industry_profile;
+  if (ind && ind.beats_fell_pct !== null && ind.beats_fell_pct !== undefined) {
+    out.push([`${(bar.industry || 'SUB-INDUSTRY').toUpperCase()}`, `${num(ind.beats_fell_pct, 0)}% of beats fell`,
+      `median beat ${signedPct(ind.median_beat)} · median miss ${signedPct(ind.median_miss)} · usual surprise ${signedPct(ind.median_surprise)} · ${ind.reports} reports, ${ind.names} names since ${ind.since}`,
+      ind.beats_fell_pct >= 50 ? 'down' : '']);
+  }
+  return out;
+}
+
+// The compact card's one tag: the usual beat, or why there is none.
+export function barTag(bar) {
+  if (!bar) return null;
+  if (bar.no_eps_bar) return tag('NO EPS BAR', 'dim', `${bar.no_eps_bar}: the price did not answer EPS surprises`);
+  if (bar.usual_beat_pct === null || bar.usual_beat_pct === undefined) return null;
+  return tag(`BAR ${signedPct(bar.usual_beat_pct)}`, 'info', `Usual beat: median EPS surprise of its last ${bar.usual_beat_reports} reports. Beats above a name's usual beat rose more often than beats at or below it.`);
+}
+
 export function eventCard(payload, asOf, { compact = false, prices = null } = {}) {
   const c = payload.card;
   if (!c) return null;
   const title = compact ? `${payload.symbol} · ${(payload.name || '').toUpperCase()}` : 'NEXT REPORT · EVENT CARD';
-  const right = el('span', { class: 'tag-row' }, [whenTag(c, asOf), pricedTag(c.priced), guideTag(c),
+  const right = el('span', { class: 'tag-row' }, [whenTag(c, asOf), pricedTag(c.priced), guideTag(c), barTag(c.bar),
     el('span', { class: 'dim', text: `${c.date} · reacts ${c.reaction_session || DASH}` })]);
   const rt = payload.readthrough || {};
   const body = [
@@ -264,6 +307,8 @@ export function eventCard(payload, asOf, { compact = false, prices = null } = {}
   ];
   const bar = compact ? [] : guideStats(c);
   if (bar.length) body.push(el('div', { class: 'stat-strip event-stats' }, bar));
+  const hurdle = compact ? [] : barStats(c.bar);
+  if (hurdle.length) body.push(el('div', { class: 'stat-strip event-stats event-bar' }, hurdle.map(([label, value, note, tone]) => stat(label, value, note, tone))));
   if (compact) {
     const peers = (rt.with || []).slice(0, 4);
     body.push(el('div', { class: 'tag-row event-peers' }, [

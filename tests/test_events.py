@@ -497,3 +497,48 @@ def test_the_finnhub_phase_can_start_before_events_once_evidence_is_written():
     assert "events.start_finnhub" in inspect.getsource(B.run)
     assert order.index("evidence") < min(order.index(p) for p in ("europe", "heatmaps", "credit", "themes", "events"))
     assert "finnhub_started" in inspect.signature(panel.build).parameters
+
+
+# --- the bar: a name's usual beat ---------------------------------------------
+
+def _report(day, surprise, excess):
+    return {"date": day, "surprise_pct": surprise, "excess_pct": excess}
+
+
+def test_the_usual_beat_is_the_median_of_earlier_surprises_only():
+    history = [_report("2026-01-30", 4.0, 1.0), _report("2026-04-30", 8.0, -2.0),
+               _report("2026-07-30", 6.0, 0.5), _report("2026-10-30", 50.0, 3.0)]
+    assert E.usual_beat(history, "2026-10-30") == {"pct": 6.0, "reports": 3}
+    assert E.usual_beat(history, "2026-07-30") is None          # two earlier reports: under the minimum
+    assert E.usual_beat([_report("2026-01-30", None, 1.0)] * 5, "2027-01-01") is None
+
+
+def test_the_bar_profile_splits_beats_by_the_names_earlier_usual_beat():
+    history = [_report(f"2025-0{m}-15", s, x) for m, s, x in
+               ((1, 5.0, 1.0), (2, 5.0, 1.0), (3, 5.0, 1.0), (4, 9.0, 2.0), (5, 2.0, -3.0), (6, -1.0, -4.0))]
+    profile = E.bar_profile({"AAA": history}, {"AAA": "Widgets"})
+    # Usual beat 5.0 when April and May report: April (9.0) clears it, May (2.0) does not; June is a miss.
+    assert profile["above_usual"] == {"n": 1, "up_pct": 100.0, "median": 2.0}
+    assert profile["at_or_below_usual"] == {"n": 1, "up_pct": 0.0, "median": -3.0}
+    assert profile["industries"] == {}                          # six reports: under the industry minimum
+    many = {f"S{i}": [_report(f"2025-0{m}-15", 3.0, 1.0 if m % 2 else -1.0) for m in range(1, 9)] for i in range(5)}
+    industry = E.bar_profile(many, {s: "Widgets" for s in many})["industries"]["Widgets"]
+    assert industry["reports"] == 40 and industry["names"] == 5 and industry["beats_fell_pct"] == 50.0
+
+
+def test_a_card_bar_gives_the_eps_that_clears_the_usual_beat_or_says_why_there_is_none():
+    history = [_report(f"2025-0{m}-15", 10.0, 1.0) for m in range(1, 5)]
+    profile = {"above_usual": {"n": 905, "up_pct": 60.0, "median": 1.43}, "at_or_below_usual": {"n": 615, "up_pct": 42.0, "median": -0.7},
+               "industries": {"Semiconductors": {"reports": 109}}}
+    bar = E.card_bar(history, "2025-10-30", 2.0, "Information Technology", "Semiconductors", profile)
+    assert bar["usual_beat_pct"] == 10.0 and bar["usual_beat_reports"] == 4 and bar["eps_at_usual_beat"] == 2.2
+    assert bar["industry_profile"] == {"reports": 109} and bar["above_usual"]["up_pct"] == 60.0
+    assert E.card_bar(history, "2025-10-30", -0.5, "Health Care", None, profile)["eps_at_usual_beat"] is None  # a loss: no ratio
+    assert E.card_bar(history, "2025-10-30", 2.0, "Real Estate", "REITs", profile) == {"no_eps_bar": "Real Estate"}
+
+
+def test_a_sub_industry_profile_is_dated_from_its_earliest_report():
+    late = [_report(f"2025-0{m}-15", 3.0, 1.0) for m in range(1, 9)]
+    early = [_report(f"2024-0{m}-15", 3.0, 1.0) for m in range(1, 9)]
+    many = {"B": late, "A": early, "C": late, "D": late, "E": late}
+    assert E.bar_profile(many, {s: "Widgets" for s in many})["industries"]["Widgets"]["since"] == "2024-01-15"
