@@ -481,3 +481,19 @@ def test_the_evening_edition_asks_as_before(fake_finnhub):
     from market_recap.panels import events as panel
     _, _, news_state, _, event_state = panel._finnhub_phase(**_phase_args())
     assert news_state["deferred"] is False and news_state["asked"] > 0 and event_state["asked"] == 1
+
+
+def test_the_finnhub_phase_can_start_before_events_once_evidence_is_written():
+    import inspect
+    from types import SimpleNamespace
+
+    import market_recap.build as B
+    from market_recap.panels import events as panel
+    # Without this session's CATALYSTS and EVIDENCE there is nothing to start;
+    # EVENTS then raises for them as it always has.
+    assert panel.start_finnhub(SimpleNamespace(), {"catalysts": None, "evidence": {"names": {}}}) is None
+    order = list(B.PANELS)
+    # Started when EVIDENCE is written; the slow panels that read neither run beside it.
+    assert "events.start_finnhub" in inspect.getsource(B.run)
+    assert order.index("evidence") < min(order.index(p) for p in ("europe", "heatmaps", "credit", "themes", "events"))
+    assert "finnhub_started" in inspect.signature(panel.build).parameters

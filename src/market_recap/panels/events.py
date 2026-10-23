@@ -22,11 +22,12 @@ Two outputs:
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, timedelta
 import hashlib
 import os
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -695,34 +696,19 @@ def _finnhub_phase(*, as_of: date, settings: dict, excess: pd.DataFrame, reactio
     return moves_by_symbol, news, news_state, announced, event_state
 
 
-def build(ctx, *, inputs: dict | None = None) -> dict:
-    inputs = inputs or {}
-    catalysts, evidence = inputs.get("catalysts"), inputs.get("evidence")
-    if not catalysts or not evidence:
-        raise RuntimeError("EVENTS needs this session's CATALYSTS and EVIDENCE")
+def _plan(ctx, catalysts: dict, evidence: dict) -> SimpleNamespace:
+    """What the Finnhub phase and the rest of the panel both read, from the
+    shared context and this session's CATALYSTS and EVIDENCE only -- so the
+    phase can start as soon as those two are built (:func:`start_finnhub`)."""
     settings = dict(ctx.config.get("events", {}))
     as_of = date.fromisoformat(ctx.as_of)
-    # Seconds by step, for the manifest: EVENTS is most of a build's time.
-    steps: dict[str, float] = {}
-    clock = {"t": time.monotonic()}
-
-    def lap(step: str) -> None:
-        now = time.monotonic()
-        steps[step] = round(steps.get(step, 0.0) + now - clock["t"], 1)
-        clock["t"] = now
     names = evidence.get("names") or {}
-    meta = _universe(ctx)
-    meta = {info["symbol"]: info for info in meta.values()}
+    meta = {info["symbol"]: info for info in _universe(ctx).values()}
     sector_etfs = ctx.sector_etfs
-
     index_close = ctx.index_closes[ctx.primary.symbol]
     frames = [ctx.closes] + ([ctx.etf_closes[[s for s in set(sector_etfs.values()) if s in ctx.etf_closes.columns]]]
                              if not ctx.etf_closes.empty else [])
     excess = E.daily_excess(pd.concat(frames, axis=1), index_close)
-    lookback = int(settings.get("readthrough_lookback_sessions", 252))
-    member_excess = excess[[s for s in ctx.closes.columns]].iloc[-lookback:]
-    corr = member_excess.corr(min_periods=int(0.6 * lookback))
-    issuers = _issuers(list(ctx.closes.columns))
     reactions = {s: n.get("reactions") or [] for s, n in names.items()}
 
     # CATALYSTS lists tomorrow onward; today's after-close reports are kept
@@ -737,12 +723,81 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         if e["date"] > ctx.as_of or (e["date"] == ctx.as_of and e.get("timing") == "amc"):
             next_report.setdefault(e["symbol"], e)
 
-    card_days = int(settings.get("card_horizon_days", 30))
-    card_end = (as_of + timedelta(days=card_days)).isoformat()
+    card_end = (as_of + timedelta(days=int(settings.get("card_horizon_days", 30)))).isoformat()
     carded = sorted(s for s, e in next_report.items() if e["date"] <= card_end)
     # Every name's trend: the revisions table is on every ticker page, and
     # EARNINGS has already read the whole universe's this session (cached).
     everyone = sorted(set(ctx.closes.columns) & set(meta))
+    focus = set(evidence.get("focus") or [])
+    recent_events = (catalysts.get("recent") or {}).get("earnings_reacted") or []
+    recent_symbols = {e["symbol"] for e in recent_events}
+
+    # Guidance is read from each release once and kept; a build reads at most
+    # ``guide_new_releases`` new ones, soonest reporters first, then the focus
+    # names, then the heaviest -- so the cards that matter fill first.
+    def priority(symbol: str) -> tuple:
+        event = next_report.get(symbol)
+        soon = event["date"] if event and symbol in carded else "9999"
+        weight = max((meta[symbol].get("weights") or {}).values(), default=0) or 0
+        return (soon, symbol not in focus, -weight, symbol)
+
+    deep = [s for s in everyone if s in carded or s in focus or s in recent_symbols
+            or _heavy({"weights": meta[s].get("weights") or {}}, settings) or meta[s].get("watchlist")]
+    return SimpleNamespace(settings=settings, as_of=as_of, names=names, meta=meta, sector_etfs=sector_etfs,
+                           index_close=index_close, excess=excess, reactions=reactions, next_report=next_report,
+                           carded=carded, everyone=everyone, focus=focus, recent_events=recent_events,
+                           recent_symbols=recent_symbols, priority=priority, deep=deep)
+
+
+def start_finnhub(ctx, inputs: dict) -> tuple[ThreadPoolExecutor, Future, SimpleNamespace] | None:
+    """Start the Finnhub phase on its own thread, ahead of EVENTS itself.
+
+    Finnhub's free tier allows one request a second and an evening build asks
+    up to 400, so the phase is mostly waiting -- six and a half minutes on a
+    night it asks them all, which EVENTS used to spend at the end of the
+    build. It reads only the context, CATALYSTS and EVIDENCE, so the build
+    starts it as soon as EVIDENCE is written and the panels in between
+    (credit, themes, the fund maps) run while it waits. One thread, so the
+    rate limit holds. None when either input is missing: EVENTS then fails
+    as it always has."""
+    catalysts, evidence = inputs.get("catalysts"), inputs.get("evidence")
+    if not catalysts or not evidence:
+        return None
+    plan = _plan(ctx, catalysts, evidence)
+    deferred = os.environ.get("MARKET_RECAP_EDITION") == "close"
+    pool = ThreadPoolExecutor(1)
+    future = pool.submit(_timed, _finnhub_phase, as_of=plan.as_of, settings=plan.settings, excess=plan.excess,
+                         reactions=plan.reactions, everyone=plan.everyone, meta=plan.meta, deep=plan.deep,
+                         priority=plan.priority, deferred=deferred)
+    return pool, future, plan
+
+
+def build(ctx, *, inputs: dict | None = None, finnhub_started=None) -> dict:
+    """``finnhub_started`` is :func:`start_finnhub`'s handle when the build
+    started the phase early; without it, EVENTS starts the phase itself."""
+    inputs = inputs or {}
+    catalysts, evidence = inputs.get("catalysts"), inputs.get("evidence")
+    if not catalysts or not evidence:
+        raise RuntimeError("EVENTS needs this session's CATALYSTS and EVIDENCE")
+    # Seconds by step, for the manifest: EVENTS is most of a build's time.
+    steps: dict[str, float] = {}
+    clock = {"t": time.monotonic()}
+
+    def lap(step: str) -> None:
+        now = time.monotonic()
+        steps[step] = round(steps.get(step, 0.0) + now - clock["t"], 1)
+        clock["t"] = now
+    started = finnhub_started or start_finnhub(ctx, inputs)
+    finnhub_pool, finnhub_future, plan = started
+    settings, as_of, names, meta = plan.settings, plan.as_of, plan.names, plan.meta
+    sector_etfs, index_close, excess, reactions = plan.sector_etfs, plan.index_close, plan.excess, plan.reactions
+    next_report, carded, everyone, focus = plan.next_report, plan.carded, plan.everyone, plan.focus
+    recent_events, priority, deep = plan.recent_events, plan.priority, plan.deep
+    deferred = os.environ.get("MARKET_RECAP_EDITION") == "close"
+    lookback = int(settings.get("readthrough_lookback_sessions", 252))
+    member_excess = excess[[s for s in ctx.closes.columns]].iloc[-lookback:]
+    corr = member_excess.corr(min_periods=int(0.6 * lookback))
+    issuers = _issuers(list(ctx.closes.columns))
     lap("setup")
     trends, missing = estimates.fetch_trends(everyone) if everyone else ({}, {})
     lap("yahoo_estimates")
@@ -766,7 +821,6 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         cik_map = sec.fetch_ticker_cik_map()
     except Exception:
         cik_map = {}
-    focus = set(evidence.get("focus") or [])
     guide_cap = int(settings.get("guide_new_releases", 200))
     guide_budget = {"left": guide_cap, "found": 0, "waiting": 0}
     themes = inputs.get("themes") or {}
@@ -778,29 +832,9 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     marker_since = (as_of - timedelta(days=int(settings.get("timeline_filings_days", 730)))).isoformat()
     theme_groups = themes.get("groups") if isinstance(themes.get("groups"), list) else []
     bellwethers = {g["key"]: list(g.get("bellwethers") or []) for g in ctx.config.get("themes", {}).get("groups", [])}
-    recent_events = (catalysts.get("recent") or {}).get("earnings_reacted") or []
-    recent_symbols = {e["symbol"] for e in recent_events}
-
-    # Guidance is read from each release once and kept; a build reads at most
-    # ``guide_new_releases`` new ones, soonest reporters first, then the focus
-    # names, then the heaviest -- so the cards that matter fill first.
-    def priority(symbol: str) -> tuple:
-        event = next_report.get(symbol)
-        soon = event["date"] if event and symbol in carded else "9999"
-        weight = max((meta[symbol].get("weights") or {}).values(), default=0) or 0
-        return (soon, symbol not in focus, -weight, symbol)
-
-    deep = [s for s in everyone if s in carded or s in focus or s in recent_symbols
-            or _heavy({"weights": meta[s].get("weights") or {}}, settings) or meta[s].get("watchlist")]
-    # Finnhub's free tier allows one request a second and a build spends up to
-    # 400 of them, so this phase is mostly waiting (a quarter of an hour of
-    # sleeping, profiled). It needs nothing the guides read, and the guides need
-    # nothing it finds: run side by side, the build waits for the longer of the
-    # two instead of both. One thread, so the rate limit holds.
-    deferred = os.environ.get("MARKET_RECAP_EDITION") == "close"
-    finnhub_pool = ThreadPoolExecutor(1)
-    finnhub_future = finnhub_pool.submit(_timed, _finnhub_phase, as_of=as_of, settings=settings, excess=excess, reactions=reactions,
-                                         everyone=everyone, meta=meta, deep=deep, priority=priority, deferred=deferred)
+    # The Finnhub phase is already running (started above, or by the build
+    # when EVIDENCE was written). It needs nothing the guides read, and the
+    # guides need nothing it finds: the build waits for the longer of the two.
 
     guides_by_symbol = {}
     for symbol in sorted(deep, key=priority):
@@ -811,8 +845,8 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
     # The guides are done: take the headlines, waiting for whatever is left of the rate limit.
     (moves_by_symbol, news, news_state, announced, event_state), finnhub_seconds = finnhub_future.result()
     finnhub_pool.shutdown()
-    lap("sec_guidance")                    # the guides, plus the wait for the Finnhub thread if it was the longer
-    steps["finnhub_overlapped"] = finnhub_seconds   # the thread's own time, run beside the guides: not part of the sum
+    lap("sec_guidance")                    # the guides, plus whatever wait for the Finnhub thread is left
+    steps["finnhub_overlapped"] = finnhub_seconds   # the thread's own time, run beside other work: not part of the sum
     kept_events = _kept_events(settings.get("company_events") or [], ctx.as_of)
 
     lap("finnhub_events")
@@ -940,6 +974,8 @@ def build(ctx, *, inputs: dict | None = None) -> dict:
         ctx.diagnostics["events"] = {
             "seconds": steps,
             "finnhub_deferred": deferred,
+            # Started by the build when EVIDENCE was written, beside the panels between.
+            "finnhub_started_early": bool(finnhub_started),
             "finnhub_moves": {"asked": news_state["asked"], "budget": news_state["budget"], "failed": news_state["failed"],
                               "from_cache": max(0, len(news) - news_state["asked"])},
             "finnhub_events": {"names": len(deep), "asked": event_state["asked"], "budget": event_state["budget"],

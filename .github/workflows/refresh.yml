@@ -145,7 +145,12 @@ jobs:
       # A site run fetches nothing, so it skips this and the next three steps.
       - name: Install pdftotext
         if: steps.check.outputs.run == 'true' && env.MODE != 'site'
-        run: command -v pdftotext || { sudo apt-get update -q && sudo apt-get install -y -q poppler-utils; }
+        # The runner's package index is usually current enough: refreshing it
+        # first cost over a minute some nights, so it is refreshed only if the
+        # install fails without it.
+        run: |
+          command -v pdftotext || sudo apt-get install -y -q --no-install-recommends poppler-utils \
+            || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends poppler-utils; }
 
       - name: Restore cache
         if: steps.check.outputs.run == 'true' && env.MODE != 'site'

@@ -25,8 +25,6 @@ from .util import SourceRecord, describe_error, utc_now_iso, write_json
 # MONITOR consumes same-session valuation and calendar outputs, and runs last.
 PANELS = {
     "markets": markets.build,
-    # European indices, supersector funds and members from Yahoo; reads no other panel.
-    "europe": europe.build,
     # Breadth and stress readings from fund prices; reads no other panel.
     "market_state": market_state.build,
     # Measures past data releases against rates and stocks; reads no other panel.
@@ -37,7 +35,6 @@ PANELS = {
     "catalyst_log": catalyst_log.build,
     "priced": priced.build,
     "earnings": earnings.build,
-    "heatmaps": heatmaps.build,
     "rotation": rotation.build,
     "risk": risk.build,
     "fixed_income": fixed_income.build,
@@ -51,6 +48,12 @@ PANELS = {
     "valuation": valuation.build,
     "dcf": dcf.build,
     "evidence": evidence.build,
+    # EVENTS' Finnhub phase starts once EVIDENCE is written (it waits on a rate
+    # limit for minutes on an evening build), so the slow panels that read
+    # neither go here, beside it, rather than before the SEC panels.
+    # European indices, supersector funds and members from Yahoo; reads no other panel.
+    "europe": europe.build,
+    "heatmaps": heatmaps.build,
     # Reads this session's VALUATION (per-company P/E and EPS histories), so after it.
     "kshape": kshape.build,
     "sizek": sizek.build,
@@ -140,6 +143,8 @@ def run(
 
     written: list[str] = []
     built: dict[str, dict] = {}
+    # EVENTS' Finnhub phase, started when EVIDENCE is written (events.start_finnhub).
+    finnhub_started = None
 
     def optional_panel(name: str) -> dict | None:
         if name in selected:
@@ -196,7 +201,8 @@ def run(
                 elif name == "flows":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in flows.INPUTS})
                 elif name == "events":
-                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in events.INPUTS})
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in events.INPUTS},
+                                          finnhub_started=finnhub_started)
                 elif name == "kshape":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in kshape.INPUTS})
                 elif name == "sizek":
@@ -229,6 +235,12 @@ def run(
                 write_json(ARTIFACT_DIR / f"{name}.json", payload)
             built[name] = payload
             written.append(name)
+            if name == "evidence" and "events" in selected:
+                try:
+                    finnhub_started = events.start_finnhub(
+                        ctx, {dep: optional_panel(dep) for dep in ("catalysts", "evidence")})
+                except Exception as exc:  # EVENTS then starts the phase itself
+                    print(f"[build] events' Finnhub phase not started early: {describe_error(exc)}", flush=True)
         finally:
             if profiler:
                 profiler.disable()
