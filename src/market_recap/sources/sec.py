@@ -10,6 +10,7 @@ revenue" is only meaningful alongside when it became public.
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -824,19 +825,22 @@ def trailing_parts(periods: dict, end: str) -> list[tuple[dict, int]] | None:
     that is missing makes the whole figure None -- never an annualised guess.
     """
     low, high = ANNUAL_SPAN_DAYS
-    spans = [(start, e) for (start, e) in periods if start is not None and e == end and _days(start, e) <= high]
+    # Each span's length once: this runs for every quarter of every vintage of
+    # every line, and three scans of the periods with a date parse each were
+    # most of a filer's parse.
+    lengths = [(key, _days(*key)) for key in periods if key[0] is not None]
+    spans = [(key, length) for key, length in lengths if key[1] == end and length <= high]
     if not spans:
         return None
-    start, _ = max(spans, key=lambda k: _days(k[0], k[1]))
+    (start, _), length = max(spans, key=lambda span: span[1])
     ytd = periods[(start, end)]
-    length = _days(start, end)
     if length >= low:
         return [(ytd, 1)]
 
-    one_year_back = (pd.Timestamp(end) - pd.Timedelta(days=DAYS_PER_YEAR)).strftime("%Y-%m-%d")
-    prior = [k for k in periods if k[0] is not None and abs(_days(k[0], k[1]) - length) <= PERIOD_MATCH_DAYS]
+    one_year_back = (date.fromisoformat(end[:10]) - timedelta(days=DAYS_PER_YEAR)).isoformat()
+    prior = [key for key, span in lengths if abs(span - length) <= PERIOD_MATCH_DAYS]
     prior_end = _near(one_year_back, [k[1] for k in prior])
-    fiscal_years = [k for k in periods if k[0] is not None and low <= _days(k[0], k[1]) <= high]
+    fiscal_years = [key for key, span in lengths if low <= span <= high]
     year_end = _near(start, [k[1] for k in fiscal_years])
     if prior_end is None or year_end is None:
         return None
@@ -1185,11 +1189,43 @@ def _is_quarter_span(key: tuple) -> bool:
     return start is not None and QUARTER_SPAN_DAYS[0] <= _days(start, end) <= QUARTER_SPAN_DAYS[1]
 
 
+class _Periods(dict):
+    """A line's periods with their ends indexed. A quarterly rebuild asks for the
+    periods near each of some fifty quarter ends, line by line: scanning every
+    period each time was a million scans a build and most of the parse. The index
+    is built on the first ask; a later insertion drops it."""
+
+    def __setitem__(self, key, value) -> None:
+        self.__dict__.pop("_index", None)
+        super().__setitem__(key, value)
+
+    def near(self, end: str) -> list[tuple]:
+        """(key, entry) of every period ending within PERIOD_MATCH_DAYS of ``end``,
+        in the map's own order (what a scan of ``items()`` would have found)."""
+        index = self.__dict__.get("_index")
+        if index is None:
+            ordered = sorted(enumerate(self.items()), key=lambda item: _ordinal(item[1][0][1]))
+            index = self._index = ([_ordinal(key[1]) for _, (key, _) in ordered], ordered)
+        ends, ordered = index
+        target = _ordinal(end)
+        low, high = bisect_left(ends, target - PERIOD_MATCH_DAYS), bisect_right(ends, target + PERIOD_MATCH_DAYS)
+        window = ordered[low:high]
+        # One end date: the stable sort by end kept the map's order already.
+        if high - low > 1 and ends[low] != ends[high - 1]:
+            window = sorted(window)  # by position in the map; positions are unique
+        return [item for _, item in window]
+
+
+def _periods_near(periods: dict, end: str) -> list[tuple]:
+    if isinstance(periods, _Periods):
+        return periods.near(end)
+    return [(key, entry) for key, entry in periods.items() if abs(_days(key[1], end)) <= PERIOD_MATCH_DAYS]
+
+
 def _nearest_period(periods: dict, end: str, accept) -> tuple | None:
     """(key, entry) of the period ending within PERIOD_MATCH_DAYS of ``end`` that
     ``accept`` admits: the nearest end, then the latest filed."""
-    found = [(key, entry) for key, entry in periods.items()
-             if accept(key) and abs(_days(key[1], end)) <= PERIOD_MATCH_DAYS]
+    found = [(key, entry) for key, entry in _periods_near(periods, end) if accept(key)]
     if not found:
         return None
     found.sort(key=lambda item: item[1]["filed"], reverse=True)
@@ -1273,9 +1309,8 @@ def _flow_quarter(periods: dict, end: str) -> tuple | None:
     span = _nearest_period(periods, end, _is_quarter_span)
     if span is not None:
         return span[1]["value"], span[1]["filed"], False
-    candidates = [(key, entry) for key, entry in periods.items()
-                  if key[0] is not None and abs(_days(key[1], end)) <= PERIOD_MATCH_DAYS
-                  and QUARTER_SPAN_DAYS[1] < _days(*key) <= ANNUAL_SPAN_DAYS[1]]
+    candidates = [(key, entry) for key, entry in _periods_near(periods, end)
+                  if key[0] is not None and QUARTER_SPAN_DAYS[1] < _days(*key) <= ANNUAL_SPAN_DAYS[1]]
     for (start, ytd_end), ytd in sorted(candidates, key=lambda item: item[1]["filed"], reverse=True):
         # The same tag on both sides: HIG's year is tagged ``Revenues`` and its
         # nine months a narrower line, and their difference was a $5B "quarter".
@@ -1312,7 +1347,7 @@ def quarterly_statements(facts: dict) -> list[dict]:
     cannot be named, or that has neither revenue nor net income, is left out.
     """
     splits = share_splits(facts)
-    periods = {item.key: _period_values(facts, item, splits) for item in LINE_ITEMS}
+    periods = {item.key: _Periods(_period_values(facts, item, splits)) for item in LINE_ITEMS}
     ends = _quarter_ends(periods)
     quarter_ends = [end for end, _ in ends]
     year_ends = [end for end, is_year in ends if is_year]
