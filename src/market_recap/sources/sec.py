@@ -1420,6 +1420,7 @@ def quarterly_statements(facts: dict) -> list[dict]:
     if "revenue" in by_tag:
         by_tag["revenue"].append(_Periods(_bank_revenue(facts, None, splits)))
     ends = _quarter_ends(periods)
+    revenue_tag: dict[str, int] = {}
     quarter_ends = [end for end, _ in ends]
     year_ends = [end for end, is_year in ends if is_year]
     rows = []
@@ -1432,10 +1433,17 @@ def quarterly_statements(facts: dict) -> list[dict]:
         for item in LINE_ITEMS:
             if item.key in by_tag:
                 single = LineItem(item.key, item.label, item.tags[:1], item.statement, item.unit)
-                tags = [_quarter_figure(single, p, end, quarter_ends, year_ends) for p in by_tag[item.key][:len(item.tags)]]
-                tags = [f for f in tags if f is not None]
-                found = max(tags, key=lambda f: f[0]) if tags else \
-                    _quarter_figure(single, by_tag[item.key][-1], end, quarter_ends, year_ends) if item.key == "revenue" else None
+                tags = [(i, _quarter_figure(single, p, end, quarter_ends, year_ends))
+                        for i, p in enumerate(by_tag[item.key][:len(item.tags)])]
+                tags = [(i, f) for i, f in tags if f is not None]
+                if tags:
+                    index, found = max(tags, key=lambda t: t[1][0])
+                elif item.key == "revenue":
+                    index, found = len(item.tags), _quarter_figure(single, by_tag[item.key][-1], end, quarter_ends, year_ends)
+                else:
+                    index, found = None, None
+                if item.key == "revenue" and found is not None:
+                    revenue_tag[end] = index
             else:
                 found = _quarter_figure(item, periods[item.key], end, quarter_ends, year_ends)
             value, filed, derived = found if found is not None else (None, None, False)
@@ -1445,7 +1453,7 @@ def quarterly_statements(facts: dict) -> list[dict]:
         if row["revenue"] is None and row["net_income"] is None:
             continue
         rows.append(row)
-    _drop_stray_revenue(rows)
+    _drop_stray_revenue(rows, [revenue_tag.get(row["period_end"]) for row in rows])
     return rows
 
 
@@ -1456,16 +1464,32 @@ REVENUE_STRAY_FACTOR = 3.0
 REVENUE_STRAY_WINDOW = 4
 
 
-def _drop_stray_revenue(rows: list[dict]) -> None:
+def _drop_stray_revenue(rows: list[dict], tags: list[int | None] | None = None) -> None:
     """Blank a quarter's revenue that is not on the scale of the quarters around
-    it, or not positive. Its margins then go blank with it, never wrong."""
+    it, or not positive. Its margins then go blank with it, never wrong.
+
+    With ``tags`` (which revenue tag each quarter came from), a fall that lasts
+    is kept: a quarter filed as three months under the same tag as most of its
+    neighbours, below their median, with a quarter beside it on its own scale.
+    Moderna's revenue really did fall to a third (as airlines' and cruise lines'
+    did in 2020). Still blanked: a quarter far above its neighbours (a year
+    filed under a quarter's dates), a one-quarter fragment, and a derived
+    quarter (a year and nine months of different scope)."""
     values = [row["revenue"] for row in rows]
     for i, row in enumerate(rows):
         value = values[i]
         if value is None:
             continue
-        around = [v for v in values[max(0, i - REVENUE_STRAY_WINDOW):i] + values[i + 1:i + 1 + REVENUE_STRAY_WINDOW]
-                  if v is not None and v > 0]
+        window = [j for j in range(max(0, i - REVENUE_STRAY_WINDOW), min(len(rows), i + 1 + REVENUE_STRAY_WINDOW))
+                  if j != i and values[j] is not None and values[j] > 0]
+        around = [values[j] for j in window]
+        if tags and value > 0 and tags[i] is not None and not row.get("revenue_derived") and around:
+            used = [tags[j] for j in window if tags[j] is not None]
+            below = value < sorted(around)[len(around) // 2]
+            beside = [values[j] for j in (i - 1, i + 1) if 0 <= j < len(values) and values[j] is not None and values[j] > 0]
+            lasting = any(v / REVENUE_STRAY_FACTOR <= value <= v * REVENUE_STRAY_FACTOR for v in beside)
+            if used and max(set(used), key=used.count) == tags[i] and below and lasting:
+                continue
         if value <= 0 or (len(around) >= 3 and not
                           sorted(around)[len(around) // 2] / REVENUE_STRAY_FACTOR <= value
                           <= sorted(around)[len(around) // 2] * REVENUE_STRAY_FACTOR):

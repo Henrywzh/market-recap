@@ -330,3 +330,23 @@ def test_a_bank_without_a_revenue_tag_reads_net_interest_plus_noninterest_income
     # A bank that tags a revenue line keeps it: the parts stand in only where no tag gives one.
     entries += _usd(REVENUE, _row("2026-01-01", "2026-03-31", 228.0, "2026-05-05"))
     assert {r["period_end"]: r for r in sec.quarterly_statements(_facts(entries))}["2026-03-31"]["revenue"] == 228.0
+
+
+def test_a_lasting_fall_under_the_same_tag_is_kept_and_a_spike_or_fragment_is_blanked():
+    def rows(values):
+        return [{"period_end": f"2025-{i + 1:02d}-28", "revenue": v, "revenue_derived": False} for i, v in enumerate(values)]
+    # A real collapse: two quarters on the new, lower scale, same tag throughout.
+    fall = rows([10.0, 11.0, 10.5, 10.8, 3.0, 2.8])
+    sec._drop_stray_revenue(fall, [0] * 6)
+    assert [r["revenue"] for r in fall][-2:] == [3.0, 2.8]
+    # A year filed under a quarter's dates: far above, blanked even in the same tag.
+    spike = rows([10.0, 11.0, 42.0, 10.5, 10.8])
+    sec._drop_stray_revenue(spike, [0] * 5)
+    assert spike[2]["revenue"] is None
+    # A one-quarter fragment, and a fall read from another tag than its neighbours: blanked.
+    fragment = rows([10.0, 11.0, 0.2, 10.5, 10.8])
+    sec._drop_stray_revenue(fragment, [0] * 5)
+    assert fragment[2]["revenue"] is None
+    other = rows([10.0, 11.0, 10.5, 10.8, 3.0, 2.8])
+    sec._drop_stray_revenue(other, [0, 0, 0, 0, 1, 1])
+    assert other[4]["revenue"] is None
