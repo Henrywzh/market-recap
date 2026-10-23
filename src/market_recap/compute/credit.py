@@ -91,29 +91,41 @@ def filed_facts(facts: dict) -> dict:
 def as_of(rows, index: pd.DatetimeIndex, stale_days: int) -> pd.Series:
     """Each day's value for the latest period among filings public by that day; a value
     whose period ended more than ``stale_days`` before is dropped (a line the filer
-    stopped tagging)."""
+    stopped tagging).
+
+    Read some 20,000 times a build (every debt line of every name), so it works on
+    arrays: a binary search for each day's last filing, not a reindexed frame."""
     if not rows:
         return pd.Series(np.nan, index=index)
-    frame = pd.DataFrame(rows, columns=["end", "filed", "val"])
-    frame["end"] = pd.to_datetime(frame["end"])
-    frame["filed"] = pd.to_datetime(frame["filed"])
-    frame = frame.sort_values(["filed", "end"])
+    end = np.array([r[0] for r in rows], dtype="datetime64[ns]")
+    filed = np.array([r[1] for r in rows], dtype="datetime64[ns]")
+    val = np.array([r[2] for r in rows], dtype=float)
+    order = np.lexsort((end, filed))
+    end, filed, val = end[order], filed[order], val[order]
     # Per filing date, the latest period it reports; a later filing restating an
     # older period does not replace a newer one already public.
-    latest = frame.groupby("filed").tail(1)
-    latest = latest[latest["end"] >= latest["end"].cummax()]
-    latest = latest.drop_duplicates("filed", keep="last").set_index("filed")
-    full = index.union(latest.index)
-    value = latest["val"].reindex(full).ffill().reindex(index)
-    end = pd.to_datetime(latest["end"].reindex(full).ffill().reindex(index))
-    age = (pd.Series(index, index=index) - end).dt.days
-    return value.where(age <= stale_days)
+    last = np.append(filed[1:] != filed[:-1], True)
+    end, filed, val = end[last], filed[last], val[last]
+    newest = end >= np.maximum.accumulate(end)
+    end, filed, val = end[newest], filed[newest], val[newest]
+    days = index.values.astype("datetime64[ns]")
+    at = np.searchsorted(filed, days, side="right") - 1
+    known = at >= 0
+    out = np.full(len(days), np.nan)
+    age = (days[known] - end[at[known]]) / np.timedelta64(1, "D")
+    out[known] = np.where(age <= stale_days, val[at[known]], np.nan)
+    return pd.Series(out, index=index)
 
 
 def debt_parts(kept: dict, index: pd.DatetimeIndex, stale_days: int) -> tuple[pd.Series, pd.Series]:
     """Debt due within a year and long-term debt, as filed by each day."""
     zero = pd.Series(0.0, index=index)
-    read = lambda tag: as_of(kept.get(tag), index, stale_days)  # noqa: E731
+    memo: dict[str, pd.Series] = {}
+
+    def read(tag: str) -> pd.Series:
+        if tag not in memo:
+            memo[tag] = as_of(kept.get(tag), index, stale_days)
+        return memo[tag]
     lease_now = read(LEASE_CURRENT).fillna(0)
     parts = sum((read(tag).fillna(0) for tag in SHORT_PARTS), zero)
     short = pd.concat([read(SHORT_TOTAL).fillna(0) + lease_now, read(SHORT_WITH_LEASES).fillna(0),

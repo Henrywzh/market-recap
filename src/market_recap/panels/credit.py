@@ -50,7 +50,8 @@ def _check(frame: pd.DataFrame, kept: dict, liabilities: float | None, settings:
     """The debt counted, and a flag when it is a sliver of the filer's liabilities: debt
     filed under tags the measure does not read (Nebius before its first 10-K) would
     otherwise make a borrower look safe."""
-    counted = C.total_debt(kept, frame.index, settings["stale_days"]).iloc[-1]
+    # Only the last day is shown: the debt read as of that day alone, not the whole path again.
+    counted = C.total_debt(kept, frame.index[-1:], settings["stale_days"]).iloc[-1]
     counted = float(counted) if pd.notna(counted) else None
     thin = bool(liabilities and liabilities >= settings["check_min_liabilities"]
                 and (counted or 0.0) < settings["check_debt_share"] * liabilities)
