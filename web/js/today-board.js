@@ -241,9 +241,19 @@ function stateText(item) {
   return cut.replace(/\s*\([^)]*\)\s*$/, '').trim() || item.subject;
 }
 
-function scenarioText(item) {
-  const { value, threshold, state } = item.extra || {};
-  if (valid(value) && valid(threshold)) return `${item.subject} ${num(value, 0)} → ${num(threshold, 0)}`;
+// A trigger's figure in its unit, to the precision its size needs: "$113", "0.95", "+42bp".
+function triggerFigure(value, unit, signed = false) {
+  const digits = Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 10 ? 1 : 2;
+  const text = `${signed && value > 0 ? '+' : ''}${num(value, digits)}`;
+  return unit === '$' ? `$${text}` : `${text}${unit || ''}`;
+}
+
+export function scenarioText(item) {
+  const { value, threshold, state, unit, op, measure } = item.extra || {};
+  if (valid(value) && valid(threshold)) {
+    const sign = op === 'below' ? '≤' : '≥';
+    return `${item.subject} ${triggerFigure(value, unit, measure && measure !== 'level')} ${sign} ${triggerFigure(threshold, unit)}`;
+  }
   return [item.subject, state].filter(Boolean).join(' · ');
 }
 

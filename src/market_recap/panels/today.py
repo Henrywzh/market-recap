@@ -661,7 +661,12 @@ def _watch_items(watch: dict, as_of: str) -> list[dict]:
         items.append(_item("watch", s["name"], as_of, title, link="#watch", detail=s.get("thesis"),
                            importance="high" if state == "triggered" and changed else "medium",
                            new=changed, since=s.get("since"),
-                           extra={"state": state, "previous_state": was, "name": s["name"]}))
+                           extra={"state": state, "previous_state": was, "name": s["name"],
+                                  # The first trigger read, for the chip: "Oil $113 ≥ $120".
+                                  **({"value": hits[0]["value"], "threshold": hits[0]["threshold"],
+                                      "unit": hits[0].get("unit"), "op": hits[0]["op"],
+                                      "measure": hits[0].get("measure"), "label": hits[0].get("label")}
+                                     if hits and hits[0].get("threshold") is not None else {})}))
     return _order(items)
 
 

@@ -756,3 +756,12 @@ def test_a_release_just_out_carries_what_the_market_priced_it_at_the_evening_bef
     assert item["extra"]["market_before"]["readings"][0]["value"] == 187.5
     assert today._with_market({"key": "macro:CPI:2026-10-16", "extra": {}}, priced)["extra"] == {}
     assert today._priced_before(None) == {}
+
+
+def test_a_scenario_item_carries_its_first_trigger_for_the_chip():
+    watch = {"scenarios": [{"name": "Oil spike", "state": "triggered", "previous_state": "near", "changed": True,
+                            "triggers": [{"label": "WTI", "value": 121.0, "threshold": 120.0, "unit": "$", "op": "above",
+                                          "measure": "level", "met": True}]}]}
+    item = today._watch_items(watch, AS_OF)[0]
+    assert item["extra"]["value"] == 121.0 and item["extra"]["threshold"] == 120.0 and item["extra"]["op"] == "above"
+    assert "WTI $121 (triggers at ≥ $120)" in item["title"]

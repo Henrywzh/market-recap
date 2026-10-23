@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   moveText, sigmaText, sparkPath, sparkSvg, headlineNode, boardSlots, boardLabel, boardOption, drawBoard, boardCard,
-  signalGroups, signalsCard, flowChips, flowDollars, moverRecords, moversTable, sectorLine, remainingEvents, eventNodes,
+  signalGroups, signalsCard, flowChips, flowDollars, scenarioText, moverRecords, moversTable, sectorLine, remainingEvents, eventNodes,
 } from '../../web/js/today-board.js';
 import { tickerHref } from '../../web/js/routes.js';
 
@@ -243,7 +243,7 @@ test('the signal chips come in the order OVERSOLD, RARE, CHANGED, SCENARIO, ONGO
   assert.equal(rare[0].href, '#movecheck/XLP');
   assert.deepEqual(changed.map((c) => c.text), ['MOVE moved to elevated'], 'the state after the colon, the build note left out');
   assert.equal(changed[0].title, 'Treasuries · technical: MOVE moved to elevated (elevated from 100)', 'the full title is the tooltip');
-  assert.deepEqual(scenario.map((c) => c.text), ['Oil supply shock 113 → 120', 'Buyback · triggered']);
+  assert.deepEqual(scenario.map((c) => c.text), ['Oil supply shock 113 ≥ 120', 'Buyback · triggered']);
   assert.equal(scenario[1].tone, 'down');
   assert.deepEqual(ongoing.map((c) => c.text), ['SMALL CAPS LAGGING · 30 sessions']);
 });
@@ -353,3 +353,10 @@ test('read live, the headline, the board and the signals carry the blinking LIVE
   assert.equal(byClass(signalsCard([], '14:32 ET quotes'), 'live-badge').length, 1);
   assert.equal(byClass(headlineNode({ title: 'Down day', text: 'x', tone: 'down' }), 'live-badge').length, 0);
 }));
+
+test('a scenario chip reads its trigger in its unit: the figure, the side, the threshold', () => {
+  assert.equal(scenarioText({ subject: 'Oil spike', extra: { value: 113.4, threshold: 120, unit: '$', op: 'above', measure: 'level' } }), 'Oil spike $113 ≥ $120');
+  assert.equal(scenarioText({ subject: 'Curve', extra: { value: 0.95, threshold: 1.0, unit: '', op: 'above', measure: 'level' } }), 'Curve 0.95 ≥ 1.00');
+  assert.equal(scenarioText({ subject: 'Spreads', extra: { value: 42, threshold: 50, unit: 'bp', op: 'above', measure: 'change' } }), 'Spreads +42.0bp ≥ 50.0bp');
+  assert.equal(scenarioText({ subject: 'Old', extra: { state: 'triggered' } }), 'Old · triggered');
+});
