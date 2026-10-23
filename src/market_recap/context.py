@@ -367,6 +367,9 @@ def _preset_symbols(config: dict) -> set[str]:
     return out
 
 
+WATCHLIST_COLUMNS = ["ticker", "label", "note", "priced", "name", "sector", "sub_sector", "classification_source"]
+
+
 def _build_watchlist(ctx: MarketContext, specs: list[dict], symbols: list[str]) -> pd.DataFrame:
     # Sector labels for watchlist names come from the same mapped-Yahoo path
     # the out-of-index members use, and carry the same marker.
@@ -396,4 +399,7 @@ def _build_watchlist(ctx: MarketContext, specs: list[dict], symbols: list[str]) 
         status="ok" if not missing else "partial",
         error=None if not missing else "no data for: " + ", ".join(missing),
     ))
-    return pd.DataFrame(rows)
+    # Every column readers name exists even when the sector lookup came back
+    # empty (Yahoo refused or timed out): a missing label is None, never a crash.
+    frame = pd.DataFrame(rows).reindex(columns=WATCHLIST_COLUMNS).astype(object)
+    return frame.where(frame.notna(), None)
