@@ -711,3 +711,34 @@ def test_flows_headline_is_carried_from_the_flows_panel_or_null(tmp_path):
     inputs = _inputs()
     inputs["flows"] = {"etf": {"unavailable": "issuer files failed"}}
     assert _run(inputs=inputs, events_dir=tmp_path)["flows"] is None
+
+
+def test_a_board_row_carries_what_the_page_needs_to_read_the_next_session_live():
+    import numpy as np
+    from market_recap.compute import oversold
+    rng = np.random.default_rng(3)
+    days = pd.bdate_range(end=AS_OF, periods=600)
+    close = pd.Series(100 * np.cumprod(1 + rng.normal(0, 0.01, len(days))), index=days)
+    row = today._board_row("XLK", "Technology (XLK)", close, AS_OF, 6)
+    assert row["sigma_pct"] > 0 and row["z"] == pytest.approx(row["ret_pct"] / row["sigma_pct"], abs=0.01)
+
+    # The RSI state at this close gives the next close's RSI exactly, as the live page computes it.
+    state = row["rsi_state"]
+    price = state["close"] * 0.97
+    up, down = max(price - state["close"], 0), max(state["close"] - price, 0)
+    gain = (5 * state["gain"] + up) / 6
+    loss = (5 * state["loss"] + down) / 6
+    live = 100 - 100 / (1 + gain / loss)
+    nxt = pd.concat([close, pd.Series([price], index=[days[-1] + pd.offsets.BDay()])])
+    assert live == pytest.approx(float(oversold.wilder_rsi(nxt, 6).iloc[-1]), rel=1e-9)
+    assert set(state["below"]) == {"20", "30"}
+
+    # The ladder: moves grow as the share falls, each side ends at the largest move on record,
+    # and it agrees with the build's own count where the build states a share.
+    moves = ((close / close.shift(1) - 1) * 100).dropna()
+    up_moves = [m for m, _ in row["ladder"]["up"]]
+    down_moves = [m for m, _ in row["ladder"]["down"]]
+    assert up_moves == sorted(up_moves) and down_moves == sorted(down_moves, reverse=True)
+    assert up_moves[-1] == pytest.approx(moves.max(), abs=1e-3)
+    five = next(m for m, share in row["ladder"]["up"] if share == 5)
+    assert today._beyond_share(five, moves)[1] == pytest.approx(5, abs=0.3)

@@ -345,3 +345,11 @@ test('ETF flow chips: the US equity week with its rank, then the funds in and ou
   assert.deepEqual(flowChips({ us_equity_1w: null }), []);
   assert.equal(flowDollars(null), '—');
 });
+
+test('read live, the headline, the board and the signals carry the blinking LIVE mark with the quote time', () => withBrowser(() => {
+  const headline = headlineNode({ title: 'Down day', text: 'S&P 500 −0.5%.', tone: 'down' }, '14:32 ET quotes');
+  assert.equal(byClass(headline, 'live-badge').length, 1);
+  assert.match(textOf(headline), /LIVE · SO FAR TODAY\s+14:32 ET quotes/);
+  assert.equal(byClass(signalsCard([], '14:32 ET quotes'), 'live-badge').length, 1);
+  assert.equal(byClass(headlineNode({ title: 'Down day', text: 'x', tone: 'down' }), 'live-badge').length, 0);
+}));

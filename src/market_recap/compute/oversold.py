@@ -40,6 +40,22 @@ def wilder_rsi(close: pd.Series, period: int) -> pd.Series:
     return pd.Series(out, index=close.index)
 
 
+def wilder_state(close: pd.Series, period: int) -> tuple[float, float] | None:
+    """The smoothed average gain and loss after the last close: with tomorrow's
+    price, ``((period - 1) * gain + up) / period`` gives tomorrow's RSI -- which
+    is how TODAY's page reads the RSI from a live quote. None when not formed."""
+    values = pd.to_numeric(close.dropna(), errors="coerce").to_numpy(dtype=float)
+    if len(values) <= period:
+        return None
+    changes = np.diff(values)
+    gains, losses = np.clip(changes, 0, None), np.clip(-changes, 0, None)
+    gain, loss = gains[:period].mean(), losses[:period].mean()
+    for i in range(period + 1, len(values)):
+        gain = ((period - 1) * gain + gains[i - 1]) / period
+        loss = ((period - 1) * loss + losses[i - 1]) / period
+    return float(gain), float(loss)
+
+
 def reading(close: pd.Series, period: int, lines=LINES) -> dict | None:
     """Today's RSI and, when under a line, which one and for how many closes in a row.
 
@@ -53,13 +69,13 @@ def reading(close: pd.Series, period: int, lines=LINES) -> dict | None:
     out = {"rsi": now, "date": rsi.index[-1].strftime("%Y-%m-%d"), "line": None, "verdict": None, "days": 0}
     for line, verdict in sorted(lines):
         if now < line:
-            out.update(line=line, verdict=verdict, days=_run_below(rsi, line))
+            out.update(line=line, verdict=verdict, days=run_below(rsi, line))
             break
     shallow = max(line for line, _ in lines)
-    out["days_shallow"] = _run_below(rsi, shallow)
+    out["days_shallow"] = run_below(rsi, shallow)
     return out
 
 
-def _run_below(rsi: pd.Series, line: float) -> int:
+def run_below(rsi: pd.Series, line: float) -> int:
     below = (rsi < line).to_numpy()[::-1]
     return int(np.argmin(below)) if not below.all() else int(len(below))

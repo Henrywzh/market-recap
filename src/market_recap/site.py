@@ -81,6 +81,11 @@ def live_contract(config: dict | None = None, *, weighted_names: list[str] | Non
         bench = live.get("sector_benchmark", "SPY")
         boards["sector_etfs"] = {**board, "series": False, "symbols": [e["symbol"] for e in etfs] + [bench],
                                  "labels": {**{e["symbol"]: e["sector"] for e in etfs}, bench: "benchmark"}}
+    # TODAY's board read live: its indices and sector funds, and the VIX.
+    watch = dict(config.get("today", {}).get("oversold_watch") or {})
+    if watch:
+        boards["today"] = {**board, "series": False, "symbols": list(dict.fromkeys([*watch, "^VIX"])),
+                           "labels": {**watch, "^VIX": "VIX"}}
     commodities = config.get("macro", {}).get("commodities", {})
     if commodities:
         boards["macro"] = {**board, "series": False, "symbols": list(dict.fromkeys(commodities.values())),

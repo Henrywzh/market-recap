@@ -4,10 +4,11 @@
 // part that moves during the session is the MOVERS table, which re-ranks the names
 // by today's move (against yesterday's close) while the market is open.
 
-import { el, num, sectionTitle, tag, dirClass, table, DASH } from '../fmt.js';
+import { el, num, sectionTitle, tag, liveBadge, dirClass, table, DASH } from '../fmt.js';
 import { mountLive } from '../live.js';
 import { createFeed } from '../live-feed.js';
-import { liveView } from '../today-live.js';
+import { liveView, liveIsCurrent } from '../today-live.js';
+import { liveBoard, headlineOf, liveSignals } from '../today-live-board.js';
 import {
   boardCard, headlineNode, signalGroups, signalsCard, moverRecords, moversTable, sectorLine, remainingEvents, eventNodes,
 } from '../today-board.js';
@@ -314,7 +315,7 @@ export function moversNodes(unusual, view) {
   const events = remainingEvents(unusual);
   const sector = sectorLine(unusual);
   const stamp = live
-    ? el('span', { class: 'today-stamp' }, [tag('LIVE · PROVISIONAL', 'warn', 'Today\'s move so far, against the last close; not official'), ` ${clock(live.time)} quotes`])
+    ? el('span', { class: 'today-stamp' }, [liveBadge('LIVE · PROVISIONAL', 'Today\'s move so far, against the last close; not official'), ` ${clock(live.time)} quotes`])
     : `· AS OF ${longDay(view.asOf)} CLOSE`;
   const nodes = [
     el('div', { class: 'today-block-title', text: 'MOVERS' }),
@@ -374,6 +375,41 @@ function startLive(host, data, ctx) {
   }).catch(() => { /* no moves file: the build's close stands, with no live list */ });
 }
 
+// The top of the page read live: the headline, THE DAY and the RARE and OVERSOLD
+// chips follow the 'today' quote board while the session is open and the S&P 500's
+// quote is fresh; otherwise -- closed, stale, or no quotes -- the build's close stands.
+// The other signal groups (CHANGED, SCENARIO, ONGOING, ETF FLOWS) are the build's.
+function startLiveBoard(parts, data) {
+  let body = null;
+  let showing = false;
+  const view = () => {
+    const quotes = new Map((body?.quotes || []).filter((q) => q?.symbol && !q.error).map((q) => [q.symbol, q]));
+    const spx = quotes.get('^GSPC');
+    if (!liveIsCurrent(body, spx, Date.now())) return null;
+    return liveBoard(data.board, quotes);
+  };
+  const paint = () => {
+    const board = view();
+    showing = Boolean(board);
+    const stamp = board ? `${clock(board.time)} quotes` : null;
+    const headline = board ? headlineOf(board) : data.headline;
+    const unusual = board
+      ? { ...data.unusual, ...liveSignals(board, { oversoldDetail: data.live?.oversold_detail || '' }) }
+      : data.unusual;
+    parts.headline.replaceChildren(...[headlineNode(headline, stamp)].filter(Boolean));
+    const card = boardCard(board || data.board, stamp);
+    parts.board.replaceChildren(...(card ? [card.node] : []));
+    card?.draw();
+    parts.signals.replaceChildren(signalsCard(signalGroups(unusual, (board || data.board)?.rows, data.flows), stamp));
+  };
+  createFeed('api/quotes?board=today', {
+    node: parts.board,
+    onData: (answer) => { body = answer; paint(); },
+    // A quote going stale flips the page back to the close without new data.
+    onTick: () => { if (Boolean(view()) !== showing) paint(); },
+  });
+}
+
 export default function renderToday(root, data, manifest, ctx = {}) {
   // One element for the whole page, so its phone gutter is its own (CSS).
   const page = el('div', { class: 'today-page' });
@@ -382,22 +418,27 @@ export default function renderToday(root, data, manifest, ctx = {}) {
   const sessions = (data.sessions || []).map(dayLabel).join(' · ');
   page.append(el('div', { class: 'today-close-head', text: `SESSION CLOSE · ${longDay(data.as_of)}${sessions ? ` · NEXT SESSIONS ${sessions}` : ''}` }));
   page.append(el('div', { class: 'today-live' }, [mountLive({ asOf: data.as_of })]));
+  const parts = { headline: el('div', { class: 'today-headline-host' }), board: el('div', { class: 'today-board-host' }),
+    signals: el('div', { class: 'today-signals-host' }) };
   const headline = headlineNode(data.headline);
-  if (headline) page.append(headline);
+  if (headline) parts.headline.append(headline);
   const board = boardCard(data.board);
-  if (board) page.append(board.node);
+  if (board) parts.board.append(board.node);
+  page.append(parts.headline, parts.board);
   const moversHost = el('div', { class: 'today-movers-host' });
   moversHost.replaceChildren(...moversNodes(data.unusual, { live: null, asOf: data.as_of }));
   page.append(el('div', { class: 'today-columns' }, [
     el('div', { class: 'today-col' }, [justOutSection(data.just_out), comingUpSection(data.coming_up)]),
     el('div', { class: 'today-col' }, [
       sectionTitle('UNUSUAL NOW', ''),
-      signalsCard(signalGroups(data.unusual, data.board?.rows, data.flows)),
+      parts.signals,
       moversHost,
     ]),
   ]));
   const notes = notesNode(data);
   if (notes) page.append(notes);
+  parts.signals.append(signalsCard(signalGroups(data.unusual, data.board?.rows, data.flows)));
   board?.draw();
   if (ctx.loadArtifact && data.live) startLive(moversHost, data, ctx);
+  if (ctx.loadArtifact && data.board?.rows?.length) startLiveBoard(parts, data);
 }

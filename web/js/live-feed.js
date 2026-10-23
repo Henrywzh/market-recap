@@ -3,7 +3,7 @@
 // after), paused while the tab is hidden, and asked again on REFRESH. The strip,
 // the heat map and the index charts each hold one; nothing here draws prices.
 
-import { el } from './fmt.js';
+import { el, liveBadge } from './fmt.js';
 import { ageText, nextDelay, dueOnShow } from './live-model.js';
 
 export function sessionText(body) {
@@ -28,6 +28,11 @@ export function statusText(state, now = Date.now()) {
   return parts.join(' · ');
 }
 
+// Live is a fresh answer while the regular session is open; closed, failed or not yet asked is not.
+export function isLive(state) {
+  return Boolean(state?.body && !state.error && state.body.session?.open === true);
+}
+
 export function withFresh(url) {
   return `${url}${url.includes('?') ? '&' : '?'}fresh=1`;
 }
@@ -41,10 +46,14 @@ export function createFeed(url, { node, onData, onTick, delayFor = null }) {
   const state = { body: null, lastFetch: 0, nextAt: null, timer: null, ticker: null, inflight: false, error: null, stopped: false };
   const button = el('button', { type: 'button', class: 'live-refresh', text: 'REFRESH' });
   const status = el('span', { class: 'live-status', text: 'LOADING…' });
+  // Every live block's mark: shown while the session is open and the last fetch answered.
+  const badge = liveBadge();
+  badge.hidden = true;
 
   function tick() {
     status.textContent = statusText(state);
     status.className = `live-status${state.error ? ' down' : ''}`;
+    badge.hidden = !isLive(state);
     onTick?.(state);
   }
 
@@ -109,7 +118,7 @@ export function createFeed(url, { node, onData, onTick, delayFor = null }) {
   }, 1000);
   // The node is attached by the caller after this returns: ask once it is.
   setTimeout(() => fetchNow(false), 0);
-  return { state, stop, controls: el('div', { class: 'live-controls' }, [status, button]) };
+  return { state, stop, controls: el('div', { class: 'live-controls' }, [badge, status, button]) };
 }
 
 // The status line of a block that asks only when the reader presses REFRESH:
@@ -136,11 +145,14 @@ export function createManualFeed(urls, { onData }) {
   const state = { body: null, bodies: null, lastFetch: 0, inflight: false, error: null };
   const button = el('button', { type: 'button', class: 'live-refresh', text: 'REFRESH' });
   const status = el('span', { class: 'live-status', text: manualStatusText(state) });
-  const controls = el('div', { class: 'live-controls' }, [status, button]);
+  const badge = liveBadge();
+  badge.hidden = true;
+  const controls = el('div', { class: 'live-controls' }, [badge, status, button]);
 
   function tick() {
     status.textContent = manualStatusText(state);
     status.className = `live-status${state.error ? ' down' : ''}`;
+    badge.hidden = !isLive(state);
   }
 
   // A click while a fetch is out waits for that fetch instead of starting another.

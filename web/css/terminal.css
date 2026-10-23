@@ -1695,3 +1695,12 @@ table.data tr.total td { font-weight: 600; border-top: 1px solid var(--border-st
 .flows-13f-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 10px 0; }
 .flows-13f-moves { min-width: 0; }
 @media (max-width: 640px) { .flows-13f-pair { grid-template-columns: 1fr; } }
+
+/* LIVE: every intraday figure carries this mark, a pulsing dot beside the word */
+.live-badge { display: inline-flex; align-items: center; gap: 5px; padding: 1px 6px; border: 1px solid var(--down); border-radius: 2px; color: var(--down); font-size: 10px; letter-spacing: .08em; font-weight: 600; white-space: nowrap; }
+.live-badge[hidden] { display: none; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--down); animation: live-pulse 1.4s ease-in-out infinite; }
+@keyframes live-pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--down) 60%, transparent); } 50% { opacity: .25; box-shadow: 0 0 0 4px transparent; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+.live-controls .live-badge { margin-right: 8px; }
+.today-live-stamp { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }

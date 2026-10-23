@@ -96,6 +96,12 @@ export function periodSwitch(periods, active, onPick) {
 
 // A state label that reads at a glance: filled, coloured by what it means.
 // Tones: up (good / risk on), down (bad / risk off), warn, info, dim.
+// The mark every live figure carries: a pulsing dot and LIVE (or the text given),
+// so an intraday number is never mistaken for the build's close.
+export function liveBadge(text = 'LIVE', title = 'Intraday quotes, unofficial: against the last close') {
+  return el('span', { class: 'live-badge', title }, [el('span', { class: 'live-dot', 'aria-hidden': 'true' }), text]);
+}
+
 export function tag(text, tone = 'dim', title = null) {
   return el('span', { class: `tag tag-${tone}`, text, title });
 }

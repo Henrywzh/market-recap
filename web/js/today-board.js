@@ -4,7 +4,7 @@
 // numbers come from the build (or the live quotes for MOVERS while the market is
 // open); a missing figure is a dash, never a zero.
 
-import { el, num, card, table, tag, dirClass, DASH } from './fmt.js';
+import { el, num, card, table, tag, liveBadge, dirClass, DASH } from './fmt.js';
 import { render } from './charts.js';
 import { tickerHref } from './routes.js';
 
@@ -50,14 +50,20 @@ export function sparkSvg(values, w = 56, h = 16) {
 // The headline the build wrote from the board: a title saying what kind of day it
 // was (the broad market first), and the figures behind it underneath. Toned by the
 // S&P 500. A build from before the title had only the line of figures.
-export function headlineNode(headline) {
+// `live` is the quotes' stamp ("14:32 quotes") when the board is read live, null for the close.
+export function headlineNode(headline, live = null) {
   if (!headline?.text) return null;
   const tone = ['up', 'down'].includes(headline.tone) ? headline.tone : 'flat';
-  if (!headline.title) return el('div', { class: `today-headline ${tone}`, text: headline.text });
+  const stamp = live ? el('div', { class: 'today-live-stamp' }, [liveBadge('LIVE · SO FAR TODAY'), ` ${live}`]) : null;
+  if (!headline.title) {
+    const line = el('div', { class: `today-headline ${tone}`, text: headline.text });
+    return stamp ? el('div', { class: 'today-headline-block' }, [stamp, line]) : line;
+  }
   return el('div', { class: 'today-headline-block' }, [
+    stamp,
     el('div', { class: `today-headline ${tone}`, text: headline.title }),
     el('div', { class: 'today-headline-text', text: headline.text }),
-  ]);
+  ].filter(Boolean));
 }
 
 // --- The day's board -----------------------------------------------------
@@ -205,7 +211,7 @@ export function indexTiles(board) {
 // The day's board as a card: the index tiles, then the sector funds as bars.
 // `draw` mounts the chart once the card is in the page, so ECharts measures it.
 // Null when no index or sector fund has a close.
-export function boardCard(board) {
+export function boardCard(board, live = null) {
   const tiles = indexTiles(board);
   const slots = boardSlots((board?.rows || []).filter((r) => r && r.group !== 'index'));
   if (!tiles.length && !slots.some(Boolean)) return null;
@@ -215,7 +221,8 @@ export function boardCard(board) {
     el('div', { class: 'today-index-grid' }, tiles),
     slots.length ? el('div', { class: 'today-sectors' }, [el('div', { class: 'today-block-title', text: 'SECTORS' }), node]) : null,
   ].filter(Boolean));
-  return { node: card('THE DAY', null, [body]), draw: () => (slots.length ? drawBoard(node, slots) : null) };
+  const stamp = live ? el('span', { class: 'today-live-stamp' }, [liveBadge(), ` ${live}`]) : null;
+  return { node: card('THE DAY', stamp, [body]), draw: () => (slots.length ? drawBoard(node, slots) : null) };
 }
 
 // --- Signals -------------------------------------------------------------
@@ -297,9 +304,11 @@ export function flowChips(flows) {
 const chipNode = (chip) => el(chip.href ? 'a' : 'span', { class: `chip ${chip.tone || 'dim'}`, href: chip.href, title: chip.title, text: chip.text });
 
 // The SIGNALS card: one row per kind, its label then its chips.
-export function signalsCard(groups) {
-  if (!groups.length) return card('SIGNALS', null, [el('div', { class: 'today-empty dim', text: 'No signal this session.' })]);
-  return card('SIGNALS', null, groups.map((group) => el('div', { class: 'today-chips' }, [
+// With `live`, RARE and OVERSOLD are read from today's quotes (the badge says so); the rest are the build's.
+export function signalsCard(groups, live = null) {
+  const stamp = live ? el('span', { class: 'today-live-stamp' }, [liveBadge('LIVE · RARE, OVERSOLD'), ` ${live}`]) : null;
+  if (!groups.length) return card('SIGNALS', stamp, [el('div', { class: 'today-empty dim', text: 'No signal this session.' })]);
+  return card('SIGNALS', stamp, groups.map((group) => el('div', { class: 'today-chips' }, [
     el('span', { class: 'today-chips-label dim', text: group.label }),
     ...group.chips.map(chipNode),
   ])));

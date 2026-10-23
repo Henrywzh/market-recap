@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 from urllib.parse import urljoin
 
+import numpy as np
 import pandas as pd
 
 from ..compute import catalysts as C
@@ -745,10 +746,36 @@ def _board_row(symbol: str, label: str, closes: pd.Series, as_of: str, period: i
         _, share = _beyond_share(ret, past)
         share = None if share > 50 else round(share, 2)
     reading = oversold.reading(close, period)
+    state = oversold.wilder_state(close, period)
     return {"symbol": symbol, "label": label, "short": SHORT_LABEL.get(symbol, label),
             "group": "index" if symbol in INDEX_SYMBOLS else "sector", "ret_pct": round(ret, 2),
             "z": _round(ret / stdev, 2) if stdev else None, "share_pct": share,
-            "rsi6": _round(reading["rsi"], 1) if reading else None}
+            "rsi6": _round(reading["rsi"], 1) if reading else None,
+            # What the page needs to read the next session live from a quote: the
+            # sigma, the share ladder of past moves, and the RSI's state at this close.
+            "sigma_pct": _round(stdev, 4) if stdev else None,
+            "ladder": _ladder(moves) if len(moves) >= MOVE_MIN_HISTORY else None,
+            "rsi_state": {"period": period, "close": float(close.iloc[-1]),
+                          "gain": state[0], "loss": state[1],
+                          "below": {str(line): oversold.run_below(oversold.wilder_rsi(close, period).dropna(), line)
+                                    for line, _ in oversold.LINES}} if state else None}
+
+
+# The shares of past sessions at which the ladder gives each direction's move:
+# enough points below 5% that the page's live share reads within a tenth of a point there.
+LADDER_SHARES = (50, 25, 10, 5, 4, 3, 2.5, 2, 1.5, 1, 0.75, 0.5, 0.4, 0.3, 0.2, 0.1)
+
+
+def _ladder(moves: pd.Series) -> dict:
+    """For each direction, the move matched or exceeded on each LADDER_SHARES share of
+    all past sessions, and the largest ever: the page interpolates a live move's share
+    from it (the build's own share counts every past day)."""
+    past = moves.to_numpy(dtype=float)
+    up = [[round(float(np.quantile(past, 1 - share / 100)), 3), share] for share in LADDER_SHARES]
+    down = [[round(float(np.quantile(past, share / 100)), 3), share] for share in LADDER_SHARES]
+    one = round(100 / len(past), 4)
+    return {"up": up + [[round(float(past.max()), 3), one]], "down": down + [[round(float(past.min()), 3), one]],
+            "sessions": int(len(past))}
 
 
 def _board(closes: pd.DataFrame, watch: dict, as_of: str, period: int) -> list[dict]:
@@ -890,6 +917,8 @@ def _live(config: dict) -> dict:
         "market": moves["market"],
         "sector_funds": dict(config["universe"]["sectors"]),
         "max_items": config["today"]["live_max_items"],
+        # The board's live RARE and OVERSOLD chips explain themselves as the build's do.
+        "oversold_detail": OVERSOLD_DETAIL,
     }
 
 

@@ -191,9 +191,11 @@ test('the page reads headline first, then the board card, then signals, movers a
   const page = root.children[0];
   const order = page.children.map((child) => child.className || child.tagName);
   const at = (cls) => order.findIndex((c) => String(c).split(' ').includes(cls));
-  assert.ok(at('today-headline') > at('today-live'), 'the headline follows the live strip');
-  assert.ok(at('card') > at('today-headline'), 'the board card follows the headline');
-  assert.ok(at('today-columns') > at('card'), 'the two columns follow the board');
+  // The headline and the board sit in hosts the live board repaints in place.
+  assert.ok(at('today-headline-host') > at('today-live'), 'the headline follows the live strip');
+  assert.ok(at('today-board-host') > at('today-headline-host'), 'the board card follows the headline');
+  assert.ok(at('today-columns') > at('today-board-host'), 'the two columns follow the board');
+  assert.equal(byClass(root, 'live-badge').filter((n) => !n.hidden).length, 0, 'the close carries no LIVE mark');
   const text = textOf(root);
   assert.ok(text.includes(HEADLINE), 'the headline is the build text');
   assert.equal(byClass(root, 'today-headline')[0].className, 'today-headline down');
