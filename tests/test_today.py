@@ -601,8 +601,10 @@ def _row(symbol, label, group, ret, share=None):
             "ret_pct": ret, "z": None, "share_pct": share, "rsi6": None}
 
 
-def _day_board(vix=None, sectors=None, spx=-1.2):
+def _day_board(vix=None, sectors=None, spx=-1.2, rsp=0.7):
     rows = [_row("^GSPC", "S&P 500", "index", spx), _row("^NDX", "Nasdaq-100", "index", -2.9)]
+    if rsp is not None:
+        rows.append(_row("RSP", "S&P 500 equal weight (RSP)", "index", rsp))
     rows += sectors if sectors is not None else [
         _row("SOXX", "Semiconductors (SOXX)", "sector", -6.79, share=0.5),
         _row("XLK", "Technology (XLK)", "sector", -3.3, share=12.0),
@@ -613,20 +615,32 @@ def _day_board(vix=None, sectors=None, spx=-1.2):
     return {"as_of": AS_OF, "rows": rows, "vix": {"value": 19.03, "change": 2.35} if vix is None else vix}
 
 
-def test_headline_text_is_the_fixed_template():
+def test_headline_names_the_market_and_the_sectors_that_made_the_day():
     out = today.headline(_day_board())
-    assert out == {"text": "S&P 500 −1.2%, Nasdaq-100 −2.9%. Weakest: Semis −6.8% (rare: 0.5% of days), Tech −3.3%. "
-                           "Strongest: Staples +3.3%, Utilities +2.1%. VIX 19.0 (+2.4).", "tone": "down"}
+    # 2026-10-22: the index fell, the average stock rose; semis and tech drove it; staples and utilities rose.
+    assert out["title"] == ("Mega-cap selloff while the average stock rose, led by Semis −6.8% (rare) and Tech −3.3%; "
+                            "Staples +3.3% and Utilities +2.1% rose")
+    assert out["text"] == ("S&P 500 −1.2%, Nasdaq-100 −2.9%, Equal weight +0.7%. "
+                           "Rare: Semis fell this far on 0.5% of days. VIX 19.0 (+2.4).")
+    assert out["tone"] == "down"
 
 
-def test_headline_drops_a_missing_vix_and_a_sector_part_with_no_sector_up():
+def test_headline_title_on_a_plain_selloff_a_flat_day_and_a_narrow_rally():
+    xle = _row("XLE", "Energy (XLE)", "sector", 0.4)
+    assert today.headline(_day_board(spx=-1.2, rsp=-1.4, sectors=[xle]))["title"] == "Selloff"
+    flat = [_row("XLE", "Energy (XLE)", "sector", 1.6), _row("XLK", "Technology (XLK)", "sector", -1.1)]
+    assert today.headline(_day_board(spx=0.1, rsp=None, sectors=flat))["title"] == "Flat day; up: Energy +1.6%; down: Tech −1.1%"
+    rally = [_row("XLK", "Technology (XLK)", "sector", 3.0), _row("XLU", "Utilities (XLU)", "sector", -1.2)]
+    assert today.headline(_day_board(spx=1.5, rsp=0.2, sectors=rally))["title"] == (
+        "Narrow rally in the largest names, led by Tech +3.0%; Utilities −1.2% fell")
+
+
+def test_headline_drops_a_missing_vix_and_the_rare_part_when_nothing_is_rare():
     no_vix = today.headline(_day_board(vix={"value": None, "change": None}))
-    assert no_vix["text"].endswith("Strongest: Staples +3.3%, Utilities +2.1%.")
-    down_only = [_row("SOXX", "Semiconductors (SOXX)", "sector", -6.79, share=0.5),
-                 _row("XLK", "Technology (XLK)", "sector", -3.3, share=12.0),
-                 _row("XLE", "Energy (XLE)", "sector", -0.2)]
-    text = today.headline(_day_board(vix={"value": 19.03, "change": None}, sectors=down_only))["text"]
-    assert "Strongest" not in text and text.endswith("VIX 19.0.")
+    assert no_vix["text"].endswith("Rare: Semis fell this far on 0.5% of days.")
+    common = [_row("XLK", "Technology (XLK)", "sector", -3.3, share=12.0), _row("XLE", "Energy (XLE)", "sector", -0.2)]
+    text = today.headline(_day_board(vix={"value": 19.03, "change": None}, sectors=common))["text"]
+    assert "Rare" not in text and text.endswith("VIX 19.0.")
 
 
 def test_headline_tone_is_flat_inside_three_tenths_and_none_under_three_rows():

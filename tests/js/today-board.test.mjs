@@ -137,10 +137,12 @@ test('the board puts the indices first, a gap, then the sectors, each group high
   assert.deepEqual(boardSlots(undefined), []);
 });
 
-test('a bar label carries the move, its σ and RARE only at 1% of days or fewer', () => {
+test('a bar label carries the move, its σ, and the share of days at 5% or fewer (RARE at 1%)', () => {
   const [soxx, xlu] = [ROWS[5], ROWS[11]];
-  assert.equal(boardLabel(soxx), '−6.8% · 3.1σ · RARE');
-  assert.equal(boardLabel(xlu), '+2.1% · 2.2σ', 'above 1% of days is no mark');
+  assert.equal(boardLabel(soxx), `−6.8% · 3.1σ · RARE: ${soxx.share_pct.toFixed(1)}% of days`);
+  assert.equal(boardLabel(xlu), '+2.1% · 2.2σ · 3.0% of days', 'uncommon, not rare: the share without RARE');
+  assert.equal(boardLabel({ ret_pct: 0.7, z: 0.7, share_pct: 28.8 }), '+0.7% · 0.7σ', 'a common move carries no share');
+  assert.equal(boardLabel({ ret_pct: -3.3, z: -2.0, share_pct: 2.31 }), '−3.3% · 2.0σ · 2.3% of days');
   assert.equal(boardLabel({ ret_pct: 1, z: null, share_pct: null }), '+1.0%', 'a missing σ is left out, not zero');
 });
 
@@ -157,10 +159,12 @@ test('the chart option has one bar per row, coloured by direction, full strength
   const xleAt = slots.findIndex((r) => r?.symbol === 'XLE');
   assert.equal(bars[xleAt].itemStyle.color, '#u');
   assert.equal(bars[xleAt].itemStyle.opacity, 0.55, '|z| 0.8 is faded');
-  assert.equal(option.series[0].label.formatter({ dataIndex: soxxAt }), '−6.8% · 3.1σ · RARE');
+  assert.equal(option.series[0].label.formatter({ dataIndex: soxxAt }), '−6.8%', 'the bar end holds the move only');
+  assert.equal(option.yAxis[1].data[soxxAt], `{rare|3.1σ · RARE: ${ROWS[5].share_pct.toFixed(1)}% of days}`, 'σ and the share in the right column, RARE accented');
   assert.equal(option.series[0].label.formatter({ dataIndex: 5 }), '', 'the gap has no label');
-  assert.equal(option.yAxis.data[5], '', 'the gap is an empty row name');
-  assert.equal(option.yAxis.data[soxxAt], 'Semis');
+  assert.equal(option.yAxis[0].data[5], '', 'the gap is an empty row name');
+  assert.equal(option.yAxis[1].data[5], '', 'and an empty note');
+  assert.equal(option.yAxis[0].data[soxxAt], 'Semis');
   const span = option.xAxis.max;
   assert.equal(option.xAxis.min, -span, 'the axis is symmetric about zero');
   assert.ok(Math.abs(6.79) < span, 'the largest move fits inside the axis');
@@ -193,15 +197,28 @@ test('the board chart opens MOVE CHECK for the bar clicked, and a gap click does
   }, { echarts });
 });
 
-test('the board card holds the chart node, sized to its rows, and draws only when asked; no card without rows', () => withBrowser(() => {
+test('the board card: index tiles broad market first, the S&P 500 the lead; sectors as bars; no card without rows', () => withBrowser(() => {
   assert.equal(boardCard({ rows: [] }), null);
   assert.equal(boardCard(null), null);
-  const card = boardCard({ rows: ROWS });
+  const card = boardCard({ rows: ROWS, vix: { value: 19.03, change: 2.35 } });
+  const tiles = byClass(card.node, 'today-index');
+  const indexRows = ROWS.filter((r) => r.group === 'index');
+  assert.equal(tiles.length, indexRows.length + 1, 'one tile per index, plus VIX');
+  assert.equal(tiles[0].className, 'today-index lead');
+  assert.ok(textOf(tiles[0]).startsWith('S&P 500'));
+  assert.ok(textOf(tiles[tiles.length - 1]).includes('VIX'));
   const [chartNode] = byClass(card.node, 'today-board-chart');
-  assert.equal(chartNode.style.height, '318px', 'fourteen slots at 22px, plus the margin');
-  assert.equal(textOf(card.node).includes('THE DAY BY INDEX AND SECTOR'), true);
-  // No chart library here: draw is a no-op, the card still builds.
+  const sectors = ROWS.filter((r) => r.group !== 'index').length;
+  assert.equal(chartNode.style.height, `${sectors * 22 + 10}px`, 'sector bars only, at 22px each');
+  assert.ok(textOf(card.node).includes('THE DAY') && textOf(card.node).includes('SECTORS'));
   assert.doesNotThrow(() => card.draw());
+}));
+
+test('the headline shows the title over the line of figures; an old build without a title shows the line alone', () => withBrowser(() => {
+  const node = headlineNode({ title: 'Mega-cap selloff, the average stock held up', text: 'S&P 500 −1.2%.', tone: 'down' });
+  assert.equal(node.className, 'today-headline-block');
+  assert.equal(byClass(node, 'today-headline')[0].className, 'today-headline down');
+  assert.ok(textOf(node).includes('Mega-cap selloff') && textOf(node).includes('S&P 500 −1.2%.'));
 }));
 
 test('the signal chips come in the order OVERSOLD, RARE, CHANGED, SCENARIO, ONGOING, with the build names and links', () => {

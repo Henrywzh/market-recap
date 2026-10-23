@@ -197,7 +197,9 @@ test('the page reads headline first, then the board card, then signals, movers a
   const text = textOf(root);
   assert.ok(text.includes(HEADLINE), 'the headline is the build text');
   assert.equal(byClass(root, 'today-headline')[0].className, 'today-headline down');
-  assert.ok(text.includes('THE DAY BY INDEX AND SECTOR'));
+  assert.ok(text.includes('THE DAY') && text.includes('SECTORS'));
+  assert.ok(byClass(root, 'today-index').length >= 2, 'the indices are tiles');
+  assert.equal(byClass(root, 'today-index').filter((n) => n.className === 'today-index lead').length, 1, 'the S&P 500 is the lead tile');
   assert.ok(byClass(root, 'today-board-chart').length === 1);
   assert.doesNotMatch(text, BAD);
 }));

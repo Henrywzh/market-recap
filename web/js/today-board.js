@@ -47,11 +47,17 @@ export function sparkSvg(values, w = 56, h = 16) {
   return d ? `<svg class="today-spark-svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true"><path d="${d}"/></svg>` : '';
 }
 
-// The headline the build wrote from the board: one line, toned by the S&P 500.
+// The headline the build wrote from the board: a title saying what kind of day it
+// was (the broad market first), and the figures behind it underneath. Toned by the
+// S&P 500. A build from before the title had only the line of figures.
 export function headlineNode(headline) {
   if (!headline?.text) return null;
   const tone = ['up', 'down'].includes(headline.tone) ? headline.tone : 'flat';
-  return el('div', { class: `today-headline ${tone}`, text: headline.text });
+  if (!headline.title) return el('div', { class: `today-headline ${tone}`, text: headline.text });
+  return el('div', { class: 'today-headline-block' }, [
+    el('div', { class: `today-headline ${tone}`, text: headline.title }),
+    el('div', { class: 'today-headline-text', text: headline.text }),
+  ]);
 }
 
 // --- The day's board -----------------------------------------------------
@@ -68,12 +74,20 @@ export function boardSlots(rows) {
 
 const strongBar = (row) => valid(row.z) && Math.abs(row.z) >= BOARD_STRONG_Z;
 
-// The label at a bar's end: the move, its σ, and RARE when the history has seen a
-// move this far on 1% of days or fewer.
+// How often the history moved this far, for a label: "0.5% of days". Shown only
+// when it is uncommon (SHARE_SHOWN_PCT or less); RARE marks 1% or less.
+const SHARE_SHOWN_PCT = 5;
+export function shareText(row) {
+  if (!valid(row?.share_pct) || row.share_pct > SHARE_SHOWN_PCT) return null;
+  return `${row.share_pct <= 1 ? 'RARE: ' : ''}${num(row.share_pct, 1)}% of days`;
+}
+
+// The label at a bar's end: the move, its σ, and how often the history moved this far.
 export function boardLabel(row) {
   const parts = [moveText(row.ret_pct)];
   if (valid(row.z)) parts.push(`${num(Math.abs(row.z), 1)}σ`);
-  if (valid(row.share_pct) && row.share_pct <= 1) parts.push('RARE');
+  const share = shareText(row);
+  if (share) parts.push(share);
   return parts.join(' · ');
 }
 
@@ -93,13 +107,22 @@ function boardTip(row) {
 // largest move so the bar-end labels fit, a zero line, and a tooltip per row.
 export function boardOption(slots, p) {
   const largest = Math.max(1, ...slots.filter(Boolean).map((r) => Math.abs(r.ret_pct)));
-  const span = largest * 1.6;
+  // Room on each side for the bar-end move ("−6.8%").
+  const span = largest * 1.5;
+  // σ and the share of days sit in their own column on the right, so a long one
+  // never runs into a bar or a name; RARE is drawn in the accent colour.
+  const noteOf = (r) => {
+    if (!r) return '';
+    const parts = [valid(r.z) ? `${num(Math.abs(r.z), 1)}σ` : null, shareText(r)].filter(Boolean).join(' · ');
+    return valid(r.share_pct) && r.share_pct <= 1 ? `{rare|${parts}}` : parts;
+  };
+  const category = { type: 'category', inverse: true, axisLine: { show: false, onZero: false }, axisTick: { show: false } };
   return {
     animation: false,
     backgroundColor: 'transparent',
     textStyle: { fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 10 },
-    // A fixed label column: containLabel mis-measures truncated labels and clips the longest.
-    grid: { left: 116, right: 8, top: 4, bottom: 4 },
+    // Fixed label columns: containLabel mis-measures truncated labels and clips the longest.
+    grid: { left: 116, right: 176, top: 4, bottom: 4 },
     tooltip: {
       trigger: 'item',
       backgroundColor: '#000',
@@ -117,16 +140,15 @@ export function boardOption(slots, p) {
       axisLabel: { show: false },
       splitLine: { show: false },
     },
-    yAxis: {
-      type: 'category',
-      inverse: true,
-      data: slots.map((r) => (r ? r.short || r.label || r.symbol : '')),
-      axisLine: { show: false, onZero: false },
-      axisTick: { show: false },
-      axisLabel: { color: p.text, fontSize: 11, width: 96, overflow: 'truncate' },
-    },
+    yAxis: [
+      { ...category, data: slots.map((r) => (r ? r.short || r.label || r.symbol : '')),
+        axisLabel: { color: p.text, fontSize: 11, width: 96, overflow: 'truncate' } },
+      { ...category, position: 'right', data: slots.map(noteOf),
+        axisLabel: { color: p.dim, fontSize: 10, align: 'left', margin: 12, rich: { rare: { color: p.accent, fontSize: 10 } } } },
+    ],
     series: [{
       type: 'bar',
+      yAxisIndex: 0,
       barMaxWidth: 12,
       markLine: { silent: true, symbol: 'none', data: [{ xAxis: 0 }], lineStyle: { color: p.faint }, label: { show: false } },
       data: slots.map((r) => (r ? {
@@ -134,7 +156,7 @@ export function boardOption(slots, p) {
         itemStyle: { color: r.ret_pct >= 0 ? p.up : p.down, opacity: strongBar(r) ? 1 : 0.55 },
         label: { position: r.ret_pct >= 0 ? 'right' : 'left' },
       } : { value: null })),
-      label: { show: true, color: p.dim, fontSize: 11, formatter: (q) => (slots[q.dataIndex] ? boardLabel(slots[q.dataIndex]) : '') },
+      label: { show: true, color: p.dim, fontSize: 11, formatter: (q) => (slots[q.dataIndex] ? moveText(slots[q.dataIndex].ret_pct) : '') },
     }],
   };
 }
@@ -149,14 +171,51 @@ export function drawBoard(node, slots) {
   return chart;
 }
 
-// The day's board as a card. `draw` mounts the chart once the card is in the page,
-// so ECharts measures it. Null when no index or sector fund has a close.
+// The index tiles, broad market first: the S&P 500 is the large one. VIX joins
+// them when the build has a same-session reading.
+const INDEX_ORDER = ['^GSPC', '^NDX', 'RSP', 'IWM', 'DIA'];
+
+export function indexTiles(board) {
+  const rows = (board?.rows || []).filter((r) => r && r.group === 'index' && valid(r.ret_pct));
+  const rank = (r) => { const k = INDEX_ORDER.indexOf(r.symbol); return k < 0 ? INDEX_ORDER.length : k; };
+  const tiles = [...rows].sort((a, b) => rank(a) - rank(b)).map((r) => {
+    // A tile has room for the share however common the move: "1.7σ · 8.1% of days".
+    const share = valid(r.share_pct) ? `${r.share_pct <= 1 ? 'RARE: ' : ''}${num(r.share_pct, 1)}% of days` : null;
+    const notes = [valid(r.z) ? `${num(Math.abs(r.z), 1)}σ` : null, share].filter(Boolean).join(' · ');
+    return el('a', { class: `today-index${r.symbol === '^GSPC' ? ' lead' : ''}`, href: `#movecheck/${r.symbol}`,
+      title: boardTip(r).replaceAll('<br>', '\n') }, [
+      el('span', { class: 'today-index-label', text: r.short || r.label || r.symbol }),
+      // A move that prints as 0.0% is not coloured as a rise or a fall.
+      el('span', { class: `today-index-move ${moveText(r.ret_pct).startsWith('0') ? '' : dirClass(r.ret_pct)}`, text: moveText(r.ret_pct) }),
+      el('span', { class: 'today-index-note dim', text: notes || ' ' }),
+    ]);
+  });
+  const vix = board?.vix;
+  if (valid(vix?.value)) {
+    tiles.push(el('div', { class: 'today-index' }, [
+      el('span', { class: 'today-index-label', text: 'VIX' }),
+      el('span', { class: 'today-index-move', text: num(vix.value, 1) }),
+      el('span', { class: `today-index-note ${valid(vix.change) ? dirClass(-vix.change) : 'dim'}`,
+        text: valid(vix.change) ? moveText(vix.change, 1, '') : ' ' }),
+    ]));
+  }
+  return tiles;
+}
+
+// The day's board as a card: the index tiles, then the sector funds as bars.
+// `draw` mounts the chart once the card is in the page, so ECharts measures it.
+// Null when no index or sector fund has a close.
 export function boardCard(board) {
-  const slots = boardSlots(board?.rows);
-  if (!slots.some(Boolean)) return null;
+  const tiles = indexTiles(board);
+  const slots = boardSlots((board?.rows || []).filter((r) => r && r.group !== 'index'));
+  if (!tiles.length && !slots.some(Boolean)) return null;
   const node = el('div', { class: 'chart today-board-chart' });
   node.style.height = `${slots.length * BOARD_ROW_PX + 10}px`;
-  return { node: card('THE DAY BY INDEX AND SECTOR', null, [node]), draw: () => drawBoard(node, slots) };
+  const body = el('div', { class: 'today-board' }, [
+    el('div', { class: 'today-index-grid' }, tiles),
+    slots.length ? el('div', { class: 'today-sectors' }, [el('div', { class: 'today-block-title', text: 'SECTORS' }), node]) : null,
+  ].filter(Boolean));
+  return { node: card('THE DAY', null, [body]), draw: () => (slots.length ? drawBoard(node, slots) : null) };
 }
 
 // --- Signals -------------------------------------------------------------

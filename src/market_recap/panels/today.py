@@ -778,18 +778,71 @@ def _plain_signed(value: float, suffix: str = "") -> str:
     return f"{sign}{abs(value):.1f}{suffix}"
 
 
-def _headline_move(row: dict) -> str:
-    text = f"{row['short']} {_plain_signed(row['ret_pct'], '%')}"
-    share = row.get("share_pct")
-    if share is not None and share <= BOARD_RARE_PCT:
-        text += f" (rare: {share:.1f}% of days)"
-    return text
+# The headline's read of the day. Gaps are in percentage points of one session's move.
+BREADTH_GAP_PCT = 1.0      # equal weight against the S&P 500: the average stock against the index
+LEAD_GAP_PCT = 1.0         # a sector this much beyond the S&P 500, the same way, drove the day
+AGAINST_MIN_PCT = 1.0      # a sector moving the other way by at least this much is named
+NAMED_SECTORS = 2
+
+
+def _named(row: dict) -> str:
+    """A sector as the title names it: "Semis −6.8%", marked when the move is rare in its history."""
+    rare = row.get("share_pct") is not None and row["share_pct"] <= BOARD_RARE_PCT
+    return f"{row['short']} {_plain_signed(row['ret_pct'], '%')}{' (rare)' if rare else ''}"
+
+
+def _and(items: list[str]) -> str:
+    return " and ".join(items) if len(items) <= 2 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _market_title(by_symbol: dict, sectors: list[dict]) -> str | None:
+    """What kind of day it was, and which sectors made it, by name and figure.
+
+    The market first (the S&P 500's move, and whether the average stock, equal
+    weight, parted from it); then the sectors that went the index's way by at
+    least LEAD_GAP_PCT more ("led by"); then those that went the other way by
+    AGAINST_MIN_PCT or more. On a flat day, the largest moves either way.
+    """
+    spx = by_symbol.get("^GSPC")
+    if spx is None:
+        return None
+    s = spx["ret_pct"]
+    rsp = by_symbol.get("RSP")
+    gap = rsp["ret_pct"] - s if rsp else 0.0
+    if abs(s) < FLAT_MOVE_PCT:
+        word = "Flat day"
+    elif s < 0:
+        word = ("Mega-cap selloff while the average stock rose" if gap >= BREADTH_GAP_PCT and rsp["ret_pct"] >= 0 else
+                "Mega-cap selloff" if gap >= BREADTH_GAP_PCT else
+                "Broad selloff" if -gap >= BREADTH_GAP_PCT else "Selloff" if s <= -1 else "Down day")
+    else:
+        word = ("Mega-cap rally while the average stock fell" if -gap >= BREADTH_GAP_PCT and rsp["ret_pct"] <= 0 else
+                "Narrow rally in the largest names" if -gap >= BREADTH_GAP_PCT else
+                "Broad rally" if gap >= BREADTH_GAP_PCT else "Rally" if s >= 1 else "Up day")
+    ranked = sorted(sectors, key=lambda r: r["ret_pct"])
+    if abs(s) < FLAT_MOVE_PCT:
+        down = [r for r in ranked if r["ret_pct"] <= -AGAINST_MIN_PCT][:NAMED_SECTORS]
+        up = [r for r in reversed(ranked) if r["ret_pct"] >= AGAINST_MIN_PCT][:NAMED_SECTORS]
+        parts = [word] + ([f"up: {_and([_named(r) for r in up])}"] if up else []) \
+            + ([f"down: {_and([_named(r) for r in down])}"] if down else [])
+        return "; ".join(parts)
+    with_index = ranked if s < 0 else list(reversed(ranked))
+    lead = [r for r in with_index if (r["ret_pct"] - s) * (1 if s > 0 else -1) >= LEAD_GAP_PCT][:NAMED_SECTORS]
+    against = [r for r in reversed(with_index) if r["ret_pct"] * (1 if s > 0 else -1) <= -AGAINST_MIN_PCT][:NAMED_SECTORS]
+    title = f"{word}, led by {_and([_named(r) for r in lead])}" if lead else word
+    if against:
+        title += f"; {_and([_named(r) for r in against])} {'rose' if s < 0 else 'fell'}"
+    return title
 
 
 def headline(board: dict) -> dict | None:
-    """The day in one fixed sentence cut from the board: indices, the weakest and strongest sectors, VIX.
+    """The day in a title and one line of figures, from fixed rules over the board, never free text.
 
-    None with fewer than three rows. The tone is the S&P 500's, flat inside FLAT_MOVE_PCT.
+    The title names what happened: the market (mega-caps against the average
+    stock), the sectors that drove it and those that went the other way, by name
+    and figure. The line gives the indices and, for each sector move that is rare
+    in its own history, how often it has happened. None with fewer than three
+    rows; the tone is the S&P 500's, flat inside FLAT_MOVE_PCT.
     """
     rows = board.get("rows") or []
     if len(rows) < 3:
@@ -797,15 +850,14 @@ def headline(board: dict) -> dict | None:
     by_symbol = {r["symbol"]: r for r in rows}
     sectors = [r for r in rows if r["group"] == "sector"]
     parts = []
-    indices = [by_symbol[s] for s in ("^GSPC", "^NDX") if s in by_symbol]
+    indices = [by_symbol[s] for s in ("^GSPC", "^NDX", "RSP", "IWM") if s in by_symbol]
     if indices:
         parts.append(", ".join(f"{r['short']} {_plain_signed(r['ret_pct'], '%')}" for r in indices) + ".")
-    weakest = sorted((r for r in sectors if r["ret_pct"] < 0), key=lambda r: r["ret_pct"])[:2]
-    if weakest:
-        parts.append("Weakest: " + ", ".join(_headline_move(r) for r in weakest) + ".")
-    strongest = sorted((r for r in sectors if r["ret_pct"] > 0), key=lambda r: -r["ret_pct"])[:2]
-    if strongest:
-        parts.append("Strongest: " + ", ".join(_headline_move(r) for r in strongest) + ".")
+    rare = sorted((r for r in sectors if r.get("share_pct") is not None and r["share_pct"] <= BOARD_RARE_PCT),
+                  key=lambda r: r["share_pct"])
+    if rare:
+        parts.append("Rare: " + "; ".join(f"{r['short']} {'rose' if r['ret_pct'] > 0 else 'fell'} this far on "
+                                          f"{r['share_pct']:.1f}% of days" for r in rare) + ".")
     vix = board.get("vix") or {}
     if vix.get("value") is not None:
         change = f" ({_plain_signed(vix['change'])})" if vix.get("change") is not None else ""
@@ -814,7 +866,7 @@ def headline(board: dict) -> dict | None:
         return None
     spx = by_symbol.get("^GSPC")
     tone = "flat" if spx is None or abs(spx["ret_pct"]) < FLAT_MOVE_PCT else "down" if spx["ret_pct"] < 0 else "up"
-    return {"text": " ".join(parts), "tone": tone}
+    return {"title": _market_title(by_symbol, sectors), "text": " ".join(parts), "tone": tone}
 
 
 def _spark(ctx, symbol: str, as_of: str) -> list[float]:

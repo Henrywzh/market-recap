@@ -53,52 +53,10 @@ theirs.
 
 ## 3. Trading layer
 
-Scope chosen 2026-09-29: US stocks and index ETFs, overnight to weeks. Items
-1–3 are deliberately deferred at the user's request; Trade Desk has no
-account connection, messages or trade journal. Items 4–9 are implemented
-within the free-source coverage limits below.
-
-First, the workflow gaps:
-
-1. **Holdings and portfolio risk.** Gross exposure, beta-adjusted SPX
-   equivalent, sector concentration, risk to stops, day P&L attribution, and
-   exposure against the RISK anchor ("model 50%, you 85%"). Positions from
-   the local Futu OpenD. Private only: Cloudflare Access or local.
-2. **Alerts.** Push instead of pull: SPX crossing its 200-day, a risk tile
-   crossing its threshold, a holding moving after hours, a new headline on a
-   tracked theme, the day before an earnings date. Telegram bot or email,
-   checked by a Worker cron (GitHub Actions schedules are not punctual).
-3. **Trade plan and review.** Attached to each trade, not a market journal:
-   thesis, stop, target and catalyst date at entry; outcome computed at exit;
-   hit rate by trade type once there are a few dozen.
-
-Second, entries and exits:
-
-4. **Levels and expected range.** Trade Desk: chart and price ladder on
-   traded closes (20/50/200-day averages, prior 20/60-session and 52-week
-   closing extremes, ±2 ATR), gap, ATR. The straddle range appears only with
-   a same-session option snapshot; none has been captured yet.
-5. **Pre-market and overnight.** ES/NQ, Asia/Europe, and a pre/post-market
-   scan of the top 30 S&P 500 weights plus the watchlist. Not a whole-market
-   mover feed.
-6. **Position-size calculator.** Stop risk, position limit and dollar-volume
-   caps with a 2× ATR stop shortcut; spread is a manual assumption.
-
-Third, flows and positioning (all on RISK → POSITIONING):
-
-7. **Who is forced to trade.** FINRA short interest, trend-follower flip
-   levels, and the share of S&P 500 weight in an estimated buyback blackout
-   (30 days before to 2 days after each report; a convention, not company
-   policy).
-8. **Insider buying.** Strict Form 4 purchases for every S&P 500 / Nasdaq-100
-   issuer from EDGAR's daily index, clusters and the largest buys. Each build
-   reads at most 1,500 new filings, so the 90-day window fills over about four
-   nights; the page shows coverage. No alpha claim (the quantamental-lab
-   cross-universe gate is blocked).
-9. **Signal scorecard** (Trade Desk). Forward returns after anchor states
-   (since 1993), Fear & Greed extremes (since 2024) and the trend proxy,
-   against any day. Descriptive, in-sample. Blackout, insider and implied-
-   range signals need archived daily history before they can be scored.
+Dropped 2026-10-23. Items 4-9 of the old list were built and live on their own
+pages (Trade Desk levels, pre-market, position size; POSITIONING; the signal
+scorecard); holdings, alerts and the trade journal will not be built. The number
+stays so that the other items keep theirs.
 
 ## 4. From the reference dashboard (2026-09-29)
 
@@ -198,42 +156,11 @@ To decide: build the price layer first (constituents, weights, prices,
 rotation, breadth) and look for a UK estimates source before promising the
 valuation columns. The same pattern would extend to FTSE 250 or the euro area.
 
-## 8. Implied move on the event card (2026-10-09)
+## 8. Implied move on the event card
 
-The card shows `none in snapshot` for most reporters. Two causes found, and
-a source that can fill in the past.
-
-- **Expiry gap.** `compute.options.select_expiries` picks the nearest expiry
-  plus the ones around fixed targets (`target_days`), not the first expiry
-  after each reporter's date. JPM reports 13 Oct and needs 16 Oct; the
-  snapshot holds 9 Oct, 30 Oct, 6 Nov. `build_universe` already knows who
-  reports; pass each reporter's date through to the expiry choice.
-- **Stale snapshot.** The 6 Oct build used the 30 Sep snapshot while the
-  `snapshots` branch had options through 7 Oct. Check what
-  `snapshot_store.latest_options_summary` takes and why.
-- **No history from Yahoo.** Free chains are current only; our own snapshots
-  start 30 Sep. Past implied moves cannot be fetched from yfinance.
-- **Alpaca (paper key, free) can rebuild them.** Tried on JPM, PEP, JNJ,
-  UNH, GS, C: 47 of 48 reports back to Oct 2024. Method: spot at the close
-  before the reaction session, the first expiry with contracts on or after
-  it, the strike nearest spot, call + put daily-bar close / spot. Expired
-  contracts are listed by `/v2/options/contracts?status=inactive`; prices from
-  `/v1beta1/options/bars`. Caveats: bar close is the last trade, not a mid
-  (six of 48 had under 20 contracts: PEP once traded 1); expiries sit 1-4
-  days past the report, so the figure carries a few ordinary days; the
-  paper-account data policy may change.
-- Over the 41 liquid ones: mean implied 4.9%, mean |move| 3.8%, move beyond
-  implied 11 times, median |move| / implied 0.75. Six large caps, not a
-  market result.
-
-Proposed order: (1) snapshot the first expiry after each reporter's date and
-fix the stale-snapshot read, no new secret; (2) local script backfilling the
-straddle per past report into `events/{SYM}.json` history (drop under 20
-contracts, show days to expiry), drawn beside the reaction bars; (3) event
-premium = short expiry IV less the next-month IV, from the snapshots' multi-
-expiry `atm_iv`; (4) IV level and percentile once the snapshots hold 2-3
-months. Open: whether to put the Alpaca key in GitHub secrets so the nightly
-build can use it; otherwise it stays a local script. Futu OpenD untested.
+Dropped 2026-10-23. The card keeps the implied move where a same-afternoon options
+snapshot has it; no expiry-targeted snapshots and no Alpaca backfill of past
+straddles. The number stays so that the other items keep theirs.
 
 ## 9. THEMES data signals: do they lead price? (2026-10-10)
 
@@ -739,27 +666,9 @@ Priority: the Technicals event/relative evidence first; options scenarios second
 No change to the anchor, automatic trading, paid feed or deployment is approved
 by this TODO entry.
 
-## 19. Market-implied expectations: improve existing dashboard views (2026-10-15)
+## 19. Market-implied expectations
 
-Deferred at Henry's request: TODO only, not implemented or scheduled. Keep the
-scope simple and reuse Priced path, Rates & macro, DCF and catalyst views;
-do not create another dashboard or a composite expectations score.
-
-- **Macro:** distinguish survey consensus, futures-implied policy paths and
-  inflation compensation. Consider a compact release-before/after comparison
-  with observation times and matched horizons. Breakevens include risk and
-  liquidity premiums; they are not next-month CPI forecasts. Daily changes
-  must not be presented as intraday or causal event effects.
-- **Stocks:** consider a reverse mode in the existing DCF: what growth and
-  margins would justify today's price under explicit discount-rate and terminal
-  assumptions, with sensitivity rather than a single purported market forecast.
-- **Data first:** audit existing coverage and redistribution rights before
-  choosing the smallest useful enhancement. Missing pre-release snapshots stay
-  missing; retrospective calendar consensus is not a frozen pre-release record.
-  Analyst consensus, market-implied quantities and positioning stay separate.
-
-Requires a fresh scope decision before implementation; no new collection,
-forecast-model integration or trading rules are authorized by this entry.
+Folded into 21 (2026-10-23).
 
 ## 20. Narrative cycle: future research framework / trade rules (2026-10-15)
 
@@ -780,3 +689,42 @@ now, not an automatic stage classifier or trading signal.
 No change to the current anchor, positions or execution. Any implementation or
 backtest needs a separate user request.
 
+## 21. Expectations: consensus, buy-side and market-implied (2026-10-23)
+
+Added at Henry's request; not scheduled. One question across the existing views
+(event cards, REVISIONS, PRICED PATH, RATES & MACRO, DCF / reverse DCF): what is
+expected, by whom, and how firmly. Three sources of expectation, kept separate and
+never blended into one score.
+
+- **Improving the consensus we show.** Today: Yahoo/Nasdaq EPS and revenue
+  consensus, low-high range, analyst count, 7/30-day revision counts, recorded
+  nightly since 2026-09-30 (`data/snapshots/consensus/`). Open: dispersion
+  (high-low over mean) as a reading of how settled the number is; stale-estimate
+  detection (analyst count falling, range unchanged for months); revision breadth
+  and momentum per name and per theme; the consensus frozen before each report
+  (the report card already uses it) kept as a dated record; guide against
+  consensus for every reporter, not only where the parser finds a plausible
+  guide; segment or KPI consensus (data centre revenue, capex) needs a source, as
+  none is free.
+- **Buy-side expectations (what the price implies the holders expect).** No free
+  whisper numbers. Proxies to test before showing: the reaction to in-line
+  results (a fall on an in-line print means the bar was above consensus), the
+  pre-report drift against the sector, the options-implied move against the
+  name's own past realized reactions, short interest and days to cover before
+  the report, crowding from 13F holder concentration (quarterly, 45 days late),
+  and CFTC positioning for index-level expectations. Each needs its own evidence
+  that it leads the reaction; label as description until it does.
+- **Market-implied expectations (was 19).** Macro: keep survey consensus,
+  futures-implied policy paths and inflation compensation apart; a compact
+  before/after comparison around releases with observation times and matched
+  horizons; breakevens include risk and liquidity premiums and are not CPI
+  forecasts; daily changes are not intraday or causal event effects. Stocks: the
+  reverse DCF (growth and margins that justify today's price under stated
+  discount-rate and terminal assumptions, with sensitivity). Options: implied
+  moves and skew as the market's range, not a forecast.
+- **Data first.** Audit current coverage and redistribution rights before the
+  smallest useful change. Missing pre-release snapshots stay missing; a
+  retrospective calendar consensus is not a frozen pre-release record. Analyst
+  consensus, market-implied quantities and positioning stay in separate rows.
+
+Requires a scope decision before implementation.
