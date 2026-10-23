@@ -269,3 +269,64 @@ def test_a_year_to_date_difference_needs_the_same_tag_on_both_sides():
         ("2025-01-01", "2025-09-30"): {"value": 1.05e9, "filed": "2025-10-30", "priority": 2, "rank": (2, 0)},
     }
     assert sec._flow_quarter(periods, "2025-12-31") is None
+
+
+# --- revenue: the largest tag wins, tag by tag; a bank's parts as the fallback --
+
+CONTRACT = "RevenueFromContractWithCustomerExcludingAssessedTax"
+
+
+def _insurer():
+    """An insurer: contract revenue (fees) is a sliver of its total Revenues."""
+    entries = _usd(CONTRACT,
+                   _row("2025-01-01", "2025-12-31", 40.0, "2026-02-20", "10-K", "FY"),
+                   _row("2025-01-01", "2025-09-30", 30.0, "2025-11-05"),
+                   _row("2025-07-01", "2025-09-30", 10.0, "2025-11-05"),
+                   _row("2026-01-01", "2026-03-31", 11.0, "2026-05-05"))
+    # Revenues: the year and the three months, but no nine months -- so its Q4 cannot be derived.
+    entries += _usd(REVENUE,
+                    _row("2025-01-01", "2025-12-31", 1000.0, "2026-02-20", "10-K", "FY"),
+                    _row("2025-07-01", "2025-09-30", 250.0, "2025-11-05"),
+                    _row("2026-01-01", "2026-03-31", 260.0, "2026-05-05"))
+    entries += _usd(NET_INCOME,
+                    _row("2025-07-01", "2025-09-30", 20.0, "2025-11-05"),
+                    _row("2025-01-01", "2025-12-31", 90.0, "2026-02-20", "10-K", "FY"),
+                    _row("2025-01-01", "2025-09-30", 70.0, "2025-11-05"),
+                    _row("2026-01-01", "2026-03-31", 22.0, "2026-05-05"))
+    return _facts(entries)
+
+
+def test_revenue_takes_the_largest_tag_in_each_period_annual_and_quarterly():
+    facts = _insurer()
+    item = sec.ITEMS_BY_KEY["revenue"]
+    annual = sec._annual_series(facts, item, sec.share_splits(facts))
+    assert annual["2025-12-31"]["value"] == 1000.0 and annual["2025-12-31"]["tag"] == REVENUE
+    q = {r["period_end"]: r for r in sec.quarterly_statements(facts)}
+    assert q["2025-09-30"]["revenue"] == 250.0 and q["2026-03-31"]["revenue"] == 260.0
+
+
+def test_a_fourth_quarter_is_derived_within_one_tag_never_across_two():
+    q = {r["period_end"]: r for r in sec.quarterly_statements(_insurer())}
+    # Revenues has the year but not the nine months; contract revenue has both: its Q4 (40 - 30)
+    # stands, rather than the total's year less the contract's nine months (1000 - 30).
+    assert q["2025-12-31"]["revenue"] == 10.0 and q["2025-12-31"]["revenue_derived"] is True
+
+
+def test_a_bank_without_a_revenue_tag_reads_net_interest_plus_noninterest_income():
+    entries = _usd("InterestIncomeExpenseNet",
+                   _row("2025-01-01", "2025-12-31", 600.0, "2026-02-20", "10-K", "FY"),
+                   _row("2026-01-01", "2026-03-31", 160.0, "2026-05-05"))
+    entries += _usd("NoninterestIncome",
+                    _row("2025-01-01", "2025-12-31", 250.0, "2026-02-20", "10-K", "FY"),
+                    _row("2026-01-01", "2026-03-31", 70.0, "2026-05-05"))
+    entries += _usd(NET_INCOME,
+                    _row("2025-01-01", "2025-12-31", 200.0, "2026-02-20", "10-K", "FY"),
+                    _row("2026-01-01", "2026-03-31", 55.0, "2026-05-05"))
+    facts = _facts(entries)
+    annual = sec._annual_series(facts, sec.ITEMS_BY_KEY["revenue"], sec.share_splits(facts))
+    assert annual["2025-12-31"]["value"] == 850.0
+    q = {r["period_end"]: r for r in sec.quarterly_statements(facts)}
+    assert q["2026-03-31"]["revenue"] == 230.0
+    # A bank that tags a revenue line keeps it: the parts stand in only where no tag gives one.
+    entries += _usd(REVENUE, _row("2026-01-01", "2026-03-31", 228.0, "2026-05-05"))
+    assert {r["period_end"]: r for r in sec.quarterly_statements(_facts(entries))}["2026-03-31"]["revenue"] == 228.0

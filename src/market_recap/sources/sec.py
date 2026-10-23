@@ -65,6 +65,10 @@ class LineItem:
     tags: tuple[str, ...]
     statement: str          # income | balance | cash_flow
     unit: str = "USD"       # the XBRL unit the value is reported in
+    # Within a period the largest of the tags' figures wins, not the first
+    # tag: for revenue, a filer's narrower lines (contract revenue only) sit
+    # under the same period as its total, and the total is the largest.
+    largest: bool = False
 
     @property
     def instant(self) -> bool:
@@ -74,6 +78,10 @@ class LineItem:
 
 LINE_ITEMS: tuple[LineItem, ...] = (
     # --- Income statement
+    # Largest wins: an insurer's or a REIT's contract revenue is a sliver of
+    # its total (Hartford's $1.5B of $27B), and taking the first tag read it as
+    # the whole; a filer whose "Revenues" is a sub-line (General Mills, BlackRock)
+    # keeps its contract revenue, the larger figure.
     LineItem("revenue", "Revenue", (
         "RevenueFromContractWithCustomerExcludingAssessedTax",
         "RevenueFromContractWithCustomerIncludingAssessedTax",
@@ -81,7 +89,9 @@ LINE_ITEMS: tuple[LineItem, ...] = (
         "SalesRevenueNet",
         # Banks report revenue net of interest expense.
         "RevenuesNetOfInterestExpense",
-    ), "income"),
+        # Utilities (Xcel) tag their total operating revenue here.
+        "RegulatedAndUnregulatedOperatingRevenue",
+    ), "income", largest=True),
     LineItem("cost_of_revenue", "Cost of revenue", (
         "CostOfRevenue", "CostOfGoodsAndServicesSold", "CostOfGoodsSold",
     ), "income"),
@@ -669,6 +679,25 @@ def _annual_series(facts: dict, item: LineItem, splits: list[tuple[str, float]] 
             priority == current["priority"] and filed >= current["filed"]
         ):
             picked[end] = {"value": value, "filed": filed, "tag": tag, "priority": priority}
+    if item.largest and len(item.tags) > 1:
+        # Each tag's latest filing per period, then the largest of the tags.
+        by_tag: dict[tuple[str, str], dict] = {}
+        for priority, tag, end, value, filed in _annual_rows(facts, item):
+            current = by_tag.get((end, tag))
+            if current is None or filed >= current["filed"]:
+                by_tag[(end, tag)] = {"value": value, "filed": filed, "tag": tag, "priority": priority}
+        picked = {}
+        for (end, _), entry in sorted(by_tag.items(), key=lambda kv: kv[1]["priority"]):
+            if end not in picked or entry["value"] > picked[end]["value"]:
+                picked[end] = entry
+        if item.key == "revenue":
+            parts = [_annual_series(facts, LineItem("part", "part", tags, "income")) for tags in BANK_REVENUE_PARTS]
+            for end in set(parts[0]) & set(parts[1]):
+                if end not in picked:
+                    picked[end] = {"value": parts[0][end]["value"] + parts[1][end]["value"],
+                                   "filed": max(parts[0][end]["filed"], parts[1][end]["filed"]),
+                                   "tag": "+".join(BANK_REVENUE_PARTS[0][:1] + BANK_REVENUE_PARTS[1]),
+                                   "priority": len(item.tags)}
 
     if item.unit in PER_SHARE_UNITS:
         # A year last filed before a split is on the old share basis; put it
@@ -759,6 +788,25 @@ def _days(earlier: str, later: str) -> int:
     return _ordinal(later) - _ordinal(earlier)
 
 
+# A bank that tags no revenue line (Fifth Third, Truist, Regions, BNY, Synchrony)
+# reports its two parts: net interest income and noninterest income. Their sum
+# is the bank's revenue, used only for a period no revenue tag covers.
+BANK_REVENUE_PARTS = (("InterestIncomeExpenseNet", "InterestRevenueExpenseNet"), ("NoninterestIncome",))
+
+
+def _bank_revenue(facts: dict, filed_by: str | None, splits) -> dict:
+    """Revenue as net interest income plus noninterest income, per period both are filed for."""
+    parts = [_period_values(facts, LineItem("part", "part", tags, "income"), splits, filed_by=filed_by)
+             for tags in BANK_REVENUE_PARTS]
+    out = {}
+    for key in set(parts[0]) & set(parts[1]):
+        a, b = parts[0][key], parts[1][key]
+        out[key] = {"value": a["value"] + b["value"], "filed": max(a["filed"], b["filed"]),
+                    "priority": len(ITEMS_BY_KEY["revenue"].tags),
+                    "rank": (len(ITEMS_BY_KEY["revenue"].tags), max(a["rank"][1], b["rank"][1])), "bank_parts": True}
+    return out
+
+
 def _form_rank(key: tuple[str | None, str], form: str | None) -> int:
     """0 unless a quarterly report claims a whole year. A 10-Q has no year to
     report; Comfort Systems' 2026 Q1 10-Q tagged its Q1 2025 operating income
@@ -774,8 +822,23 @@ def _period_values(
     facts: dict, item: LineItem, splits, *, filed_by: str | None = None
 ) -> dict[tuple[str | None, str], dict]:
     """Latest-filed value for every (start, end) an item was reported for, in
-    10-Ks and 10-Qs; the highest-priority tag wins a period. With ``filed_by``,
-    only what had been filed by that date -- the figures as they were known."""
+    10-Ks and 10-Qs; the highest-priority tag wins a period (the largest
+    figure, for a ``largest`` item). With ``filed_by``, only what had been
+    filed by that date -- the figures as they were known."""
+    if item.largest and len(item.tags) > 1:
+        merged: dict[tuple[str | None, str], dict] = {}
+        for priority, tag in enumerate(item.tags):
+            single = LineItem(item.key, item.label, (tag,), item.statement, item.unit)
+            for key, entry in _period_values(facts, single, splits, filed_by=filed_by).items():
+                entry = {**entry, "priority": priority, "rank": (priority, entry["rank"][1])}
+                current = merged.get(key)
+                if current is None or entry["value"] > current["value"]:
+                    merged[key] = entry
+        if item.key == "revenue":
+            for key, entry in _bank_revenue(facts, filed_by, splits).items():
+                if key not in merged:
+                    merged[key] = entry
+        return merged
     gaap = facts.get("facts", {}).get("us-gaap", {})
     picked: dict[tuple[str | None, str], dict] = {}
     for priority, tag in enumerate(item.tags):
@@ -1348,6 +1411,14 @@ def quarterly_statements(facts: dict) -> list[dict]:
     """
     splits = share_splits(facts)
     periods = {item.key: _Periods(_period_values(facts, item, splits)) for item in LINE_ITEMS}
+    # A largest-wins line is rebuilt tag by tag, so a fourth quarter (the year
+    # less nine months) subtracts within one tag; the largest quarter wins, and
+    # a bank's two parts stand in only where no tag gives one.
+    by_tag = {item.key: [_Periods(_period_values(facts, LineItem(item.key, item.label, (tag,), item.statement, item.unit), splits))
+                         for tag in item.tags]
+              for item in LINE_ITEMS if item.largest and len(item.tags) > 1}
+    if "revenue" in by_tag:
+        by_tag["revenue"].append(_Periods(_bank_revenue(facts, None, splits)))
     ends = _quarter_ends(periods)
     quarter_ends = [end for end, _ in ends]
     year_ends = [end for end, is_year in ends if is_year]
@@ -1359,7 +1430,14 @@ def quarterly_statements(facts: dict) -> list[dict]:
         fiscal, quarter = named
         row: dict = {"period_end": end, "fiscal_year": fiscal, "quarter": quarter, "label": f"FY{fiscal} Q{quarter}"}
         for item in LINE_ITEMS:
-            found = _quarter_figure(item, periods[item.key], end, quarter_ends, year_ends)
+            if item.key in by_tag:
+                single = LineItem(item.key, item.label, item.tags[:1], item.statement, item.unit)
+                tags = [_quarter_figure(single, p, end, quarter_ends, year_ends) for p in by_tag[item.key][:len(item.tags)]]
+                tags = [f for f in tags if f is not None]
+                found = max(tags, key=lambda f: f[0]) if tags else \
+                    _quarter_figure(single, by_tag[item.key][-1], end, quarter_ends, year_ends) if item.key == "revenue" else None
+            else:
+                found = _quarter_figure(item, periods[item.key], end, quarter_ends, year_ends)
             value, filed, derived = found if found is not None else (None, None, False)
             row[item.key] = value
             row[f"{item.key}_filed"] = filed
@@ -1562,7 +1640,9 @@ def _quarterly_revenue(facts: dict) -> list[dict]:
     from ..compute.capex import quarterly
 
     series = [quarterly(facts, tag) for tag in ITEMS_BY_KEY["revenue"].tags]
-    best = max((found for found in series if found), key=lambda found: found[-1]["end"], default=[])
+    # The newest series, and among the tags at that end the largest figure: a
+    # filer that starts tagging its contract revenue keeps its total (INVH, 2026).
+    best = max((found for found in series if found), key=lambda found: (found[-1]["end"], found[-1]["value"]), default=[])
     return [{"end": q["end"], "value": q["value"], "filed": q["filed"]} for q in best]
 
 
