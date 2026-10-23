@@ -152,7 +152,9 @@ function createController({ asOf } = {}) {
       + (asOf ? `Everything below is the build's close of ${asOf}.` : 'Everything below is the build\'s close.');
   }
 
-  const node = card(`LIVE · ${newYorkDayLabel(Date.now())}`, feed.controls, [primary, toggleRow, rest, foot]);
+  // What the prices are, folded: the strip itself is what a reader scans.
+  const about = el('details', { class: 'sx-fold live-about' }, [el('summary', { text: 'About these prices' }), foot]);
+  const node = card(`LIVE · ${newYorkDayLabel(Date.now())}`, feed.controls, [primary, toggleRow, rest, about]);
   title = node.querySelector('.card-title');
   holder.append(node);
   render();
