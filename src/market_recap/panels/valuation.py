@@ -19,6 +19,7 @@ import math
 
 import pandas as pd
 
+from ..compute import reverse_dcf as RD
 from ..compute import valuation as V
 from ..compute.reverse_dcf_context import revenue_context
 from ..config import VALUATION_ARTIFACT_DIR
@@ -41,6 +42,16 @@ PE_AGREEMENT_TOLERANCE = 0.25
 # Columns the history adds to the table, beside the snapshot metrics. The
 # percentile is on the history's own basis (operating unless the company has
 # no operating history), the table's own P/E stays reported.
+# What the price expects beside what analysts expect (docs/expectations_research_v1.md):
+# the yearly revenue growth that, at today's operating margin and the reverse DCF's
+# shared assumptions, makes the model's EV equal the market's -- a ten-year average --
+# and the analysts' revenue growth for one fiscal year (the later one, which the page
+# opens its scenario on). Two horizons, so two columns and no difference between them.
+EXPECTATION_METRICS = (
+    V.Metric("implied_growth", "Revenue growth the price implies (avg/yr over 10Y, today's margin)", "pct", "valuation", "low", banks=False),
+    V.Metric("consensus_growth", "Analysts' revenue growth (one fiscal year, the later)", "pct", "valuation", "high", banks=False),
+)
+
 HISTORY_METRICS = (
     V.Metric("pe_forward", "P/E forward (NTM consensus)", "x", "valuation", "low"),
     V.Metric("pe_operating", "P/E operating (TTM)", "x", "valuation", "low"),
@@ -437,7 +448,36 @@ def _weight_check(rows: list[dict], weights: dict[str, float]) -> dict:
     return {"checked": len(pairs), "factor": WEIGHT_CHECK_FACTOR, "flagged": sorted(flagged, key=lambda f: f["ratio"])}
 
 
+def _expectation_gap(row: dict, data, reverse: dict | None, as_of: str) -> dict:
+    """The growth the price implies and the analysts' growth, in percent;
+    None for each where the reverse DCF page would not run (a bank, a REIT, a
+    utility or biotech; no positive operating profit; an annual year too old; an
+    EV whose debt is not known) or where no growth reprices the model."""
+    out = {"implied_growth": None, "consensus_growth": None, "implied_growth_status": None}
+    periods = [p for p in ((row.get("revenue_consensus") or {}).get("periods") or []) if p.get("growth_pct") is not None]
+    out["consensus_growth"] = clean_float(periods[-1]["growth_pct"], 1) if periods else None
+    if not reverse:
+        return out
+    if row.get("sector") in reverse.get("excluded_sectors", []) or row.get("sub_sector") in reverse.get("excluded_subindustries", []):
+        out["implied_growth_status"] = "excluded_business"
+        return out
+    annual = data.rows[-1] if data.rows else {}
+    revenue, ebit, end = annual.get("revenue"), annual.get("ebit"), annual.get("period_end")
+    age = (pd.Timestamp(as_of) - pd.Timestamp(end)).days if end else None
+    ev = row.get("ev") if row.get("debt_basis") and row.get("debt_basis") != "no debt tagged" else None
+    if not revenue or not ebit or ebit <= 0 or ebit > revenue or age is None or age > reverse.get("annual_max_age_days", 550) or not ev:
+        out["implied_growth_status"] = "inputs_missing"
+        return out
+    found = RD.implied_growth(revenue, ebit / revenue, ev, RD.settings_of(reverse))
+    out["implied_growth_status"] = found["status"]
+    if found["growth"] is not None:
+        out["implied_growth"] = clean_float(found["growth"] * 100, 1)
+    return out
+
+
 def build(ctx, *, use_cache: bool = True) -> dict:
+    # The reverse DCF's shared assumptions, for the growth each price implies.
+    reverse = (ctx.config.get("dcf") or {}).get("reverse")
     symbols = universe(ctx)
     try:
         cik_map = sec.fetch_ticker_cik_map(use_cache=use_cache)
@@ -510,6 +550,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         # Uses the same response already fetched for forward EPS: no new
         # requests, and no revenue assumption inferred from adjusted EPS.
         row["revenue_consensus"] = revenue_context(trends.get(symbol), estimates.observed_at(symbol))
+        row.update(_expectation_gap(row, data, reverse, ctx.as_of))
         rows.append(row)
         prices = ctx.prices.get(symbol)
         if (prices is not None and data.eps_history and row["market_cap"] and price and row["cik"] not in companies
@@ -572,7 +613,7 @@ def build(ctx, *, use_cache: bool = True) -> dict:
         "universe": len(symbols),
         "metrics": [
             {"key": m.key, "label": m.label, "unit": m.unit, "group": m.group, "better": m.better, "banks": m.banks}
-            for m in [m for m, _ in V.METRICS] + list(HISTORY_METRICS)
+            for m in [m for m, _ in V.METRICS] + list(HISTORY_METRICS) + list(EXPECTATION_METRICS)
         ],
         "rows": rows,
         "skipped": skipped,

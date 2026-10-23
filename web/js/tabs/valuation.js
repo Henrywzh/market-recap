@@ -73,6 +73,16 @@ function rankClass(rank) {
   return '';
 }
 
+// Why a name has no price-implied growth (panels/valuation._expectation_gap).
+const IMPLIED_STATUS = {
+  solved: 'the 10-year average that reprices the reverse DCF to its EV, at today\'s operating margin and the page\'s shared WACC, tax and investment; a different horizon from the analysts\' one-year growth beside it',
+  excluded_business: 'not computed: the reverse DCF\'s operating template does not fit this business (banks, REITs, utilities, biotech)',
+  inputs_missing: 'not computed: no positive operating profit, an annual year too old, or an EV whose debt is not known',
+  no_free_cash_flow: 'not computed: at today\'s margin, after tax, revenue leaves no cash beyond the page\'s net investment, so no growth reprices it',
+  below_range: 'below -50% a year: the price sits under the model at any growth searched',
+  above_range: 'above 100% a year: the price sits over the model at any growth searched',
+};
+
 function rowNote(row, data) {
   const parts = [
     `${row.name || row.ticker} · data to ${row.period_end} (filed ${row.filed})`,
@@ -85,6 +95,8 @@ function rowNote(row, data) {
   if (row.tbv_assumed_none?.length) parts.push(`tangible book: no ${row.tbv_assumed_none.join(', ')} tagged in the filing, taken as none`);
   else if (row.tbv === null || row.tbv === undefined) parts.push('tangible book: needs goodwill or intangibles tagged in the filing');
   if (row.piotroski === null && row.piotroski_tested) parts.push(`Piotroski: ${row.piotroski_tested} of 9 signals testable`);
+  const implied = IMPLIED_STATUS[row.implied_growth_status];
+  if (implied) parts.push(`price-implied growth: ${implied}`);
   return parts.join('\n');
 }
 
