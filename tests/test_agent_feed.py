@@ -172,3 +172,35 @@ def test_a_missing_artifact_is_named_and_a_failed_build_leaves_no_feed(tmp_path)
     failed = A.write(root=tmp_path, fetch=_missing)
     assert not failed["written"]
     assert not (tmp_path / A.INDEX_FILE).exists() and not (tmp_path / A.BRIEF_FILE).exists()
+
+
+def test_a_brief_over_its_cap_is_fitted_not_dropped_and_says_what_it_condensed():
+    cards = [{"ticker": f"N{i:02d}", "sector": "Tech", "watchlist": i == 39, "in_queue": i % 2 == 0,
+              "changes": [{"kind": "entered", "text": "Entered the queue"}], "pe": None, "gaps": [],
+              "evidence_for": ["x" * 400]} for i in range(40)]
+    earnings = [{"date": "2026-10-27", "timing": "amc", "symbol": f"E{i:02d}", "name": "Co", "importance": "high" if i == 29 else "medium",
+                 "watchlist": False, "spx_weight_pct": i / 10, "expectations": {"history": "y" * 400, "setup": None}}
+                for i in range(30)]
+    brief = {"names": {"changed_this_session": cards, "source": "monitor.json"},
+             "timing": {"earnings": earnings, "sources": ["events.json"]},
+             "research_candidates": [{"id": "c1"}], "data_quality": {}}
+    A._fit(brief, 30_000)
+    assert len(json.dumps(brief).encode()) <= 30_000
+    kept = brief["names"]["changed_this_session"]
+    assert [c["ticker"] for c in kept] == [c["ticker"] for c in cards]          # no name dropped
+    full = [c for c in kept if not c.get("condensed")]
+    assert len(full) == A.KEEP_NAME_CARDS and full[0]["ticker"] == "N00" and any(c["ticker"] == "N39" for c in full)
+    assert "pe" not in full[0] and "gaps" not in full[0]                         # empty fields left out
+    rows = brief["timing"]["earnings"]
+    assert len(rows) == 30 and sum(not r.get("condensed") for r in rows) == A.KEEP_EARNINGS
+    assert not next(r for r in rows if r["symbol"] == "E29").get("condensed")   # high importance kept first
+    assert all("importance" in r for r in rows)                                 # the index's next week reads it
+    assert len(brief["data_quality"]["condensed"]) == 2 and "monitor.json" in brief["data_quality"]["condensed"][0]
+    assert brief["research_candidates"] == [{"id": "c1"}]                       # candidates are never cut
+
+
+def test_a_brief_under_its_cap_only_loses_its_empty_fields():
+    brief = {"names": {"changed_this_session": [{"ticker": "A", "pe": None, "gaps": []}]},
+             "timing": {"earnings": []}, "data_quality": {}}
+    A._fit(brief, 150_000)
+    assert brief["names"]["changed_this_session"] == [{"ticker": "A"}] and brief["data_quality"]["condensed"] == []

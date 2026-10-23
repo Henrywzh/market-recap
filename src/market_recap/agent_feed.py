@@ -593,7 +593,9 @@ def build(*, root: Path | None = None, validation: dict | None = None,
             "Candidates are raised by fixed rules and carry a neutral question, not a verdict. State: new / "
             "continuing / resolved (valid new data shows it ended) / unknown (no valid reading this build) for "
             "conditions, compared with the previous published session; event = this session; scheduled = ahead. "
-            "The close edition (16:20 New York) leaves news to the evening edition (18:35); read the evening one."
+            "The close edition (16:20 New York) leaves news to the evening edition (18:35); read the evening one. "
+            "A field left out of a name card or an earnings entry is null; an entry marked condensed keeps its "
+            "detail in the artifact data_quality.condensed names."
         ),
     }
     brief: dict[str, Any] = {**header}
@@ -612,10 +614,69 @@ def build(*, root: Path | None = None, validation: dict | None = None,
         brief["data_quality"]["candidate_states"] = base["unreadable"]
     brief["candidate_ledger"] = {"as_of": as_of, "entries": ledger}
     brief["ledger_base"] = None if not base or base.get("unreadable") else base
+    _fit(brief, BRIEF_MAX_BYTES)
 
     index = {**header, "market_state": _market_state(brief, f), "candidates": _index_candidates(candidates),
              "next_7_days": _next_week(brief), "data_quality_alerts": _alerts(brief)}
     return index, brief
+
+
+def _size(payload) -> int:
+    return len(json.dumps(payload, ensure_ascii=False).encode())
+
+
+def _drop_nulls(row: dict) -> dict:
+    """A card without its empty fields: a field left out reads as null (how_to_read)."""
+    return {k: (_drop_nulls(v) if isinstance(v, dict) else v) for k, v in row.items()
+            if v is not None and v != [] and v != {}}
+
+
+# How much detail a brief over BRIEF_MAX_BYTES keeps, in the order it gives the
+# rest up: the name cards first (watchlist and queue entries keep theirs), then
+# the lighter reporters. Candidates are never cut: the index points at them.
+KEEP_NAME_CARDS = 25
+KEEP_EARNINGS = 20
+
+
+def _fit(brief: dict, limit: int) -> None:
+    """Bring the brief under ``limit`` without losing any name or event: empty
+    fields go first; then, only while it is still over, the cards beyond the
+    first few are condensed to what changed, each step recorded in
+    data_quality.condensed with where the full rows are. A busy session (48
+    names changed on 2026-10-23) once made the brief too large to publish, and
+    the index with it."""
+    names, timing = brief.get("names"), brief.get("timing")
+    if isinstance(names, dict):
+        names["changed_this_session"] = [_drop_nulls(c) for c in names.get("changed_this_session") or []]
+    if isinstance(timing, dict):
+        timing["earnings"] = [_drop_nulls(e) for e in timing.get("earnings") or []]
+    # Recorded where it is read, so each size check counts its own note.
+    condensed: list[str] = []
+    if isinstance(brief.get("data_quality"), dict):
+        brief["data_quality"]["condensed"] = condensed
+    if _size(brief) > limit and isinstance(names, dict) and len(names["changed_this_session"]) > KEEP_NAME_CARDS:
+        cards = names["changed_this_session"]
+        order = sorted(range(len(cards)), key=lambda i: (not cards[i].get("watchlist"), not cards[i].get("in_queue"), i))
+        keep = set(order[:KEEP_NAME_CARDS])
+        names["changed_this_session"] = [
+            c if i in keep else {"ticker": c.get("ticker"), "sector": c.get("sector"), "changes": c.get("changes"),
+                                 "condensed": True}
+            for i, c in enumerate(cards)]
+        condensed.append(f"names.changed_this_session: full cards for {KEEP_NAME_CARDS} of {len(cards)} "
+                         f"(watchlist and queue entries first); the rest list their changes only. Full rows: {names.get('source')}")
+    if _size(brief) > limit and isinstance(timing, dict) and len(timing["earnings"]) > KEEP_EARNINGS:
+        rows = timing["earnings"]
+        # Watchlist and high-importance reporters keep their expectations first, then the heaviest.
+        heavy = set(sorted(range(len(rows)), key=lambda i: (not rows[i].get("watchlist"), rows[i].get("importance") != "high",
+                                                            -(rows[i].get("spx_weight_pct") or 0)))[:KEEP_EARNINGS])
+        timing["earnings"] = [
+            r if i in heavy else {**_pick(r, "date", "timing", "symbol", "name", "importance", "watchlist", "spx_weight_pct"),
+                                  "condensed": True}
+            for i, r in enumerate(rows)]
+        sources = ", ".join(timing.get("sources") or [])
+        condensed.append(f"timing.earnings: expectations for {KEEP_EARNINGS} of {len(rows)} reporters (watchlist, high importance, "
+                         f"then the heaviest); "
+                         f"the rest give date and weight only. Full cards: {sources}")
 
 
 def _market_state(brief: dict, f: _Feed) -> dict:
