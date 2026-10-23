@@ -1,6 +1,5 @@
 """FLOWS section B: CFTC futures positioning by trader type. No network: synthetic reports and closes."""
 
-from datetime import date
 import json
 from types import SimpleNamespace
 
