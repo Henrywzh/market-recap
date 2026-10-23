@@ -14,16 +14,34 @@ import pandas as pd
 
 from ..util import clean_float
 
-# (ticker, short label, group). The page lists them in this order.
+# (ticker, short label, group). The page lists them in this order. US equity
+# funds are grouped by the index they track, so a group's total is that
+# index's money, and the US equity total is every covered index fund once.
 FUNDS = (
-    ("SPY", "S&P 500", "US equity"),
-    ("IVV", "Core S&P 500", "US equity"),
-    ("QQQ", "Nasdaq-100", "US equity"),
-    ("IWM", "Russell 2000", "US equity"),
-    ("DIA", "Dow Jones", "US equity"),
-    ("RSP", "S&P 500 equal weight", "US equity"),
-    ("MDY", "S&P MidCap 400", "US equity"),
-    ("QNDX", "Nasdaq-100 (QNDX)", "US equity"),
+    ("SPY", "S&P 500 · SPDR", "S&P 500"),
+    ("IVV", "S&P 500 · iShares", "S&P 500"),
+    ("SPYM", "S&P 500 · SPDR Portfolio", "S&P 500"),
+    ("QQQ", "Nasdaq-100 · Invesco", "Nasdaq-100"),
+    ("QQQM", "Nasdaq-100 · Invesco M", "Nasdaq-100"),
+    ("QNDX", "Nasdaq-100 · SPDR", "Nasdaq-100"),
+    ("ITOT", "Total market · iShares", "Total market"),
+    ("SPTM", "Total market · SPDR", "Total market"),
+    ("IWV", "Russell 3000", "Total market"),
+    ("IWB", "Russell 1000", "Total market"),
+    ("IWF", "Russell 1000 Growth", "Growth"),
+    ("IVW", "S&P 500 Growth · iShares", "Growth"),
+    ("SPYG", "S&P 500 Growth · SPDR", "Growth"),
+    ("IWD", "Russell 1000 Value", "Value"),
+    ("IVE", "S&P 500 Value · iShares", "Value"),
+    ("SPYV", "S&P 500 Value · SPDR", "Value"),
+    ("IJH", "S&P MidCap 400 · iShares", "Mid cap"),
+    ("MDY", "S&P MidCap 400 · SPDR", "Mid cap"),
+    ("SPMD", "S&P MidCap 400 · SPDR Portfolio", "Mid cap"),
+    ("IWM", "Russell 2000", "Small cap"),
+    ("IJR", "S&P SmallCap 600 · iShares", "Small cap"),
+    ("SPSM", "S&P SmallCap 600 · SPDR", "Small cap"),
+    ("RSP", "S&P 500 equal weight", "Equal weight"),
+    ("DIA", "Dow Jones", "Dow"),
     ("XLK", "Technology", "Sectors"),
     ("XLF", "Financials", "Sectors"),
     ("XLV", "Health care", "Sectors"),
@@ -47,20 +65,32 @@ FUNDS = (
     ("EEM", "Emerging markets", "International"),
 )
 
-# Funds with no share-count history on any issuer file this module reads.
-# Listed on the page with the reason, never dropped silently.
+US_EQUITY_GROUPS = ("S&P 500", "Nasdaq-100", "Total market", "Growth", "Value", "Mid cap", "Small cap",
+                    "Equal weight", "Dow")
+
+# Large funds with no share-count history on any file this page reads, with the
+# group they would belong to: listed with the reason, and their assets counted
+# against each group's coverage, never dropped silently.
+VANGUARD = "Vanguard publishes no daily share count; only month-end share-class assets, rounded"
+SCHWAB = "Schwab's fund pages refuse automated requests"
 NOT_COVERED = (
-    ("VOO", "Vanguard S&P 500", "Vanguard publishes no share-count history; only month-end share-class assets"),
-    ("VTI", "Vanguard Total Market", "Vanguard publishes no share-count history; only month-end share-class assets"),
-    ("VEA", "Vanguard Developed Markets", "Vanguard publishes no share-count history; only month-end share-class assets"),
-    ("VWO", "Vanguard Emerging Markets", "Vanguard publishes no share-count history; only month-end share-class assets"),
+    ("VOO", "Vanguard S&P 500", "S&P 500", VANGUARD),
+    ("VTI", "Vanguard Total Market", "Total market", VANGUARD),
+    ("VUG", "Vanguard Growth", "Growth", VANGUARD),
+    ("VTV", "Vanguard Value", "Value", VANGUARD),
+    ("VO", "Vanguard Mid-Cap", "Mid cap", VANGUARD),
+    ("VB", "Vanguard Small-Cap", "Small cap", VANGUARD),
+    ("SCHX", "Schwab U.S. Large-Cap", "Total market", SCHWAB),
+    ("SCHB", "Schwab U.S. Broad Market", "Total market", SCHWAB),
+    ("VEA", "Vanguard Developed Markets", "International", VANGUARD),
+    ("VWO", "Vanguard Emerging Markets", "International", VANGUARD),
 )
 
-# Aggregate name -> member tickers. A member joins a total only when its history
-# covers the whole aggregate window, so QQQ and RSP (recorded nightly since
-# 2026-09) join once they have a year on record.
+# Aggregate name -> member tickers: one per US equity group, the US equity
+# total, and the cross-asset groups.
 AGGREGATES = (
-    ("US equity", ("SPY", "IVV", "IWM", "DIA", "MDY", "QQQ", "RSP")),
+    ("US equity", tuple(t for t, _, g in FUNDS if g in US_EQUITY_GROUPS)),
+    *((group, tuple(t for t, _, g in FUNDS if g == group)) for group in US_EQUITY_GROUPS if group not in ("Equal weight", "Dow")),
     ("Treasuries", ("SHY", "IEF", "TLT")),
     ("Credit", ("LQD", "HYG")),
     ("Gold", ("GLD",)),
@@ -186,44 +216,66 @@ def fund_summary(flow: pd.Series, *, aum: float | None) -> dict:
 def aggregate(flows: dict[str, pd.Series], *, window: int = AGGREGATE_WINDOW) -> dict:
     """One total across funds, day by day, over the last ``window`` dates.
 
-    A fund joins only if its history starts on or before the window's first
-    date, so a fund listed partway through the window does not look like a
-    fall in the total. Each date sums the funds that have a flow that day, and
-    ``count`` says how many that was.
+    The day-by-day line and its rank keep to the funds whose history starts on
+    or before the window's first date, so a fund listed partway through does
+    not look like a jump in the total (``funds``; ``count`` per date). The
+    latest 1D/1W/1M sums count every fund whose record covers that window, so
+    a fund recorded for weeks (QQQ) is in the week's total (``latest_funds``).
     """
+    empty = {"funds": [], "excluded": list(flows), "dates": [], "flow": [], "rolling_20": [], "count": [],
+             "latest_date": None, "latest": {}, "latest_funds": []}
     if not flows:
-        return {"funds": [], "excluded": [], "dates": [], "flow": [], "rolling_20": [], "count": [],
-                "latest_date": None, "latest": {}}
+        return empty
     frame = pd.concat(flows, axis=1).sort_index()
+    frame = frame[frame.notna().any(axis=1)]
+    if frame.empty:
+        return empty
+    starts = {t: (series.first_valid_index() if series.first_valid_index() is not None else series.index[-1])
+              for t, series in flows.items()}
+    lasts = {t: series.last_valid_index() for t, series in flows.items()}
+
     window_start = frame.index[-window] if len(frame.index) >= window else frame.index[0]
     included = [t for t in flows if flows[t].index[0] <= window_start]
     excluded = [t for t in flows if t not in included]
+    # The windows end on the long-history funds' latest date: a fund whose
+    # issuer publishes a day earlier or later does not move the week.
+    end = frame[included].dropna(how="all").index[-1] if included else frame.index[-1]
+    upto = frame.loc[:end]
+
+    def recent(sessions: int) -> tuple[float | None, list[str]]:
+        rows = upto.iloc[-sessions:]
+        if len(rows) < sessions:
+            return None, []
+        # A fund counts only if its record spans the window: one whose issuer
+        # record stopped before the window's end would be a partial week.
+        members = [t for t in flows if starts[t] <= rows.index[0] and lasts[t] is not None and lasts[t] >= rows.index[-1]]
+        if not members:
+            return None, []
+        return clean_float(rows[members].sum(axis=1, min_count=1).sum(min_count=1), 0), members
+
+    week, week_funds = recent(WINDOW_SESSIONS["1W"])
+    latest = {"flow_1d": recent(1)[0], "flow_1w": week, "flow_1m": recent(WINDOW_SESSIONS["1M"])[0],
+              "pct_rank_1w": None, "rolling_20": None}
+    out = {**empty, "excluded": excluded, "latest_date": end.strftime("%Y-%m-%d"),
+           "latest": latest, "latest_funds": week_funds}
     if not included:
-        return {"funds": [], "excluded": excluded, "dates": [], "flow": [], "rolling_20": [], "count": [],
-                "latest_date": None, "latest": {}}
+        return out
 
     members = frame[included]
     total = members.sum(axis=1, min_count=1)
     count = members.notna().sum(axis=1)
     keep = count > 0
     total, count = total[keep], count[keep]
-
     rolling = total.rolling(ROLLING_SESSIONS, min_periods=ROLLING_SESSIONS).sum()
     tail = slice(-window, None)
-    latest = {
-        "flow_1d": window_sum(total, 1),
-        "flow_1w": window_sum(total, WINDOW_SESSIONS["1W"]),
-        "flow_1m": window_sum(total, WINDOW_SESSIONS["1M"]),
-        "pct_rank_1w": percentile_1w(total),
-        "rolling_20": clean_float(rolling.iloc[-1], 0) if not rolling.empty else None,
-    }
+    # The rank compares like with like: the long-history funds' week against their own past weeks.
+    latest["pct_rank_1w"] = percentile_1w(total)
+    latest["rolling_20"] = clean_float(rolling.iloc[-1], 0) if not rolling.empty else None
     return {
+        **out,
         "funds": included,
-        "excluded": excluded,
-        "latest_date": total.index[-1].strftime("%Y-%m-%d") if not total.empty else None,
         "dates": [d.strftime("%Y-%m-%d") for d in total.index[tail]],
         "flow": [clean_float(v, 0) for v in total.iloc[tail]],
         "rolling_20": [clean_float(v, 0) for v in rolling.iloc[tail]],
         "count": [int(v) for v in count.iloc[tail]],
-        "latest": latest,
     }

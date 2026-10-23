@@ -5,7 +5,7 @@
 // NaN, undefined or [object Object].
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { section, dollars, pctOfAssets, rankText, headlineText } from '../../web/js/flows-etf.js';
+import { section, dollars, pctOfAssets, rankText, headlineText, aggregateLine } from '../../web/js/flows-etf.js';
 
 class FakeNode {
   constructor(tag) {
@@ -210,4 +210,17 @@ test('the aggregate chart draws daily bars in up and down colours with the rolli
   // The colour callback reads the sign of each bar.
   assert.equal(bars.itemStyle.color({ value: 1 }), '--up');
   assert.equal(bars.itemStyle.color({ value: -1 }), '--down');
+});
+
+test('an aggregate line names its coverage, the funds in the week and the funds behind the rank', () => {
+  const agg = {
+    name: 'S&P 500', latest_date: '2026-10-22', funds: ['SPY', 'IVV'], latest_funds: ['SPY', 'IVV', 'SPYM'],
+    latest: { flow_1w: -4.1e9, flow_1m: 1.06e10, pct_rank_1w: 24 },
+    coverage: { pct: 65, missing: ['VOO'] },
+  };
+  const line = aggregateLine(agg);
+  assert.match(line, /^S&P 500: 1W −\$4\.1bn · 1M \+\$10\.6bn · 1W rank 24th pct \(rank on SPY, IVV\) · covers ~65% of assets \(not VOO\) · SPY, IVV, SPYM · as of 2026-10-22$/);
+  assert.equal(aggregateLine({ name: 'Nasdaq-100', latest: { flow_1w: null } }), null);
+  const bare = aggregateLine({ name: 'Gold', funds: ['GLD'], latest_funds: ['GLD'], latest: { flow_1w: 1e9, flow_1m: null, pct_rank_1w: null } });
+  assert.doesNotMatch(bare, /NaN|undefined|null|covers/);
 });

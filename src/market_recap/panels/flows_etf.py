@@ -12,6 +12,8 @@ import pandas as pd
 
 from ..compute import etf_flows as F
 from ..panels import heatmaps as H
+from ..snapshots.risk import INVESCO_RECORDED
+from ..sources import vanguard, yahoo
 from ..util import SourceRecord, clean_float, describe_error, to_iso_date
 
 # Issuer files are dated to the trading day and published after the close, so
@@ -47,6 +49,8 @@ def _fetch(ticker: str, errors: list) -> dict | None:
 
 def _empty_row(ticker: str, label: str, group: str, error: str | None) -> dict:
     note = ("the issuer's file could not be read this build" if error
+            else "Invesco publishes only today's count; it is recorded each evening and a flow appears "
+                 "once two days are on record" if ticker in INVESCO_RECORDED
             else "no issuer share-count history on the providers this page reads")
     return {
         "ticker": ticker, "label": label, "group": group, "source": None, "source_id": None,
@@ -109,6 +113,51 @@ def _fund_row(ticker: str, label: str, group: str, got: dict, sessions, cut_days
     return row, flow
 
 
+def _not_covered(ctx, inputs: dict) -> list[dict]:
+    """The large funds this page cannot measure, with their assets where a
+    publisher states them: Vanguard's month-end share-class figure (the heat
+    map's own size for VOO and VTI), Yahoo's total assets for the rest."""
+    heat = {e["ticker"]: e for e in ((inputs or {}).get("heatmaps") or {}).get("etfs") or []}
+    others = [t for t, _, _, reason in F.NOT_COVERED if reason != F.VANGUARD and t not in heat]
+    try:
+        snapshot = yahoo.fetch_fund_snapshot(others) if others else pd.DataFrame()
+        sizes = snapshot.set_index("ticker")["aum"].to_dict() if not snapshot.empty else {}
+    except Exception:
+        sizes = {}
+    out = []
+    for ticker, label, group, reason in F.NOT_COVERED:
+        aum, basis = None, None
+        if ticker in heat and heat[ticker].get("aum"):
+            aum, basis = heat[ticker]["aum"], heat[ticker].get("aum_source")
+        elif reason == F.VANGUARD:
+            try:
+                aum, _ = vanguard.fetch_share_class_assets(ticker)
+                basis = "vanguard_share_class" if aum else None
+            except Exception:
+                aum = None
+        elif sizes.get(ticker):
+            aum, basis = sizes[ticker], "yahoo_total_assets"
+        out.append({"ticker": ticker, "label": label, "group": group, "reason": reason,
+                    "aum": clean_float(aum), "aum_basis": basis})
+    return out
+
+
+def _coverage(funds: list[str], aum: dict, missing: list[dict]) -> dict:
+    """How much of a group's money the total measures: the assets of the funds
+    in its latest week against those plus the funds it leaves out -- its own
+    funds without a current record (a fund recorded nightly that is behind or
+    not yet recorded) and the large funds it cannot read. Approximate: the
+    missing funds' assets are month-end or a vendor's figure, or unknown."""
+    covered = sum(aum.get(t) or 0 for t in funds)
+    absent = sum(n["aum"] or 0 for n in missing)
+    return {
+        "covered_aum": clean_float(covered, 0) if covered else None,
+        "missing_aum": clean_float(absent, 0) if absent else None,
+        "pct": clean_float(100 * covered / (covered + absent), 0) if covered else None,
+        "missing": [n["ticker"] for n in missing],
+    }
+
+
 def build(ctx, inputs: dict) -> dict:
     """The ETF flow section. Unavailable only when no fund's share history could be read at all."""
     sessions = ctx.etf_closes.index if not ctx.etf_closes.empty else None
@@ -151,10 +200,18 @@ def build(ctx, inputs: dict) -> dict:
         ))
         return {"unavailable": "no ETF share-count history could be read this build"}
 
+    not_covered = _not_covered(ctx, inputs)
+    aum = {r["ticker"]: r["aum"] for r in rows}
+    group_of = {t: g for t, _, g in F.FUNDS}
     aggregates = []
     for name, members in F.AGGREGATES:
         total = F.aggregate({t: flows[t] for t in members if t in flows})
-        aggregates.append({"name": name, "members": list(members), **total})
+        groups = set(F.US_EQUITY_GROUPS) if name == "US equity" else {group_of[t] for t in members}
+        aggregates.append({"name": name, "members": list(members), **total,
+                           "coverage": _coverage(total["latest_funds"], aum,
+                                                 [{"ticker": t, "aum": aum.get(t)} for t in members
+                                                  if t not in total["latest_funds"]]
+                                                 + [n for n in not_covered if n["group"] in groups])})
     us = next(a for a in aggregates if a["name"] == "US equity")
 
     sectors = [
@@ -184,7 +241,7 @@ def build(ctx, inputs: dict) -> dict:
         "funds": rows,
         "aggregates": aggregates,
         "sectors": sectors,
-        "not_covered": [{"ticker": t, "label": label, "reason": reason} for t, label, reason in F.NOT_COVERED],
+        "not_covered": not_covered,
         "excluded_days": sorted(excluded, key=lambda e: (e["date"], e["ticker"])),
         "invesco_recorded_since": min(starts) if starts else None,
         "lag": LAG_NOTE,

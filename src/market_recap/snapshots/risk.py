@@ -78,13 +78,18 @@ BASELINE_NOTE = (
 )
 
 
+# Invesco funds recorded beside those in config ([snapshots.risk] invesco), by
+# CUSIP: QQQM, the other Nasdaq-100 fund, added for the FLOWS tab's coverage.
+INVESCO_RECORDED = {"QQQM": "46138G649"}
+
+
 def _etf_units(settings: Mapping[str, Any], config: Mapping[str, Any],
                fetch_units: Callable[[str], dict]) -> tuple[list[tuple[str, str, pd.Series]], dict, dict]:
     """(series, answered, failed) for the ETFs whose units are recorded here."""
     holdings = config.get("etf_xray", {}).get("holdings", {})
     series, answered, failed = [], {}, {}
-    for ticker in settings.get("invesco", []):
-        cusip = invesco.cusip_for(holdings.get(ticker))
+    for ticker in dict.fromkeys([*settings.get("invesco", []), *INVESCO_RECORDED]):
+        cusip = invesco.cusip_for(holdings.get(ticker)) or INVESCO_RECORDED.get(ticker)
         if not cusip:
             failed[f"invesco {ticker}"] = "no invesco:<CUSIP> entry under [etf_xray.holdings]"
             continue

@@ -201,15 +201,36 @@ def test_build_payload_is_json_clean_and_lists_every_fund(monkeypatch):
         ("invesco_recorded", "Invesco recorded", _provider({"QQQ": frames["QQQ"]}), "https://www.invesco.com"),
     )
     monkeypatch.setattr(P.H, "FLOW_PROVIDERS", providers)
+    # The uncovered funds' assets: VOO from the heat map, the other Vanguard funds from
+    # Vanguard's month-end figure, Schwab's from Yahoo -- all stubbed, no network.
+    monkeypatch.setattr(P.vanguard, "fetch_share_class_assets", lambda t, **k: (1e11, "2026-09-30"))
+    monkeypatch.setattr(P.yahoo, "fetch_fund_snapshot",
+                        lambda tickers: pd.DataFrame({"ticker": list(tickers), "aum": [5e10] * len(tickers)}))
     sessions = _bdays(600)
     ctx = _ctx(sessions)
-    out = P.build(ctx, {})
+    heat = {"etfs": [{"ticker": "VOO", "aum": 1e12, "aum_source": "vanguard_share_class"}]}
+    out = P.build(ctx, {"heatmaps": heat})
     text = json.dumps(out, allow_nan=False)  # would raise on NaN or inf
     assert "NaN" not in text
 
     tickers = [r["ticker"] for r in out["funds"]]
     assert tickers == [t for t, _, _ in F.FUNDS]
-    assert [n["ticker"] for n in out["not_covered"]] == ["VOO", "VTI", "VEA", "VWO"]
+    assert [n["ticker"] for n in out["not_covered"]] == [t for t, _, _, _ in F.NOT_COVERED]
+    voo = next(n for n in out["not_covered"] if n["ticker"] == "VOO")
+    assert voo["aum"] == 1e12 and voo["aum_basis"] == "vanguard_share_class"
+    assert next(n for n in out["not_covered"] if n["ticker"] == "SCHB")["aum_basis"] == "yahoo_total_assets"
+
+    # The S&P 500 group measures SPY and IVV against those plus VOO: its coverage says so.
+    sp = next(a for a in out["aggregates"] if a["name"] == "S&P 500")
+    assert set(sp["latest_funds"]) == {"SPY", "IVV"}
+    # SPYM has no file in this test, so it is missing beside VOO; with no assets known it adds nothing.
+    assert sp["coverage"]["missing"] == ["SPYM", "VOO"]
+    assert sp["coverage"]["pct"] == pytest.approx(
+        100 * sp["coverage"]["covered_aum"] / (sp["coverage"]["covered_aum"] + 1e12), abs=1)
+    # QQQ's ten recorded sessions are in the Nasdaq-100 week, though not in a rank.
+    ndx = next(a for a in out["aggregates"] if a["name"] == "Nasdaq-100")
+    assert ndx["latest_funds"] == ["QQQ"] and ndx["latest"]["flow_1w"] is not None
+    assert ndx["latest"]["pct_rank_1w"] is None
 
     spy = next(r for r in out["funds"] if r["ticker"] == "SPY")
     assert spy["source_id"] == "ssga_nav_history" and spy["flow_1d"] is not None
@@ -263,3 +284,20 @@ def test_a_frozen_issuer_count_blanks_the_windows_it_covers(monkeypatch):
     assert spy["flow_1m"] is None
     assert spy["shares_unchanged_since"] is not None
     assert spy["flow_3m"] is None  # the 63-session window lies wholly inside the 99 frozen sessions
+
+
+def test_a_recent_fund_counts_in_the_latest_week_but_not_in_the_line_or_its_rank():
+    long = pd.Series(1e8, index=_bdays(400))
+    recent = pd.Series(5e8, index=_bdays(400)[-30:])
+    out = F.aggregate({"OLD": long, "NEW": recent})
+    assert out["funds"] == ["OLD"] and out["excluded"] == ["NEW"]
+    assert out["latest_funds"] == ["OLD", "NEW"]
+    assert out["latest"]["flow_1w"] == pytest.approx(5 * (1e8 + 5e8))
+    assert out["flow"][-1] == pytest.approx(1e8)  # the day-by-day line keeps to OLD
+
+
+def test_a_fund_whose_record_stopped_is_not_in_the_latest_week():
+    days = _bdays(400)
+    out = F.aggregate({"LIVE": pd.Series(1e8, index=days), "STOPPED": pd.Series(5e8, index=days[:-10])})
+    assert out["latest_funds"] == ["LIVE"]
+    assert out["latest"]["flow_1w"] == pytest.approx(5e8)

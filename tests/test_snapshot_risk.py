@@ -88,7 +88,9 @@ def test_invesco_units_are_recorded_and_read_back_as_a_flow_record(tmp_path, mon
         "etf_xray": {"holdings": {"QQQ": "invesco:46090E103"}},
     })
     first = snap.run(root=tmp_path, now=datetime(2026, 9, 28, 23, 17, tzinfo=timezone.utc), fetch_units=units, **empty)
-    assert first["answered"]["invesco QQQ"] == 1 and asked == ["46090E103"]
+    # QQQ from config, then QQQM from the module's own list, by its CUSIP.
+    assert first["answered"]["invesco QQQ"] == 1 and asked == ["46090E103", "46138G649"]
+    assert first["answered"]["invesco QQQM"] == 1
     assert snapshot_store.etf_units("QQQ").empty          # one day is not yet a flow
     snapshot_store._RISK_ROWS.clear()
     snap.run(root=tmp_path, now=datetime(2026, 9, 29, 12, 7, tzinfo=timezone.utc), fetch_units=units, **empty)

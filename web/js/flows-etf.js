@@ -138,6 +138,24 @@ function sectorChart(node, sectors) {
   }));
 }
 
+// "S&P 500: 1W −$4.1bn · 1M +$10.6bn · 1W rank 24th pct · covers ~65% of assets (not VOO) · SPY, IVV, SPYM · as of 2026-10-22"
+export function aggregateLine(agg) {
+  if (!agg || !agg.latest || !present(agg.latest.flow_1w)) return null;
+  const funds = agg.latest_funds?.length ? agg.latest_funds : agg.funds || [];
+  const ranked = (agg.funds || []).length && (agg.funds || []).length < funds.length
+    ? ` (rank on ${agg.funds.length > 4 ? `the ${agg.funds.length} funds with a year on record` : agg.funds.join(', ')})` : '';
+  const cover = agg.coverage && present(agg.coverage.pct)
+    ? ` · covers ~${num(agg.coverage.pct, 0)}% of assets${agg.coverage.missing?.length ? ` (not ${agg.coverage.missing.join(', ')})` : ''}`
+    : '';
+  const parts = [
+    `${agg.name}: 1W ${dollars(agg.latest.flow_1w)}`,
+    `1M ${dollars(agg.latest.flow_1m)}`,
+    `1W rank ${rankText(agg.latest.pct_rank_1w)}${ranked}${cover}`,
+    funds.length > 6 ? `${funds.length} funds` : funds.join(', '),
+  ];
+  return parts.join(' · ') + (agg.latest_date ? ` · as of ${agg.latest_date}` : '');
+}
+
 function methodFold(data) {
   const since = data.invesco_recorded_since;
   const notCovered = (data.not_covered || []).map((n) => `${n.ticker} (${n.label})`).join(', ');
@@ -145,9 +163,9 @@ function methodFold(data) {
     'Flow is the change in the fund\'s published shares outstanding, times that day\'s NAV. It is the primary-market money (authorised participants creating and redeeming units), not the end buyer.',
     'Each fund\'s as-of date is its issuer\'s own last published date. The issuer publishes after the close, so the lag is about one session; that lag is not measured here.',
     'Split days: when units and NAV move inversely by a whole-number factor the flow is withheld and listed in the excluded days. Nothing is forward-filled: a window containing a withheld day is blank.',
-    `Invesco publishes only today's unit count, so QQQ and RSP flow is recorded nightly${since ? ` since ${since}` : ''}. They have no year on record yet, so they carry no percentile and join no total.`,
-    `Not covered: ${notCovered || 'none'}. Vanguard publishes no share-count history on the endpoints this page reads.`,
-    'A total sums the funds that have a flow that day; the count is shown per day. A fund whose history starts inside the window is left out.',
+    `Invesco publishes only today's unit count, so QQQ, QQQM and RSP flow is recorded nightly${since ? ` since ${since}` : ''}. Under a year on record they carry no percentile.`,
+    `Not covered: ${notCovered || 'none'}. Vanguard publishes only month-end share-class assets, rounded, and Schwab's pages refuse automated requests. Their assets count against each group's coverage, so the coverage figure says how much of the group's money the total measures (approximate: those assets are month-end or a vendor's figure).`,
+    'US equity funds are grouped by the index they track; the US equity total counts every covered index fund once, sectors not included. A week or month total counts every fund whose record covers that window; the day-by-day line and its rank keep to the funds with a year on record, so a newly recorded fund does not look like a jump.',
     '1W RANK is the latest 5-session flow\'s percentile among every 5-session flow of the last three years. It is blank under a year of history.',
     data.lag,
   ].filter(Boolean);
@@ -179,13 +197,8 @@ export function section(data) {
     const agg = aggregates.find((a) => a.name === active);
     const populated = Boolean(agg && agg.dates.length);
     chartNode.hidden = !populated;
-    if (populated) {
-      aggregateChart(chartNode, agg);
-      const dated = agg.latest_date ? `as of ${agg.latest_date}` : '';
-      latest.textContent = `${agg.name}: 1W ${dollars(agg.latest.flow_1w)} · 1M ${dollars(agg.latest.flow_1m)} · 1W rank ${rankText(agg.latest.pct_rank_1w)} · ${agg.funds.join(', ')} ${dated}`;
-    } else {
-      latest.textContent = `${active}: no total for this build.`;
-    }
+    if (populated) aggregateChart(chartNode, agg);
+    latest.textContent = aggregateLine(agg) || `${active}: no total for this build.`;
   };
   const chips = aggregates.length
     ? periodSwitch(aggregates.map((a) => a.name), active, (name) => { active = name; draw(); })
