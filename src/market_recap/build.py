@@ -16,7 +16,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalyst_log, catalysts, chain, credit, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, flows, heatmaps, industries, kshape, macro, market_state, markets, monitor, moves, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, sizek, themes, today, valuation, watch, xray
+from .panels import anchor, catalyst_log, catalysts, chain, credit, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, flows, heatmaps, industries, kshape, macro, market_state, markets, monitor, moves, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, segments, sizek, themes, today, valuation, watch, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -54,6 +54,8 @@ PANELS = {
     # European indices, supersector funds and members from Yahoo; reads no other panel.
     "europe": europe.build,
     "heatmaps": heatmaps.build,
+    # Segment, product and region breakdowns from the filings' own XBRL; reads no other panel.
+    "segments": segments.build,
     # Reads this session's VALUATION (per-company P/E and EPS histories), so after it.
     "kshape": kshape.build,
     "sizek": sizek.build,
@@ -87,7 +89,7 @@ PANELS = {
     # TODAY reads this session's calendar, moves, market state, risk, positioning, monitor, themes and watch, so last.
     "today": today.build,
 }
-SEC_PANELS = {"financials", "valuation", "dcf", "credit"}
+SEC_PANELS = {"financials", "valuation", "dcf", "credit", "segments"}
 
 
 def _carry_monitor(base_url: str, ctx, exc: Exception) -> dict | None:

@@ -18,6 +18,7 @@ import { moveCard } from '../moves-card.js';
 import { viewTabs } from '../view-tabs.js';
 import { renderEarningsForward } from './valuation.js';
 import { comparisonCard } from '../valuation-compare.js';
+import { segmentsCard } from '../segments-card.js';
 
 const BILLION = 1e9;
 // The multiples shown in the header block, in this order. The full set is on
@@ -355,7 +356,7 @@ async function section(root, title, draw) {
   }
 }
 
-const NEW_PANELS = new Set(['moves', 'credit']);
+const NEW_PANELS = new Set(['moves', 'credit', 'segments']);
 
 // The company's equity-implied default risk (CREDIT): its distance to default, the
 // model's probability and where today sits in its own five years. A description, not
@@ -410,8 +411,8 @@ export function tickerArgFor(symbol, view) {
 }
 
 export default async function renderTicker(root, valuation, manifest, ctx) {
-  const [monitor, technicals, financials, dcf, crossListing, evidence, events, themes, chain, sectors, moves, credit] = await Promise.all(
-    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events', 'themes', 'chain', 'sectors', 'moves', 'credit']
+  const [monitor, technicals, financials, dcf, crossListing, evidence, events, themes, chain, sectors, moves, credit, segments] = await Promise.all(
+    ['monitor', 'technicals', 'financials', 'dcf', 'cross_listing', 'evidence', 'events', 'themes', 'chain', 'sectors', 'moves', 'credit', 'segments']
       // MOVES and CREDIT are new: asked for only when this build made them (a 404 fails the smoke test).
       .map((name) => (NEW_PANELS.has(name) && !manifest?.panels?.includes(name) ? null : optional(ctx, name))),
   );
@@ -517,6 +518,13 @@ export default async function renderTicker(root, valuation, manifest, ctx) {
   };
   const financialsPane = async (host) => {
     if (!company) return [gap(`${symbol} has no filed statements: it is a fund, an index or a non-member.`)];
+    await section(host, 'BY BUSINESS — SEGMENTS, PRODUCTS & REGIONS · SEC XBRL', async (inner) => {
+      if (!segments) throw new Error('BY BUSINESS was not built for this session.');
+      const entry = (segments.available || []).find((a) => a.ticker === symbol);
+      if (!entry) throw new Error(`${symbol}: ${segments.skipped?.[symbol] || 'no breakdown in this build'}.`);
+      inner.append(segmentsCard(await ctx.loadArtifact(`segments/${encodeURIComponent(symbol)}`)));
+      return 'from the company\'s own 10-K / 10-Q';
+    });
     await section(host, 'FINANCIALS — FILED ANNUAL STATEMENTS · SEC XBRL', (inner) => {
       if (!financials) throw new Error('FINANCIALS was not built for this session.');
       if (!financials.available.some((c) => c.ticker === symbol)) {
