@@ -4,6 +4,7 @@ import { finite, parseInput, prepareReverseInputs, scenarioValue, requiredMargin
 import { historicalContext, scenarioCharts, marginReferenceState, industryComparators, openingGrowth, plausibleBox, growthWindow, marginScale } from '../reverse-dcf-context.js';
 import { drawHistory, drawFrontier, drawSensitivity } from '../reverse-dcf-charts.js';
 import { disposeWithin } from '../charts.js';
+import { consensusGrowthRanges } from '../consensus-growth-ranges.js';
 
 const BILLION = 1e9;
 // 'ANALYST FY REVENUE GROWTH' -> 'analyst FY revenue growth' for use mid-sentence.
@@ -190,6 +191,7 @@ function renderModel(root, row, annual, facts, cfg, asOf, universeRows, riskFree
       table(['PERIOD END', 'FILED', 'REVENUE ($B)', 'YOY GROWTH', 'GROSS MARGIN', 'OP MARGIN', 'CASH CAPEX / SALES'], history.rows.map((r) => el('tr', {}, [r.period_end, r.filed, finite(r.revenue) ? num(r.revenue / BILLION, 2) : DASH, formatPercent(r.growth), formatPercent(r.grossMargin), formatPercent(r.operatingMargin), formatPercent(r.capexShare)].map((text) => el('td', { text }))))),
     ]),
   ]);
+  historyFold.open = true;
   const primaryCagr = history.cagr.at(-1);
   root.append(card('01 · WHAT HAS THE COMPANY DELIVERED?', el('span', { class: 'dim', text: `Annual through ${facts.column.period_end}` }), [
     el('div', { class: 'stat-strip reverse-key-stats' }, [
@@ -200,7 +202,7 @@ function renderModel(root, row, annual, facts, cfg, asOf, universeRows, riskFree
   ]));
   root.append(card('02 · WHAT DOES THIS PRICE REQUIRE?', el('span', { class: 'dim', text: 'Scenario, not forecast' }), [
     resultHost, assumptionSummary, checkHost, scenarioEditor,
-    el('p', { class: 'reverse-chart-guide', text: 'READ THE CHART · each curve is the margin the price requires at that growth, for one WACC. Shaded box: analysts\' growth range × the company\'s reported margin range. A curve through the box is met by outcomes inside the company\'s own evidence; a curve above it needs more than that evidence shows.' }),
+    el('p', { class: 'reverse-chart-guide', text: 'READ THE CHART · each curve is the margin the price requires at that growth, for one WACC. Shaded box: near-term analysts\' growth ranges × historical reported margins. These cover different horizons: their intersection is not a validated long-term scenario or a probability region.' }),
     frontierChart,
     el('p', { class: 'note-text', text: 'Diamond: your scenario (above its curve, model EV exceeds working EV). Dotted line: median reported margin. Gaps lie outside the solve range.' }),
     evidenceHost,
@@ -214,7 +216,7 @@ function renderModel(root, row, annual, facts, cfg, asOf, universeRows, riskFree
   sensitivityFold.addEventListener('toggle', update);
   const audit = [];
   audit.push(el('details', { class: 'method-fold' }, [el('summary', { text: 'Inspect curve & sensitivity values' }), chartData]));
-  audit.push(el('details', { class: 'method-fold' }, [el('summary', { text: 'Valuation details · EV, gap & terminal dependence' }), valuationDetails]));
+  audit.push(el('details', { class: 'method-fold' }, [el('summary', { text: 'Valuation details · implied rate, EV & terminal dependence' }), valuationDetails]));
   audit.push(el('details', { class: 'method-fold' }, [el('summary', { text: 'Growth × margin scenario grid · enterprise-value gaps' }),
     el('p', { class: 'note-text', text: 'Pick a cell to inspect that scenario. These are enterprise-value gaps, not expected stock returns. A positive gap does not establish that the stock is cheap.' }), gridHost,
   ]));
@@ -259,10 +261,7 @@ function renderModel(root, row, annual, facts, cfg, asOf, universeRows, riskFree
     if (consensus?.periods?.length && consensus.observed_at && consensus.observed_market_date) {
       const later = consensus.observed_market_date > asOf;
       evidenceHost.append(el('p', { class: later ? 'note-text reverse-caution' : 'note-text', text: `${consensus.source} · fetched ${consensus.observed_at.slice(0, 10)}${later ? `, after the ${asOf} price session` : ''}. Fetch time, not the estimates' revision time.` }));
-      evidenceHost.append(table(['FISCAL YEAR END', 'REVENUE GROWTH', 'ANALYST LOW–HIGH', 'REVENUE ANALYSTS'], consensus.periods.map((period) => el('tr', {}, [
-        period.end, formatPercent(period.growth_pct), `${formatPercent(period.growth_low_pct)} to ${formatPercent(period.growth_high_pct)}`,
-        finite(period.analysts) ? num(period.analysts, 0) : DASH,
-      ].map((text) => el('td', { text }))))));
+      evidenceHost.append(consensusGrowthCards(consensus.periods));
       evidenceHost.append(el('p', { class: 'note-text', text: 'Growth is on Yahoo’s own prior-year base. Low–high is analyst dispersion, not a probability interval.' }));
       if (consensus.periods.some((p) => p.range_issue)) evidenceHost.append(el('p', { class: 'note-text reverse-caution', text: 'An inconsistent vendor estimate range was withheld; the mean was retained.' }));
       evidenceHost.append(el('a', { href: `https://finance.yahoo.com/quote/${encodeURIComponent(row.ticker)}/analysis/`, target: '_blank', rel: 'noopener', text: 'Yahoo analyst estimates ↗' }));
@@ -331,13 +330,17 @@ function renderModel(root, row, annual, facts, cfg, asOf, universeRows, riskFree
     const requiredStat = stat('REQUIRED MARGIN', finite(requiredPct) ? formatPercent(requiredPct) : 'OUTSIDE RANGE',
       `At ${formatPercent(state.growth)} growth and ${formatPercent(state.wacc)} WACC${versus ? ` · ${versus}` : ''}`);
     requiredStat.className = `stat reverse-reference-${reference.tone}`;
-    resultHost.append(el('div', { class: 'stat-strip' }, [impliedStat, requiredStat]));
+    resultHost.append(el('div', { class: 'stat-strip' }, [requiredStat,
+      stat('SCENARIO OPERATING MARGIN', formatPercent(state.margin), 'Your assumption, not forward margin consensus. Historical median is a reference, not a target.'),
+    ]));
     resultHost.append(marginBar(requiredPct, history, peers, reference));
     valuationDetails.append(el('div', { class: 'stat-strip' }, [
+      impliedStat,
       stat('SELECTED SCENARIO EV', currency(value.ev), `${num(state.margin, 1)}% sustainable operating margin`),
       stat('ENTERPRISE VALUE GAP', `${pct(gap, 1)}`, 'Against working EV; not share-price upside'),
       stat('TERMINAL PV / MODEL EV', value.ev > 0 ? formatPercent(value.terminalPv / value.ev * 100) : DASH, 'Dependence on value beyond the explicit horizon'),
     ]));
+    valuationDetails.append(el('p', { class: 'note-text', text: 'The implied rate is conditional on every operating assumption and applies to enterprise cash flows, not an expected equity return. Its difference from the Treasury yield is not an equity risk premium.' }));
     valuationDetails.append(el('p', { class: 'note-text', text: `Assumptions: ${state.years} forecast years · ${state.transitionYears}-year margin transition · operating tax ${num(state.tax, 1)}% · terminal growth ${num(state.terminalGrowth, 1)}% · terminal ROIC ${num(state.terminalRoic, 1)}%. All are editable scenario inputs, not estimates.` }));
     if (value.path.some((year) => year.fcf < 0)) resultHost.append(el('p', { class: 'note-text reverse-caution', text: 'This scenario has negative forecast free cash flow. External financing and dilution are not modelled.' }));
     if (solved.status !== 'solved') {
@@ -379,6 +382,39 @@ function renderModel(root, row, annual, facts, cfg, asOf, universeRows, riskFree
   }
   renderEvidence();
   update();
+}
+
+export function consensusGrowthCards(periods) {
+  const ranges = consensusGrowthRanges(periods);
+  const percent = (v) => finite(v) ? `${num(v, 1)}%` : DASH;
+  const cards = ranges.rows.map(({ period, mean, low, high, hasRange, invalid, geometry: g }) => {
+    const reading = `${period.end || 'Fiscal year unknown'}: revenue growth ${percent(mean)}; analyst low ${percent(low)}, high ${percent(high)}. Analyst dispersion, not a confidence interval.`;
+    return el('div', { class: 'reverse-consensus-card' }, [
+      el('div', { class: 'reverse-consensus-head' }, [
+        el('span', { text: `FY END ${period.end || DASH}` }),
+        el('span', { text: `${finite(period.analysts) ? num(period.analysts, 0) : DASH} revenue analysts` }),
+      ]),
+      el('div', { class: 'reverse-consensus-mean' }, [
+        el('strong', { text: percent(mean) }), el('span', { text: 'REVENUE GROWTH · CONSENSUS' }),
+      ]),
+      g && (mean !== null || hasRange) ? el('div', { class: 'ec-rbar-wrap', role: 'img', 'aria-label': reading }, [
+        el('div', { class: 'ec-rbar' }, [
+          hasRange ? el('div', { class: 'ec-rbar-box', style: `left:${g.lowAt}%;width:${g.width}%` }) : null,
+          el('div', { class: 'ec-rbar-ref', style: `left:${g.zeroAt}%`, title: '0% revenue growth' }),
+          mean !== null ? el('div', { class: 'ec-rbar-point', style: `left:${g.meanAt}%`, title: `Consensus ${percent(mean)}` }) : null,
+        ]),
+        el('div', { class: 'ec-rbar-labels' }, [
+          el('span', { text: `LOW ${percent(low)}` }), el('span', { text: '┆ 0% growth' }), el('span', { text: `HIGH ${percent(high)}` }),
+        ]),
+      ]) : null,
+      !hasRange ? el('p', { class: 'note-text', text: invalid ? 'Inconsistent analyst range withheld; no band drawn.' : 'Analyst low–high unavailable; no band inferred.' }) : null,
+      mean === null ? el('p', { class: 'note-text', text: 'Mean growth unavailable; no consensus dot drawn.' }) : null,
+    ]);
+  });
+  return el('div', { class: 'reverse-consensus' }, [
+    el('div', { class: 'reverse-consensus-grid' }, cards),
+    el('p', { class: 'note-text', text: `Blue band = analyst low–high · amber dot = consensus mean · dashed line = zero growth.${finite(ranges.min) ? ` Shared growth scale across fiscal years: ${percent(ranges.min)} to ${percent(ranges.max)}.` : ''} No probability or forecast accuracy is implied.` }),
+  ]);
 }
 
 // One bar for the margin question: the company's reported range, its peers'

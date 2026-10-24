@@ -17,6 +17,7 @@ import { chainCard } from '../chain-card.js';
 import { moveCard } from '../moves-card.js';
 import { viewTabs } from '../view-tabs.js';
 import { renderEarningsForward } from './valuation.js';
+import { comparisonCard } from '../valuation-compare.js';
 
 const BILLION = 1e9;
 // The multiples shown in the header block, in this order. The full set is on
@@ -505,6 +506,11 @@ export default async function renderTicker(root, valuation, manifest, ctx) {
       await section(host, 'EARNINGS & FORWARD P/E', (inner) => renderEarningsForward(inner, symbol, valuation));
     }
     host.append(valuationCard(symbol, row, valuation));
+    // Folded below the company's own valuation, which this page leads with.
+    if (row) {
+      const compare = comparisonCard(valuation, { selectedTicker: symbol, idPrefix: 'ticker-compare', fold: true });
+      if (compare) host.append(compare);
+    }
     const creditNode = creditCard(symbol, credit);
     if (creditNode) host.append(creditNode);
     return null;

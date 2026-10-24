@@ -1704,3 +1704,47 @@ table.data tr.total td { font-weight: 600; border-top: 1px solid var(--border-st
 @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
 .live-controls .live-badge { margin-right: 8px; }
 .today-live-stamp { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
+
+/* Valuation evidence: descriptive blue / amber, never cheap = green. */
+.valuation-lower { color: var(--blue); }
+.valuation-higher { color: var(--accent); }
+.compare-controls .field { flex: 0 1 auto; min-width: 0; }
+.compare-controls input { width: 120px; max-width: 100%; }
+.compare-controls select { max-width: 100%; }
+.compare-status { line-height: 1.6; }
+.compare-price { border-left: 3px solid var(--blue); padding: 8px 14px; margin: 14px 0; background: var(--panel-alt); }
+.compare-price-title { font-size: 20px; font-weight: 700; line-height: 1.4; }
+.compare-price-values { font-size: 16px; font-weight: 600; margin: 5px 0; }
+.compare-evidence-title { font-size: 11px; letter-spacing: .08em; margin: 18px 0 8px; color: var(--text-dim); }
+table.compare-table { min-width: 590px; }
+table.compare-table td { padding: 10px 8px; vertical-align: top; }
+table.compare-table .compare-dimension { width: 44%; font-weight: 600; white-space: normal; }
+table.compare-table .compare-reading { width: 30%; white-space: normal; text-align: left; }
+table.compare-table th:last-child { text-align: left; }
+.compare-table .sub { font-weight: 400; line-height: 1.5; margin-top: 5px; }
+.compare-reading-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+.compare-supports { color: var(--blue); }
+.compare-counterpoint { color: var(--accent); }
+.compare-context, .compare-unknown, .compare-similar { color: var(--text-dim); }
+.compare-limit { margin: 12px 0; line-height: 1.6; }
+.compare-links { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0; }
+.compare-audit { margin-top: 10px; }
+.compare-basis-note { max-width: 95ch; line-height: 1.6; }
+.reverse-consensus-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+.reverse-consensus-card { min-width: 0; padding: 14px 16px; border: 1px solid var(--border); background: var(--panel-alt); }
+.reverse-consensus-head { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; color: var(--text-dim); font-size: 11px; }
+.reverse-consensus-mean { display: flex; align-items: baseline; gap: 10px; margin: 10px 0 14px; flex-wrap: wrap; }
+.reverse-consensus-mean strong { font-size: 26px; line-height: 1.2; }
+.reverse-consensus-mean span { font-size: 10px; color: var(--text-dim); }
+.reverse-consensus-card .ec-rbar { height: 12px; }
+.reverse-consensus-card .ec-rbar-point { width: 10px; height: 10px; margin-left: -5px; margin-top: -5px; }
+.reverse-consensus-card .ec-rbar-box { min-width: 1px; }
+.reverse-consensus-card .ec-rbar-labels { font-size: 11px; margin-top: 8px; flex-wrap: wrap; }
+@media (max-width: 720px) { .reverse-consensus-grid { grid-template-columns: minmax(0, 1fr); } }
+.valuation-history-fold { margin: 8px 0 16px; }
+@media (max-width: 600px) {
+  .compare-price-title { font-size: 17px; }
+  .compare-controls { gap: 8px; }
+  .compare-controls .field { flex: 1 1 110px; }
+  .compare-controls input, .compare-controls select { width: 100%; }
+}

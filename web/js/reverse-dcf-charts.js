@@ -34,11 +34,10 @@ export function frontierOption(base, p, curves, history, scenario, cfg, box = nu
   const colors = [p.blue, p.accent, p.purple];
   const series = curves.map((curve, i) => ({ name: `WACC ${percent(curve.wacc * 100)}`, type: 'line', data: curve.points,
     connectNulls: false, showSymbol: false, lineStyle: { width: curve.shift === 0 ? 2.5 : 1.5, type: curve.shift === 0 ? 'solid' : 'dashed', color: colors[i % colors.length] }, itemStyle: { color: colors[i % colors.length] } }));
-  // The box is where the company's own evidence sits: analysts' growth range
-  // across its reported margin range. A WACC curve crossing it means the
-  // price is met by outcomes already inside that evidence.
+  // Different-horizon reference ranges, not evidence that their Cartesian
+  // product is a jointly feasible long-term outcome or a probability region.
   const area = box ? { silent: true, itemStyle: { color: p.accent, opacity: 0.28, borderColor: p.accent, borderWidth: 1.5 },
-    label: { show: true, position: 'insideTopLeft', color: p.dim, fontSize: 10, formatter: 'own evidence' },
+    label: { show: true, position: 'insideTopLeft', color: p.dim, fontSize: 10, formatter: 'reference ranges' },
     data: [[{ xAxis: box.growth[0], yAxis: box.margin[0] }, { xAxis: box.growth[1], yAxis: box.margin[1] }]] } : undefined;
   series.push({ name: 'Your growth / margin', type: 'scatter', symbol: 'diamond', symbolSize: 12,
     data: [[scenario.growth * 100, scenario.margin * 100]], itemStyle: { color: p.text }, markArea: area,

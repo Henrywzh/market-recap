@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import render from '../../web/js/tabs/reverse-dcf.js';
+import render, { consensusGrowthCards } from '../../web/js/tabs/reverse-dcf.js';
 
 class Node {
   constructor(tag) { this.nodeType = 1; this.tagName = tag.toUpperCase(); this.children = []; this.attrs = {}; this.listeners = {}; this.textContent = ''; this.value = ''; }
@@ -140,10 +140,11 @@ test('guided reading order leads with history, then conditional requirements, th
   const three = copy.indexOf('03 · HOW SENSITIVE IS THE ANSWER?');
   assert.ok(one > 0 && one < two && two < three);
   assert.match(copy, /not forecasts or a cheap \/ expensive verdict/);
-  assert.ok(copy.indexOf('IMPLIED DISCOUNT RATE') > two && copy.indexOf('IMPLIED DISCOUNT RATE') < copy.indexOf('REQUIRED MARGIN'));
+  assert.ok(copy.indexOf('REQUIRED MARGIN') > two && copy.indexOf('REQUIRED MARGIN') < three);
+  assert.ok(copy.indexOf('IMPLIED DISCOUNT RATE') > copy.indexOf('DETAILS & AUDIT'));
   assert.ok(copy.indexOf('DETAILS & AUDIT') > three);
   assert.ok(!byId(root, 'reverse-editor').open);
-  assert.ok(!byId(root, 'reverse-history-fold').open);
+  assert.equal(byId(root, 'reverse-history-fold').open, true);
   assert.ok(!byId(root, 'reverse-sensitivity-fold').open);
 }));
 
@@ -178,12 +179,28 @@ test('dated FY revenue consensus shows ranges / revenue analyst count and warns 
   assert.match(copy, /ANALYST FY REVENUE GROWTH/);
   assert.match(copy, /2027-06-30/);
   assert.match(copy, /2.1%/);
-  assert.match(copy, /1.5% to 2.9%/);
-  assert.match(copy, /REVENUE ANALYSTS/);
+  assert.match(copy, /LOW 1.5%.*HIGH 2.9%/);
+  assert.match(copy, /22 revenue analysts/);
+  assert.equal(all(root).filter((n) => n.className === 'ec-rbar-box').length, 1);
+  assert.equal(all(root).filter((n) => n.className === 'ec-rbar-point').length, 1);
   assert.match(copy, /Forward|forward operating-margin consensus/);
   assert.match(copy, /not a probability interval/);
 }, { rows: [{ ...row, revenue_consensus: { source: 'Yahoo earningsTrend (unofficial)', observed_at: '2026-10-17T21:11:43Z', observed_market_date: '2026-10-17',
   periods: [{ end: '2027-06-30', growth_pct: 2.1, growth_low_pct: 1.5, growth_high_pct: 2.9, analysts: 22 }] } }] }));
+
+test('consensus cards omit missing marks and withhold invalid bands without losing a real zero mean', async () => fixture(async () => {
+  const cards = consensusGrowthCards([
+    { end: '2027-06-30', growth_pct: 0, growth_low_pct: null, growth_high_pct: null, analysts: null },
+    { end: '2028-06-30', growth_pct: null, growth_low_pct: null, growth_high_pct: null },
+    { end: '2029-06-30', growth_pct: 3, growth_low_pct: 5, growth_high_pct: 1 },
+  ]);
+  assert.equal(all(cards).filter((n) => n.className === 'ec-rbar-box').length, 0);
+  assert.equal(all(cards).filter((n) => n.className === 'ec-rbar-point').length, 2);
+  assert.match(text(cards), /0.0% REVENUE GROWTH/);
+  assert.match(text(cards), /Mean growth unavailable; no consensus dot drawn/);
+  assert.match(text(cards), /Inconsistent analyst range withheld/);
+  assert.doesNotMatch(text(cards), /NaN|undefined/);
+}));
 
 test('short historical sample gets neutral color, not a spurious cheap / expensive verdict', async () => fixture(async (root) => {
   const primary = all(root).find((n) => n.className === 'reverse-results');
@@ -199,10 +216,14 @@ test('thin industry group exposes members and suppresses an unreliable peer medi
   assert.match(text(root), /not validated business-model peers/);
 }, { rows: [row, { ...row, ticker: 'PEER1', operating_margin: 10 }, { ...row, ticker: 'PEER2', operating_margin: -2 }] }));
 
-test('the headline gives the implied discount rate against the 10-year yield, and the bar marks the requirement', async () => fixture(async (root) => {
+test('the headline leads with required margin; the conditional enterprise rate stays in audit', async () => fixture(async (root) => {
   const primary = all(root).find((n) => n.className === 'reverse-results');
-  assert.match(text(primary), /IMPLIED DISCOUNT RATE \d+\.\d%/);
-  assert.match(text(primary), /10Y Treasury 5.1%/);
+  assert.doesNotMatch(text(primary), /IMPLIED DISCOUNT RATE|10Y Treasury/);
+  assert.match(text(primary), /REQUIRED MARGIN.*SCENARIO OPERATING MARGIN/);
+  const audit = all(root).find((n) => n.className === 'reverse-valuation-details');
+  assert.match(text(audit), /IMPLIED DISCOUNT RATE \d+\.\d%/);
+  assert.match(text(audit), /10Y Treasury 5.1%/);
+  assert.match(text(audit), /not an equity risk premium/);
   const bar = all(primary).find((n) => n.className === 'reverse-bar');
   assert.ok(bar);
   assert.ok(all(bar).some((n) => String(n.className).startsWith('reverse-bar-required')));

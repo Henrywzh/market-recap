@@ -70,16 +70,20 @@ operating-margin median, with actual coverage), what the working price/EV
 requires, and how sensitive the answer is (terminal dependence and an expandable
 chart).
 
-Section 02 leads with two numbers:
+Section 02 leads with **required margin** at the chosen growth / WACC and the
+**scenario operating margin** the user selected. The historical median is a
+reference, not a target or a forecast. The conditional required-margin marker
+retains its historical-range color; it is not a cheap/expensive signal.
+
+Inside DETAILS & AUDIT:
 
 - **Implied discount rate**: the rate at which model EV equals working EV, with
   growth, margin, tax, reinvestment and terminal assumptions held. It is solved
   by bisection between just above terminal growth and 50%. A target outside that
   span is named ("< x%" / "> 50%"), never clamped. It is shown against the build's
   10-year Treasury yield (`dcf.json` `risk_free_rate`). It is an enterprise-level
-  rate, not an expected share return.
-- **Required margin**: the conditional margin at the chosen WACC, with its
-  distance from the company's own median.
+  rate, not an expected share return. Its difference from the Treasury yield is
+  not an equity risk premium.
 
 Under them, one bar puts three things on a 0-to-top margin scale:
 - the company's reported operating-margin range;
@@ -92,26 +96,40 @@ the configured growth step. The height fits the chosen-WACC curve over the box's
 growth span, so a narrow margin range stays visible; other curves may leave the
 top.
 
-The shaded **evidence box** spans:
+The shaded **reference ranges** span:
 - growth: analysts' revenue growth low–high across both fiscal years. Without a
   range it uses their means, and without consensus the reported CAGRs, widened to
   at least 1 point;
 - margin: the company's reported operating-margin range.
 
-A WACC curve through the box is met by outcomes inside the company's own
-evidence; a curve above it needs more than that evidence shows. The box is not a
-probability region. A scenario above/below its WACC curve has model EV above/below working
+The axes combine different horizons: near-term FY consensus (or historical CAGR)
+and historical margins. Crossing this box does not validate a jointly feasible
+long-term outcome. It is not a probability region. A scenario above/below its WACC curve has model EV above/below working
 EV; neither is an automatic share valuation verdict. Future economics must be
 judged against credible expectations, not mechanically extrapolated from history.
 
 The assumption editor is folded below the requirement summary, with key inputs
 and default/edited status always visible. All fields and origin labels remain
 available; missing EV opens the editor and its advanced section automatically.
-Audit EV/gap statistics, source rows and paths are retained in folds. Historical
-and sensitivity charts draw only when their own fold is open; toggling re-renders
+Audit EV/gap statistics, source rows and paths are retained in folds. History
+opens by default; the reader can collapse it. Historical and sensitivity charts
+draw only when their own fold is open; toggling re-renders
 without resetting edits, and closing disposes hidden charts. No formula, opening
 assumption, source, date or new valuation judgement is introduced by the guided
 layout.
+
+FY revenue consensus is shown as one card per fiscal endpoint: mean growth,
+analyst count, low–high band and a mean dot, with a zero-growth reference. All
+cards share a growth-% scale for this company, so band widths are comparable.
+No year-ago revenue marker is placed on a growth axis. Missing means omit the
+dot; missing/inverted/vendor-flagged ranges or a mean outside the supplied range
+omit the band. Equal endpoints and zero/negative means remain real observations.
+The band describes analyst dispersion, not confidence, accuracy or probability.
+
+The 2026-10-24 evidence UI trial does not alter any solver, formula, opening
+scenario or input artifact. Growth fade, growth-linked reinvestment, competitive
+durability and a reviewed EV-to-equity bridge remain separate model work, not
+features this layout claims to deliver.
 
 Each map cell is `scenario EV / working EV − 1`. It is **not stock-price upside**
 and not a probability. A cell selection updates growth and margin controls.

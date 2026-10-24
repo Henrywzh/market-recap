@@ -73,16 +73,34 @@ the same section shows dated Yahoo FY revenue estimates and dated GICS-industry
 actual margins where peer coverage is adequate. These are context references,
 not an automatic cheap/expensive call or long-term forecast.
 The default reading order is now **company history → price requirements →
-sensitivity**. Only the required-margin frontier is expanded initially; the
-assumption editor, historical chart, sensitivity chart and EV audit details are
-folded. Headline requirements remain conditional scenarios; see
+sensitivity**. History and the required-margin frontier are expanded initially;
+the assumption editor, sensitivity chart and EV audit details remain folded.
+Headline requirements remain conditional scenarios; see
 [the evidence definitions and limitations](docs/reverse_dcf.md).
-The headline now leads with the **implied discount rate** (the rate at which
-model EV equals working EV, against the 10-year Treasury) beside the required
-margin, and one bar sets the required margin against the company's own range and
-its peers. Growth opens on analysts' FY revenue growth (else the reported CAGR),
-labelled and editable; the frontier shades an **own-evidence box** (analyst
-growth low–high × reported margin range) on axes fitted to the company.
+The headline leads with **required operating margin** beside the selected
+scenario margin. The implied enterprise discount rate and Treasury comparison
+remain in audit details, not as an equity-return estimate. One bar sets the
+required margin against the company's own range and its peers. Growth opens on
+analysts' FY revenue growth (else the reported CAGR), labelled and editable.
+The frontier shades **reference ranges** (near-term analyst growth low–high ×
+historical margin range), not jointly validated long-term outcomes.
+FY revenue consensus now uses low–high bands and mean dots on a shared growth
+scale across fiscal years, with a zero-growth reference and analyst counts.
+Missing / inconsistent bands are withheld, never imputed. Dispersion is not a
+confidence interval. This is presentation only, not a prediction-model change.
+
+**Valuation evidence trial (2026-10-24).** SCREENER and TICKER → VALUATION add
+an A/B same-basis multiple comparison, with separate growth, capital-return,
+cash-conversion and leverage context. Missing, future-dated, different-period or
+non-comparable inputs withhold directional labels. GICS/size peer suggestions
+are not validated business-model matches. Multiples' within-sector rank colors
+are descriptive blue/amber; historical P/E is folded below business history to
+reduce anchoring. No fair multiple, goodwill value or buy/sell score is estimated;
+no financial model formulas change. See [the comparison contract](docs/valuation_comparison.md).
+Forward P/E is the default comparison measure; operating/adjusted trailing P/E,
+reported trailing P/E and book multiples remain explicit alternatives. The
+selected measure explains its earnings base, including banks' ex-gains basis;
+different adjusted earnings bases do not receive directional evidence labels.
 
 **CPI view (2026-10-15).** RATES & MACRO opens on **Treasury rates**, with
 **CPI & macro** and **PPI · AI prices** as the other views. The latest official BLS headline/core

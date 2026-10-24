@@ -77,7 +77,7 @@ export function stripCells(name, benchmark, own, other) {
   const against = benchmark ? ` · vs ${benchmark}` : '';
   return [
     { label: 'TRAILING P/E', value: times(st.current),
-      note: present(st.percentile) ? `${ordinalOf(st.percentile)} pctl of its own ten years · median ${times(st.median)}` : 'too little history to rank' },
+      note: present(st.percentile) ? `${ordinalOf(st.percentile)} pctl of its own ten years · median ${times(st.median)} · history, not fair value` : 'too little history to rank' },
     { label: 'FORWARD P/E · NTM', value: versus(o.forward_pe, b.forward_pe, times),
       note: present(premium) ? `${name} at a ${num(Math.abs(premium), 0)}% ${premium >= 0 ? 'premium' : 'discount'}${against}` : 'consensus, next twelve months' },
     { label: 'EPS GROWTH · NEXT FY', value: versus(o.eps_growth_next, b.eps_growth_next, (v) => signed(v, 0)), note: `consensus${against}` },
@@ -142,7 +142,7 @@ const basisWord = (basis) => BASIS_WORDS[basis] || String(basis || 'reported').r
 // The trailing P/E band of one valuation. A company whose history has a second
 // earnings basis (operating against reported EPS) gets the switch; the others get
 // the plain card, exactly as before.
-function trailingPeCard(valuation, capAxis) {
+function trailingPeCard(valuation, capAxis, historyFold) {
   const alt = valuation.alternate?.pe?.length && valuation.alternate.stats
     ? { basis: valuation.alternate.basis, pe: valuation.alternate.pe, stats: valuation.alternate.stats } : null;
   const views = [{ basis: valuation.basis, pe: valuation.pe, stats: valuation.stats }, ...(alt ? [alt] : [])]
@@ -152,7 +152,7 @@ function trailingPeCard(valuation, capAxis) {
     + `${present(v.stats.percentile) ? ordinalOf(v.stats.percentile) : DASH} OF ITS OWN TEN YEARS`;
   const node = chartNode();
   const draw = () => bandChart(node, active, { compare: views.length > 1 ? views.find((v) => v !== active) : null, capAxis });
-  const note = el('span', { class: 'dim', text: 'weekly · band 25th–75th' });
+  const note = el('span', { class: 'dim', text: 'weekly · historical band, not a valuation target' });
   const right = views.length > 1
     ? el('span', { class: 'tag-row' }, [note, periodSwitch(views.map((v) => basisWord(v.basis)), basisWord(active.basis), (word) => {
       active = views.find((v) => basisWord(v.basis) === word);
@@ -161,7 +161,12 @@ function trailingPeCard(valuation, capAxis) {
     })])
     : note;
   const cardNode = card(titleOf(active), right, [node]);
-  queueMicrotask(draw);
+  // Hidden details have no layout width. Initialise only after opening and
+  // redraw on reopening so the canvas fits the current viewport.
+  if (historyFold) historyFold.addEventListener('toggle', () => {
+    if (historyFold.open) requestAnimationFrame(() => { if (historyFold.open && node.isConnected) draw(); });
+  });
+  else queueMicrotask(draw);
   return cardNode;
 }
 
@@ -216,9 +221,12 @@ export function valuationBlock({ name, benchmark = null, own, other = null, refe
 
   const band = el('div', {});
   const business = el('div', {});
+  // Company-only reading order. Sector / relative-value pages retain their
+  // existing paired layout and fold state.
+  const historyFold = capAxis ? el('details', { class: 'fold valuation-history-fold' }) : null;
   const st = own.valuation?.stats;
   if (own.valuation?.dates?.length && st && present(st.median)) {
-    band.append(trailingPeCard(own.valuation, capAxis));
+    band.append(trailingPeCard(own.valuation, capAxis, historyFold));
   } else {
     band.append(card('TRAILING P/E', null, [gap('Too little P/E history to draw (a loss-making stretch, or a short listing).')]));
   }
@@ -226,12 +234,21 @@ export function valuationBlock({ name, benchmark = null, own, other = null, refe
   if (mine) {
     const node = chartNode();
     business.append(card('THE BUSINESS · BY FISCAL YEAR', el('span', { class: 'dim', text: 'revenue growth (bars) · margins (lines)' }), [node,
-      el('div', { class: 'field-note', text: 'Totals of the companies\' annual filings: each company\'s own fiscal year, so a year mixes year-ends. Gross margin is blank where most of the revenue has no cost-of-revenue line (banks).' })]));
+      el('div', { class: 'field-note', text: capAxis
+        ? 'Reported annual revenue growth and margins, by this company\'s fiscal year. Missing cost-of-revenue inputs leave gross margin blank; reported history is not a forecast.'
+        : 'Totals of the companies\' annual filings: each company\'s own fiscal year, so a year mixes year-ends. Gross margin is blank where most of the revenue has no cost-of-revenue line (banks).' })]));
     queueMicrotask(() => businessChart(node, mine, trimHistory(other?.history), name, benchmark));
   } else {
     business.append(card('THE BUSINESS · BY FISCAL YEAR', null, [gap('No annual filings to total.')]));
   }
-  nodes.push(el('div', { class: 'grid two' }, [band, business]));
+  if (historyFold) {
+    nodes.push(business);
+    historyFold.append(
+      el('summary', { text: 'HISTORICAL MULTIPLE · CONTEXT, NOT A TARGET' }),
+      el('p', { class: 'note-text', text: 'Past multiples reflect past growth, interest rates, competition and accounting. Below the historical median does not mean undervalued; review the business first.' }), band,
+    );
+    nodes.push(historyFold);
+  } else nodes.push(el('div', { class: 'grid two' }, [band, business]));
 
   if (other?.valuation?.dates?.length && own.valuation?.price) {
     const fundamentals = { arms: [

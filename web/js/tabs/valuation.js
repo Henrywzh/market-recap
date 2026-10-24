@@ -1,20 +1,19 @@
 // VALUATION & QUALITY: every index member from its own filings and the close.
 //
-// Colour is a within-sector rank, not an absolute judgement: a utility's P/E
-// is compared with other utilities, never with software. The top fifth by the
-// metric's own "better" direction is green, the bottom fifth red.
+// Colour is a within-sector rank, not an absolute judgement. Valuation ranks
+// use neutral blue/amber rather than implying low multiples are better.
 
 import { el, card, table, num, sectionTitle, notice, metaRow, periodSwitch, DASH } from '../fmt.js';
 import { render, SERIES_COLORS } from '../charts.js';
 import * as FF from '../fiscal-forward.js';
 import { hashFor } from '../routes.js';
+import { comparisonCard } from '../valuation-compare.js';
+import { valuationRankClass } from '../valuation-compare-math.js';
 
 const { quantile } = FF;
 
 const BILLION = 1e9;
 const HISTORY_BASE = 'artifacts/valuation';
-// Share of a sector, from each end, that is coloured.
-const TAIL_SHARE = 0.2;
 // Scatter axes stop at these percentiles so a handful of extreme multiples
 // (a P/E of 900 on near-zero earnings) do not flatten everything else; at
 // the 98th, EV/EBITDA's axis ran to 165x and the market sat in its first fifth.
@@ -66,12 +65,7 @@ function groupBy(items, key) {
   return out;
 }
 
-function rankClass(rank) {
-  if (rank === undefined) return '';
-  if (rank >= 1 - TAIL_SHARE) return 'up';
-  if (rank <= TAIL_SHARE) return 'down';
-  return '';
-}
+const rankClass = valuationRankClass;
 
 // Why a name has no price-implied growth (panels/valuation._expectation_gap).
 const IMPLIED_STATUS = {
@@ -236,7 +230,7 @@ function percentileChart(node, series, selected, onPick, measure = 'P/E') {
       barMaxWidth: 13,
       data: shown.map((s) => {
         const pct = s.stats.percentile;
-        const color = s.kind === 'index' ? p.blue : pct >= 80 ? p.down : pct <= 20 ? p.up : p.accent;
+        const color = s.kind === 'index' ? p.text : pct >= 80 ? p.accent : pct <= 20 ? p.blue : p.dim;
         return {
           value: Math.round(pct),
           itemStyle: { color, opacity: s.key === selected ? 1 : 0.7, borderColor: s.key === selected ? p.text : color, borderWidth: s.key === selected ? 1 : 0 },
@@ -332,8 +326,7 @@ function aggregateSection(data) {
     const st = s.stats || {};
     stats.replaceChildren(
       stat(`P/E (TTM, ${basis.toLowerCase()})`, present(st.current) ? `${num(st.current, 1)}x` : DASH, s.label),
-      stat('OWN 10Y PERCENTILE', present(st.percentile) ? `${num(st.percentile, 0)}th` : DASH, `range ${num(st.min, 1)}x – ${num(st.max, 1)}x`,
-        st.percentile >= 80 ? 'down' : st.percentile <= 20 ? 'up' : ''),
+      stat('OWN 10Y PERCENTILE', present(st.percentile) ? `${num(st.percentile, 0)}th` : DASH, `historical position, not fair value · range ${num(st.min, 1)}x – ${num(st.max, 1)}x`),
       stat('VS 10Y MEDIAN', present(st.vs_median) ? `${st.vs_median > 0 ? '+' : ''}${num(st.vs_median, 0)}%` : DASH, `median ${num(st.median, 1)}x · IQR ${num(st.p25, 1)}–${num(st.p75, 1)}x`),
       stat('COVERAGE', present(s.coverage) ? `${num(s.coverage * 100, 0)}%` : DASH, 'of its market cap with filed EPS'),
       stat('FORWARD P/E (NTM)', present(s.forward_now?.pe) ? `${num(s.forward_now.pe, 1)}x` : DASH,
@@ -345,7 +338,7 @@ function aggregateSection(data) {
   const basisSwitch = bases.length > 1 ? periodSwitch(bases, basis, (b) => { basis = b; draw(); }) : null;
   const section = el('div', { class: 'grid two val-agg' }, [
     card('P/E VS OWN 10 YEARS · INDICES & SECTORS', el('span', { class: 'tag-row' }, [
-      el('span', { class: 'dim', text: 'percentile · red ≥ 80th · green ≤ 20th · click to chart' }), basisSwitch]), [barsNode]),
+      el('span', { class: 'dim', text: 'historical position · amber ≥ 80th · blue ≤ 20th · not fair value' }), basisSwitch]), [barsNode]),
     card('P/E · 10 YEARS', lineTitle, [stats, lineNode]),
   ]);
   requestAnimationFrame(draw);
@@ -556,7 +549,7 @@ function mainTable(rows, metrics, data, sort, onSort, onPick) {
     if (c.key === 'market_cap') return el('td', { text: present(row.market_cap) ? num(row.market_cap / BILLION, 1) : DASH });
     if (c.key === 'period_end') return el('td', { class: 'dim', text: row.period_end + (row.lagged.length ? '*' : '') });
     const rank = ranks.get(row)[c.key];
-    return el('td', { class: rankClass(rank), text: format(row[c.key], c.metric.unit) });
+    return el('td', { class: rankClass(rank, c.metric.group), text: format(row[c.key], c.metric.unit) });
   })));
   const node = el('table', { class: 'data' }, [el('thead', {}, head), el('tbody', {}, body)]);
   return el('div', { class: 'table-scroll' }, node);
@@ -626,6 +619,7 @@ export default async function renderValuation(root, data, _manifest, ctx = {}) {
     return;
   }
   root.append(metaRow(`AS OF ${data.as_of} · ${data.rows.length} COMPANIES FROM THEIR OWN FILINGS · INDEX & SECTOR P/E ARE ON MARKET → SECTORS`));
+  root.append(comparisonCard(data, { selectedTicker: ctx.arg, fold: true, open: Boolean(ctx.arg) }));
 
   const metrics = data.metrics;
   const valuationMetrics = metrics.filter((m) => m.group === 'valuation');
@@ -697,7 +691,9 @@ export default async function renderValuation(root, data, _manifest, ctx = {}) {
   ]));
   root.append(card('VALUATION × QUALITY', null, [scatterNode, scatterNote]));
   root.append(card('SECTOR MEDIANS', null, sectorHost));
-  root.append(card('ALL COMPANIES — COLOURED BY RANK WITHIN SECTOR (TOP / BOTTOM FIFTH)', null, tableHost));
+  root.append(card('ALL COMPANIES — WITHIN-SECTOR RANK, NOT FAIR VALUE', null, [
+    el('p', { class: 'note-text', text: 'Valuation ranks use blue / amber, not good / bad. A low multiple or a low historical percentile does not establish undervaluation. Quality ranks retain their metric direction; these are separate observations, not a combined investment score.' }), tableHost,
+  ]));
 
   const check = data.weight_check;
   root.append(notice(

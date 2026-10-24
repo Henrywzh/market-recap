@@ -109,6 +109,35 @@ test('the TICKER valuation block sets the company beside its sector, from its ow
   });
 });
 
+test('company historical P/E waits for opening and redraws after reopening, never at hidden width', async () => {
+  await withBrowser(async () => {
+    const savedRaf = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = (fn) => fn();
+    const painted = [];
+    window.echarts.init = (node) => { painted.push(node); return { setOption() {}, resize() {}, dispose() {} }; };
+    try {
+      const nodes = await companyValuation(ctxWith({ 'valuation/AAPL': VALUATION }), 'AAPL', ROW, null);
+      await flush();
+      const descendants = (n) => [n, ...(n.children || []).flatMap(descendants)];
+      const fold = nodes.flatMap(descendants).find((n) => n.className === 'fold valuation-history-fold');
+      assert.ok(fold);
+      const chart = descendants(fold).find((n) => n.className === 'chart');
+      assert.ok(chart);
+      chart.isConnected = true;
+      assert.ok(!painted.includes(chart));
+      fold.open = true; fold.listeners.toggle[0]();
+      assert.equal(painted.filter((n) => n === chart).length, 1);
+      fold.open = false; fold.listeners.toggle[0]();
+      assert.equal(painted.filter((n) => n === chart).length, 1);
+      fold.open = true; fold.listeners.toggle[0]();
+      assert.equal(painted.filter((n) => n === chart).length, 2);
+    } finally {
+      if (savedRaf === undefined) delete globalThis.requestAnimationFrame;
+      else globalThis.requestAnimationFrame = savedRaf;
+    }
+  });
+});
+
 test('a company with no artifacts of its own still gets the block, with its gaps named rather than a failure', async () => {
   await withBrowser(async () => {
     const ctx = ctxWith({});
