@@ -38,7 +38,7 @@ const median = (values) => quantile([...values].sort((a, b) => a - b), 0.5);
 const present = (v) => v !== null && v !== undefined;
 
 // Within-sector percentile of each row's value, oriented so 1 is "better".
-function sectorRanks(rows, metrics) {
+export function sectorRanks(rows, metrics) {
   const ranks = new Map(rows.map((r) => [r, {}]));
   const bySector = Map.groupBy ? Map.groupBy(rows, (r) => r.sector) : groupBy(rows, (r) => r.sector);
   for (const members of bySector.values()) {
@@ -500,8 +500,12 @@ function historyTable(history, view) {
   return table(['', ''], rows.map(([a, b, wrap]) => el('tr', {}, [el('td', { class: 'dim', text: a }), el('td', { class: wrap ? 'wrap-cell' : '', text: b })])));
 }
 
-function sectorTable(rows, metrics) {
-  const sectors = [...groupBy(rows, (r) => r.sector).entries()].sort((a, b) => b[1].length - a[1].length);
+// The sectors of the rows shown, each with its median over all its peers
+// (``peers``), so a search narrows the list without shrinking the reference.
+export function sectorTable(rows, metrics, peers = rows) {
+  const shown = new Set(rows.map((r) => r.sector));
+  const sectors = [...groupBy(peers, (r) => r.sector).entries()].filter(([sector]) => shown.has(sector))
+    .sort((a, b) => b[1].length - a[1].length);
   const body = sectors.map(([sector, members]) => el('tr', {}, [
     el('td', { text: sector }),
     el('td', { class: 'dim', text: members.length }),
@@ -513,8 +517,10 @@ function sectorTable(rows, metrics) {
   return table(['SECTOR (MEDIAN)', 'N', ...metrics.map((m) => m.label.toUpperCase())], body);
 }
 
-function mainTable(rows, metrics, data, sort, onSort, onPick) {
-  const ranks = sectorRanks(rows, metrics);
+// Ranks are within each sector over ``peers``: a search or a sector pick
+// chooses the rows shown, never the companies a row is ranked against.
+function mainTable(rows, metrics, data, sort, onSort, onPick, peers = rows) {
+  const ranks = sectorRanks(peers, metrics);
   const columns = [
     { key: 'ticker', label: 'TICKER' },
     { key: 'sector', label: 'SECTOR' },
@@ -652,10 +658,12 @@ export default async function renderValuation(root, data, _manifest, ctx = {}) {
     else location.hash = `#${hashFor('ticker', `${ticker}/VALUATION`)}`;
   };
 
+  // The universe sets the peer set; the sector and the search only pick rows from it.
+  const peers = () => data.rows.filter((r) => !universe.value || r.indices.includes(universe.value));
+
   function filtered() {
     const text = search.value.trim().toUpperCase();
-    return data.rows.filter((r) => (!universe.value || r.indices.includes(universe.value))
-      && (!sector.value || r.sector === sector.value)
+    return peers().filter((r) => (!sector.value || r.sector === sector.value)
       && (!text || r.ticker.includes(text) || (r.name || '').toUpperCase().includes(text)));
   }
 
@@ -666,12 +674,13 @@ export default async function renderValuation(root, data, _manifest, ctx = {}) {
     const shown = scatter(scatterNode, rows, x, y);
     scatterNote.textContent = `${shown.shown} of ${shown.total} companies with both figures shown; `
       + `${shown.outside} beyond the ${AXIS_PERCENTILES[0] * 100}th–${AXIS_PERCENTILES[1] * 100}th percentile axes are off-chart.`;
-    sectorHost.replaceChildren(sectorTable(rows, metrics));
+    const reference = peers();
+    sectorHost.replaceChildren(sectorTable(rows, metrics, reference));
     tableHost.replaceChildren(mainTable(rows, metrics, data, sort, (key) => {
       sort.descending = sort.key === key ? !sort.descending : typeof data.rows[0][key] !== 'string';
       sort.key = key;
       draw();
-    }, openTicker));
+    }, openTicker, reference));
     status.textContent = `${rows.length} companies`;
   }
 

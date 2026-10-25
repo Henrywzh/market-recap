@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { anchorScorecard, closeLevels, optionRange, priceLadder, sentimentScorecard, sizePosition, trendScorecard } from '../../web/js/trade-math.js';
+import renderTrade from '../../web/js/tabs/trade.js';
 
 test('levels are close-based and require the complete window', () => {
   const levels = closeLevels(Array.from({ length: 60 }, (_, i) => i + 1));
@@ -89,4 +90,139 @@ test('the ladder sorts every level by price with its distance from the close', (
   assert.deepEqual(ladder.map((r) => r.label), ['IMPLIED HIGH', '+2 ATR', '20D HIGH', '20D AVG', 'IMPLIED LOW', '−2 ATR', '20D LOW', '200D AVG']);
   assert.ok(Math.abs(ladder.find((r) => r.label === '200D AVG').distance_pct + 10) < 1e-9);
   assert.deepEqual(priceLadder(null), []);
+});
+
+// --- the page: SETUPS & SIZE with the trade plan, under node against a small fake DOM -----
+
+class FakeNode {
+  constructor(tag) {
+    this.nodeType = 1;
+    this.tagName = tag.toUpperCase();
+    this.children = [];
+    this.attrs = {};
+    this.listeners = {};
+    this.className = '';
+    this.textContent = '';
+    this._value = undefined;
+  }
+  get value() {
+    if (this._value !== undefined) return this._value;
+    if (this.tagName === 'SELECT') return this.children.find((c) => c.tagName === 'OPTION')?.attrs.value ?? '';
+    return this.attrs.value ?? '';
+  }
+  set value(v) { this._value = String(v); }
+  setAttribute(key, value) { this.attrs[key] = String(value); }
+  getAttribute(key) { return this.attrs[key] ?? null; }
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+  removeEventListener() {}
+  append(...nodes) { this.children.push(...nodes); }
+  replaceChildren(...nodes) { this.children = [...nodes]; }
+  querySelector(selector) {
+    return this.children.map((c) => findNode(c, (n) => n.tagName === selector.toUpperCase())).find(Boolean) ?? null;
+  }
+  querySelectorAll() { return []; }
+  select() {}
+}
+
+function findNode(node, predicate) {
+  if (predicate(node)) return node;
+  for (const child of node.children || []) {
+    const hit = findNode(child, predicate);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function textOf(node) {
+  if (!node) return '';
+  if (node.nodeType === 3) return node.text;
+  const own = [node.textContent || '', node.attrs?.value || '', node.attrs?.href || ''];
+  return [...own, ...(node.children || []).map(textOf)].filter(Boolean).join(' ');
+}
+
+const fakeDocument = () => ({
+  createElement: (tag) => new FakeNode(tag),
+  createTextNode: (text) => ({ nodeType: 3, text: String(text) }),
+  documentElement: new FakeNode('html'),
+  body: new FakeNode('body'),
+  hidden: false,
+  addEventListener() {},
+  removeEventListener() {},
+});
+
+const STUBS = ['document', 'window', 'fetch', 'requestAnimationFrame', 'getComputedStyle', 'localStorage'];
+
+// Charts are stubbed: the option builders run, and nothing is drawn.
+async function withPage(run) {
+  const saved = Object.fromEntries(STUBS.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const define = (key, value) => Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+  const chart = { setOption() {}, dispose() {}, resize() {}, getModel: () => null };
+  define('document', fakeDocument());
+  define('window', { echarts: { init: () => chart } });
+  define('fetch', async (url) => (url.endsWith('SPY.json')
+    ? { ok: true, json: async () => fixtureTicker() } : { ok: false, status: 404, json: async () => ({}) }));
+  define('requestAnimationFrame', (fn) => { fn(); return 0; });
+  define('getComputedStyle', () => ({ getPropertyValue: () => '' }));
+  define('localStorage', { getItem: () => null, setItem() {}, removeItem() {} });
+  try {
+    return await run();
+  } finally {
+    for (const key of STUBS) {
+      if (saved[key]) Object.defineProperty(globalThis, key, saved[key]);
+      else delete globalThis[key];
+    }
+  }
+}
+
+// Sixty sessions of closes from 400 up to 429.5, so the last close is 429.5.
+function fixtureTicker(count = 60) {
+  const dates = Array.from({ length: count }, (_, i) => new Date(Date.UTC(2026, 6, 1) + i * 864e5).toISOString().slice(0, 10));
+  const close = dates.map((_, i) => 400 + 0.5 * i);
+  return { as_of: dates.at(-1), dates, close,
+    ohlcv: { dates, open: close, high: close.map((c) => c + 2), low: close.map((c) => c - 2), close, volume: close.map(() => 1e6) } };
+}
+
+const BAD = /NaN|undefined|\[object Object\]/;
+
+test('the trade plan card renders its headline, outcomes and sensitivity with no bad figures', async () => {
+  const ctx = { arg: 'SPY', setArg() {}, loadArtifact: async () => { throw new Error('not in this fixture'); } };
+  await withPage(async () => {
+    const page = new FakeNode('div');
+    renderTrade(page, { available: ['SPY'] }, null, ctx);
+    const settle = async (done) => { for (let i = 0; i < 50 && !done(); i += 1) await new Promise((r) => setTimeout(r, 0)); };
+    await settle(() => textOf(page).includes('SPY · data as of'));
+    const plan = findNode(page, (n) => n.className === 'card' && textOf(n).startsWith('TRADE PLAN'));
+    const review = findNode(page, (n) => n.className === 'card' && textOf(n).startsWith('REVIEW'));
+    const fieldIn = (label) => findNode(plan, (n) => n.className === 'field' && n.children[0]?.textContent === label)?.children[1];
+    const setValue = (label, value) => {
+      const node = fieldIn(label);
+      node.value = value;
+      (node.listeners.input || []).forEach((fn) => fn());
+    };
+
+    assert.ok(textOf(plan).includes('SPY · data as of 2026-08-29'));
+    assert.ok(textOf(plan).includes('Enter the side, entry, stop, target, horizon and costs'));
+    assert.equal(fieldIn('ENTRY ($)').value, '429.5');   // prefilled from the last close
+
+    setValue('STOP ($)', '420');
+    setValue('TARGET ($)', '450');
+    setValue('SLIPPAGE (BPS / SIDE)', '5');
+    setValue('P · TARGET HIT (%)', '60');
+    setValue('P · STOP HIT (%)', '40');
+    setValue('P · HORIZON ENDS (%)', '20');
+    assert.ok(textOf(plan).includes('Weights must sum to 100%; they sum to 120.0%'));
+
+    setValue('P · TARGET HIT (%)', '40');
+    const text = textOf(plan);
+    assert.ok(text.includes('Success rate needed to break even'));
+    assert.ok(text.includes('HORIZON ENDS, NEITHER HIT'));
+    assert.ok(text.includes('Expected value from your weights, not a forecast'));
+    assert.ok(text.includes('Costs: commission per share per side'));
+    assert.doesNotMatch(text, BAD);
+    assert.ok(findNode(page, (n) => n.tagName === 'A' && n.attrs.href === '#technicals/SPY'));
+    assert.ok(findNode(page, (n) => n.tagName === 'A' && n.attrs.href === '#movecheck/SPY'));
+    assert.ok(findNode(page, (n) => n.tagName === 'A' && n.attrs.href === '#ticker/SPY'));
+    assert.ok(textOf(review).includes('Load a plan file'));
+    assert.doesNotMatch(textOf(review), BAD);
+  });
 });

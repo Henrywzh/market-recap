@@ -1748,3 +1748,13 @@ table.compare-table th:last-child { text-align: left; }
   .compare-controls .field { flex: 1 1 110px; }
   .compare-controls input, .compare-controls select { width: 100%; }
 }
+
+/* ---------- Trade plan (TRADE DESK) ---------- */
+.trade-flow { display: flex; gap: 12px; align-items: center; font-size: 10.5px; letter-spacing: 0.06em; }
+.field textarea.plan-text { background: var(--panel-alt); border: 1px solid var(--border-strong); color: var(--text); font-family: var(--mono); font-size: 12px; padding: 4px 7px; border-radius: 2px; resize: vertical; width: 100%; min-width: 0; }
+.plan-thesis { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 10px 0; }
+.plan-headline { font-size: 15px; font-weight: 600; color: var(--text); margin: 8px 0 10px; line-height: 1.4; }
+.plan-headline.down { color: var(--down); }
+.chart.plan-heat { height: 250px; }
+.trade-plan-out td:nth-child(n+2) { text-align: right; }
+.plan-copy { width: 100%; background: var(--panel-alt); border: 1px solid var(--border-strong); color: var(--text); font-family: var(--mono); font-size: 11px; padding: 6px; margin-top: 8px; }

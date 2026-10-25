@@ -365,7 +365,136 @@ test('similar setups match on both buckets, and summarise the forward returns an
   assert.equal(noVix.all.n, 6);
 });
 
-// --- the page ----------------------------------------------------------------------
+// --- against all days -----------------------------------------------------------------
+
+test('every start day reads the same forward returns and worst drawdown an episode would, and a day past the data reads none', () => {
+  const dates = Array.from({ length: 25 }, (_, i) => `d${i}`);
+  const close = Array.from({ length: 25 }, (_, i) => (i === 5 ? 80 : 100));
+  const rows = M.dayRows(dates, close, ['d0', 'd24', 'nope']);
+  near(rows[0].forward[0], 0);
+  near(rows[0].forward[1], -20);
+  near(rows[0].forward[2], 0);
+  near(rows[0].drawdown, -20);
+  assert.deepEqual(rows[1].forward, [null, null, null], 'no session after the last');
+  assert.equal(rows[1].drawdown, null);
+  assert.deepEqual(rows[2].forward, [null, null, null], 'an unknown day');
+  near(rows[0].drawdown, M.maxDrawdownAfter(dates, close, 'd0', 20));
+});
+
+test('the follow-up figures are the median and the share up of each horizon over the rows that have it', () => {
+  const rows = [
+    { forward: [1, -1, null], drawdown: -2 },
+    { forward: [-3, 2, 8], drawdown: -6 },
+    { forward: [3, null, null], drawdown: null },
+  ];
+  const f = M.followUp(rows);
+  assert.equal(f.n, 3);
+  assert.deepEqual(f.forward.map((x) => x.n), [3, 2, 1]);
+  near(f.forward[0].median, 1);
+  near(f.forward[0].share, 2 / 3);
+  near(f.forward[1].median, 0.5);
+  near(f.forward[1].share, 0.5);
+  near(f.forward[2].median, 8);
+  near(f.forward[2].share, 1);
+  assert.equal(f.drawdown.n, 2);
+  near(f.drawdown.median, -4);
+  const none = M.followUp([]);
+  assert.equal(none.n, 0);
+  assert.equal(none.forward[0].median, null);
+  assert.equal(none.drawdown.median, null);
+});
+
+test('the difference is episodes minus all days in points, and a share is scaled from a fraction to points', () => {
+  const episodes = { n: 4, forward: [{ n: 4, median: 2, share: 0.5 }, { n: 4, median: -1, share: 0.25 }, { n: 0, median: null, share: null }],
+    drawdown: { n: 4, median: -5 } };
+  const baseline = { n: 100, forward: [{ n: 100, median: 0.5, share: 0.25 }, { n: 100, median: 0.5, share: 0.5 }, { n: 90, median: 1, share: 0.6 }],
+    drawdown: { n: 100, median: -3 } };
+  const d = M.compareFollowUp(episodes, baseline);
+  near(d.forward[0].median, 1.5);
+  near(d.forward[0].share, 25);
+  near(d.forward[1].median, -1.5);
+  near(d.forward[1].share, -25);
+  assert.equal(d.forward[2].median, null, 'no episode figure, no difference');
+  assert.equal(d.forward[2].share, null);
+  near(d.drawdown, -2);
+});
+
+test('an interval is null under five episodes, and collapses to the value when every episode is alike', () => {
+  const alike = (k) => Array.from({ length: k }, () => ({ forward: [2, 2, 2], drawdown: -1 }));
+  assert.equal(M.bootstrapFollowUp(alike(4)), null);
+  const flat = M.bootstrapFollowUp(alike(6), { resamples: 200 });
+  assert.equal(flat.n, 6);
+  assert.deepEqual(flat.forward[0], { median: [2, 2], share: [1, 1] });
+});
+
+test('the episode interval is the same on every run, and brackets the median of a spread of episodes', () => {
+  const rows = Array.from({ length: 12 }, (_, i) => ({ forward: [i - 5.5, i - 5.5, i - 5.5], drawdown: -i }));
+  const a = M.bootstrapFollowUp(rows);
+  assert.deepEqual(a, M.bootstrapFollowUp(rows), 'a fixed seed');
+  const [lo, hi] = a.forward[2].median;
+  assert.ok(lo < 0 && hi > 0, `${lo}..${hi} should bracket the median of 0`);
+  assert.ok(lo < hi);
+  const [slo, shi] = a.forward[0].share;
+  assert.ok(slo <= 0.5 && shi >= 0.5, `${slo}..${shi} should bracket the share of 0.5`);
+});
+
+test('the episodes span their worst days\' first and last years, and none gives null', () => {
+  const rows = [{ worstDate: '2011-08-08' }, { worstDate: '2026-02-03' }, { worstDate: '2019-05-01' }];
+  assert.deepEqual(M.episodeYears(rows), { first: 2011, last: 2026 });
+  assert.equal(M.episodeYears([]), null);
+});
+
+test('the middle date is halfway between two dates, and the halves split on it by worst day', () => {
+  assert.equal(M.midDate('2020-01-01', '2020-01-11'), '2020-01-06');
+  assert.equal(M.midDate('2020-01-01', 'nope'), null);
+  const rows = ['2020-01-02', '2020-01-05', '2020-01-06', '2020-01-10'].map((worstDate) => ({ worstDate }));
+  const h = M.halves(rows, '2020-01-01', '2020-01-11');
+  assert.equal(h.middle, '2020-01-06');
+  assert.deepEqual(h.earlier.map((r) => r.worstDate), ['2020-01-02', '2020-01-05']);
+  assert.deepEqual(h.later.map((r) => r.worstDate), ['2020-01-06', '2020-01-10'], 'the middle day is in the later half');
+  assert.deepEqual(M.halves(rows, 'x', 'y'), { middle: null, earlier: [], later: [] });
+});
+
+// --- overnight gaps ----------------------------------------------------------------
+
+test('an overnight gap is the open against the prior close, and a session missing a price has none', () => {
+  const bars = {
+    dates: ['d0', 'd1', 'd2', 'd3', 'd4'],
+    open: [100, 103.02, null, 99.96, 99.96],
+    close: [100, 102, 102, 0, 101],
+  };
+  const g = M.overnightGaps(bars);
+  assert.deepEqual(g.map((r) => r.date), ['d1', 'd3']);
+  near(g[0].gap, 3.02);
+  near(g[1].gap, -2);
+  assert.deepEqual(M.overnightGaps({}), []);
+});
+
+test('gap percentiles interpolate between neighbours, the share counts gaps beyond two per cent, and the latest sits at its percentile', () => {
+  const gaps = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((gap, i) => ({ date: dayAt(i), gap }));
+  const s = M.gapSummary(gaps);
+  assert.equal(s.n, 10);
+  assert.equal(s.from, dayAt(0));
+  assert.equal(s.to, dayAt(9));
+  const at = (p) => s.percentiles.find((x) => x.p === p).value;
+  near(at(5), 1.45);
+  near(at(50), 5.5);
+  near(at(95), 9.55);
+  near(s.shareLarge, 0.8, 1e-12);
+  assert.deepEqual(s.up.map((g) => g.gap), [10, 9, 8, 7, 6]);
+  assert.deepEqual(s.down, []);
+  assert.equal(s.latest.date, dayAt(9));
+  near(s.latest.percentile, 95);
+});
+
+test('the largest gaps down are the most negative, and no gap either way leaves that list empty', () => {
+  const s = M.gapSummary([{ date: 'a', gap: -3 }, { date: 'b', gap: -1 }, { date: 'c', gap: 0.5 }]);
+  assert.deepEqual(s.down.map((g) => g.gap), [-3, -1]);
+  assert.deepEqual(s.up.map((g) => g.gap), [0.5]);
+  assert.equal(M.gapSummary([]), null);
+});
+
+// --- the page----------------------------------------------------------------------
 
 class FakeNode {
   constructor(tag) {
@@ -546,3 +675,98 @@ test('without the VIX file the VIX columns are dashes and a note says so', async
 function isoDays(count) {
   return Array.from({ length: count }, (_, i) => dayAt(i));
 }
+
+// Every tenth session falls 4% and the rest rise 0.2%; the last session falls 3%. The falls are ten sessions
+// apart, so the episodes are known: floor((count - 2) / 10) of them.
+function stepTicker(count = 300) {
+  const dates = Array.from({ length: count }, (_, i) => dayAt(i));
+  const close = [100];
+  for (let i = 1; i < count; i += 1) {
+    const r = i === count - 1 ? -3 : i % 10 === 0 ? -4 : 0.2;
+    close.push(close[i - 1] * (1 + r / 100));
+  }
+  return { ticker: 'STEP', dates, close };
+}
+
+// Opens a little off each close, so the gaps follow the day's moves and a missing close leaves a missing open.
+function barsOf({ dates, close }) {
+  return { ticker: 'X', dates, close, open: close.map((c, i) => (c === null ? null : c * (1 + 0.001 * Math.sin(i)))) };
+}
+
+test('the move links to the ticker page, its technicals and the trade desk', async () => {
+  const ctx = ctxWith({ FIX: fixtureTicker() });
+  await withBrowser(async () => {
+    const root = new FakeNode('div');
+    await renderMoveCheck(root, { available: ['FIX'] }, null, ctx);
+    for (const href of ['#ticker/FIX', '#technicals/FIX', '#trade/FIX']) {
+      assert.ok(findNode(root, (n) => n.tagName === 'A' && n.attrs.href === href), `a link to ${href}`);
+    }
+    assert.ok(textOf(root).includes('TRADE DESK'));
+  });
+});
+
+test('the episodes are set against all days, with the baseline, the difference, the interval, the years and the two periods', async () => {
+  const ctx = ctxWith({ STEP: stepTicker(300), 'bars/STEP': barsOf(stepTicker(300)) });
+  const text = await withBrowser(async () => {
+    const root = new FakeNode('div');
+    await renderMoveCheck(root, { available: ['STEP'] }, null, ctx);
+    return textOf(root);
+  });
+  assert.ok(text.includes('EPISODES AGAINST ALL DAYS'));
+  assert.ok(text.includes('ALL DAYS (BASELINE)'));
+  assert.ok(text.includes('DIFFERENCE'));
+  assert.ok(text.includes('N = 29 independent episodes'), text.match(/N = [^.]*/)?.[0]);
+  assert.ok(text.includes('5th to 95th percentile'));
+  assert.ok(!text.includes('interval is wide'), 'twenty-nine episodes is not wide');
+  assert.ok(text.includes('CONSISTENCY ACROSS TWO PERIODS'));
+  assert.ok(text.includes('EARLIER (before'));
+  assert.ok(text.includes('LATER (from'));
+  assert.ok(text.includes('Episodes span 2020 to 2020.'));
+  assert.ok(!BAD.test(text), `bad figure in page text: ${text.match(BAD)?.[0]}`);
+});
+
+test('under twenty episodes the interval is called wide, and under five it is not shown', async () => {
+  const few = await withBrowser(async () => {
+    const root = new FakeNode('div');
+    await renderMoveCheck(root, { available: ['STEP'] }, null, ctxWith({ STEP: stepTicker(120) }, 'STEP'));
+    return textOf(root);
+  });
+  assert.ok(few.includes('N = 11 independent episodes'));
+  assert.ok(few.includes('Under 20 episodes, so the interval is wide.'));
+
+  const fewer = await withBrowser(async () => {
+    const root = new FakeNode('div');
+    await renderMoveCheck(root, { available: ['STEP'] }, null, ctxWith({ STEP: stepTicker(45) }, 'STEP'));
+    return textOf(root);
+  });
+  assert.ok(fewer.includes('N = 4 independent episodes: no interval'));
+  assert.ok(!fewer.includes('5th to 95th percentile'));
+  assert.ok(!BAD.test(fewer), `bad figure in page text: ${fewer.match(BAD)?.[0]}`);
+});
+
+test('the overnight gaps card shows the latest gap, the share beyond two per cent, the percentiles and the largest gaps', async () => {
+  const ctx = ctxWith({ STEP: stepTicker(300), 'bars/STEP': barsOf(stepTicker(300)) });
+  const text = await withBrowser(async () => {
+    const root = new FakeNode('div');
+    await renderMoveCheck(root, { available: ['STEP'], bars: ['STEP'] }, null, ctx);
+    return textOf(root);
+  });
+  assert.ok(text.includes('OVERNIGHT GAPS'));
+  assert.ok(text.includes('LATEST GAP'));
+  assert.ok(text.includes('SESSIONS OVER 2%'));
+  assert.ok(text.includes('LARGEST GAPS UP'));
+  assert.ok(text.includes('LARGEST GAPS DOWN'));
+  assert.ok(text.includes('Empirical percentiles, no fitted curve'));
+  assert.ok(!BAD.test(text), `bad figure in page text: ${text.match(BAD)?.[0]}`);
+});
+
+test('a ticker without daily bars gets a one-line note in the gap card, and nothing else breaks', async () => {
+  const text = await withBrowser(async () => {
+    const root = new FakeNode('div');
+    await renderMoveCheck(root, { available: ['FIX', 'SPY'], bars: ['SPY'] }, null, ctxWith({ FIX: fixtureTicker() }));
+    return textOf(root);
+  });
+  assert.ok(text.includes('FIX has no daily bars in this build, so there are no overnight gaps.'));
+  assert.ok(text.includes('EPISODES BEYOND THIS MOVE'));
+  assert.ok(!BAD.test(text));
+});

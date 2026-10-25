@@ -28,6 +28,9 @@ const BAND_FILL = 'rgba(232,163,61,0.13)';
 const BAND_ICON = 'rgba(232,163,61,0.55)';
 // Price bins of the volume profile beside the candles.
 const PROFILE_BINS = 60;
+// A bin inside the window's traded range holding under this share of the
+// average bin is thin: few shares changed hands at those prices.
+const THIN_SHARE = 0.35;
 
 const payloads = new Map();
 
@@ -172,9 +175,35 @@ export function profileText(reading) {
   if (!reading) return '';
   const { area, close } = reading;
   const where = !isNum(close) ? '' : close > area.high ? 'above it' : close < area.low ? 'below it' : 'inside it';
+  const range = isNum(reading.high) && isNum(reading.low) ? ` · window range ${num(reading.low)}–${num(reading.high)}` : '';
   return `VOLUME PROFILE (sessions on screen) · most traded ${num(area.poc)} · value area ${num(area.low)}–${num(area.high)}`
-    + ` (${num(area.share * 100, 0)}% of volume)${where ? ` · last close ${num(close)}, ${where}` : ''}`
-    + ' · each session\'s volume spread over its low–high range; descriptive, not support or resistance.';
+    + ` (${num(area.share * 100, 0)}% of volume)${where ? ` · last close ${num(close)}, ${where}` : ''}${range}`
+    + ' · amber = value area, blue = thin trading (under a third of the average price bin)'
+    + ' · estimated from daily bars, each session\'s volume spread over its low–high range, not trade-by-trade;'
+    + ' where trading was heavy in the past, not a support, resistance or target.';
+}
+
+// The window's high and low, and which bins inside that range are thin.
+export function profileRange(bars, from, to, g, volumes) {
+  let high = -Infinity;
+  let low = Infinity;
+  for (let i = from; i <= to; i += 1) {
+    if (isNum(bars.high[i])) high = Math.max(high, bars.high[i]);
+    if (isNum(bars.low[i])) low = Math.min(low, bars.low[i]);
+  }
+  const inside = (k) => g.min + (k + 1) * g.step > low && g.min + k * g.step < high;
+  const traded = volumes.filter((_, k) => inside(k));
+  const mean = traded.length ? traded.reduce((a, b) => a + b, 0) / traded.length : 0;
+  return {
+    high: isNum(high) ? high : null, low: isNum(low) ? low : null,
+    thin: volumes.map((v, k) => inside(k) && mean > 0 && v < mean * THIN_SHARE),
+  };
+}
+
+// The window the profile reads, above the chart: it changes with zoom and pan.
+export function profileWindow(reading) {
+  if (!reading) return '';
+  return `VOLUME PROFILE WINDOW · ${reading.from} → ${reading.to} · ${reading.sessions} sessions on screen · zoom or pan to change it`;
 }
 
 function volumeLabel(v) {
@@ -190,9 +219,10 @@ function volumeLabel(v) {
 // reader can pan and zoom past it. The y-axis fits the visible candles (or
 // closes) and the visible averages; the band is left to be clipped.
 // With ``view.profile`` the candles get the volume profile of the sessions on
-// screen to their right (chip-math.js): volume by price, the value area in amber
-// and its point of control dashed across the candles. It follows zoom and pan,
-// and ``view.onProfile`` hears its readings.
+// screen to their right (chip-math.js): volume by price, the value area in amber,
+// thin bins in blue, and the point of control and the window's high and low
+// dashed across the candles. It follows zoom and pan, and ``view.onProfile``
+// hears its readings.
 function priceChart(node, view) {
   const { bars, dates, close, averages, bandLines, start, log, ticker } = view;
   const last = dates.length - 1;
@@ -211,15 +241,21 @@ function priceChart(node, view) {
     const volumes = volumeProfile(bars, from, to, g);
     const area = valueArea(volumes, g);
     if (!area) return null;
-    return { g, volumes, area, close: bars.close[to] };
+    return { g, volumes, area, close: bars.close[to], ...profileRange(bars, from, to, g, volumes),
+      from: dates[from], to: dates[to], sessions: to - from + 1 };
   };
+  // Tone per bin: 1 the value area, 2 thin, 0 the rest.
   const profileData = (profile) => (profile ? profile.volumes.map((v, k) => {
     const low = profile.g.min + k * profile.g.step;
     const high = low + profile.g.step;
     const inArea = low >= profile.area.low - 1e-9 && high <= profile.area.high + 1e-9;
-    return [v, low, high, inArea ? 1 : 0];
+    return [v, low, high, inArea ? 1 : profile.thin[k] ? 2 : 0];
   }) : []);
-  const pocLine = (profile) => (profile ? [{ yAxis: profile.area.poc, name: 'POC' }] : []);
+  const pocLine = (profile) => (profile ? [
+    { yAxis: profile.area.poc, name: 'POC' },
+    ...(isNum(profile.high) ? [{ yAxis: profile.high, name: 'HIGH', lineStyle: { type: 'dotted' } }] : []),
+    ...(isNum(profile.low) ? [{ yAxis: profile.low, name: 'LOW', lineStyle: { type: 'dotted' } }] : []),
+  ] : []);
   let profile = withProfile ? profileOf(start, last, fit(start, last)) : null;
   if (withProfile) view.onProfile?.(profile);
   const chart = render(node, (option, p) => {
@@ -304,7 +340,7 @@ function priceChart(node, view) {
           const from = api.coord([0, api.value(1)]);
           const to = api.coord([api.value(0), api.value(2)]);
           return { type: 'rect', shape: { x: from[0], y: to[1], width: Math.max(0, to[0] - from[0]), height: Math.max(1, from[1] - to[1] - 1) },
-            style: { fill: api.value(3) ? p.accent : p.faint, opacity: api.value(3) ? 0.75 : 0.45 } };
+            style: { fill: [p.faint, p.accent, p.blue][api.value(3)], opacity: [0.45, 0.75, 0.35][api.value(3)] } };
         },
       }],
     } : { grid: [], xAxis: [], yAxis: [], series: [] };
@@ -334,7 +370,7 @@ function priceChart(node, view) {
           data: O.map((_, i) => (isNum(O[i]) && isNum(H[i]) && isNum(L[i]) && isNum(C[i]) ? [O[i], C[i], L[i], H[i]] : '-')),
           itemStyle: { color: p.up, color0: p.down, borderColor: p.up, borderColor0: p.down },
           markLine: { silent: true, symbol: 'none', lineStyle: { color: p.accent, type: 'dashed', width: 1 },
-            label: { color: p.accent, fontSize: 9, position: 'insideEndTop', formatter: (d) => `POC ${num(d.value)}` },
+            label: { color: p.accent, fontSize: 9, position: 'insideEndTop', formatter: (d) => `${d.name} ${num(d.value)}` },
             data: pocLine(profile) } },
         ...maSeries,
         { name: 'Volume', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, barMaxWidth: 6,
@@ -634,6 +670,15 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
     },
   });
   const profileNote = el('div', { class: 'tech-note', text: '' });
+  const profileLabel = el('div', { class: 'tech-note', text: '' });
+  // The same name on the other pages of the flow: company, history of its moves, a plan.
+  const flowLinks = el('div', { class: 'field-note' });
+  const drawLinks = (name) => {
+    const items = [['TICKER PAGE', 'ticker'], ['MOVE CHECK', 'movecheck'], ['TRADE DESK', 'trade']];
+    flowLinks.replaceChildren(`${name} ON `, ...items.flatMap(([label, tab], i) => [
+      i ? ' · ' : '', el('a', { href: `#${tab}/${encodeURIComponent(name)}`, text: label }),
+    ]));
+  };
   const toolNote = el('span', { class: 'tech-note', text: '' });
   const toolbar = el('div', { class: 'tech-toolbar' }, [
     modeSwitch, rangeSwitch, el('div', { class: 'period-switch' }, [logButton, bandButton, profileButton]), toolNote,
@@ -690,6 +735,7 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
 
   async function loadSingle() {
     const symbol = resolveTicker(tickerInput.value.trim().toUpperCase(), (t) => (data.available || []).includes(t));
+    drawLinks(symbol);
     stStatus.textContent = `Loading ${symbol}…`;
     try {
       const windows = T.parseWindows(maInput.value, { max: MAX_MA_WINDOW });
@@ -724,10 +770,16 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
         bars: candles, dates: series.dates, close: series.close, averages: readings.averages,
         bandLines: bandOn ? readings.bandLines : null, sigma: defaults.band_sigma, start: T.rangeStart(series.dates, range),
         log: logOn, ticker: payload.ticker, profile: profileOn,
-        onProfile: (reading) => { profileNote.textContent = profileText(reading); },
+        onProfile: (reading) => {
+          profileNote.textContent = profileText(reading);
+          profileLabel.textContent = profileWindow(reading);
+        },
       });
       profileButton.hidden = !candles;
-      if (!candles || !profileOn) profileNote.textContent = '';
+      if (!candles || !profileOn) {
+        profileNote.textContent = '';
+        profileLabel.textContent = '';
+      }
       statHost.replaceChildren(...statItems(payload, series, readings, windows).map(([label, text, tone]) => el('div', { class: 'tech-stat' }, [
         el('span', { class: 'tech-stat-label', text: label }),
         el('span', { class: `tech-stat-value ${tone}`, text }),
@@ -763,7 +815,7 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
   }
 
   if (compact) {
-    root.append(card('PRICE & TREND', null, [priceTitle, toolbar, chipRow, statHost, stPriceNode, profileNote, summaryHost, stStatus]));
+    root.append(card('PRICE & TREND', null, [priceTitle, toolbar, chipRow, statHost, profileLabel, stPriceNode, profileNote, summaryHost, stStatus]));
     const slopeCard = card('', null, slopeNode);
     slopeCard.querySelector('.card-title').replaceWith(slopeTitle);
     root.append(el('div', { class: 'grid two' }, [slopeCard, card(`Z-SCORE VS ${zWindow} DMA`, null, zNode)]));
@@ -782,11 +834,13 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
       el('button', { class: 'action', text: 'LOAD', onclick: loadSingle }),
       stStatus,
     ]),
+    flowLinks,
     summaryHost,
     priceTitle,
     toolbar,
     chipRow,
     statHost,
+    profileLabel,
     stPriceNode,
     profileNote,
   ]));

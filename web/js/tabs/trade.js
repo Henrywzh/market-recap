@@ -6,11 +6,12 @@
 import { card, DASH, dirClass, el, metaRow, num, pct, periodSwitch, table, tag } from '../fmt.js';
 import { render } from '../charts.js';
 import { rangeSwitch, sliceRange, initialRange } from '../range.js';
-import { tickerHref } from '../routes.js';
+import { hashFor, tickerHref } from '../routes.js';
 import { ageSeconds, ageText } from '../live-model.js';
 import { anchorScorecard, closeLevels, optionRange, priceLadder, sentimentScorecard, sizePosition, trendScorecard } from '../trade-math.js';
 import { resolveTicker } from '../routes.js';
 import { overnightCard } from '../overnight-card.js';
+import { tradePlanCard } from '../plan-card.js';
 
 const valid = (v) => typeof v === 'number' && Number.isFinite(v);
 const usd = (v, digits = 2) => (valid(v) ? `$${num(v, digits)}` : DASH);
@@ -105,8 +106,11 @@ function setups(root, technicals, ctx, state) {
   const list = el('datalist', { id: 'trade-tickers' }, available.map((t) => el('option', { value: t })));
   const host = el('div', {});
   const evidence = ctx.loadArtifact('evidence').catch(() => null);
+  // Flow links for the loaded ticker only; they clear while another one loads.
+  const flow = el('span', { class: 'trade-flow' });
 
   const load = async () => {
+    flow.replaceChildren();
     const symbol = resolveTicker(ticker.value.trim().toUpperCase(), (t) => available.includes(t));
     if (!available.includes(symbol)) {
       host.replaceChildren(info(`${symbol || 'Ticker'} has no baked price history in this build.`));
@@ -120,8 +124,14 @@ function setups(root, technicals, ctx, state) {
       const levels = closeLevels(payload.close, payload.ohlcv, payload.dates);
       if (!levels) throw new Error('no closes in the artifact');
       const range = optionRange((await evidence)?.names?.[symbol]?.options, levels.close, payload.as_of);
-      state.reference = { price: levels.close, atr14: levels.atr14, adv20: levels.adv20, symbol };
+      state.reference = { price: levels.close, atr14: levels.atr14, adv20: levels.adv20, symbol, asOf: payload.as_of };
       state.onReference?.();
+      state.onPlan?.();
+      flow.replaceChildren(
+        el('a', { href: tickerHref(symbol), text: 'TICKER PAGE' }),
+        el('a', { href: `#${hashFor('technicals', symbol)}`, text: 'TECHNICALS' }),
+        el('a', { href: `#${hashFor('movecheck', symbol)}`, text: 'MOVE CHECK' }),
+      );
 
       const vs = (n) => (valid(levels.moving[n]) ? 100 * (levels.close / levels.moving[n] - 1) : null);
       const trendTag = (n) => (valid(vs(n)) ? tag(`${vs(n) >= 0 ? 'ABOVE' : 'BELOW'} ${n}D`, vs(n) >= 0 ? 'up' : 'down') : DASH);
@@ -162,7 +172,7 @@ function setups(root, technicals, ctx, state) {
   };
   ticker.addEventListener('keydown', (event) => { if (event.key === 'Enter') load(); });
   root.append(el('div', { class: 'field-row trade-pick' }, [field('STOCK OR ETF', ticker),
-    el('button', { class: 'action', text: 'LOAD', onclick: load }), list]), host);
+    el('button', { class: 'action', text: 'LOAD', onclick: load }), list, flow]), host);
   load();
 }
 
@@ -178,6 +188,8 @@ function sizing(root, state) {
   const calculate = () => {
     const r = sizePosition({ ...Object.fromEntries(Object.entries(byKey).map(([key, node]) => [key, node.value])),
       side: side.value, advUsd: state.reference?.adv20 });
+    // The plan card reads these when it is built or asked for the stop and shares.
+    state.sizing = { side: side.value, stop: byKey.stop.value, spreadBps: byKey.spreadBps.value, shares: r ? r.shares : null };
     if (!r) {
       out.replaceChildren(info(`Enter the account, risk %, entry and a stop ${side.value === 'long' ? 'below' : 'above'} the entry. Nothing is saved or sent.`));
       return;
@@ -371,18 +383,19 @@ async function scorecard(root, ctx) {
 
 export default function renderTrade(root, technicals, _manifest, ctx) {
   root.append(metaRow('TRADE DESK · US STOCKS & INDEX ETFs · OVERNIGHT TO WEEKS', [
-    'Research and sizing arithmetic only: no account connection, alerts, journal or orders.',
+    'Research and sizing arithmetic only: no account connection, alerts or orders. A trade plan is a file you download; nothing is sent.',
     'Levels come from the nightly build\'s daily bars; the overnight board is live and separate. A blank is missing coverage, never zero.',
     'Buyback blackout and insider buying are on RISK → POSITIONING with short interest and the trend-follower levels.',
   ]));
   const tabs = ['SETUPS & SIZE', 'OVERNIGHT', 'SCORECARD'];
   const host = el('div', {});
-  const state = { reference: null, onReference: null };
+  const state = { reference: null, onReference: null, onPlan: null, sizing: null };
   const show = (selected) => {
     host.replaceChildren();
     if (selected === tabs[0]) {
       setups(host, technicals, ctx, state);
       sizing(host, state);
+      tradePlanCard(host, state);
     } else if (selected === tabs[1]) {
       overnight(host);
       const content = el('div', {});

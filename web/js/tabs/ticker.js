@@ -153,6 +153,8 @@ function fold(label, node) {
 function links(symbol, { mon, dcf, pairs }) {
   const items = [
     ['TECHNICALS TOOL', `#technicals/${encodeURIComponent(symbol)}`],
+    ['MOVE CHECK', `#movecheck/${encodeURIComponent(symbol)}`],
+    ['TRADE DESK', `#trade/${encodeURIComponent(symbol)}`],
     ['SCREENER', '#valuation'],
   ];
   if (dcf?.available?.includes(symbol)) items.push(['DCF MODEL', `#dcf/${encodeURIComponent(symbol)}`]);

@@ -7,7 +7,7 @@
 // original one.
 
 import { el, card, table, num, pct, DASH } from '../fmt.js';
-import { render } from '../charts.js';
+import { render, disposeWithin } from '../charts.js';
 import { MODES, defaultMode, hasQuarters, pointNotes, seriesFor } from '../fundamentals-model.js';
 import { formatValue as formatAxis } from '../axis-format.js';
 
@@ -201,12 +201,41 @@ function trendSpecs(s) {
   ];
 }
 
+const hasData = (s) => (s.data || []).some((v) => typeof v === 'number' && Number.isFinite(v));
+
+// The spec without the series the filer never tagged (a bank's gross and
+// operating margin), or null when none is left: an empty legend entry or an
+// empty frame reads as a fault.
+export function withData(spec) {
+  const bars = spec.bars.filter(hasData);
+  const lines = spec.lines.filter(hasData);
+  if (!bars.length && !lines.length) return null;
+  const right = lines.some((s) => s.axis === 1) ? spec.right : null;
+  return { ...spec, bars, lines, right };
+}
+
+// Why a chart is blank. A bank's or insurer's operating cash flow moves with its
+// loans, deposits and float, and it files no capital-spending line, so there is
+// no free cash flow to draw rather than a missing one.
+export function emptyNote(index, company) {
+  if (TREND_TITLES[index].startsWith('FREE CASH FLOW') && company?.sector === 'Financials') {
+    return 'Not meaningful for a bank or insurer: its operating cash flow moves with loans, deposits and float, and it files no capital-spending line.';
+  }
+  return 'Not tagged in this company\'s filings for these periods.';
+}
+
 // Redraws the six charts for one mode. Charts share a connect group, so a
 // hover on one moves the tooltip on all six.
 function drawGrid(nodes, company, mode) {
   const series = seriesFor(company, mode);
   const notes = pointNotes(series);
-  const charts = trendSpecs(series).map((spec, i) => drawTrend(nodes[i], series.labels, spec, notes));
+  const charts = trendSpecs(series).map((spec, i) => {
+    const shown = withData(spec);
+    if (shown) return drawTrend(nodes[i], series.labels, shown, notes);
+    disposeWithin(nodes[i]);
+    nodes[i].replaceChildren(el('div', { class: 'note-text', text: emptyNote(i, company) }));
+    return null;
+  });
   charts.forEach((chart) => { if (chart) chart.group = TREND_GROUP; });
   globalThis.window?.echarts?.connect?.(TREND_GROUP);
 }

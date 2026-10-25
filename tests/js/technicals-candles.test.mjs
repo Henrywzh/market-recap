@@ -5,7 +5,7 @@
 // LINE toggle, and a ticker without bars offering no candles.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderSingleTicker } from '../../web/js/tabs/technicals.js';
+import { renderSingleTicker, profileRange } from '../../web/js/tabs/technicals.js';
 import * as T from '../../web/js/technicals-math.js';
 
 class FakeNode {
@@ -221,6 +221,10 @@ test('the volume profile is on by default, follows the zoom and hides with its b
   const poc = option.series.find((s) => s.id === 'candles').markLine.data[0].yAxis;
   assert.ok(poc >= option.yAxis[0].min && poc <= option.yAxis[0].max, 'the point of control is inside the range drawn');
   assert.match(textOf(root), /VOLUME PROFILE \(sessions on screen\) · most traded [\d.]+ · value area/);
+  assert.match(textOf(root), /VOLUME PROFILE WINDOW · \d{4}-\d\d-\d\d → \d{4}-\d\d-\d\d · 253 sessions on screen/);
+  const marks = option.series.find((s) => s.id === 'candles').markLine.data;
+  assert.deepEqual(marks.map((m) => m.name), ['POC', 'HIGH', 'LOW']);
+  assert.ok(marks[1].yAxis > marks[2].yAxis);
 
   // Zooming to the first 10% re-reads the profile over those sessions and that range.
   priceHandlers(charts).datazoom({ start: 0, end: 10 });
@@ -236,6 +240,16 @@ test('the volume profile is on by default, follows the zoom and hides with its b
   assert.ok(!option.series.some((s) => s.id === 'profile'));
   assert.doesNotMatch(textOf(root), /VOLUME PROFILE \(sessions/);
   assert.doesNotMatch(textOf(root), /NaN|undefined|\[object Object\]/);
+});
+
+test('a bin is thin when it holds under a third of the average bin inside the traded range', () => {
+  const bars = { high: [12, 12], low: [8, 8] };
+  const g = { min: 6, step: 1, count: 8 };
+  // Bins 6–7 and 13–14 are outside the traded 8–12 range and never thin.
+  const { high, low, thin } = profileRange(bars, 0, 1, g, [0, 0, 10, 10, 1, 10, 10, 0]);
+  assert.equal(high, 12);
+  assert.equal(low, 8);
+  assert.deepEqual(thin, [false, false, false, false, true, false, false, false]);
 });
 
 test('the stat strip reads the candles and dashes what it cannot compute', async () => {

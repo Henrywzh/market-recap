@@ -12,11 +12,22 @@ export const LOOKBACKS = { ALL: null, '5Y': 1260, '1Y': 252 };
 export const DEFAULT_GAP = 5;
 // Forward returns after an episode's worst day, in sessions.
 export const FORWARD_SESSIONS = [1, 5, 20];
+// The worst drawdown is read over this many sessions after the day.
+export const DRAWDOWN_SESSIONS = 20;
 // Bucket edges for SIMILAR SETUPS: VIX level, and the drop from the 1Y high in percent.
 export const VIX_EDGES = [15, 20, 30];
 export const DRAWDOWN_EDGES = [5, 10, 20];
 // Fewer episodes than this in a bucket are too few to read.
 export const SETUP_MIN = 5;
+// The episode bootstrap: resamples, a fixed seed so every run gives the same interval, the
+// fewest episodes that get an interval at all, and the count below which it is called wide.
+export const BOOTSTRAP_RESAMPLES = 2000;
+export const BOOTSTRAP_SEED = 1;
+export const INTERVAL_MIN = 5;
+export const INTERVAL_WIDE = 20;
+// Overnight gaps: the percentiles read off the data, and the size (percent) that counts as large.
+export const GAP_PERCENTILES = [1, 5, 50, 95, 99];
+export const GAP_LARGE = 2;
 const YEAR_MS = 365.25 * 864e5;
 const DAY_MS = 864e5;
 // How far back a VIX level may be taken when its own date has none.
@@ -137,22 +148,15 @@ function indexOfDate(dates, date) {
   return Array.isArray(dates) ? dates.indexOf(date) : -1;
 }
 
-// Percent from `date`'s close to the close `sessions` later. Null when the date
-// is unknown, a close is missing, or the target lies beyond the last session.
-export function forward(dates, close, date, sessions) {
-  const i = indexOfDate(dates, date);
-  if (i < 0 || !Number.isInteger(sessions) || sessions < 0) return null;
+// The same two figures from a session's index, so a whole history can be read in one pass.
+function forwardFrom(dates, close, i, sessions) {
   const j = i + sessions;
   if (j >= Math.min(dates.length, close?.length || 0)) return null;
   if (!finite(close[i]) || !finite(close[j]) || close[i] === 0) return null;
   return (close[j] / close[i] - 1) * 100;
 }
 
-// The lowest close in the `sessions` after `date`, against its close, never above 0.
-// Null when the window runs past the last session or holds no close.
-export function maxDrawdownAfter(dates, close, date, sessions) {
-  const i = indexOfDate(dates, date);
-  if (i < 0 || !Number.isInteger(sessions) || sessions < 1) return null;
+function drawdownFrom(dates, close, i, sessions) {
   const j = i + sessions;
   if (j >= Math.min(dates.length, close?.length || 0)) return null;
   if (!finite(close[i]) || close[i] === 0) return null;
@@ -164,6 +168,22 @@ export function maxDrawdownAfter(dates, close, date, sessions) {
     low = Math.min(low, (close[k] / close[i] - 1) * 100);
   }
   return seen ? low : null;
+}
+
+// Percent from `date`'s close to the close `sessions` later. Null when the date
+// is unknown, a close is missing, or the target lies beyond the last session.
+export function forward(dates, close, date, sessions) {
+  const i = indexOfDate(dates, date);
+  if (i < 0 || !Number.isInteger(sessions) || sessions < 0) return null;
+  return forwardFrom(dates, close, i, sessions);
+}
+
+// The lowest close in the `sessions` after `date`, against its close, never above 0.
+// Null when the window runs past the last session or holds no close.
+export function maxDrawdownAfter(dates, close, date, sessions) {
+  const i = indexOfDate(dates, date);
+  if (i < 0 || !Number.isInteger(sessions) || sessions < 1) return null;
+  return drawdownFrom(dates, close, i, sessions);
 }
 
 // Equal-width bins over the values and any `include` values (the move, so the
@@ -336,17 +356,152 @@ function share(values) {
   return data.length ? data.filter((v) => v > 0).length / data.length : null;
 }
 
-// n, and the median and the share positive of the +5 and +20 session returns,
-// and the median max drawdown, over rows (episodes).
-function summarize(rows) {
-  const at = (session) => rows.map((r) => r.forward[FORWARD_SESSIONS.indexOf(session)]);
+// The follow-up figures over rows (episodes or start days): at each FORWARD_SESSIONS
+// horizon the median and the share up, each over the rows that have that return, and
+// the median worst drawdown. `n` counts the values behind each figure.
+export function followUp(rows) {
+  const list = rows || [];
+  const column = (values) => {
+    const data = values.filter(finite);
+    return { n: data.length, median: median(data), share: share(data) };
+  };
+  const drawdown = list.map((r) => r.drawdown).filter(finite);
   return {
-    n: rows.length,
-    median5: median(at(5)),
-    positive5: share(at(5)),
-    median20: median(at(20)),
-    positive20: share(at(20)),
-    medianDrawdown: median(rows.map((r) => r.drawdown)),
+    n: list.length,
+    forward: FORWARD_SESSIONS.map((_, k) => column(list.map((r) => r.forward[k]))),
+    drawdown: { n: drawdown.length, median: median(drawdown) },
+  };
+}
+
+// Every start day, read as an episode is: its forward returns and worst drawdown.
+// Used as the baseline: what followed on any day in the same window.
+export function dayRows(dates, close, days) {
+  const at = new Map((dates || []).map((d, i) => [d, i]));
+  return (days || []).map((date) => {
+    const i = at.has(date) ? at.get(date) : -1;
+    return {
+      date,
+      forward: FORWARD_SESSIONS.map((s) => (i < 0 ? null : forwardFrom(dates, close, i, s))),
+      drawdown: i < 0 ? null : drawdownFrom(dates, close, i, DRAWDOWN_SESSIONS),
+    };
+  });
+}
+
+// Episodes minus all days, figure by figure, in percentage points: a share's gap
+// is scaled from a fraction to points. Null wherever either side is missing.
+export function compareFollowUp(episodes, baseline) {
+  const diff = (x, y, scale = 1) => (finite(x) && finite(y) ? (x - y) * scale : null);
+  return {
+    forward: episodes.forward.map((f, k) => ({
+      median: diff(f.median, baseline.forward[k].median),
+      share: diff(f.share, baseline.forward[k].share, 100),
+    })),
+    drawdown: diff(episodes.drawdown.median, baseline.drawdown.median),
+  };
+}
+
+// A small seeded PRNG (mulberry32): the same seed gives the same resamples on every run.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// The value at percentile p (0–100) of an ascending array, interpolated between neighbours.
+function quantile(sorted, p) {
+  const at = ((sorted.length - 1) * p) / 100;
+  const lo = Math.floor(at);
+  const hi = Math.ceil(at);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (at - lo);
+}
+
+// The 5th and 95th percentiles of a list of values, or null for none.
+function interval(values) {
+  if (!values.length) return null;
+  const sorted = Float64Array.from(values).sort();
+  return [quantile(sorted, 5), quantile(sorted, 95)];
+}
+
+// A 90% interval for the median and the share up at each horizon, from resampling
+// the episodes with replacement. Episodes are the independent events, so they are
+// what is resampled. Null with fewer than INTERVAL_MIN episodes.
+export function bootstrapFollowUp(rows, { resamples = BOOTSTRAP_RESAMPLES, seed = BOOTSTRAP_SEED } = {}) {
+  const list = rows || [];
+  const n = list.length;
+  if (n < INTERVAL_MIN) return null;
+  const rng = mulberry32(seed);
+  // NaN marks a missing return; typed arrays keep the resamples fast enough to rerun on each check.
+  const columns = FORWARD_SESSIONS.map((_, k) => Float64Array.from(list, (r) => (finite(r.forward[k]) ? r.forward[k] : NaN)));
+  const buffer = new Float64Array(n);
+  const medians = FORWARD_SESSIONS.map(() => []);
+  const shares = FORWARD_SESSIONS.map(() => []);
+  for (let b = 0; b < resamples; b += 1) {
+    const picks = Array.from({ length: n }, () => Math.floor(rng() * n));
+    FORWARD_SESSIONS.forEach((_, k) => {
+      let count = 0;
+      let up = 0;
+      for (const p of picks) {
+        const v = columns[k][p];
+        if (Number.isNaN(v)) continue;
+        buffer[count] = v;
+        count += 1;
+        if (v > 0) up += 1;
+      }
+      if (!count) return;
+      const sorted = buffer.subarray(0, count).sort();
+      const mid = count >> 1;
+      medians[k].push(count % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2);
+      shares[k].push(up / count);
+    });
+  }
+  return {
+    n,
+    forward: FORWARD_SESSIONS.map((_, k) => ({ median: interval(medians[k]), share: interval(shares[k]) })),
+  };
+}
+
+// Years the episodes' worst days fall in, first and last; null with none.
+export function episodeYears(rows) {
+  const years = (rows || []).map((r) => Number(String(r.worstDate).slice(0, 4))).filter(finite);
+  return years.length ? { first: Math.min(...years), last: Math.max(...years) } : null;
+}
+
+// The ISO day halfway between two ISO days, or null when either is not a date.
+export function midDate(from, to) {
+  const a = Date.parse(from);
+  const b = Date.parse(to);
+  if (!finite(a) || !finite(b)) return null;
+  return new Date((a + b) / 2).toISOString().slice(0, 10);
+}
+
+// The episodes before the lookback's middle date, and on or after it, by their worst day.
+// Both are empty when the lookback has no usable first and last session.
+export function halves(rows, from, to) {
+  const middle = midDate(from, to);
+  if (!middle) return { middle: null, earlier: [], later: [] };
+  return {
+    middle,
+    earlier: (rows || []).filter((r) => r.worstDate < middle),
+    later: (rows || []).filter((r) => r.worstDate >= middle),
+  };
+}
+
+// The summary the episode table and the setups use: n and the +5 and +20 figures
+// and the median drawdown, over rows (episodes).
+function summarize(rows) {
+  const f = followUp(rows);
+  return {
+    n: f.n,
+    median5: f.forward[1].median,
+    positive5: f.forward[1].share,
+    median20: f.forward[2].median,
+    positive20: f.forward[2].share,
+    medianDrawdown: f.drawdown.median,
   };
 }
 
@@ -363,6 +518,40 @@ export function similarSetups(rows, today) {
     drawdownBucket: ddBucket,
     matched: summarize((rows || []).filter(matches)),
     all: summarize(rows || []),
+  };
+}
+
+// Overnight gap in percent: the open against the prior session's close. A session
+// with a missing open or close, or a zero prior close, has no gap.
+export function overnightGaps(bars) {
+  const { dates, open, close } = bars || {};
+  if (!Array.isArray(dates) || !Array.isArray(open) || !Array.isArray(close)) return [];
+  const n = Math.min(dates.length, open.length, close.length);
+  const out = [];
+  for (let i = 1; i < n; i += 1) {
+    const prior = close[i - 1];
+    if (!finite(open[i]) || !finite(prior) || prior === 0) continue;
+    out.push({ date: dates[i], gap: (open[i] / prior - 1) * 100 });
+  }
+  return out;
+}
+
+// The empirical gap percentiles, the share with a gap beyond `threshold` either way,
+// the five largest gaps up and down, and where the latest session's gap sits. Null with no gaps.
+export function gapSummary(gaps, { threshold = GAP_LARGE } = {}) {
+  const data = (gaps || []).filter((g) => finite(g.gap));
+  if (!data.length) return null;
+  const sorted = Float64Array.from(data.map((g) => g.gap)).sort();
+  const latest = data[data.length - 1];
+  return {
+    n: data.length,
+    from: data[0].date,
+    to: latest.date,
+    percentiles: GAP_PERCENTILES.map((p) => ({ p, value: quantile(sorted, p) })),
+    shareLarge: data.filter((g) => Math.abs(g.gap) > threshold).length / data.length,
+    up: data.filter((g) => g.gap > 0).sort((a, b) => b.gap - a.gap).slice(0, 5),
+    down: data.filter((g) => g.gap < 0).sort((a, b) => a.gap - b.gap).slice(0, 5),
+    latest: { date: latest.date, gap: latest.gap, percentile: percentileOf(data.map((g) => g.gap), latest.gap) },
   };
 }
 
