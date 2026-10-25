@@ -250,7 +250,7 @@ function signed(value, digits, unit) {
 
 function sdSize(response) {
   if (response.scale == null) return '';
-  const unit = response.unit === 'pp' ? 'pp' : response.unit === 'k' ? 'k' : ` ${response.unit || ''}`;
+  const unit = response.unit === 'pp' ? 'pp' : response.unit === 'k' || response.unit === 'M' ? response.unit : ` ${response.unit || ''}`;
   const digits = response.scale < 1 ? 2 : response.scale < 10 ? 1 : 0;
   return ` (${num(response.scale, digits)}${unit})`;
 }

@@ -58,7 +58,7 @@ export function nextText(next) {
   const d = new Date(`${next.date}T00:00:00Z`);
   const when = `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}${next.time ? ` ${next.time}` : ''}`;
   const unit = next.unit === 'k' || next.unit === 'pts' ? '' : '';
-  const fmt = (v) => (finite(v) ? num(v, next.unit === 'k' ? 0 : 1) + unit : DASH);
+  const fmt = (v) => (finite(v) ? num(v, next.unit === 'k' ? 0 : next.unit === 'M' ? 2 : 1) + unit : DASH);
   return { when, forecast: fmt(next.forecast), previous: fmt(next.previous) };
 }
 

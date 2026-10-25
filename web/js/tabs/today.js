@@ -52,7 +52,7 @@ export function whenText(item) {
   return '';
 }
 
-// A value with its unit, as the reader scans it: 2.5%, +12.0 bp, 1.20×, 194k.
+// A value with its unit, as the reader scans it: 2.5%, +12.0 bp, 1.20×, 194k, 7.08M.
 function valueText(value, unit) {
   if (!valid(value)) return DASH;
   if (unit === 'bp') return `${value > 0 ? '+' : ''}${num(value, 1)} bp`;
@@ -60,6 +60,7 @@ function valueText(value, unit) {
   if (unit === 'x') return `${num(value, 2)}×`;
   if (unit === '%') return `${num(value, 2)}%`;
   if (unit === 'k') return `${num(value, 0)}k`;
+  if (unit === 'M') return `${num(value, 2)}M`;
   return num(value, 2);
 }
 

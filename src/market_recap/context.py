@@ -205,6 +205,18 @@ def _classify(frame: pd.DataFrame, labelled: pd.DataFrame | None) -> pd.DataFram
     return frame
 
 
+def apply_overrides(labelled: pd.DataFrame, overrides: list[dict]) -> pd.DataFrame:
+    """The config's corrections to the Wikipedia labels, marked as such."""
+    out = labelled.copy()
+    for o in overrides:
+        hit = out["yahoo_symbol"] == str(o["ticker"]).upper()
+        for column in ("sector", "sub_sector"):
+            if o.get(column):
+                out.loc[hit, column] = o[column]
+        out.loc[hit, "classification_source"] = "config_override"
+    return out
+
+
 def build_context(*, history_period: str = "3y", use_cache: bool = True) -> MarketContext:
     config = load_config()
     log = BuildLog()
@@ -220,6 +232,7 @@ def build_context(*, history_period: str = "3y", use_cache: bool = True) -> Mark
             columns={"ticker": "yahoo_symbol"}
         )
         labelled["classification_source"] = "wikipedia_gics"
+        labelled = apply_overrides(labelled, config["universe"].get("classification_overrides") or [])
         log.add(SourceRecord(
             "wikipedia_gics", "S&P 500 GICS sector / sub-industry", wiki_url,
             rows=len(classification), policy="fund_holdings",

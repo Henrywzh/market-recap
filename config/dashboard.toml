@@ -18,6 +18,12 @@ history_years = 11
 # what they are, so both have to be stateable rather than buried in the model.
 market_proxy = "SPY"
 risk_free_tenor = "10Y"
+# Where the GICS labels read from Wikipedia's S&P 500 list are known to be out
+# of step, the label used instead, with the reason and the day it was checked.
+# Applied to every page, so a name's peers change with it.
+classification_overrides = [
+  { ticker = "PG", sector = "Consumer Staples", sub_sector = "Household Products", checked = "2026-10-25", reason = "Wikipedia files PG under Personal Care Products; S&P and MSCI classify it as Household Products, with CL, KMB, CLX and CHD." },
+]
 
 # Every index the page covers, defined once. The builder loops over this list:
 # adding a third index is a config change, not a code change, and nothing can
@@ -548,7 +554,7 @@ drivers = [
   { key = "unemployment", label = "Unemployment rate", title = "Unemployment Rate", unit = "pp" , miss_threshold = 0.05, hawkish = -1 },
   { key = "hourly_earnings", label = "Average hourly earnings m/m", title = "Average Hourly Earnings MoM", unit = "pp" , miss_threshold = 0.05 },
   { key = "claims", label = "Initial jobless claims", title = "Initial Jobless Claims", unit = "k", hawkish = -1 },
-  { key = "jolts", label = "JOLTs job openings", title = "JOLTs Job Openings", unit = "k" },
+  { key = "jolts", label = "JOLTs job openings", title = "JOLTs Job Openings", unit = "M" },
   { key = "retail_sales", label = "Retail sales m/m", title = "Retail Sales MoM", unit = "pp" , miss_threshold = 0.05 },
   { key = "ism_manufacturing", label = "ISM manufacturing PMI", title = "ISM Manufacturing PMI", unit = "pts" },
 ]
@@ -1907,15 +1913,15 @@ detail = "The December 2026 reconstitution (Russell now reconstitutes twice a ye
 
 [[catalysts.manual]]
 date = "2026-11-04"
-title = "Treasury quarterly refunding announcement (expected)"
+title = "Treasury quarterly refunding announcement"
 event_type = "fiscal"
 scope = "us_macro"
 importance = "high"
 date_precision = "day"
-certainty = "expected"
-checked = "2026-10-19"
-source_url = "https://home.treasury.gov/policy-issues/financing-the-government/quarterly-refunding"
-detail = "Not yet announced: Treasury confirms the date about a week ahead. The statement usually comes at 8:30 on the Wednesday of the first week of February, May, August and November, after borrowing estimates on the Monday. It sets coupon auction sizes; the August 2023 refunding helped drive that autumn's rise in the term premium."
+certainty = "announced"
+checked = "2026-10-25"
+source_url = "https://home.treasury.gov/news/press-releases/sb0590"
+detail = "Date set in Treasury's August refunding statement; the borrowing estimates come on Monday 2 November. The statement usually comes at 8:30 on the Wednesday of the first week of February, May, August and November. It sets coupon auction sizes; the August 2023 refunding helped drive that autumn's rise in the term premium."
 
 # --- Commodities and geopolitics ----------------------------------------------------
 [[catalysts.manual]]
@@ -1977,9 +1983,9 @@ scope = "us_macro"
 importance = "medium"
 date_precision = "day"
 certainty = "deadline"
-checked = "2026-10-19"
-source_url = "https://tax.thomsonreuters.com/blog/section-301-exclusions-expiration/"
-detail = "The remaining 178 product exclusions from Section 301 tariffs lapse unless USTR extends them; no extension announced when checked. Separate from the broader truce, which now runs to 10 January 2027."
+checked = "2026-10-25"
+source_url = "https://ustr.gov/about/policy-offices/press-office/press-releases/2025/november/ustr-extends-exclusions-china-section-301-tariffs-related-forced-technology-transfer-investigation"
+detail = "The remaining 178 product exclusions from Section 301 tariffs run to 11:59 p.m. ET on 9 November, so entries from the 10th pay the full rate unless USTR extends them; no extension announced when checked. Separate from the broader truce, which now runs to 10 January 2027."
 
 [[catalysts.manual]]
 date = "2026-12-01"
