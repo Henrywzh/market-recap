@@ -89,7 +89,12 @@ export function bands(series, limit = MAX_BANDS) {
 }
 
 const bn = (v, digits = 1) => (finite(v) ? `${num(v / BILLION, digits)}B` : DASH);
-const signed = (v, unit = '%', digits = 1) => (finite(v) ? `${v > 0 ? '+' : v < 0 ? '−' : ''}${num(Math.abs(v), digits)}${unit}` : DASH);
+// Signed after rounding, so a change that rounds to zero reads 0.0, not −0.0.
+const signed = (v, unit = '%', digits = 1) => {
+  if (!finite(v)) return DASH;
+  const r = Number(v.toFixed(digits));
+  return `${r > 0 ? '+' : r < 0 ? '−' : ''}${num(Math.abs(r), digits)}${unit}`;
+};
 const percent = (v) => (finite(v) ? `${num(v, 1)}%` : DASH);
 const marginText = (v) => (finite(v) && !meaningful(v) ? 'n.m.' : percent(v));
 const periodLabel = (p) => `${p.label}${p.derived ? '*' : ''}`;
