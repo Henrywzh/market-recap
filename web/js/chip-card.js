@@ -1,6 +1,7 @@
-// CHIP DISTRIBUTION card on a ticker's PRICE view: candles beside the volume
-// profile or the estimated cost distribution (chip-math.js), for a window
-// ending on the latest session or on any session clicked.
+// CHIP DISTRIBUTION card: candles beside the volume profile or the estimated
+// cost distribution (chip-math.js), for a window ending on the latest session
+// or on any session clicked. The ticker page folds the cost view under its
+// PRICE & TREND chart, which carries the volume profile itself.
 
 import { el, num, gap, periodSwitch, DASH } from './fmt.js';
 import { render } from './charts.js';
@@ -134,14 +135,17 @@ function statsNode(view) {
 }
 
 // The card's body, or a gap when the ticker has no bars. ``shares``: shares
-// outstanding (market cap / price), for the cost model's turnover.
-export function chipCard(bars, { shares = null } = {}) {
+// outstanding (market cap / price), for the cost model's turnover; ``modes``:
+// the modes to offer, all by default.
+export function chipCard(bars, { shares = null, modes: only = null } = {}) {
   if (!bars?.dates?.length) return gap('No daily bars for this ticker.');
   let windowLabel = '1Y';
-  let mode = 'volume';
   let end = null;
   const body = el('div', {});
-  const modes = finite(shares) ? MODES : MODES.slice(0, 1);
+  // ``only`` limits the modes offered (the ticker page shows the volume profile with its candles).
+  const modes = MODES.filter(([k]) => (finite(shares) || k === 'volume') && (!only || only.includes(k)));
+  if (!modes.length) return gap('No shares outstanding for the cost estimate.');
+  let mode = modes[0][0];
   const redraw = () => {
     body.replaceChildren();
     const sessions = WINDOWS.find(([label]) => label === windowLabel)[1];

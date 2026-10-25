@@ -490,14 +490,25 @@ export default async function renderTicker(root, valuation, manifest, ctx) {
     } else {
       host.append(card('PRICE & TREND', null, gap(`${symbol} has no baked price history in this build.`)));
     }
-    if (technicals?.bars?.includes(symbol)) {
-      await section(host, 'CHIP DISTRIBUTION · VOLUME BY PRICE', async (inner) => {
-        const bars = await ctx.loadArtifact(`bars/${encodeURIComponent(symbol)}`);
-        // Shares outstanding for the cost model's turnover: market cap over the price it was taken at.
-        const shares = row?.market_cap > 0 && row?.price > 0 ? row.market_cap / row.price : null;
-        inner.append(chipCard(bars, { shares }));
-        return `daily bars since ${bars.dates[0]}`;
+    // The volume profile sits beside the candles above; the estimated holders' cost
+    // (which needs shares outstanding) is folded here, its bars loaded on first open.
+    const shares = row?.market_cap > 0 && row?.price > 0 ? row.market_cap / row.price : null;
+    if (technicals?.bars?.includes(symbol) && shares) {
+      const body = el('div', {});
+      const fold = el('details', { class: 'fold' }, [
+        el('summary', { text: 'COST DISTRIBUTION · ESTIMATED HOLDERS\' COST SINCE 2020' }), body,
+      ]);
+      fold.addEventListener('toggle', async () => {
+        if (!fold.open || body.childElementCount) return;
+        body.append(el('div', { class: 'field-note', text: 'Loading…' }));
+        try {
+          const bars = await ctx.loadArtifact(`bars/${encodeURIComponent(symbol)}`);
+          body.replaceChildren(chipCard(bars, { shares, modes: ['cost'] }));
+        } catch (error) {
+          body.replaceChildren(gap(error.message));
+        }
       });
+      host.append(card('COST DISTRIBUTION', null, fold));
     }
     host.append(...keep(eventPayload ? storyCard(eventPayload) : null, chain ? chainCard(chain, symbol, { compact: true }) : null));
     return null;

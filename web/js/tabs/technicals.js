@@ -6,6 +6,7 @@
 import { el, card, table, num, pct, dirClass, sectionTitle, tag, DASH } from '../fmt.js';
 import { render, multiLine, SERIES_COLORS } from '../charts.js';
 import * as T from '../technicals-math.js';
+import { grid as priceGrid, volumeProfile, valueArea } from '../chip-math.js';
 import { resolveTicker } from '../routes.js';
 
 const TICKER_BASE = 'artifacts/tickers';
@@ -25,6 +26,8 @@ const FIT_PAD = 0.04;
 const BAND_FILL = 'rgba(232,163,61,0.13)';
 // The legend icon is a small square: the fill's own alpha would be invisible there.
 const BAND_ICON = 'rgba(232,163,61,0.55)';
+// Price bins of the volume profile beside the candles.
+const PROFILE_BINS = 60;
 
 const payloads = new Map();
 
@@ -163,6 +166,17 @@ const maName = (w) => `SMA ${w}`;
 const MA_COLORS = (p) => [p.accent, p.blue, p.purple, ...SERIES_COLORS];
 
 // Volume labels on the pane's axis: 1.2M, 340K.
+// The profile's readings in a line: where the window traded most, its value
+// area, and the last close on screen against it. Descriptive, not a level call.
+export function profileText(reading) {
+  if (!reading) return '';
+  const { area, close } = reading;
+  const where = !isNum(close) ? '' : close > area.high ? 'above it' : close < area.low ? 'below it' : 'inside it';
+  return `VOLUME PROFILE (sessions on screen) · most traded ${num(area.poc)} · value area ${num(area.low)}–${num(area.high)}`
+    + ` (${num(area.share * 100, 0)}% of volume)${where ? ` · last close ${num(close)}, ${where}` : ''}`
+    + ' · each session\'s volume spread over its low–high range; descriptive, not support or resistance.';
+}
+
 function volumeLabel(v) {
   if (!isNum(v)) return '';
   const unit = [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']].find(([size]) => v >= size);
@@ -175,6 +189,10 @@ function volumeLabel(v) {
 // the range is a zoom window from `view.start` to the last session, so the
 // reader can pan and zoom past it. The y-axis fits the visible candles (or
 // closes) and the visible averages; the band is left to be clipped.
+// With ``view.profile`` the candles get the volume profile of the sessions on
+// screen to their right (chip-math.js): volume by price, the value area in amber
+// and its point of control dashed across the candles. It follows zoom and pan,
+// and ``view.onProfile`` hears its readings.
 function priceChart(node, view) {
   const { bars, dates, close, averages, bandLines, start, log, ticker } = view;
   const last = dates.length - 1;
@@ -185,6 +203,25 @@ function priceChart(node, view) {
     // A log axis needs positive bounds; prices are, so this only guards a stray zero.
     return log && extent.min <= 0 ? { max: extent.max } : extent;
   };
+  const withProfile = Boolean(bars && view.profile);
+  // The profile of sessions [from, to] over the y-axis range they are drawn in.
+  const profileOf = (from, to, extent) => {
+    const g = extent && priceGrid(extent.min, extent.max, PROFILE_BINS);
+    if (!g) return null;
+    const volumes = volumeProfile(bars, from, to, g);
+    const area = valueArea(volumes, g);
+    if (!area) return null;
+    return { g, volumes, area, close: bars.close[to] };
+  };
+  const profileData = (profile) => (profile ? profile.volumes.map((v, k) => {
+    const low = profile.g.min + k * profile.g.step;
+    const high = low + profile.g.step;
+    const inArea = low >= profile.area.low - 1e-9 && high <= profile.area.high + 1e-9;
+    return [v, low, high, inArea ? 1 : 0];
+  }) : []);
+  const pocLine = (profile) => (profile ? [{ yAxis: profile.area.poc, name: 'POC' }] : []);
+  let profile = withProfile ? profileOf(start, last, fit(start, last)) : null;
+  if (withProfile) view.onProfile?.(profile);
   const chart = render(node, (option, p) => {
     const colors = MA_COLORS(p);
     const maEntries = Object.entries(averages).map(([w, values], i) => ({
@@ -253,43 +290,78 @@ function priceChart(node, view) {
     const L = bars.low;
     const C = close;
     const V = bars.volume;
+    const right = withProfile ? '19%' : 16;
+    // The profile's grid shares the price grid's height and y-range, so a bar sits at its price.
+    const profileParts = withProfile ? {
+      grid: [{ left: '82%', right: 16, top: 12, height: '68%' }],
+      xAxis: [{ type: 'value', gridIndex: 2, min: 0, axisLabel: { show: false }, splitLine: { show: false },
+        axisLine: { show: false }, axisTick: { show: false } }],
+      yAxis: [{ ...yPrice, gridIndex: 2, axisLabel: { show: false }, splitLine: { show: false }, axisTick: { show: false } }],
+      series: [{
+        id: 'profile', name: 'Volume profile', type: 'custom', xAxisIndex: 2, yAxisIndex: 2, silent: true,
+        tooltip: { show: false }, encode: { x: 0, y: [1, 2] }, data: profileData(profile),
+        renderItem: (params, api) => {
+          const from = api.coord([0, api.value(1)]);
+          const to = api.coord([api.value(0), api.value(2)]);
+          return { type: 'rect', shape: { x: from[0], y: to[1], width: Math.max(0, to[0] - from[0]), height: Math.max(1, from[1] - to[1] - 1) },
+            style: { fill: api.value(3) ? p.accent : p.faint, opacity: api.value(3) ? 0.75 : 0.45 } };
+        },
+      }],
+    } : { grid: [], xAxis: [], yAxis: [], series: [] };
     return withLegend(option, p, {
       ...option,
       tooltip: axisTooltip,
       grid: [
-        { left: 52, right: 16, top: 12, height: '68%' },
-        { left: 52, right: 16, top: '74%', height: '12%' },
+        { left: 52, right, top: 12, height: '68%' },
+        { left: 52, right, top: '74%', height: '12%' },
+        ...profileParts.grid,
       ],
       dataZoom,
       xAxis: [
         { ...option.xAxis, data: dates, gridIndex: 0, boundaryGap: true, axisLabel: { show: false } },
         { ...option.xAxis, data: dates, gridIndex: 1, boundaryGap: true },
+        ...profileParts.xAxis,
       ],
       yAxis: [
         yPrice,
         { ...option.yAxis, gridIndex: 1, scale: false, min: 0, splitNumber: 2,
           axisLabel: { ...option.yAxis.axisLabel, formatter: volumeLabel } },
+        ...profileParts.yAxis,
       ],
       series: [
         ...bandSeries,
-        { name: `${ticker} OHLC`, type: 'candlestick', z: 5,
+        { id: 'candles', name: `${ticker} OHLC`, type: 'candlestick', z: 5,
           data: O.map((_, i) => (isNum(O[i]) && isNum(H[i]) && isNum(L[i]) && isNum(C[i]) ? [O[i], C[i], L[i], H[i]] : '-')),
-          itemStyle: { color: p.up, color0: p.down, borderColor: p.up, borderColor0: p.down } },
+          itemStyle: { color: p.up, color0: p.down, borderColor: p.up, borderColor0: p.down },
+          markLine: { silent: true, symbol: 'none', lineStyle: { color: p.accent, type: 'dashed', width: 1 },
+            label: { color: p.accent, fontSize: 9, position: 'insideEndTop', formatter: (d) => `POC ${num(d.value)}` },
+            data: pocLine(profile) } },
         ...maSeries,
         { name: 'Volume', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, barMaxWidth: 6,
           data: V.map((v, i) => (isNum(v) ? {
             value: v,
             itemStyle: { color: isNum(O[i]) && isNum(C[i]) ? (C[i] < O[i] ? p.down : p.up) : p.faint, opacity: 0.5 },
           } : null)) },
+        ...profileParts.series,
       ],
-    }, [`${ticker} OHLC`, 'Volume']);
+    }, [`${ticker} OHLC`, 'Volume', 'Volume profile']);
   });
   // Zooming or panning re-fits the y-axis to what is now on screen.
   chart?.on('datazoom', (event) => {
     const e = event.batch?.[0] || event;
     const from = Math.floor(((e.start ?? 0) / 100) * last);
     const to = Math.ceil(((e.end ?? 100) / 100) * last);
-    chart.setOption({ yAxis: [fit(from, to)] });
+    const extent = fit(from, to);
+    if (!withProfile) {
+      chart.setOption({ yAxis: [extent] });
+      return;
+    }
+    profile = profileOf(from, Math.min(to, last), extent);
+    view.onProfile?.(profile);
+    chart.setOption({
+      yAxis: [extent, {}, extent],
+      series: [{ id: 'candles', markLine: { data: pocLine(profile) } }, { id: 'profile', data: profileData(profile) }],
+    });
   });
   return chart;
 }
@@ -512,6 +584,7 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
   let candlesOn = true;
   let logOn = false;
   let bandOn = true;
+  let profileOn = true;
   let shownWindows = [...defaults.ma_periods].sort((a, b) => a - b);
   const summaryHost = el('div', {});
   const priceTitle = el('div', { class: 'card-title', text: '' });
@@ -551,9 +624,19 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
       loadSingle();
     },
   });
+  // VOL PROFILE: volume by price beside the candles, on by default; candles only, since a line has no volume.
+  const profileButton = el('button', {
+    type: 'button', text: 'VOL PROFILE', 'aria-pressed': 'true', title: 'Volume by price for the sessions on screen',
+    onclick: () => {
+      profileOn = !profileOn;
+      profileButton.setAttribute('aria-pressed', String(profileOn));
+      loadSingle();
+    },
+  });
+  const profileNote = el('div', { class: 'tech-note', text: '' });
   const toolNote = el('span', { class: 'tech-note', text: '' });
   const toolbar = el('div', { class: 'tech-toolbar' }, [
-    modeSwitch, rangeSwitch, el('div', { class: 'period-switch' }, [logButton, bandButton]), toolNote,
+    modeSwitch, rangeSwitch, el('div', { class: 'period-switch' }, [logButton, bandButton, profileButton]), toolNote,
   ]);
 
   function pickRange(key) {
@@ -640,8 +723,11 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
       priceChart(stPriceNode, {
         bars: candles, dates: series.dates, close: series.close, averages: readings.averages,
         bandLines: bandOn ? readings.bandLines : null, sigma: defaults.band_sigma, start: T.rangeStart(series.dates, range),
-        log: logOn, ticker: payload.ticker,
+        log: logOn, ticker: payload.ticker, profile: profileOn,
+        onProfile: (reading) => { profileNote.textContent = profileText(reading); },
       });
+      profileButton.hidden = !candles;
+      if (!candles || !profileOn) profileNote.textContent = '';
       statHost.replaceChildren(...statItems(payload, series, readings, windows).map(([label, text, tone]) => el('div', { class: 'tech-stat' }, [
         el('span', { class: 'tech-stat-label', text: label }),
         el('span', { class: `tech-stat-value ${tone}`, text }),
@@ -677,7 +763,7 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
   }
 
   if (compact) {
-    root.append(card('PRICE & TREND', null, [priceTitle, toolbar, chipRow, statHost, stPriceNode, summaryHost, stStatus]));
+    root.append(card('PRICE & TREND', null, [priceTitle, toolbar, chipRow, statHost, stPriceNode, profileNote, summaryHost, stStatus]));
     const slopeCard = card('', null, slopeNode);
     slopeCard.querySelector('.card-title').replaceWith(slopeTitle);
     root.append(el('div', { class: 'grid two' }, [slopeCard, card(`Z-SCORE VS ${zWindow} DMA`, null, zNode)]));
@@ -702,6 +788,7 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
     chipRow,
     statHost,
     stPriceNode,
+    profileNote,
   ]));
 
   const slopeCard = card('', null, slopeNode);

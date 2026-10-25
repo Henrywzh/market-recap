@@ -130,7 +130,7 @@ const priceHandlers = (charts) => [...charts].reverse().find(({ node }) => node.
 test('a ticker with bars opens on candles: OHLC, a volume pane and the moving averages on the candles', async () => {
   const { root, charts } = await mount({ TST: fixture() });
   const option = priceOption(charts);
-  assert.equal(option.grid.length, 2);
+  assert.equal(option.grid.length, 3, 'price, volume and the volume profile beside the price');
   assert.ok(option.series.some((s) => s.type === 'candlestick'));
   const volume = option.series.find((s) => s.name === 'Volume');
   assert.equal(volume.type, 'bar');
@@ -207,6 +207,34 @@ test('zooming re-fits the y-axis to the window on screen', async () => {
   const want = expectedExtent(data.ohlcv, 0, 52);
   assert.ok(Math.abs(zoomed.min - want.min) < 1e-9 && Math.abs(zoomed.max - want.max) < 1e-9);
   assert.ok(zoomed.max < 170, 'the early window tops out well below the latest prices');
+  assert.doesNotMatch(textOf(root), /NaN|undefined|\[object Object\]/);
+});
+
+test('the volume profile is on by default, follows the zoom and hides with its button', async () => {
+  const { root, charts } = await mount({ TST: fixture() });
+  let option = priceOption(charts);
+  const profile = option.series.find((s) => s.id === 'profile');
+  assert.equal(profile.type, 'custom');
+  assert.equal(profile.yAxisIndex, 2);
+  assert.equal(profile.data.length, 60);
+  assert.ok(profile.data.some((d) => d[3] === 1), 'the value area is marked');
+  const poc = option.series.find((s) => s.id === 'candles').markLine.data[0].yAxis;
+  assert.ok(poc >= option.yAxis[0].min && poc <= option.yAxis[0].max, 'the point of control is inside the range drawn');
+  assert.match(textOf(root), /VOLUME PROFILE \(sessions on screen\) · most traded [\d.]+ · value area/);
+
+  // Zooming to the first 10% re-reads the profile over those sessions and that range.
+  priceHandlers(charts).datazoom({ start: 0, end: 10 });
+  option = priceOption(charts);
+  const zoomedPoc = option.series.find((s) => s.id === 'candles').markLine.data[0].yAxis;
+  assert.ok(zoomedPoc < poc, 'the early window traded lower');
+  assert.deepEqual(option.yAxis[2], option.yAxis[0], 'the profile axis keeps the price axis range');
+
+  buttonNamed(root, 'VOL PROFILE').dispatch('click');
+  await flush();
+  option = priceOption(charts);
+  assert.equal(option.grid.length, 2);
+  assert.ok(!option.series.some((s) => s.id === 'profile'));
+  assert.doesNotMatch(textOf(root), /VOLUME PROFILE \(sessions/);
   assert.doesNotMatch(textOf(root), /NaN|undefined|\[object Object\]/);
 });
 
