@@ -1786,3 +1786,16 @@ table.compare-table th:last-child { text-align: left; }
 .chart.plan-heat { height: 250px; }
 .trade-plan-out td:nth-child(n+2) { text-align: right; }
 .plan-copy { width: 100%; background: var(--panel-alt); border: 1px solid var(--border-strong); color: var(--text); font-family: var(--mono); font-size: 11px; padding: 6px; margin-top: 8px; }
+
+/* Ticker suggestions under a ticker box (ticker-suggest.js). */
+.ticker-suggest-wrap { position: relative; display: inline-block; }
+.ticker-suggest {
+  position: absolute; z-index: 30; top: calc(100% + 2px); left: 0; min-width: 240px; max-width: 340px;
+  background: var(--panel-alt); border: 1px solid var(--border-strong); border-radius: 2px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); font-family: var(--mono); font-size: 12px;
+}
+.ticker-suggest-item { display: flex; gap: 10px; align-items: baseline; padding: 5px 9px; cursor: pointer; white-space: nowrap; }
+.ticker-suggest-item b { color: var(--text); min-width: 52px; font-weight: 600; }
+.ticker-suggest-item span { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; }
+.ticker-suggest-item:hover, .ticker-suggest-item.active { background: var(--border); }
+.ticker-suggest-item.active b { color: var(--accent); }

@@ -7,6 +7,7 @@ import { el, card, table, num, pct, dirClass, sectionTitle, tag, DASH } from '..
 import { render, multiLine, SERIES_COLORS } from '../charts.js';
 import * as T from '../technicals-math.js';
 import { grid as priceGrid, volumeProfile, valueArea } from '../chip-math.js';
+import { withSuggestions } from '../ticker-suggest.js';
 import { resolveTicker } from '../routes.js';
 
 const TICKER_BASE = 'artifacts/tickers';
@@ -474,6 +475,57 @@ function withLegend(option, p, built, hidden = []) {
   };
 }
 
+// The ratio with its moving averages and a ±σ band around the longest one: the
+// same envelope the price chart draws, so a stretched ratio reads the same way.
+// A dashed level and its value follow the pointer.
+function ratioChart(node, dates, { ratio, averages, band, sigma, window }) {
+  return render(node, (option, p) => {
+    const colors = MA_COLORS(p);
+    const bandSeries = band ? [
+      { name: BAND_BASE, type: 'line', data: band.lower, stack: 'band', showSymbol: false,
+        lineStyle: { opacity: 0 }, areaStyle: { opacity: 0 }, silent: true, tooltip: { show: false } },
+      { name: `±${sigma}σ band (${window}-day)`, type: 'line', stack: 'band', showSymbol: false, silent: true,
+        data: band.upper.map((v, i) => (v === null || band.lower[i] === null ? null : v - band.lower[i])),
+        lineStyle: { opacity: 0 }, areaStyle: { color: BAND_FILL }, itemStyle: { color: BAND_ICON }, tooltip: { show: false } },
+    ] : [];
+    // The ratio takes the first colour, so the averages start from the second.
+    const maColor = (i) => colors[(i + 1) % colors.length];
+    const maSeries = Object.entries(averages).map(([name, data], i) => ({
+      name, type: 'line', data, showSymbol: false, lineStyle: { width: 1, color: maColor(i) },
+      itemStyle: { color: maColor(i) },
+    }));
+    const values = [...ratio, ...Object.values(averages).flat()].filter(isNum);
+    const lo = Math.min(...values);
+    const hi = Math.max(...values);
+    const pad = (hi - lo) * FIT_PAD || hi * 0.01;
+    const tip = (params) => {
+      const k = [].concat(params)[0]?.dataIndex;
+      if (k === undefined) return '';
+      const rows = [`<b>${dates[k]}</b>`, `Ratio <b>${num(ratio[k], 4)}</b>`];
+      Object.entries(averages).forEach(([name, data], i) => rows.push(`<span style="color:${maColor(i)}">${name}</span> ${num(data[k], 4)}`));
+      if (band && isNum(band.upper[k])) rows.push(`Band ${num(band.lower[k], 4)} – ${num(band.upper[k], 4)}`);
+      return rows.join('<br>');
+    };
+    return withLegend(option, p, {
+      ...option,
+      tooltip: { ...option.tooltip, valueFormatter: undefined, formatter: tip },
+      grid: { ...option.grid, bottom: 40 },
+      xAxis: { ...option.xAxis, data: dates },
+      yAxis: { ...option.yAxis, min: lo - pad, max: hi + pad,
+        axisLabel: { ...option.yAxis.axisLabel, showMinLabel: false, showMaxLabel: false },
+        axisPointer: { show: true, type: 'line', snap: false, triggerTooltip: false,
+          lineStyle: { color: p.dim, type: 'dashed', width: 1 },
+          label: { show: true, backgroundColor: p.panel, color: p.text, borderColor: p.faint, borderWidth: 1, fontSize: 10,
+            formatter: (d) => num(d.value, 4) } } },
+      series: [
+        ...bandSeries,
+        { name: 'Ratio', type: 'line', data: ratio, showSymbol: false, lineStyle: { width: 1.5, color: p.accent }, itemStyle: { color: p.accent }, z: 5 },
+        ...maSeries,
+      ],
+    });
+  });
+}
+
 function zChart(node, dates, z) {
   render(node, (option, p) => ({
     ...option,
@@ -605,7 +657,9 @@ export default async function renderTechnicals(root, data, _manifest, ctx = {}) 
   ]);
   const numInput = el('input', { value: firstNum, size: '8' });
   const denInput = el('input', { value: firstDen, size: '8' });
-  const rsPeriod = periodSelect(Object.keys(data.periods), defaults.ratio_period);
+  // Every range the price chart offers, 1M to MAX: indicators are computed on the
+  // whole history first, so a 1M view still has its 200-day average and band.
+  const rsPeriod = periodSelect(T.RANGES.map((r) => r.key), defaults.ratio_period);
   presetSelect.addEventListener('change', () => {
     if (!presetSelect.value) return;
     [numInput.value, denInput.value] = presetSelect.value.split('/');
@@ -627,15 +681,22 @@ export default async function renderTechnicals(root, data, _manifest, ctx = {}) 
       for (const symbol of [a, b]) if (!available.has(symbol)) throw new Error(`${symbol} is not in this build`);
       const [left, right] = await Promise.all([loadTicker(a), loadTicker(b)]);
       const { dates, ratio } = T.ratioSeries(left, right);
-      const start = T.viewStart(dates, data.periods[rsPeriod.value]);
-      const lines = { Ratio: cut(ratio, start) };
-      defaults.ratio_ma_periods.forEach((w) => { lines[`${w}MA`] = cut(T.sma(ratio, w), start); });
-      multiLine(ratioNode, cut(dates, start), lines);
+      const start = T.rangeStart(dates, rsPeriod.value);
+      const averages = Object.fromEntries(defaults.ratio_ma_periods.map((w) => [`${w}MA`, cut(T.sma(ratio, w), start)]));
+      const bandWindow = Math.max(...defaults.ratio_ma_periods);
+      const full = ratio.length >= bandWindow ? T.band(ratio, bandWindow, defaults.band_sigma) : null;
+      ratioChart(ratioNode, cut(dates, start), {
+        ratio: cut(ratio, start), averages, sigma: defaults.band_sigma, window: bandWindow,
+        band: full ? { upper: cut(full.upper, start), lower: cut(full.lower, start) } : null,
+      });
+      const z = T.zscore(ratio, bandWindow);
+      const zNow = z[z.length - 1];
       const m = T.macd(ratio, defaults.macd);
       macdChart(macdNode, cut(dates, start), {
         macd: cut(m.macd, start), signal: cut(m.signal, start), histogram: cut(m.histogram, start),
       });
-      rsStatus.textContent = `Loaded ${a}/${b} as of ${dates[dates.length - 1]} · ${dates.length} shared sessions`;
+      rsStatus.textContent = `Loaded ${a}/${b} as of ${dates[dates.length - 1]} · ${dates.length} shared sessions`
+        + (isNum(zNow) ? ` · ratio ${zNow >= 0 ? '+' : '−'}${num(Math.abs(zNow), 2)}σ from its ${bandWindow}-day average` : '');
     } catch (error) {
       rsStatus.textContent = error.message;
       ratioNode.innerHTML = '';
@@ -646,13 +707,13 @@ export default async function renderTechnicals(root, data, _manifest, ctx = {}) 
   root.append(card('RELATIVE STRENGTH RATIO', null, [
     el('div', { class: 'field-row' }, [
       el('div', { class: 'field' }, [el('label', { text: 'PRESET' }), presetSelect]),
-      el('div', { class: 'field' }, [el('label', { text: 'NUMERATOR' }), numInput]),
-      el('div', { class: 'field' }, [el('label', { text: 'DENOMINATOR' }), denInput]),
+      el('div', { class: 'field' }, [el('label', { text: 'NUMERATOR' }), withSuggestions(numInput, data.available, data.names || {}, () => { markCustom(); loadRatio(); }, data.rank || [])]),
+      el('div', { class: 'field' }, [el('label', { text: 'DENOMINATOR' }), withSuggestions(denInput, data.available, data.names || {}, () => { markCustom(); loadRatio(); }, data.rank || [])]),
       el('div', { class: 'field' }, [el('label', { text: 'PERIOD' }), rsPeriod]),
       el('button', { class: 'action', text: 'LOAD', onclick: loadRatio }),
       rsStatus,
     ]),
-    el('div', { class: 'card-title', text: `RATIO + ${maShort}/${maLong}-DAY MOVING AVERAGE` }),
+    el('div', { class: 'card-title', text: `RATIO + ${maShort}/${maLong}-DAY MOVING AVERAGE & ${defaults.band_sigma}σ BAND (${maLong}-DAY)` }),
     ratioNode,
     el('div', { class: 'card-title', text: `MACD (${fast}/${slow}/${signal})` }),
     macdNode,
@@ -874,10 +935,14 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
     }
   }
 
+  // Suggestions first, so a picked symbol's Enter is not also read as the half-typed one.
+  const tickerBox = withSuggestions(tickerInput, data.available || [], data.names || {}, () => loadSingle(), data.rank || []);
+  tickerInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') loadSingle(); });
+
   const rsiCard = card('', null, [rsiNode, el('div', { class: 'field-note', text: RSI_NOTE })]);
   rsiCard.querySelector('.card-title').replaceWith(rsiTitle);
 
-  for (const input of [tickerInput, maInput, slopeInput, rsiInput]) {
+  for (const input of [maInput, slopeInput, rsiInput]) {
     input.addEventListener('keydown', (event) => { if (event.key === 'Enter') loadSingle(); });
   }
 
@@ -893,7 +958,7 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
 
   root.append(card('SINGLE-TICKER TECHNICALS', null, [
     el('div', { class: 'field-row' }, [
-      lockTicker ? null : el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), tickerInput]),
+      lockTicker ? null : el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), tickerBox]),
       el('div', { class: 'field' }, [el('label', { text: 'MA PERIODS' }), maInput]),
       el('div', { class: 'field' }, [el('label', { text: 'SLOPE WINDOW (D)' }), slopeInput]),
       el('div', { class: 'field' }, [el('label', { text: 'RSI PERIOD' }), rsiInput]),

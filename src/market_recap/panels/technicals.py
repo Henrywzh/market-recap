@@ -20,7 +20,7 @@ from .. import corporate_actions
 from ..compute.oversold import LINES as OVERSOLD_LINES
 from ..config import PERIOD_TRADING_DAYS, TICKER_ARTIFACT_DIR
 from ..sources import yahoo
-from ..util import clean_float, prune_stale, write_json
+from ..util import clean_float, company_name, prune_stale, write_json
 
 # Decimal places kept on a baked close: enough for a sub-dollar ETF, and every
 # extra digit is paid for once per session per ticker.
@@ -103,6 +103,39 @@ def bake_ticker(symbol: str, closes: pd.Series, *, min_sessions: int,
     return {"ticker": symbol, "sessions": payload["sessions"]}
 
 
+def ticker_names(ctx, symbols) -> dict[str, str]:
+    """A display name per baked symbol, for the page's ticker suggestions: index members
+    from their basket, the extra names and the sector funds from the config. A symbol
+    with none (an index, a fund the config does not name) is left out, not guessed."""
+    names: dict[str, str] = {}
+    for frame in ctx.members.values():
+        if "name" not in frame:
+            continue
+        for row in frame.drop_duplicates("yahoo_symbol").itertuples():
+            if isinstance(row.name, str) and row.name.strip():
+                names.setdefault(row.yahoo_symbol, company_name(row.name))
+    for extra in (ctx.config.get("financials") or {}).get("extra_names") or []:
+        if extra.get("name"):
+            names.setdefault(str(extra["ticker"]).upper(), extra["name"])
+    for sector, fund in ctx.sector_etfs.items():
+        names.setdefault(fund, f"{sector} sector fund")
+    wanted = set(symbols)
+    return {symbol: name for symbol, name in sorted(names.items()) if symbol in wanted}
+
+
+def ticker_rank(ctx, symbols) -> list[str]:
+    """The baked symbols by their largest index weight, heaviest first, so a typed
+    "A" suggests AAPL and AMZN before A and ABT. Symbols with no weight follow."""
+    weight: dict[str, float] = {}
+    for frame in ctx.members.values():
+        if "weight" not in frame:
+            continue
+        for symbol, value in zip(frame["yahoo_symbol"], frame["weight"]):
+            if pd.notna(value):
+                weight[symbol] = max(weight.get(symbol, 0.0), float(value))
+    return sorted((s for s in symbols if s in weight), key=lambda s: (-weight[s], s))
+
+
 def build(ctx) -> dict:
     settings = ctx.config["technicals"]
     chart_periods = list(ctx.config["periods"]["technicals_chart"])
@@ -140,6 +173,10 @@ def build(ctx) -> dict:
     return {
         "as_of": ctx.as_of,
         "available": sorted(e["ticker"] for e in baked),
+        # Names for the ticker boxes' suggestions (TECHNICALS ratio and single ticker).
+        "names": ticker_names(ctx, (e["ticker"] for e in baked)),
+        # The same symbols by index weight, heaviest first: the suggestions' order.
+        "rank": ticker_rank(ctx, [e["ticker"] for e in baked]),
         "partial_history": sorted(e["ticker"] for e in baked if e["sessions"] < zwindow),
         # Tickers with daily bars since BARS_START (artifacts/bars), for the chip distribution.
         "bars": sorted(barred),
