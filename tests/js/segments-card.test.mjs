@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bands, periodTable, yearAgoIndex } from '../../web/js/segments-card.js';
+import { bands, measureBands, periodTable, previousIndex, yearAgoIndex } from '../../web/js/segments-card.js';
 
 const periods = [
   { end: '2025-03-31', label: 'Q1 FY2025', reconciled: true },
@@ -51,4 +51,39 @@ test('bands: the largest members drawn, the rest one Other band', () => {
   assert.deepEqual(out.map((b) => b.label), ['B', 'D', 'Other (2)']);
   assert.deepEqual(out[2].values, [1, 3, 3, 3]);  // A + C
   assert.equal(bands(many, 4).length, 4);
+});
+
+test('the quarter before is 80 to 100 days back, else none', () => {
+  assert.equal(previousIndex(periods, 3), 2);
+  assert.equal(previousIndex(periods, 2), null);  // nine months after Q2 FY2025
+  assert.equal(previousIndex(periods, 1), 0);
+  assert.equal(previousIndex(periods, 0), null);
+});
+
+test('period table: quarter-on-quarter growth, profit growth from a positive base and profit share', () => {
+  const t = periodTable(series, 3);
+  const cloud = t.members.find((r) => r.key === 'cloud');
+  assert.ok(Math.abs(cloud.qoq - 20) < 1e-9);  // 15 -> 18
+  assert.equal(cloud.profitGrowth, null);  // from a profit of 0
+  assert.ok(Math.abs(cloud.profitShare - 3.6 / 37.2 * 100) < 1e-9);
+  assert.ok(Math.abs(t.members.find((r) => r.key === 'ads').profitGrowth - 15.862068965517) < 1e-6);
+  assert.ok(Math.abs(t.totalQoq - 100 * (120 / 110 - 1)) < 1e-9);
+  assert.ok(Math.abs(t.totalProfitGrowth - 100 * (33 / 27 - 1)) < 1e-9);
+});
+
+test('measured bands: dollars, shares adding to 100, growth inside its cap', () => {
+  const list = bands(series);
+  const value = measureBands(list, periods, 'value');
+  assert.deepEqual(value.find((b) => b.label === 'Cloud').values, [10e-9, 12e-9, 15e-9, 18e-9]);
+  const shares = measureBands(list, periods, 'share');
+  periods.forEach((_, i) => assert.ok(Math.abs(shares.reduce((s, b) => s + b.values[i], 0) - 100) < 1e-9));
+  const yoy = measureBands(list, periods, 'yoy').find((b) => b.label === 'Cloud').values;
+  assert.deepEqual(yoy, [null, null, 50, 50]);
+  const qoq = measureBands(list, periods, 'qoq').find((b) => b.label === 'Cloud').values;
+  assert.deepEqual(qoq.map((v) => (v === null ? null : Math.round(v * 1e6) / 1e6)), [null, 20, null, 20]);
+  // Profit: ranked by size, growth from a loss left out, a jump past the cap too.
+  const profit = measureBands(bands(series, 8, 'profit'), periods, 'yoy');
+  assert.deepEqual(profit.find((b) => b.label === 'Cloud').values, [null, null, null, null]);
+  const jump = measureBands([{ label: 'X', values: [1, 1, 5, 5] }], periods, 'yoy')[0].values;
+  assert.deepEqual(jump, [null, null, null, null]);  // +400%: a base effect
 });

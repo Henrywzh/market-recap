@@ -86,8 +86,45 @@ export function render(node, build) {
   const option = build(baseOption(p), p);
   chart.setOption(option, true);
   fitTickLabels(chart, option);
+  if (option.legend && typeof chart.on === 'function') legendSolo(chart, node);
   registry.set(node, chart);
   return chart;
+}
+
+// Two clicks on one legend entry within this many milliseconds are a double click.
+export const DOUBLE_CLICK_MS = 350;
+
+// What a double click on legend entry ``name`` does, given the legend's state
+// before it (``selected``: name -> shown). Shows only that entry; when it is
+// already the only one shown, shows them all again.
+export function soloAction(selected, name) {
+  const names = Object.keys(selected);
+  const alone = names.every((n) => Boolean(selected[n]) === (n === name));
+  return alone ? { show: names, hide: [] } : { show: [name], hide: names.filter((n) => n !== name) };
+}
+
+// The last legend click per chart node, kept by node so a chart redrawn
+// between the two clicks (OPENROUTER redraws on every click) still sees both.
+const lastLegendClick = new WeakMap();
+
+// A legend click hides or shows its series (ECharts' own toggle); a double
+// click shows only that series. The double click's two toggles cancel out, so
+// ``selected`` after the second is the state before the first. This listener
+// is registered first, so it rewrites ``event.selected`` to the final state for
+// the listeners after it (charts that keep their own selection).
+function legendSolo(chart, node) {
+  chart.on('legendselectchanged', (event) => {
+    const now = Date.now();
+    const last = lastLegendClick.get(node);
+    const twice = last?.name === event.name && now - last.at < DOUBLE_CLICK_MS;
+    lastLegendClick.set(node, twice ? { name: null, at: 0 } : { name: event.name, at: now });
+    if (!twice) return;
+    const { show, hide } = soloAction(event.selected, event.name);
+    show.forEach((name) => chart.dispatchAction({ type: 'legendSelect', name }));
+    hide.forEach((name) => chart.dispatchAction({ type: 'legendUnSelect', name }));
+    show.forEach((name) => { event.selected[name] = true; });
+    hide.forEach((name) => { event.selected[name] = false; });
+  });
 }
 
 // Each adaptive value axis takes the step ECharts drew it with: the spacing of
