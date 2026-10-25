@@ -4,9 +4,10 @@
 
 import { card, DASH, dirClass, el, num, notice, tag } from './fmt.js';
 import { render } from './charts.js';
+import { grid as priceGrid, priceRange, volumeProfile } from './chip-math.js';
 import {
   breakevenHeadline, planFileName, planMarkdown, planOutcomes, planSensitivity, planToJson,
-  readPlanFile, reviewMarkdown, reviewToJson, toNumber,
+  journalSummary, readPlanFile, readReviews, reviewMarkdown, reviewToJson, toNumber,
 } from './plan-math.js';
 
 const DRAFT_KEY = 'market-recap.trade-plan-draft.v1';
@@ -85,6 +86,7 @@ function drawSensitivity(node, grid, yourRate) {
     const cells = [];
     grid.rows.forEach((row, y) => row.cells.forEach((v, x) => { if (finite(v)) cells.push([x, y, v]); }));
     const yourRow = grid.rows.findIndex((row) => row.multiple === 1);
+    const reach = Math.max(0.25, ...cells.map((c) => Math.abs(c[2])));
     const yourCol = finite(yourRate) ? nearestIndex(grid.rates, yourRate) : -1;
     return {
       ...option,
@@ -94,7 +96,8 @@ function drawSensitivity(node, grid, yourRate) {
       xAxis: { ...option.xAxis, type: 'category', boundaryGap: true, data: grid.rates.map((r) => `${num(100 * r, 0)}%`) },
       yAxis: { ...option.yAxis, type: 'category', data: grid.rows.map((row) => `${row.multiple}× · $${num(row.target, 2)}`),
         axisLabel: { color: p.dim, fontSize: 10 } },
-      visualMap: { show: false, dimension: 2, pieces: [{ lt: 0, color: p.down }, { gte: 0, color: p.up }] },
+      // Graded, centred on zero: the sign is the hue, the size its depth, so the break-even edge reads as a fade.
+      visualMap: { show: false, dimension: 2, min: -reach, max: reach, inRange: { color: [p.down, p.panel, p.up] } },
       series: [
         { type: 'heatmap', data: cells, itemStyle: { borderColor: p.panel, borderWidth: 1 },
           label: { show: true, fontSize: 9, color: p.text, formatter: (q) => num(q.value[2], 2) } },
@@ -104,6 +107,76 @@ function drawSensitivity(node, grid, yourRate) {
       ],
     };
   });
+}
+
+// The plan on the price: the last year's volume by price (from the daily bars, each
+// session spread over its range) under the stop, the entry and the target, with
+// the loss and gain zones shaded. Where the plan sits against past trading, not a forecast.
+const PLAN_SESSIONS = 252;
+function drawPlanPrice(node, bars, raw, close) {
+  // The form's fields are text; the chart needs the numbers.
+  const input = { side: raw.side, entry: toNumber(raw.entry), stop: toNumber(raw.stop), target: toNumber(raw.target) };
+  const last = bars.dates.length - 1;
+  const from = Math.max(0, last - PLAN_SESSIONS + 1);
+  const traded = priceRange(bars, from, last);
+  if (!traded) return;
+  const levels = [input.entry, input.stop, input.target].filter(finite);
+  const lo = Math.min(traded.min, ...levels);
+  const hi = Math.max(traded.max, ...levels);
+  const pad = (hi - lo) * 0.04;
+  const g = priceGrid(lo - pad, hi + pad, 90);
+  const volumes = volumeProfile(bars, from, last, g);
+  const total = volumes.reduce((a, b) => a + b, 0) || 1;
+  const long = input.side !== 'short';
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, left: 16, right: 16, top: 28, bottom: 30 },
+    tooltip: { ...option.tooltip, trigger: 'axis', valueFormatter: undefined,
+      formatter: (items) => { const d = [].concat(items)[0]; return `$${num(d.value[0], 2)} · ${num(d.value[1] * 100, 2)}% of the year's volume`; } },
+    xAxis: { ...option.yAxis, type: 'value', min: g.min, max: g.max, axisLabel: { ...option.yAxis.axisLabel, formatter: (v) => `$${num(v, 0)}` } },
+    yAxis: { ...option.yAxis, type: 'value', min: 0, axisLabel: { show: false }, splitLine: { show: false } },
+    series: [{
+      type: 'line', name: 'Volume by price', smooth: 0.35, showSymbol: false,
+      data: g.centers.map((c, k) => [c, volumes[k] / total]),
+      lineStyle: { color: p.accent, width: 1.6 }, areaStyle: { color: p.accent, opacity: 0.18 },
+      markArea: { silent: true, data: [
+        [{ xAxis: input.stop, itemStyle: { color: p.down, opacity: 0.1 } }, { xAxis: input.entry }],
+        [{ xAxis: input.entry, itemStyle: { color: p.up, opacity: 0.1 } }, { xAxis: input.target }],
+      ] },
+      markLine: { silent: true, symbol: 'none', label: { fontSize: 10, position: 'end' }, data: [
+        { xAxis: input.stop, name: 'STOP', lineStyle: { color: p.down, type: 'dashed' }, label: { color: p.down, formatter: `STOP $${num(input.stop, 2)}` } },
+        { xAxis: input.entry, name: 'ENTRY', lineStyle: { color: p.text, type: 'solid' }, label: { color: p.text, formatter: `${long ? 'LONG' : 'SHORT'} $${num(input.entry, 2)}` } },
+        { xAxis: input.target, name: 'TARGET', lineStyle: { color: p.up, type: 'dashed' }, label: { color: p.up, formatter: `TARGET $${num(input.target, 2)}` } },
+        ...(finite(close) && Math.abs(close - input.entry) > 1e-9 ? [{ xAxis: close, name: 'CLOSE', lineStyle: { color: p.faint, type: 'dotted' },
+          label: { color: p.dim, formatter: `CLOSE $${num(close, 2)}` } }] : []),
+      ] },
+    }],
+  }));
+}
+
+// The three outcomes in R after costs, each with the weight you gave it.
+function drawOutcomes(node, model) {
+  const risk = model.riskPerShare;
+  const rows = [['TARGET HIT', model.target, model.weights?.pTarget], ['STOP HIT', model.stop, model.weights?.pStop],
+    ['HORIZON ENDS', model.time, model.weights?.pTime]];
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, left: 170, right: 90, top: 10, bottom: 26 },
+    tooltip: { show: false },
+    xAxis: { ...option.yAxis, type: 'value', axisLabel: { ...option.yAxis.axisLabel, formatter: (v) => `${num(v, 1)}R` } },
+    yAxis: { ...option.xAxis, type: 'category', inverse: true, data: rows.map(([label]) => label), axisLabel: { ...option.xAxis.axisLabel, fontSize: 10 } },
+    series: [{
+      type: 'bar', barWidth: '46%',
+      data: rows.map(([, leg]) => {
+        const r = finite(leg.netPerShare) && risk ? leg.netPerShare / risk : null;
+        return { value: r, itemStyle: { color: r === null ? p.faint : r >= 0 ? p.up : p.down, opacity: 0.85 },
+          label: { position: r < 0 ? 'left' : 'right' } };
+      }),
+      label: { show: true, position: 'right', color: p.text, fontSize: 10,
+        formatter: (d) => `${sR(d.value)}${finite(rows[d.dataIndex][2]) ? ` · ${pctText(rows[d.dataIndex][2], 0)}` : ''}` },
+      markLine: { silent: true, symbol: 'none', data: [{ xAxis: 0 }], lineStyle: { color: p.faint }, label: { show: false } },
+    }],
+  }));
 }
 
 function outcomeTable(model) {
@@ -163,6 +236,9 @@ export function tradePlanCard(root, state) {
   const messages = el('div', {});
   const outBox = el('div', {});
   const chartNode = el('div', { class: 'chart plan-heat' });
+  const priceNode = el('div', { class: 'chart', style: 'height:250px' });
+  const outcomeNode = el('div', { class: 'chart', style: 'height:150px' });
+  const visualBox = el('div', {});
   const sensitivityBox = el('div', {});
   const exportStatus = el('div', { class: 'stat-note' });
   const copyBox = el('div', {});
@@ -198,8 +274,20 @@ export function tradePlanCard(root, state) {
     const withTimeNote = withTime && withTime.feasible ? `target share of resolved trades ${pctText(withTime.targetShare)}`
       : (model.weights ? null : 'enter all three weights');
     const roundTrip = `round-trip cost a share: target ${num(model.target.costPerShare, 2)}, stop ${num(model.stop.costPerShare, 2)}`;
+    const bars = state.reference?.ohlcv;
+    visualBox.replaceChildren(el('div', { class: 'grid two' }, [
+      el('div', {}, [el('div', { class: 'card-title', text: 'THE PLAN ON THE PRICE · VOLUME BY PRICE, LAST 252 SESSIONS' }),
+        bars?.dates?.length ? priceNode : info('No daily bars for this ticker, so no volume by price.'),
+        info('Shaded: the loss zone to the stop and the gain zone to the target. The curve is where shares traded over the year, estimated from daily bars; heavy trading is not a support or a target.')]),
+      el('div', {}, [el('div', { class: 'card-title', text: 'OUTCOMES IN R, AFTER COSTS · YOUR WEIGHTS' }), outcomeNode]),
+    ]));
+    requestAnimationFrame(() => {
+      if (bars?.dates?.length) drawPlanPrice(priceNode, bars, input, state.reference?.price);
+      drawOutcomes(outcomeNode, model);
+    });
     outBox.replaceChildren(
       el('div', { class: `plan-headline ${model.breakevenSuccess > 1 ? 'down' : ''}`, text: breakevenHeadline(model.breakevenSuccess) }),
+      visualBox,
       outcomeTable(model),
       el('div', { class: 'stat-strip' }, [
         stat('REWARD : RISK, AFTER COSTS', `${num(model.rewardRisk, 2)} : 1`, roundTrip),
@@ -313,6 +401,7 @@ export function tradePlanCard(root, state) {
   ]));
 
   reviewCard(root);
+  journalCard(root);
   onReference();
 }
 
@@ -413,4 +502,101 @@ function reviewCard(root) {
     copyBox,
   ]));
   reviewNow();
+}
+
+// ------------------------------------------------------------ journal card
+
+// The running total in R, one point per review in date order, with zero dashed.
+function drawJournalCurve(node, rows, summary) {
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, left: 44, right: 16, top: 12, bottom: 28 },
+    tooltip: { ...option.tooltip, trigger: 'axis', valueFormatter: undefined,
+      formatter: (items) => { const k = [].concat(items)[0].dataIndex; const x = rows[k];
+        return `${x.date} · ${x.ticker}<br>this trade ${sR(x.r)} · total ${sR(summary.cumulative[k])}`; } },
+    xAxis: { ...option.xAxis, type: 'category', data: rows.map((x, i) => `${i + 1}`), boundaryGap: false },
+    yAxis: { ...option.yAxis, scale: true, axisLabel: { ...option.yAxis.axisLabel, formatter: (v) => `${num(v, 1)}R` } },
+    series: [{
+      type: 'line', name: 'Total R', data: summary.cumulative, showSymbol: rows.length < 40, symbolSize: 5,
+      lineStyle: { color: p.accent, width: 1.6 }, itemStyle: { color: p.accent }, areaStyle: { color: p.accent, opacity: 0.12 },
+      markLine: { silent: true, symbol: 'none', data: [{ yAxis: 0 }], lineStyle: { color: p.faint, type: 'dashed' }, label: { show: false } },
+    }],
+  }));
+}
+
+// Each trade's R in half-R bins, gains and losses in their own colours.
+function drawJournalSpread(node, rs) {
+  const lo = Math.floor(Math.min(...rs, -1) * 2) / 2;
+  const hi = Math.ceil(Math.max(...rs, 1) * 2) / 2;
+  const edges = [];
+  for (let e = lo; e < hi - 1e-9; e += 0.5) edges.push(e);
+  const counts = edges.map((e) => rs.filter((r) => r >= e && r < e + 0.5).length);
+  rs.filter((r) => r === hi).forEach(() => { counts[counts.length - 1] += 1; });
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, left: 30, right: 12, top: 12, bottom: 28 },
+    xAxis: { ...option.xAxis, type: 'category', data: edges.map((e) => `${e >= 0 ? '+' : ''}${num(e, 1)}`), boundaryGap: true },
+    yAxis: { ...option.yAxis, min: 0, minInterval: 1 },
+    series: [{ type: 'bar', name: 'Trades', barCategoryGap: '15%',
+      data: counts.map((c, k) => ({ value: c, itemStyle: { color: edges[k] >= 0 ? p.up : p.down, opacity: 0.8 } })) }],
+  }));
+}
+
+// JOURNAL: several review files read together, in this browser only. The record in R, and
+// the mean R split by execution (followed the plan) and by judgement (the thesis held),
+// so a good result from a broken plan and a loss from a sound one stay visible.
+function journalCard(root) {
+  const fileInput = el('input', { type: 'file', accept: 'application/json,.json', multiple: '' });
+  const status = el('div', { class: 'stat-note' });
+  const body = el('div', {});
+  const empty = () => body.replaceChildren(info('Load the review files you downloaded (several at once) to see your record in R. They are read in this browser and sent nowhere.'));
+
+  fileInput.addEventListener('change', async () => {
+    const files = [...(fileInput.files || [])];
+    const parsed = [];
+    let unreadable = 0;
+    for (const file of files) {
+      try { parsed.push(JSON.parse(await file.text())); } catch { unreadable += 1; }
+    }
+    const { rows, skipped } = readReviews(parsed);
+    status.textContent = `${rows.length} reviews read${skipped + unreadable ? ` · ${skipped + unreadable} skipped (not a review, no result, or not JSON)` : ''}.`;
+    const s = journalSummary(rows);
+    if (!s) { empty(); return; }
+    const curve = el('div', { class: 'chart', style: 'height:220px' });
+    const spread = el('div', { class: 'chart', style: 'height:220px' });
+    const split = (label, groups) => el('table', { class: 'data' }, [
+      el('thead', {}, [el('tr', {}, [label, 'TRADES', 'MEAN R'].map((h) => el('th', { text: h })))]),
+      el('tbody', {}, Object.entries(groups).filter(([, g]) => g.n).map(([k, g]) => el('tr', {}, [
+        el('td', { text: k }), el('td', { text: num(g.n, 0) }), el('td', { class: dirClass(g.mean), text: sR(g.mean) }),
+      ]))),
+    ]);
+    body.replaceChildren(
+      el('div', { class: 'stat-strip' }, [
+        stat('TRADES', num(s.n, 0), s.n < 20 ? 'under 20: a short record, read it loosely' : null),
+        stat('EXPECTANCY', sR(s.expectancy), 'mean R a trade', dirClass(s.expectancy)),
+        stat('GAINS', pctText(s.winRate, 0), `avg gain ${sR(s.avgWin)} · avg loss ${sR(s.avgLoss)}`),
+        stat('TOTAL', sR(s.total), `worst fall from a high ${sR(s.maxDrawdown)}`, dirClass(s.total)),
+      ]),
+      el('div', { class: 'grid two' }, [
+        el('div', {}, [el('div', { class: 'card-title', text: 'RUNNING TOTAL IN R, BY TRADE' }), curve]),
+        el('div', {}, [el('div', { class: 'card-title', text: 'R PER TRADE' }), spread]),
+      ]),
+      el('div', { class: 'grid two' }, [
+        el('div', {}, [el('div', { class: 'card-title', text: 'EXECUTION · FOLLOWED THE PLAN' }), split('FOLLOWED', s.byFollowed)]),
+        el('div', {}, [el('div', { class: 'card-title', text: 'JUDGEMENT · THE THESIS' }), split('THESIS', s.byThesis)]),
+      ]),
+      info('R is each trade\'s realised result after costs over its plan\'s initial risk. A loss with the plan followed and the thesis refuted is a call that did not work; a gain with the plan broken is not evidence for the plan.'),
+    );
+    requestAnimationFrame(() => {
+      drawJournalCurve(curve, rows, s);
+      drawJournalSpread(spread, s.rs);
+    });
+  });
+
+  root.append(card('JOURNAL · YOUR REVIEWS', el('span', { class: 'dim', text: 'read here, sent nowhere' }), [
+    el('div', { class: 'field-row' }, [field('REVIEW FILES (JSON, SEVERAL)', fileInput)]),
+    status,
+    body,
+  ]));
+  empty();
 }

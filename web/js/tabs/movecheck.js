@@ -87,7 +87,7 @@ function histogramChart(node, { edges, counts }, move) {
   render(node, (option, p) => ({
     ...option,
     grid: { ...option.grid, top: 26, bottom: 30, left: 36, right: 12, containLabel: true },
-    xAxis: { ...option.xAxis, data: labels, boundaryGap: true, axisLabel: { hideOverlap: true, interval: 'auto' } },
+    xAxis: { ...option.xAxis, data: labels, boundaryGap: true, axisLabel: { ...option.xAxis.axisLabel, hideOverlap: true, interval: 'auto' } },
     yAxis: { ...option.yAxis, min: 0, scale: false },
     series: [{
       name: 'Returns', type: 'bar', barCategoryGap: '20%',
@@ -200,6 +200,79 @@ function figureCell(value, format, { range = null, count = null, total = null } 
   ]);
 }
 
+// What followed, as spreads: at each horizon the episodes' returns above all days', each a
+// 10th–90th line, a 25th–75th box and a median dot; the episodes' 90% interval for the
+// median is the bracket under their box. The same numbers as the table, drawn.
+function bandsChart(node, episodes, baseline, boot) {
+  const rows = [];
+  M.FORWARD_SESSIONS.forEach((s, k) => {
+    rows.push({ label: `+${s} · EPISODES`, band: episodes[k], episode: true, ci: boot?.forward[k].median || null });
+    rows.push({ label: `+${s} · ALL DAYS`, band: baseline[k], episode: false, ci: null });
+  });
+  const shown = rows.filter((r) => r.band);
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, left: 110, right: 16, top: 10, bottom: 28 },
+    tooltip: { ...option.tooltip, trigger: 'item', valueFormatter: undefined, formatter: (d) => {
+      const r = shown[d.dataIndex];
+      const b = r.band;
+      return [`<b>${r.label}</b> · n ${num(b.n, 0)}`, `median ${M.signedPct(b.p50)}`,
+        `25th–75th ${M.signedPct(b.p25)} to ${M.signedPct(b.p75)}`, `10th–90th ${M.signedPct(b.p10)} to ${M.signedPct(b.p90)}`,
+        r.ci ? `median's 90% interval ${M.signedPct(r.ci[0])} to ${M.signedPct(r.ci[1])}` : ''].filter(Boolean).join('<br>');
+    } },
+    xAxis: { ...option.yAxis, type: 'value', scale: true, axisLabel: { ...option.yAxis.axisLabel, formatter: (v) => `${num(v, 0)}%` } },
+    yAxis: { ...option.xAxis, type: 'category', inverse: true, data: shown.map((r) => r.label), boundaryGap: true,
+      axisLabel: { ...option.xAxis.axisLabel, fontSize: 10 } },
+    series: [{
+      type: 'custom', name: 'Spread',
+      encode: { x: [1, 2, 3, 4, 5], y: 0 },
+      data: shown.map((r, i) => [i, r.band.p10, r.band.p25, r.band.p50, r.band.p75, r.band.p90, r.ci?.[0] ?? null, r.ci?.[1] ?? null]),
+      renderItem: (params, api) => {
+        const r = shown[params.dataIndex];
+        const at = (k) => api.coord([api.value(k), api.value(0)]);
+        const [lo, q1, mid, q3, hi] = [1, 2, 3, 4, 5].map(at);
+        const color = r.episode ? p.accent : p.dim;
+        const h = Math.min(14, api.size([0, 1])[1] * 0.45);
+        const children = [
+          { type: 'line', shape: { x1: lo[0], y1: lo[1], x2: hi[0], y2: hi[1] }, style: { stroke: color, lineWidth: 1 } },
+          { type: 'rect', shape: { x: q1[0], y: q1[1] - h / 2, width: Math.max(1, q3[0] - q1[0]), height: h },
+            style: { fill: color, opacity: r.episode ? 0.35 : 0.2, stroke: color, lineWidth: 1 } },
+          { type: 'circle', shape: { cx: mid[0], cy: mid[1], r: 3.5 }, style: { fill: color } },
+        ];
+        if (r.ci) {
+          const [a, b] = [6, 7].map(at);
+          const y = a[1] + h / 2 + 4;
+          children.push({ type: 'polyline', shape: { points: [[a[0], y - 3], [a[0], y], [b[0], y], [b[0], y - 3]] },
+            style: { stroke: p.text, lineWidth: 1, fill: 'none' } });
+        }
+        return { type: 'group', children };
+      },
+      markLine: { silent: true, symbol: 'none', data: [{ xAxis: 0 }], lineStyle: { color: p.faint, type: 'dashed' }, label: { show: false } },
+    }],
+  }));
+}
+
+// Each episode's +20 session return by the date of its worst day, the lookback's middle
+// date dashed: whether the later half reads like the earlier one, at a glance.
+function timelineChart(node, rows, middle) {
+  const points = rows.filter((r) => Number.isFinite(r.forward[2])).map((r) => [r.worstDate, r.forward[2]]);
+  render(node, (option, p) => ({
+    ...option,
+    grid: { ...option.grid, left: 44, right: 16, top: 14, bottom: 28 },
+    tooltip: { ...option.tooltip, trigger: 'item', valueFormatter: undefined,
+      formatter: (d) => `${d.value[0]}<br>+20 sessions <b>${M.signedPct(d.value[1])}</b>` },
+    xAxis: { ...option.xAxis, type: 'time', boundaryGap: false },
+    yAxis: { ...option.yAxis, scale: true, axisLabel: { ...option.yAxis.axisLabel, formatter: (v) => `${num(v, 0)}%` } },
+    series: [{
+      type: 'scatter', name: '+20 sessions', symbolSize: 7,
+      data: points.map(([d, v]) => ({ value: [d, v], itemStyle: { color: v >= 0 ? p.up : p.down, opacity: 0.85 } })),
+      markLine: { silent: true, symbol: 'none', lineStyle: { color: p.faint, type: 'dashed' },
+        label: { color: p.dim, fontSize: 9, formatter: (d) => d.name },
+        data: [{ yAxis: 0, name: '' }, ...(middle ? [{ xAxis: middle, name: 'MIDDLE' }] : [])] },
+    }],
+  }));
+}
+
 // The episodes' figures and the all-days baseline over the same lookback, from the model.
 function studyOf(rows, dates, close, windowed) {
   const follow = M.followUp(rows);
@@ -213,12 +286,16 @@ function studyOf(rows, dates, close, windowed) {
     boot: M.bootstrapFollowUp(rows),
     years: M.episodeYears(rows),
     periods: M.halves(rows, windowed[0].date, windowed[windowed.length - 1].date),
+    bands: M.forwardBands(rows),
+    baseBands: M.forwardBands(M.dayRows(dates, close, windowed.map((r) => r.date))),
+    rows,
   };
 }
 
 // Episodes against every start day in the lookback, beside the episode table: the baseline,
 // the difference, the interval under each episode figure, the years covered and the two halves.
-function studyBlock({ n, days, follow, baseline, diff, boot, years, periods }) {
+// Returns the block and a draw() for its charts, called once the block is on the page.
+function studyBlock({ n, days, follow, baseline, diff, boot, years, periods, bands, baseBands, rows }) {
   const forwardCells = (stats, total, ranges) => stats.forward.flatMap((f, k) => [
     figureCell(f.median, PCT_FORMAT, { count: f.n, total, range: ranges ? boot.forward[k].median : null }),
     figureCell(f.share, SHARE_FORMAT, { count: f.n, total, range: ranges ? boot.forward[k].share : null }),
@@ -259,8 +336,17 @@ function studyBlock({ n, days, follow, baseline, diff, boot, years, periods }) {
     return el('tr', {}, cells);
   };
 
-  return el('div', {}, [
+  const bandsNode = el('div', { class: 'chart', style: 'height:230px' });
+  const timelineNode = el('div', { class: 'chart', style: 'height:230px' });
+  const charts = el('div', { class: 'grid two' }, [
+    el('div', {}, [el('div', { class: 'card-title', text: 'WHAT FOLLOWED · EPISODES (AMBER) VS ALL DAYS (GREY)' }), bandsNode,
+      el('div', { class: 'field-note', text: 'Line 10th–90th percentile, box 25th–75th, dot the median; the bracket under an episode box is the median\'s 90% interval.' })]),
+    el('div', {}, [el('div', { class: 'card-title', text: 'EPISODES OVER TIME · +20 SESSIONS' }), timelineNode,
+      el('div', { class: 'field-note', text: 'Each dot an episode, at its worst day; dashed: zero and the middle of the lookback.' })]),
+  ]);
+  const node = el('div', {}, [
     el('div', { class: 'card-title', text: 'EPISODES AGAINST ALL DAYS' }),
+    charts,
     table,
     el('div', {
       class: 'field-note',
@@ -280,11 +366,16 @@ function studyBlock({ n, days, follow, baseline, diff, boot, years, periods }) {
       period(`LATER (from ${periods.middle})`, periods.later),
     ]),
   ]);
+  const draw = () => {
+    bandsChart(bandsNode, bands, baseBands, boot);
+    timelineChart(timelineNode, rows, periods.middle);
+  };
+  return { node, draw };
 }
 
 // The overnight-gap figures: the latest session's gap and where it sits, the share beyond 2%,
 // the empirical percentiles, and the five largest gaps up and down.
-function gapBody({ n, from, to, percentiles, shareLarge, up, down, latest }) {
+function gapBody({ n, from, to, percentiles, shareLarge, up, down, latest }, chartNode) {
   const list = (rows, label) => el('div', {}, [
     el('div', { class: 'card-title', text: label }),
     rows.length
@@ -308,6 +399,8 @@ function gapBody({ n, from, to, percentiles, shareLarge, up, down, latest }) {
         el('div', { class: 'stat-note', text: `gap beyond ${M.GAP_LARGE}% either way` }),
       ]),
     ]),
+    chartNode,
+    el('div', { class: 'field-note', text: 'Every gap in the bars in bins, the axis from the 1st to the 99th percentile (gaps beyond counted in the end bins); dashed: the latest, coloured: as large or larger in its direction.' }),
     wrapTable(percentiles.map(({ p }) => M.ordinal(p).toUpperCase()), [
       el('tr', {}, percentiles.map(({ value }) => valueCell(value, GAP_FORMAT))),
     ]),
@@ -477,8 +570,17 @@ export default async function renderMoveCheck(root, data, _manifest, ctx = {}) {
     } catch (error) {
       return [gap(`${symbol} bars could not be loaded: ${error.message}`)];
     }
-    const summary = M.gapSummary(M.overnightGaps(bars));
-    return summary ? gapBody(summary) : [gap(`${symbol} has no open and prior close pairs in its bars.`)];
+    const gaps = M.overnightGaps(bars);
+    const summary = M.gapSummary(gaps);
+    if (!summary) return [gap(`${symbol} has no open and prior close pairs in its bars.`)];
+    const chartNode = el('div', { class: 'chart short' });
+    const nodes = gapBody(summary, chartNode);
+    // The axis spans the 1st to the 99th percentile: a few crash-day gaps would squeeze the rest
+    // into three bars. Gaps beyond are counted in the end bins, not dropped.
+    const [p1, p99] = [summary.percentiles[0].value, summary.percentiles[summary.percentiles.length - 1].value];
+    const clipped = gaps.map((g) => Math.min(p99, Math.max(p1, g.gap)));
+    nodes.draw = () => histogramChart(chartNode, M.histogram(clipped, BINS, { include: [summary.latest.gap] }), summary.latest.gap);
+    return nodes;
   }
 
   async function refreshGaps(symbol) {
@@ -486,7 +588,10 @@ export default async function renderMoveCheck(root, data, _manifest, ctx = {}) {
     gapsFor = symbol;
     gapsHost.replaceChildren(gap('Loading overnight gaps…'));
     const nodes = await gapNodes(symbol);
-    if (gapsFor === symbol) gapsHost.replaceChildren(...nodes);
+    if (gapsFor === symbol) {
+      gapsHost.replaceChildren(...nodes);
+      nodes.draw?.();
+    }
   }
 
   // Runs the check for the ticker in the box and the horizon and move as set. A
@@ -580,8 +685,9 @@ export default async function renderMoveCheck(root, data, _manifest, ctx = {}) {
       start: 'THIS MOVE', worstDate: date, worst: move, ...today,
       forward: M.FORWARD_SESSIONS.map(() => null), drawdown: null,
     };
-    const study = rows.length ? studyOf(rows, dates, close, windowed) : null;
-    episodesHost.replaceChildren(episodesBlock(rows, thisRow), ...(study ? [studyBlock(study)] : []));
+    const study = rows.length ? studyBlock(studyOf(rows, dates, close, windowed)) : null;
+    episodesHost.replaceChildren(episodesBlock(rows, thisRow), ...(study ? [study.node] : []));
+    study?.draw();
     setupsHost.replaceChildren(setupsBlock(M.similarSetups(rows, today)));
 
     status.textContent = `${symbol} · ${num(series.length, 0)} ${HORIZON_NAMES[horizon]} returns to ${date}`;

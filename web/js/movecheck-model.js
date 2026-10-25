@@ -571,3 +571,15 @@ export function moveSentence({ ticker, horizon, move, date, all }) {
   const last = all.lastWorse ? `the last was ${all.lastWorse}` : 'no earlier day was that far';
   return `${head} ${sharePhrase} ${span} ${verb} this far or further${rate}; ${last}.`;
 }
+
+// The spread of the forward returns at each FORWARD_SESSIONS horizon: the 10th, 25th, 50th,
+// 75th and 90th percentiles over the rows that have that return, or null with none.
+export function forwardBands(rows) {
+  return FORWARD_SESSIONS.map((_, k) => {
+    const values = (rows || []).map((r) => r.forward[k]).filter(finite);
+    if (!values.length) return null;
+    const sorted = Float64Array.from(values).sort();
+    const [p10, p25, p50, p75, p90] = [10, 25, 50, 75, 90].map((p) => quantile(sorted, p));
+    return { n: values.length, p10, p25, p50, p75, p90 };
+  });
+}

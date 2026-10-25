@@ -770,3 +770,13 @@ test('a ticker without daily bars gets a one-line note in the gap card, and noth
   assert.ok(text.includes('EPISODES BEYOND THIS MOVE'));
   assert.ok(!BAD.test(text));
 });
+
+test('forward bands are the empirical percentiles of each horizon, over the rows that have it', () => {
+  const rows = Array.from({ length: 11 }, (_, i) => ({ forward: [i, i * 2, i === 0 ? null : i - 5] }));
+  const [one, five, twenty] = M.forwardBands(rows);
+  assert.deepEqual([one.p10, one.p25, one.p50, one.p75, one.p90], [1, 2.5, 5, 7.5, 9]);
+  assert.equal(five.p50, 10);
+  assert.equal(twenty.n, 10);
+  assert.equal(twenty.p50, 0.5);
+  assert.deepEqual(M.forwardBands([]), [null, null, null]);
+});

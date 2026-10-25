@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   breakevenHeadline, planFileName, planMarkdown, planOutcomes, planSensitivity, planToJson,
-  readPlanFile, reviewMarkdown, reviewResult, reviewToJson, toNumber,
+  journalSummary, readPlanFile, readReviews, reviewMarkdown, reviewResult, reviewToJson, toNumber,
 } from '../../web/js/plan-math.js';
 
 const near = (actual, expected, eps = 1e-9) => assert.ok(Math.abs(actual - expected) < eps, `${actual} != ${expected}`);
@@ -252,4 +252,25 @@ test('file names use the local calendar date, and the Markdown carries no bad fi
   assert.match(planMarkdown(blank), /No valid outputs/);
   assert.match(reviewMarkdown({ ticker: 'SPY', plan_created: 'a', created: 'b', result: null,
     execution: { followed_plan: null, what_changed: '' }, judgement: { thesis_outcome: null } }), /No result/);
+});
+
+test('the journal reads review files in date order and keeps execution and judgement apart', () => {
+  const review = (created, r, followed, thesis) => ({ schema: 'review/v1', ticker: 'NVDA', created, result: { r },
+    execution: { followed_plan: followed }, judgement: { thesis_outcome: thesis } });
+  const { rows, skipped } = readReviews([
+    review('2026-03-01', -1, 'no', 'refuted'), review('2026-01-01', 2, 'yes', 'supported'),
+    review('2026-02-01', -1, 'yes', 'supported'), { schema: 'plan/v1' }, review('2026-04-01', null, 'yes', null),
+  ]);
+  assert.equal(skipped, 2);
+  assert.deepEqual(rows.map((x) => x.r), [2, -1, -1]);
+  const s = journalSummary(rows);
+  assert.equal(s.n, 3);
+  assert.ok(Math.abs(s.winRate - 1 / 3) < 1e-12);
+  assert.equal(s.expectancy, 0);
+  assert.deepEqual(s.cumulative, [2, 1, 0]);
+  assert.equal(s.maxDrawdown, -2);
+  assert.deepEqual(s.byFollowed.yes, { n: 2, mean: 0.5 });
+  assert.deepEqual(s.byFollowed.no, { n: 1, mean: -1 });
+  assert.equal(s.byThesis.refuted.mean, -1);
+  assert.equal(journalSummary([]), null);
 });

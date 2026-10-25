@@ -124,7 +124,7 @@ function setups(root, technicals, ctx, state) {
       const levels = closeLevels(payload.close, payload.ohlcv, payload.dates);
       if (!levels) throw new Error('no closes in the artifact');
       const range = optionRange((await evidence)?.names?.[symbol]?.options, levels.close, payload.as_of);
-      state.reference = { price: levels.close, atr14: levels.atr14, adv20: levels.adv20, symbol, asOf: payload.as_of };
+      state.reference = { price: levels.close, atr14: levels.atr14, adv20: levels.adv20, symbol, asOf: payload.as_of, ohlcv: payload.ohlcv };
       state.onReference?.();
       state.onPlan?.();
       flow.replaceChildren(

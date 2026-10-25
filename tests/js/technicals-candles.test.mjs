@@ -5,7 +5,7 @@
 // LINE toggle, and a ticker without bars offering no candles.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderSingleTicker, profileRange } from '../../web/js/tabs/technicals.js';
+import { renderSingleTicker, profileRange, profileNodes } from '../../web/js/tabs/technicals.js';
 import * as T from '../../web/js/technicals-math.js';
 
 class FakeNode {
@@ -71,8 +71,9 @@ function fixture(sessions = 2600, bars = 520) {
   };
 }
 
-const data = (available) => ({
+const data = (available, bars = []) => ({
   available,
+  bars,
   note: 'A note.',
   defaults: {
     ma_periods: [20, 50, 200], zscore_window: 200, forward_return_days: 40, band_sigma: 1.5,
@@ -107,17 +108,18 @@ globalThis.window = {
   },
 };
 globalThis.fetch = async (url) => {
-  const key = url.split('/').pop().replace('.json', '');
+  const name = url.split('/').pop().replace('.json', '');
+  const key = url.includes('/bars/') ? `bars:${name}` : name;
   if (!served[key]) return { ok: false, json: async () => ({}) };
   return { ok: true, json: async () => served[key] };
 };
 
 // Renders the single-ticker view for `payloads` (symbol → payload) and returns the root and the charts.
-async function mount(payloads, symbol = 'TST') {
+async function mount(payloads, symbol = 'TST', bars = []) {
   served = payloads;
   charts.length = 0;
   const root = new FakeNode('main');
-  await renderSingleTicker(root, data(Object.keys(payloads)), { symbol });
+  await renderSingleTicker(root, data(Object.keys(payloads).filter((k) => !k.startsWith('bars:')), bars), { symbol });
   await flush();
   return { root, charts };
 }
@@ -271,7 +273,25 @@ test('a range the bars do not reach is drawn as a line, with the note', async ()
   assert.ok(!option.series.some((s) => s.type === 'candlestick'));
   assert.ok(option.series.some((s) => s.name === 'TST Close'));
   assert.equal(descendants(root).find((n) => n.className === 'tech-note').textContent,
-    'Candles cover the last 520 sessions; 10Y is drawn as a line.');
+    'Candles and the volume profile start 2024-01-01; 10Y reaches further back, so it is drawn as a line.'.replace('2024-01-01', fixture().ohlcv.dates[0]));
+});
+
+test('past the payload candles, the long daily bars carry a range they reach, with the profile', async () => {
+  const payload = fixture();
+  // The long bars: the last 1,300 sessions, so 5Y (1,260) fits and 10Y does not.
+  const long = fixture(2600, 1300).ohlcv;
+  const { root, charts } = await mount({ TST: payload, 'bars:TST': long }, 'TST', ['TST']);
+  buttonNamed(root, '5Y').dispatch('click');
+  await flush();
+  let option = priceOption(charts);
+  assert.ok(option.series.some((s) => s.type === 'candlestick'));
+  assert.equal(option.xAxis[0].data.length, 1300);
+  assert.ok(option.series.some((s) => s.id === 'profile'));
+  buttonNamed(root, '10Y').dispatch('click');
+  await flush();
+  option = priceOption(charts);
+  assert.ok(!option.series.some((s) => s.type === 'candlestick'));
+  assert.match(descendants(root).find((n) => n.className === 'tech-note').textContent, new RegExp(`start ${long.dates[0]}; 10Y`));
 });
 
 test('LINE draws the close, LOG switches the price axis, and a short range keeps the candles', async () => {
@@ -315,4 +335,14 @@ test('a ticker without bars offers no candles and no toggle', async () => {
   const toggle = descendants(root).find((n) => n.className === 'period-switch' && n.children.some((b) => b.textContent === 'CANDLES'));
   assert.equal(toggle.hidden, true);
   assert.doesNotMatch(textOf(root), /NaN|undefined|\[object Object\]/);
+});
+
+test('two heavy nodes far enough apart, and the thin gap between them', () => {
+  const g = { min: 0, step: 1, count: 20 };
+  const volumes = [1, 2, 8, 10, 8, 2, 1, 1, 1, 1, 2, 6, 9, 6, 2, 1, 1, 1, 1, 1];
+  const nodes = profileNodes(volumes, g);
+  assert.deepEqual(nodes.map((n) => n.kind), ['HVN', 'LVN', 'HVN']);
+  assert.deepEqual(nodes.map((n) => n.price), [12.5, 7.5, 3.5]);
+  // One peak only: no gap to name.
+  assert.deepEqual(profileNodes([1, 2, 9, 2, 1, 1, 1, 1], { min: 0, step: 1, count: 8 }).map((n) => n.kind), ['HVN']);
 });

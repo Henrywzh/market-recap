@@ -324,3 +324,51 @@ export function reviewMarkdown(review) {
     `Thesis: ${review.judgement.thesis_outcome ?? '—'}`, '',
     'Execution and judgement are recorded separately. A loss can be a sound decision, and a gain does not prove the reasoning.'].join('\n');
 }
+
+// ------------------------------------------------------------ journal
+
+// Reads review/v1 files (already parsed JSON) into dated R results: the ones without a
+// result, or not a review, are counted as skipped rather than read as zero.
+export function readReviews(files) {
+  const rows = [];
+  let skipped = 0;
+  for (const file of files || []) {
+    const r = file?.schema === REVIEW_SCHEMA ? file.result?.r : null;
+    if (!finite(r)) { skipped += 1; continue; }
+    rows.push({ ticker: file.ticker, date: String(file.created || file.plan_created || '').slice(0, 10), r,
+      followed: file.execution?.followed_plan ?? null, thesis: file.judgement?.thesis_outcome ?? null });
+  }
+  rows.sort((a, b) => a.date.localeCompare(b.date));
+  return { rows, skipped };
+}
+
+// The record in R: count, share of gains, the average gain and loss, the expectancy (mean R),
+// the running total and its worst fall from a high, and the mean R by whether the plan was
+// followed and whether the thesis held -- execution and judgement kept apart.
+export function journalSummary(rows) {
+  const list = rows || [];
+  if (!list.length) return null;
+  const rs = list.map((x) => x.r);
+  const wins = rs.filter((r) => r > 0);
+  const losses = rs.filter((r) => r < 0);
+  const mean = (values) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
+  let total = 0;
+  let peak = 0;
+  let worst = 0;
+  const cumulative = rs.map((r) => {
+    total += r;
+    peak = Math.max(peak, total);
+    worst = Math.min(worst, total - peak);
+    return total;
+  });
+  const by = (key, values) => Object.fromEntries(values.map((v) => {
+    const group = list.filter((x) => x[key] === v).map((x) => x.r);
+    return [v ?? 'unrecorded', { n: group.length, mean: mean(group) }];
+  }));
+  return {
+    n: list.length, winRate: wins.length / list.length, avgWin: mean(wins), avgLoss: mean(losses),
+    expectancy: mean(rs), total, maxDrawdown: worst, cumulative, rs,
+    byFollowed: by('followed', ['yes', 'partly', 'no', null]),
+    byThesis: by('thesis', ['supported', 'refuted', 'unclear', null]),
+  };
+}

@@ -10,6 +10,8 @@ import { grid as priceGrid, volumeProfile, valueArea } from '../chip-math.js';
 import { resolveTicker } from '../routes.js';
 
 const TICKER_BASE = 'artifacts/tickers';
+// Daily bars since 2020 (panels/technicals.py BARS_START), for a range past the payload's own candles.
+const BARS_BASE = 'artifacts/bars';
 // A sanity bound on typed windows, not a data limit: ten years of history
 // would support more, but nobody means a 2,000-day "moving average".
 const MAX_MA_WINDOW = 400;
@@ -48,6 +50,18 @@ async function loadTicker(symbol) {
     payloads.delete(key);
     throw error;
   }
+}
+
+const longBars = new Map();
+
+// The long daily bars for a symbol, or null when the build has none for it.
+async function loadLongBars(symbol) {
+  const key = symbol.toUpperCase();
+  if (!longBars.has(key)) {
+    longBars.set(key, fetch(`${BARS_BASE}/${key}.json`, { cache: 'no-cache' })
+      .then((response) => (response.ok ? response.json() : null)).catch(() => null));
+  }
+  return longBars.get(key);
 }
 
 const cut = (values, start) => values.slice(start);
@@ -176,8 +190,10 @@ export function profileText(reading) {
   const { area, close } = reading;
   const where = !isNum(close) ? '' : close > area.high ? 'above it' : close < area.low ? 'below it' : 'inside it';
   const range = isNum(reading.high) && isNum(reading.low) ? ` · window range ${num(reading.low)}–${num(reading.high)}` : '';
+  const nodes = (reading.nodes || []).map((n) => `${n.kind} ${num(n.price)}`).join(', ');
   return `VOLUME PROFILE (sessions on screen) · most traded ${num(area.poc)} · value area ${num(area.low)}–${num(area.high)}`
     + ` (${num(area.share * 100, 0)}% of volume)${where ? ` · last close ${num(close)}, ${where}` : ''}${range}`
+    + (nodes ? ` · ${nodes} (HVN a heavy node, LVN the thin gap between the two)` : '')
     + ' · amber = value area, blue = thin trading (under a third of the average price bin)'
     + ' · estimated from daily bars, each session\'s volume spread over its low–high range, not trade-by-trade;'
     + ' where trading was heavy in the past, not a support, resistance or target.';
@@ -197,7 +213,38 @@ export function profileRange(bars, from, to, g, volumes) {
   return {
     high: isNum(high) ? high : null, low: isNum(low) ? low : null,
     thin: volumes.map((v, k) => inside(k) && mean > 0 && v < mean * THIN_SHARE),
+    nodes: profileNodes(volumes, g, inside, mean),
   };
+}
+
+// The two heaviest nodes (HVN: local peaks of the profile smoothed over three
+// bins, above the average bin and at least NODE_GAP bins apart) and, between
+// them, the thinnest bin (LVN) when it holds under 60% of the smaller peak.
+const NODE_GAP = 5;
+export function profileNodes(volumes, g, inside = () => true, mean = null) {
+  const n = volumes.length;
+  const smooth = volumes.map((_, k) => {
+    const near = volumes.slice(Math.max(0, k - 1), Math.min(n, k + 2));
+    return near.reduce((a, b) => a + b, 0) / near.length;
+  });
+  const floor = mean ?? smooth.reduce((a, b) => a + b, 0) / (n || 1);
+  const peaks = smooth.map((v, k) => k).filter((k) => inside(k) && smooth[k] > floor
+    && (k === 0 || smooth[k] >= smooth[k - 1]) && (k === n - 1 || smooth[k] >= smooth[k + 1]))
+    .sort((a, b) => smooth[b] - smooth[a]);
+  const heavy = [];
+  for (const k of peaks) {
+    if (heavy.every((h) => Math.abs(h - k) >= NODE_GAP)) heavy.push(k);
+    if (heavy.length === 2) break;
+  }
+  const at = (k) => g.min + (k + 0.5) * g.step;
+  const out = heavy.map((k) => ({ kind: 'HVN', price: at(k), volume: volumes[k] }));
+  if (heavy.length === 2) {
+    const [a, b] = [...heavy].sort((x, y) => x - y);
+    let low = a + 1;
+    for (let k = a + 1; k < b; k += 1) if (smooth[k] < smooth[low]) low = k;
+    if (low < b && smooth[low] < 0.6 * Math.min(smooth[a], smooth[b])) out.push({ kind: 'LVN', price: at(low), volume: volumes[low] });
+  }
+  return out.sort((x, y) => y.price - x.price);
 }
 
 // The window the profile reads, above the chart: it changes with zoom and pan.
@@ -251,6 +298,7 @@ function priceChart(node, view) {
     const inArea = low >= profile.area.low - 1e-9 && high <= profile.area.high + 1e-9;
     return [v, low, high, inArea ? 1 : profile.thin[k] ? 2 : 0];
   }) : []);
+  const nodeData = (profile) => (profile?.nodes || []).map((node) => ({ name: node.kind, value: [node.volume, node.price] }));
   const pocLine = (profile) => (profile ? [
     { yAxis: profile.area.poc, name: 'POC' },
     ...(isNum(profile.high) ? [{ yAxis: profile.high, name: 'HIGH', lineStyle: { type: 'dotted' } }] : []),
@@ -296,8 +344,14 @@ function priceChart(node, view) {
       axisPointer: { ...option.tooltip.axisPointer, link: [{ xAxisIndex: 'all' }] },
     };
     // The fitted ends are padded data values, not round numbers: label only the ticks between them.
+    // The price axis has its own pointer: a dashed level at the mouse, its price on the axis,
+    // so a level can be laid across the candles and the profile beside them.
     const yPrice = { ...option.yAxis, gridIndex: 0, type: log ? 'log' : 'value', ...fit(start, last),
-      axisLabel: { ...option.yAxis.axisLabel, showMinLabel: false, showMaxLabel: false } };
+      axisLabel: { ...option.yAxis.axisLabel, showMinLabel: false, showMaxLabel: false },
+      axisPointer: { show: true, type: 'line', snap: false, triggerTooltip: false,
+        lineStyle: { color: p.dim, type: 'dashed', width: 1 },
+        label: { show: true, backgroundColor: p.panel, color: p.text, borderColor: p.faint, borderWidth: 1, fontSize: 10,
+          formatter: (d) => num(d.value) } } };
     const zoomAxes = bars ? [0, 1] : [0];
     const dataZoom = [
       { type: 'inside', xAxisIndex: zoomAxes, filterMode: 'weakFilter', startValue: start, endValue: last },
@@ -332,7 +386,8 @@ function priceChart(node, view) {
       grid: [{ left: '82%', right: 16, top: 12, height: '68%' }],
       xAxis: [{ type: 'value', gridIndex: 2, min: 0, axisLabel: { show: false }, splitLine: { show: false },
         axisLine: { show: false }, axisTick: { show: false } }],
-      yAxis: [{ ...yPrice, gridIndex: 2, axisLabel: { show: false }, splitLine: { show: false }, axisTick: { show: false } }],
+      yAxis: [{ ...yPrice, gridIndex: 2, axisLabel: { show: false }, splitLine: { show: false }, axisTick: { show: false },
+        axisPointer: { ...yPrice.axisPointer, label: { show: false } } }],
       series: [{
         id: 'profile', name: 'Volume profile', type: 'custom', xAxisIndex: 2, yAxisIndex: 2, silent: true,
         tooltip: { show: false }, encode: { x: 0, y: [1, 2] }, data: profileData(profile),
@@ -342,6 +397,10 @@ function priceChart(node, view) {
           return { type: 'rect', shape: { x: from[0], y: to[1], width: Math.max(0, to[0] - from[0]), height: Math.max(1, from[1] - to[1] - 1) },
             style: { fill: [p.faint, p.accent, p.blue][api.value(3)], opacity: [0.45, 0.75, 0.35][api.value(3)] } };
         },
+      }, {
+        id: 'nodes', name: 'Profile nodes', type: 'scatter', xAxisIndex: 2, yAxisIndex: 2, silent: true, tooltip: { show: false },
+        symbolSize: 5, data: nodeData(profile),
+        itemStyle: { color: p.text }, label: { show: true, position: 'right', color: p.text, fontSize: 9, formatter: (d) => d.data.name },
       }],
     } : { grid: [], xAxis: [], yAxis: [], series: [] };
     return withLegend(option, p, {
@@ -380,7 +439,7 @@ function priceChart(node, view) {
           } : null)) },
         ...profileParts.series,
       ],
-    }, [`${ticker} OHLC`, 'Volume', 'Volume profile']);
+    }, [`${ticker} OHLC`, 'Volume', 'Volume profile', 'Profile nodes']);
   });
   // Zooming or panning re-fits the y-axis to what is now on screen.
   chart?.on('datazoom', (event) => {
@@ -396,7 +455,8 @@ function priceChart(node, view) {
     view.onProfile?.(profile);
     chart.setOption({
       yAxis: [extent, {}, extent],
-      series: [{ id: 'candles', markLine: { data: pocLine(profile) } }, { id: 'profile', data: profileData(profile) }],
+      series: [{ id: 'candles', markLine: { data: pocLine(profile) } }, { id: 'profile', data: profileData(profile) },
+        { id: 'nodes', data: nodeData(profile) }],
     });
   });
   return chart;
@@ -752,9 +812,16 @@ export async function renderSingleTicker(root, data, { symbol, lockTicker = fals
       const payload = await loadTicker(symbol);
       const bars = payload.ohlcv?.dates?.length ? payload.ohlcv : null;
       modeSwitch.hidden = !bars;
-      const candles = candlesOn && bars && T.rangeWithin(payload.dates, range, bars.dates[0]) ? bars : null;
+      let candles = candlesOn && bars && T.rangeWithin(payload.dates, range, bars.dates[0]) ? bars : null;
+      // Past the payload's candles, the bars since 2020 carry the range when they reach back far enough.
+      let long = null;
+      if (candlesOn && bars && !candles && (data.bars || []).includes(symbol)) {
+        long = await loadLongBars(symbol);
+        if (long?.dates?.length && T.rangeWithin(payload.dates, range, long.dates[0])) candles = long;
+      }
+      const firstBar = long?.dates?.[0] || bars?.dates?.[0];
       toolNote.textContent = candlesOn && bars && !candles
-        ? `Candles cover the last ${bars.dates.length} sessions; ${range} is drawn as a line.` : '';
+        ? `Candles and the volume profile start ${firstBar}; ${range} reaches further back, so it is drawn as a line.` : '';
 
       // The price chart and its readings use the candles' close when candles
       // are shown, else the close history the other charts use.

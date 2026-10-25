@@ -64,6 +64,34 @@ html, body {
 .asof { font-size: 12px; letter-spacing: 0.08em; color: var(--text-dim); white-space: nowrap; }
 .masthead-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
+/* Every select in the terminal's colours: an unstyled one renders as the
+   browser's white control on the dark page. Specific rules below override. */
+select {
+  background: var(--panel-alt);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 3px 6px;
+  color-scheme: dark;
+}
+select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+/* The file picker's button, likewise: the browser's own is a light grey pill. */
+input[type="file"] { color: var(--text-dim); font-family: var(--mono); font-size: 12px; }
+input[type="file"]::file-selector-button {
+  background: var(--panel-alt);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 4px 10px;
+  margin-right: 10px;
+  cursor: pointer;
+}
+input[type="file"]::file-selector-button:hover { border-color: var(--accent); color: var(--accent); }
 select.control {
   background: var(--panel-alt);
   color: var(--text);
