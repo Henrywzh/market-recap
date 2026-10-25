@@ -478,7 +478,9 @@ function withLegend(option, p, built, hidden = []) {
 // The ratio with its moving averages and a ±σ band around the longest one: the
 // same envelope the price chart draws, so a stretched ratio reads the same way.
 // A dashed level and its value follow the pointer.
-function ratioChart(node, dates, { ratio, averages, band, sigma, window }) {
+// With ``candles`` (ratioBars cut to the view) the ratio is drawn as daily candles:
+// an exact body from the open and close, and a faint wick for the bounds of the day.
+function ratioChart(node, dates, { ratio, averages, band, sigma, window, candles = null }) {
   return render(node, (option, p) => {
     const colors = MA_COLORS(p);
     const bandSeries = band ? [
@@ -494,14 +496,17 @@ function ratioChart(node, dates, { ratio, averages, band, sigma, window }) {
       name, type: 'line', data, showSymbol: false, lineStyle: { width: 1, color: maColor(i) },
       itemStyle: { color: maColor(i) },
     }));
-    const values = [...ratio, ...Object.values(averages).flat()].filter(isNum);
+    // The fit takes the bodies, not the wick bounds, which can run far wider than the day did.
+    const values = [...ratio, ...(candles ? candles.open : []), ...Object.values(averages).flat()].filter(isNum);
     const lo = Math.min(...values);
     const hi = Math.max(...values);
     const pad = (hi - lo) * FIT_PAD || hi * 0.01;
     const tip = (params) => {
       const k = [].concat(params)[0]?.dataIndex;
       if (k === undefined) return '';
-      const rows = [`<b>${dates[k]}</b>`, `Ratio <b>${num(ratio[k], 4)}</b>`];
+      const rows = [`<b>${dates[k]}</b>`, candles
+        ? `Open ${num(candles.open[k], 4)} · close <b>${num(candles.close[k], 4)}</b><br><span style="color:${p.dim}">day bounds ${num(candles.lower[k], 4)} – ${num(candles.upper[k], 4)}</span>`
+        : `Ratio <b>${num(ratio[k], 4)}</b>`];
       Object.entries(averages).forEach(([name, data], i) => rows.push(`<span style="color:${maColor(i)}">${name}</span> ${num(data[k], 4)}`));
       if (band && isNum(band.upper[k])) rows.push(`Band ${num(band.lower[k], 4)} – ${num(band.upper[k], 4)}`);
       return rows.join('<br>');
@@ -519,7 +524,24 @@ function ratioChart(node, dates, { ratio, averages, band, sigma, window }) {
             formatter: (d) => num(d.value, 4) } } },
       series: [
         ...bandSeries,
-        { name: 'Ratio', type: 'line', data: ratio, showSymbol: false, lineStyle: { width: 1.5, color: p.accent }, itemStyle: { color: p.accent }, z: 5 },
+        candles ? {
+          name: 'Ratio', type: 'custom', z: 5, clip: true, encode: { x: 0, y: [1, 2] },
+          data: dates.map((_, i) => [i, candles.open[i], candles.close[i], candles.lower[i], candles.upper[i]]),
+          renderItem: (params, api) => {
+            const [open, close, low, high] = [1, 2, 3, 4].map((k) => api.value(k));
+            if (![open, close, low, high].every(isNum)) return null;
+            const x = api.coord([api.value(0), open])[0];
+            const width = Math.max(1, api.size([1, 0])[0] * 0.6);
+            const top = api.coord([api.value(0), Math.max(open, close)])[1];
+            const bottom = api.coord([api.value(0), Math.min(open, close)])[1];
+            const color = close >= open ? p.up : p.down;
+            return { type: 'group', children: [
+              { type: 'line', shape: { x1: x, y1: api.coord([0, high])[1], x2: x, y2: api.coord([0, low])[1] },
+                style: { stroke: p.faint, lineWidth: 1, opacity: 0.6 } },
+              { type: 'rect', shape: { x: x - width / 2, y: top, width, height: Math.max(1, bottom - top) }, style: { fill: color } },
+            ] };
+          },
+        } : { name: 'Ratio', type: 'line', data: ratio, showSymbol: false, lineStyle: { width: 1.5, color: p.accent }, itemStyle: { color: p.accent }, z: 5 },
         ...maSeries,
       ],
     });
@@ -673,6 +695,14 @@ export default async function renderTechnicals(root, data, _manifest, ctx = {}) 
   const [maShort, maLong] = defaults.ratio_ma_periods;
   const { fast, slow, signal } = defaults.macd;
 
+  let ratioCandles = true;
+  const ratioNote = el('div', { class: 'field-note', text: '' });
+  const ratioMode = segmented(['LINE', 'CANDLES'], 'CANDLES', (label) => {
+    ratioCandles = label === 'CANDLES';
+    ratioMode.setActive(label);
+    loadRatio();
+  });
+
   async function loadRatio() {
     const a = numInput.value.trim().toUpperCase();
     const b = denInput.value.trim().toUpperCase();
@@ -680,14 +710,31 @@ export default async function renderTechnicals(root, data, _manifest, ctx = {}) 
     try {
       for (const symbol of [a, b]) if (!available.has(symbol)) throw new Error(`${symbol} is not in this build`);
       const [left, right] = await Promise.all([loadTicker(a), loadTicker(b)]);
-      const { dates, ratio } = T.ratioSeries(left, right);
+      const closes = T.ratioSeries(left, right);
+      // Candles need both legs' daily bars (since 2020) to reach back over the range;
+      // otherwise the ratio is the close line over its whole history.
+      let bars = null;
+      if (ratioCandles && [a, b].every((s) => (data.bars || []).includes(s))) {
+        const [la, lb] = await Promise.all([loadLongBars(a), loadLongBars(b)]);
+        const made = la && lb ? T.ratioBars(la, lb) : null;
+        if (made?.dates.length && T.rangeWithin(closes.dates, rsPeriod.value, made.dates[0])) bars = made;
+      }
+      // The averages, band, z-score and MACD read the series drawn, so a candle's close
+      // and its averages are on one basis (the bars: split-adjusted, not dividend-adjusted).
+      const { dates, ratio } = bars ? { dates: bars.dates, ratio: bars.close } : closes;
       const start = T.rangeStart(dates, rsPeriod.value);
+      ratioNote.textContent = bars
+        ? 'Candles: the body is the ratio of the two opens and the two closes, exact; the faint wick is the widest the day could have been '
+          + '(the numerator\'s high over the denominator\'s low, and the reverse), as the two highs come at different times. '
+          + 'Daily bars, split- but not dividend-adjusted; the averages, band and MACD are on the same closes.'
+        : (ratioCandles ? `Candles need both names' daily bars, which start ${data.bars_start || '2020-01-01'}; this range is drawn as the close line.` : '');
       const averages = Object.fromEntries(defaults.ratio_ma_periods.map((w) => [`${w}MA`, cut(T.sma(ratio, w), start)]));
       const bandWindow = Math.max(...defaults.ratio_ma_periods);
       const full = ratio.length >= bandWindow ? T.band(ratio, bandWindow, defaults.band_sigma) : null;
       ratioChart(ratioNode, cut(dates, start), {
         ratio: cut(ratio, start), averages, sigma: defaults.band_sigma, window: bandWindow,
         band: full ? { upper: cut(full.upper, start), lower: cut(full.lower, start) } : null,
+        candles: bars ? { open: cut(bars.open, start), close: cut(bars.close, start), upper: cut(bars.upper, start), lower: cut(bars.lower, start) } : null,
       });
       const z = T.zscore(ratio, bandWindow);
       const zNow = z[z.length - 1];
@@ -710,11 +757,13 @@ export default async function renderTechnicals(root, data, _manifest, ctx = {}) 
       el('div', { class: 'field' }, [el('label', { text: 'NUMERATOR' }), withSuggestions(numInput, data.available, data.names || {}, () => { markCustom(); loadRatio(); }, data.rank || [])]),
       el('div', { class: 'field' }, [el('label', { text: 'DENOMINATOR' }), withSuggestions(denInput, data.available, data.names || {}, () => { markCustom(); loadRatio(); }, data.rank || [])]),
       el('div', { class: 'field' }, [el('label', { text: 'PERIOD' }), rsPeriod]),
+      el('div', { class: 'field' }, [el('label', { text: 'DRAW' }), ratioMode]),
       el('button', { class: 'action', text: 'LOAD', onclick: loadRatio }),
       rsStatus,
     ]),
     el('div', { class: 'card-title', text: `RATIO + ${maShort}/${maLong}-DAY MOVING AVERAGE & ${defaults.band_sigma}σ BAND (${maLong}-DAY)` }),
     ratioNode,
+    ratioNote,
     el('div', { class: 'card-title', text: `MACD (${fast}/${slow}/${signal})` }),
     macdNode,
   ]));

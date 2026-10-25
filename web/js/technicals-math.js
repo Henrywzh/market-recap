@@ -171,6 +171,29 @@ export function ratioSeries(left, right) {
   return { dates, ratio };
 }
 
+// Daily candles of a ratio from two sets of bars, on their shared sessions. The
+// open and the close are exact: both legs open and close at the same moment. The
+// day's high and low are not: each leg's comes at its own time, so only bounds
+// follow, the numerator's high over the denominator's low and the reverse, which
+// always hold the true range and are usually wider. Null on missing or zero prices.
+export function ratioBars(left, right) {
+  const at = new Map(right.dates.map((d, i) => [d, i]));
+  const out = { dates: [], open: [], close: [], upper: [], lower: [] };
+  left.dates.forEach((d, i) => {
+    const j = at.get(d);
+    if (j === undefined) return;
+    const [oa, ca, ha, la] = [left.open[i], left.close[i], left.high[i], left.low[i]];
+    const [ob, cb, hb, lb] = [right.open[j], right.close[j], right.high[j], right.low[j]];
+    if (![oa, ca, ha, la, ob, cb, hb, lb].every((v) => finite(v) && v > 0)) return;
+    out.dates.push(d);
+    out.open.push(oa / ob);
+    out.close.push(ca / cb);
+    out.upper.push(ha / lb);
+    out.lower.push(la / hb);
+  });
+  return out;
+}
+
 // Index of the first session shown for a display period: every indicator is
 // computed on the full history first, so a 200-day average is already formed
 // on the first day of a 1Y chart. `sessions === null` means YTD.

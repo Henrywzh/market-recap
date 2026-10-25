@@ -115,3 +115,17 @@ test('the visible extent covers the window only, skips missing values and pads b
   assert.equal(T.visibleExtent({ low: [null], high: [null], lines: [[null]] }, 0, 0, 0.04), null);
   assert.equal(T.visibleExtent(series, 5, 9, 0), null);
 });
+
+test('ratio candles: exact open and close, the day\'s range as bounds, shared sessions only', () => {
+  const left = { dates: ['d1', 'd2', 'd3'], open: [10, 11, 12], close: [11, 12, 0], high: [12, 13, 13], low: [9, 10, 11] };
+  const right = { dates: ['d2', 'd3', 'd1'], open: [5, 6, 4], close: [6, 6, 5], high: [6.5, 7, 5], low: [4.5, 5, 4] };
+  const r = T.ratioBars(left, right);
+  assert.deepEqual(r.dates, ['d1', 'd2'], 'd3 has a zero close, so it is left out');
+  assert.deepEqual(r.open, [10 / 4, 11 / 5]);
+  assert.deepEqual(r.close, [11 / 5, 12 / 6]);
+  assert.deepEqual(r.upper, [12 / 4, 13 / 4.5]);
+  assert.deepEqual(r.lower, [9 / 5, 10 / 6.5]);
+  r.dates.forEach((_, i) => {
+    assert.ok(r.upper[i] >= Math.max(r.open[i], r.close[i]) && r.lower[i] <= Math.min(r.open[i], r.close[i]));
+  });
+});
