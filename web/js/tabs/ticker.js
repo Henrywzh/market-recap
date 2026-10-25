@@ -19,6 +19,7 @@ import { viewTabs } from '../view-tabs.js';
 import { renderEarningsForward } from './valuation.js';
 import { comparisonCard } from '../valuation-compare.js';
 import { segmentsCard } from '../segments-card.js';
+import { chipCard } from '../chip-card.js';
 
 const BILLION = 1e9;
 // The multiples shown in the header block, in this order. The full set is on
@@ -488,6 +489,15 @@ export default async function renderTicker(root, valuation, manifest, ctx) {
       await renderSingleTicker(chartHost, technicals, { symbol, lockTicker: true, compact: true });
     } else {
       host.append(card('PRICE & TREND', null, gap(`${symbol} has no baked price history in this build.`)));
+    }
+    if (technicals?.bars?.includes(symbol)) {
+      await section(host, 'CHIP DISTRIBUTION · VOLUME BY PRICE', async (inner) => {
+        const bars = await ctx.loadArtifact(`bars/${encodeURIComponent(symbol)}`);
+        // Shares outstanding for the cost model's turnover: market cap over the price it was taken at.
+        const shares = row?.market_cap > 0 && row?.price > 0 ? row.market_cap / row.price : null;
+        inner.append(chipCard(bars, { shares }));
+        return `daily bars since ${bars.dates[0]}`;
+      });
     }
     host.append(...keep(eventPayload ? storyCard(eventPayload) : null, chain ? chainCard(chain, symbol, { compact: true }) : null));
     return null;

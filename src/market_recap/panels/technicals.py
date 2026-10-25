@@ -28,6 +28,42 @@ CLOSE_DIGITS = 4
 # Two years of traded bars: a 200-session average then spans the Trade Desk's
 # whole one-year chart, and the 252-session extremes have room.
 OHLCV_SESSIONS = 520
+# The bars the volume profile and cost distribution read (web/js/chip-math.js):
+# open, high, low, close and volume since BARS_START, in a file of their own so the
+# two-year price artifact every ticker page loads does not grow.
+BARS_START = "2020-01-01"
+BARS_ARTIFACT_DIR = TICKER_ARTIFACT_DIR.parent / "bars"
+
+
+def _price_digits(values: pd.Series) -> int:
+    """Two decimals for a stock priced in dollars, four for one below a dollar."""
+    low = values.min()
+    return 4 if pd.notna(low) and low < 1 else 2
+
+
+def bake_bars(symbol: str, raw_prices: pd.DataFrame, ohlcv: dict[str, pd.DataFrame]) -> bool:
+    """Write one ticker's daily bars since BARS_START; False when it has none."""
+    if symbol not in raw_prices.columns:
+        return False
+    close = raw_prices[symbol].loc[BARS_START:].dropna()
+    if close.empty:
+        return False
+    frames = {kind: (ohlcv.get(kind, pd.DataFrame())[symbol].reindex(close.index)
+                     if symbol in ohlcv.get(kind, pd.DataFrame()).columns else pd.Series(index=close.index, dtype=float))
+              for kind in ("open", "high", "low", "volume")}
+    if frames["volume"].isna().all():
+        return False
+    digits = _price_digits(close)
+    write_json(BARS_ARTIFACT_DIR / f"{symbol}.json", {
+        "ticker": symbol,
+        "dates": [d.strftime("%Y-%m-%d") for d in close.index],
+        "open": [clean_float(v, digits) for v in frames["open"].to_numpy()],
+        "high": [clean_float(v, digits) for v in frames["high"].to_numpy()],
+        "low": [clean_float(v, digits) for v in frames["low"].to_numpy()],
+        "close": [clean_float(v, digits) for v in close.to_numpy()],
+        "volume": [int(v) if pd.notna(v) else None for v in frames["volume"].to_numpy()],
+    })
+    return True
 
 
 def bake_ticker(symbol: str, closes: pd.Series, *, min_sessions: int,
@@ -85,11 +121,13 @@ def build(ctx) -> dict:
                   for kind, frame in companions.items()}
     raw_prices = corporate_actions.adjust(yahoo.fetch_prices(ctx.history_period), ctx.adjustments)
 
-    baked = []
+    baked, barred = [], []
     for symbol in all_closes.columns:
         try:
             entry = bake_ticker(str(symbol), all_closes[symbol], min_sessions=int(settings["min_sessions"]),
                                 ohlcv=companions, raw_prices=raw_prices)
+            if entry and bake_bars(str(symbol), raw_prices, companions):
+                barred.append(str(symbol))
         except Exception as exc:
             ctx.log.fail(f"technicals:{symbol}", exc)
             continue
@@ -97,11 +135,15 @@ def build(ctx) -> dict:
             baked.append(entry)
 
     prune_stale(TICKER_ARTIFACT_DIR, (e["ticker"] for e in baked))
+    prune_stale(BARS_ARTIFACT_DIR, barred)
     zwindow = int(settings["zscore_window"])
     return {
         "as_of": ctx.as_of,
         "available": sorted(e["ticker"] for e in baked),
         "partial_history": sorted(e["ticker"] for e in baked if e["sessions"] < zwindow),
+        # Tickers with daily bars since BARS_START (artifacts/bars), for the chip distribution.
+        "bars": sorted(barred),
+        "bars_start": BARS_START,
         # Everything the page's controls start from, so the defaults live in
         # the contract and not in a second copy in JavaScript.
         "defaults": {
