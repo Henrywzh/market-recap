@@ -3,7 +3,9 @@
 
 const NS = 'http://www.w3.org/2000/svg';
 
-export function spark(values, { threshold = null, width = 150, height = 34, color = 'currentColor' } = {}) {
+// ``lines``: more dashed levels, each { value, cls }, drawn like the threshold
+// when it lies within a span of the line's own range.
+export function spark(values, { threshold = null, lines = [], width = 150, height = 34, color = 'currentColor' } = {}) {
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   svg.setAttribute('class', 'spark');
@@ -12,21 +14,26 @@ export function spark(values, { threshold = null, width = 150, height = 34, colo
   if (points.length < 2) return svg;
   let lo = Math.min(...points.map(([, v]) => v));
   let hi = Math.max(...points.map(([, v]) => v));
-  if (threshold !== null && Number.isFinite(threshold) && threshold >= lo - (hi - lo) && threshold <= hi + (hi - lo)) {
-    lo = Math.min(lo, threshold);
-    hi = Math.max(hi, threshold);
-  }
+  const levels = [{ value: threshold, cls: 'spark-threshold' }, ...lines]
+    .filter((l) => l.value !== null && l.value !== undefined && Number.isFinite(l.value));
+  const reach = hi - lo;
+  levels.forEach((l) => {
+    if (l.value >= lo - reach && l.value <= hi + reach) {
+      lo = Math.min(lo, l.value);
+      hi = Math.max(hi, l.value);
+    }
+  });
   const span = hi - lo || 1;
   const last = values.length - 1 || 1;
   const x = (i) => (i / last) * (width - 2) + 1;
   const y = (v) => height - 2 - ((v - lo) / span) * (height - 4);
-  if (threshold !== null && Number.isFinite(threshold) && threshold >= lo && threshold <= hi) {
+  levels.filter((l) => l.value >= lo && l.value <= hi).forEach((l) => {
     const line = document.createElementNS(NS, 'line');
     line.setAttribute('x1', '0'); line.setAttribute('x2', String(width));
-    line.setAttribute('y1', String(y(threshold))); line.setAttribute('y2', String(y(threshold)));
-    line.setAttribute('class', 'spark-threshold');
+    line.setAttribute('y1', String(y(l.value))); line.setAttribute('y2', String(y(l.value)));
+    line.setAttribute('class', l.cls);
     svg.append(line);
-  }
+  });
   const path = document.createElementNS(NS, 'polyline');
   path.setAttribute('points', points.map(([i, v]) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' '));
   path.setAttribute('fill', 'none');

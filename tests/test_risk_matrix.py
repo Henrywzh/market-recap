@@ -378,3 +378,35 @@ def test_auction_demand_compares_each_maturity_with_its_own_past():
     assert last["bid_to_cover"] == pytest.approx((-0.3 - 0.275) / 2)
     assert last["dealer_share"] == pytest.approx((8.0 + (20 - (11 * 12 + 20) / 12)) / 2)
     assert R.auction_demand([]).empty
+
+
+# --- the cell's small chart --------------------------------------------------
+
+def test_spark_is_the_last_year_with_the_lines_the_colour_is_read_against():
+    series = _daily(np.arange(4000, dtype=float))
+    spark = R.matrix_spark(series, risk_when="high", years=10, min_years=3, thresholds=THRESHOLDS)
+    assert spark["start"] == "2025-10-17"
+    assert len(spark["values"]) == 365 and spark["values"][-1] == 3999
+    elevated, stressed = spark["lines"]
+    assert elevated["state"] == "elevated" and stressed["state"] == "stressed"
+    # The values at the 75th and 95th percentiles of the ten years read.
+    assert elevated["value"] == pytest.approx(np.quantile(np.arange(4000 - 3653, 4000), 0.75), abs=1)
+    assert stressed["value"] > elevated["value"]
+    # Read low, the lines sit at the bottom of the range.
+    low = R.matrix_spark(series, risk_when="low", years=10, min_years=3, thresholds=THRESHOLDS)
+    assert low["lines"][1]["value"] < low["lines"][0]["value"] < 2000
+
+
+def test_spark_lines_follow_the_cell_scale():
+    series = _daily(np.linspace(0, 1, 2000))
+    bands = R.matrix_spark(series, risk_when="high", years=10, min_years=3, thresholds=THRESHOLDS,
+                           scale="bands", bands={"elevated": 0.9, "stressed": 1.2})
+    assert [line["value"] for line in bands["lines"]] == [0.9, 1.2]
+    valuation = R.matrix_spark(series, risk_when="high", years=10, min_years=3, thresholds=THRESHOLDS,
+                               scale="valuation", since="2000-01-01", valuation={"cheap": 25, "rich": 75, "very_rich": 90})
+    assert [line["state"] for line in valuation["lines"]] == ["cheap", "rich", "very_rich"]
+    # Too short for a percentile: the year is drawn, with no lines; an extreme series has none either.
+    short = R.matrix_spark(_daily(np.arange(400.0)), risk_when="high", years=10, min_years=3, thresholds=THRESHOLDS)
+    assert short["lines"] == [] and len(short["values"]) == 365
+    assert R.matrix_spark(series, risk_when="extreme", years=10, min_years=3, thresholds=THRESHOLDS)["lines"] == []
+    assert R.matrix_spark(pd.Series(dtype=float), risk_when="high", years=10, min_years=3, thresholds=THRESHOLDS) is None

@@ -423,7 +423,7 @@ def _matrix_cell(row: str, column: str, spec: dict, *, tiles: dict, series_of: d
             "change_1m": None, "worse_1m": None, "scale": spec.get("scale", "percentile"),
             "bands": spec.get("bands"), "evidence": spec.get("evidence", "description"),
             "caution": spec.get("caution"), "note": spec.get("note"),
-            "pending": spec.get("pending", None if lead else "—"), "members": list(spec.get("members", []))}
+            "pending": spec.get("pending", None if lead else "—"), "members": list(spec.get("members", [])), "spark": None}
     if not lead:
         return cell
     meta = dict(tiles.get(lead) or DERIVED_LEADS[lead])
@@ -450,6 +450,11 @@ def _matrix_cell(row: str, column: str, spec: dict, *, tiles: dict, series_of: d
         cell["since"] = max(since, pd.Timestamp(first)).strftime("%Y-%m-%d")
     digits = DIGITS.get(meta["unit"], 2)
     cell.update(reading)
+    cell["spark"] = R.matrix_spark(series, risk_when=meta["risk_when"], years=cfg["years"], min_years=cfg["min_years"],
+                                   thresholds={"elevated": cfg["elevated"], "stressed": cfg["stressed"]},
+                                   scale=cell["scale"], bands=cell["bands"],
+                                   since=spec.get("since", cfg.get("valuation_since")),
+                                   valuation=cfg.get("valuation"), digits=digits)
     cell.update({"label": meta["label"], "unit": meta["unit"], "risk_when": meta["risk_when"],
                  "value": _round(reading["value"], digits), "change_1m": _round(reading["change_1m"], digits)})
     return cell

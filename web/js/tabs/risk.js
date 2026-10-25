@@ -281,6 +281,20 @@ function cellHead(label, cell) {
   ]);
 }
 
+// The cell's last year as a sparkline, with dashed lines where today's reading
+// would change colour. The line takes the cell's state colour; calm stays dim.
+const SPARK_TONE = { stressed: 'var(--down)', very_rich: 'var(--down)', elevated: 'var(--accent)', rich: 'var(--accent)', cheap: 'var(--up)' };
+
+function cellSpark(cell) {
+  const values = cell.spark?.values;
+  if (!values || values.length < 2) return null;
+  const lines = (cell.spark.lines || []).map((l) => ({ value: l.value, cls: `spark-threshold spark-${l.state}` }));
+  const range = `1Y from ${cell.spark.start}: ${formatValue(Math.min(...values), cell.unit)} to ${formatValue(Math.max(...values), cell.unit)}`;
+  const levels = (cell.spark.lines || []).map((l) => `${stateWord(l.state)} ${formatValue(l.value, cell.unit)}`).join(' · ');
+  return el('span', { class: 'risk-cell-spark', title: levels ? `${range} · dashed: ${levels}` : range },
+    [spark(values, { lines, width: 200, height: 34, color: SPARK_TONE[stateOf(cell)] || 'var(--text-dim)' })]);
+}
+
 // One cell as a button. The tint carries the state; the words are in the label.
 function cellButton(row, column, cell, years, onPick) {
   if (isPlaceholder(cell)) {
@@ -307,6 +321,7 @@ function cellButton(row, column, cell, years, onPick) {
     el('span', { class: 'risk-cell-reading' }, [
       el('span', { class: 'risk-cell-value', text: formatValue(cell.value, cell.unit) }),
       arrow ? el('span', { class: `risk-cell-arrow ${arrow.tone}`, title: arrow.word, text: arrow.arrow }) : null,
+      cellSpark(cell),
     ]),
     el('span', { class: 'risk-cell-pct', text: percentText(cell, years) }),
     el('span', { class: 'risk-cell-tags' }, tagFor(cell).map((t) => tag(t.text, t.tone, t.title))),
@@ -482,7 +497,7 @@ function sentimentGap(g) {
 
 function methodNotes() {
   return [
-    'The five READ THIS FIRST gauges are the series whose fixed lines marked past drawdowns. The matrix: six channels down the side (equities, treasuries, credit, volatility, cross-asset, macro), and three kinds of evidence across (structure, technical, fundamental / premium). Each cell has one lead series. The first two columns say how stressed the market is, read on one of two scales. Levels with a meaning in any decade (VIX, the VIX curve, MOVE, drawdowns, NFCI, BAA − 10Y) are read against fixed lines, set from where each stood in past drawdowns or from a line with its own meaning (an inverted VIX curve at 1.0, NFCI\'s average at 0); a ten-year percentile would compress the tail and let a quiet decade decide what elevated means. Changes and spreads with no outside anchor are read by their percentile in their own last ten years: elevated from the 75th, stressed from the 95th. A lead that failed its out-of-sample test is shown but not coloured. The VALUATION column says how thin the compensation is for holding each risk -- the equity risk premium (Shiller\'s excess CAPE yield, from Robert J. Shiller\'s "Irrational Exuberance" data, shillerdata.com, with Aswath Damodaran\'s implied ERP beside it), the term premium (Kim and Wright, via FRED), the BAA spread and the volatility premium -- against its whole history since 1960 (1990 where it starts then): cheap, fair, rich or very rich. It describes the cushion, not the timing. Grey means no reading yet. Cells are never averaged or scored; the other series in a cell open on click.',
+    'The five READ THIS FIRST gauges are the series whose fixed lines marked past drawdowns. The matrix: six channels down the side (equities, treasuries, credit, volatility, cross-asset, macro), and three kinds of evidence across (structure, technical, fundamental / premium). Each cell has one lead series. The first two columns say how stressed the market is, read on one of two scales. Levels with a meaning in any decade (VIX, the VIX curve, MOVE, drawdowns, NFCI, BAA − 10Y) are read against fixed lines, set from where each stood in past drawdowns or from a line with its own meaning (an inverted VIX curve at 1.0, NFCI\'s average at 0); a ten-year percentile would compress the tail and let a quiet decade decide what elevated means. Changes and spreads with no outside anchor are read by their percentile in their own last ten years: elevated from the 75th, stressed from the 95th. A lead that failed its out-of-sample test is shown but not coloured. The VALUATION column says how thin the compensation is for holding each risk -- the equity risk premium (Shiller\'s excess CAPE yield, from Robert J. Shiller\'s "Irrational Exuberance" data, shillerdata.com, with Aswath Damodaran\'s implied ERP beside it), the term premium (Kim and Wright, via FRED), the BAA spread and the volatility premium -- against its whole history since 1960 (1990 where it starts then): cheap, fair, rich or very rich. It describes the cushion, not the timing. Grey means no reading yet. Each cell draws its lead\'s last year, with dashed lines where today\'s reading would change colour; hover it for the range and the lines. Cells are never averaged or scored; the other series in a cell open on click.',
     'Each tile is one series. 1Y = its percentile over the last 365 days; 1990– = over all the history the source serves, from the year shown; 1W = change over a week. Nothing is combined into a score.',
     'Thresholds were written in config/dashboard.toml before this page drew any series, and are not fitted to it. A red tile is past its line; NEW means it was not a week ago, CLEARED that it was. Positioning and the put/call ratio are read at extremes: the tails of their own history (≤5th or ≥95th percentile).',
     'Back-calculated history: VIX3M, VIX9D, VIX6M, VIX1Y, VVIX, SKEW and COR1M were launched after the first row of their files; the earlier part is Cboe\'s back-calculation. ICE BofA spreads (HY, IG, CCC) come from FRED, which serves the last three years only; the site archives what FRED serves each evening (a full-history baseline first, then the daily tail), and those archived dates extend the series back as the archive grows. The archive is current-vintage history, not point-in-time; Moody\'s Baa − 10Y runs to 1986.',

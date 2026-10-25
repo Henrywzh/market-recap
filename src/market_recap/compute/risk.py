@@ -433,6 +433,51 @@ def _month_change(clean: pd.Series, *, risk_when: str, years: int) -> tuple[floa
     return change, abs(value - median) > abs(before - median)
 
 
+def risk_level(series: pd.Series, pct: float, risk_when: str) -> float | None:
+    """The value at ``pct`` in the risk direction: risk_percentile turned round.
+
+    None for an ``extreme`` series, whose percentile has two tails.
+    """
+    clean = _clean(series)
+    if clean.empty or risk_when not in ("high", "low"):
+        return None
+    return float(clean.quantile(pct / 100 if risk_when == "high" else 1 - pct / 100))
+
+
+def matrix_spark(series: pd.Series, *, risk_when: str, years: int, min_years: float, thresholds: dict,
+                 scale: str = "percentile", bands: dict | None = None, since: str | None = None,
+                 valuation: dict | None = None, digits: int = 2) -> dict | None:
+    """A cell's last year, for its small chart, and the lines its colour is read against.
+
+    The lines are where today's reading would change colour: a band's fixed
+    lines; on the percentile scale the values at the elevated and stressed
+    percentiles of the last ``years``; on the valuation scale the values at the
+    cheap, rich and very-rich percentiles since ``since``. A percentile line
+    needs ``min_years`` of history, as the reading does.
+    """
+    clean = _clean(series)
+    if clean.empty:
+        return None
+    last = clean.index[-1]
+    year = clean[clean.index > last - timedelta(days=RECENT_DAYS)]
+    round_ = lambda v: round(float(v), digits)  # noqa: E731
+    lines = []
+    long_enough = (last - clean.index[0]).days / 365.25 >= min_years
+    if scale == "bands" and bands:
+        lines = [{"state": s, "value": bands[s]} for s in ("elevated", "stressed")]
+    elif scale == "percentile" and long_enough:
+        window = _last_years(clean, years)
+        lines = [{"state": s, "value": risk_level(window, thresholds[s], risk_when)} for s in ("elevated", "stressed")]
+    elif scale == "valuation" and valuation and long_enough:
+        window = clean[clean.index >= pd.Timestamp(since)] if since else clean
+        lines = [{"state": s, "value": risk_level(window, valuation[s], risk_when)} for s in ("cheap", "rich", "very_rich")]
+    return {
+        "start": year.index[0].strftime("%Y-%m-%d"),
+        "values": [round_(v) for v in year.to_numpy()],
+        "lines": [{**line, "value": round_(line["value"])} for line in lines if line["value"] is not None],
+    }
+
+
 def matrix_reading(series: pd.Series, *, risk_when: str, as_of: str | None, years: int,
                    min_years: float, stale_days: int, thresholds: dict, scale: str = "percentile",
                    bands: dict | None = None, since: str | None = None, valuation: dict | None = None) -> dict:
