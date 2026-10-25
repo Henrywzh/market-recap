@@ -160,9 +160,12 @@ class _Inputs:
             self.auctions = R.auction_demand(treasury.fetch_auction_history())
         except Exception as exc:
             self.failed["treasury auctions"] = describe_error(exc)
+        # Coupon auctions cluster in two weeks of each month (3/10/30-year early,
+        # 2/5/7-year late) and Fiscal Data posts results a few days after: a
+        # two-week gap with no complete result is routine (2026-10-08 to -24).
         self._log("treasury_auctions_risk", "Treasury auction results (bid-to-cover, dealer share)", treasury.AUCTIONS_PAGE,
                   [self.auctions.index[-1]] if not self.auctions.empty else [], 0 if self.auctions.empty else 1, 1,
-                  policy="weekly_release")
+                  policy="biweekly_release")
 
     def _load_vx(self, count: int, session: date | None = None) -> None:
         today = date.today()
