@@ -837,6 +837,29 @@ big_arm = "LOW VOL"
 small_arm = "MARKET"
 note = "The minimum-volatility S&P-style fund (USMV, from 2011) against the S&P 500: the market's least volatile names, weighted to keep the portfolio's swings small, against all of it."
 
+[[sizek.pairs]]
+key = "semis_software"
+label = "SEMIS vs SOFTWARE"
+big = "SOXX"
+small = "IGV"
+big_arm = "SEMIS"
+small_arm = "SOFTWARE"
+big_basket = "holdings:SOXX"
+small_basket = "holdings:IGV"
+big_basket_label = "SOXX · NYSE Semiconductor"
+small_basket_label = "IGV · S&P N. American Expanded Tech Software"
+note = "Long semiconductors, short software: SOXX (the 30 largest US-listed chip companies, ADRs such as TSMC and ASML included, weights capped) against IGV (North American software, from 2001). A rising ratio is semis leading. IGV holds Microsoft, Oracle and Palantir beside the SaaS names, so it is software broadly, not SaaS alone; the next pair is the pure cloud basket."
+
+[[sizek.pairs]]
+key = "semis_cloud"
+label = "SEMIS vs CLOUD SAAS"
+big = "SOXX"
+small = "WCLD"
+big_arm = "SEMIS"
+small_arm = "CLOUD SAAS"
+fundamentals_note = "WCLD is a WisdomTree fund, so its holdings are not read here, and many of its names have no earnings to build a P/E from. Prices only."
+note = "Long semiconductors, short cloud software: SOXX against WCLD (the BVP Nasdaq Emerging Cloud index, equal-weighted subscription-software companies, from September 2019). Shorter history than SOXX/IGV, and much smaller companies on the short side."
+
 [catalyst_log]
 # CALENDAR -> UNSCHEDULED CATALYSTS. Dated events no calendar announces (a leak,
 # a competitor's announcement, a supply report), kept by hand with their source,

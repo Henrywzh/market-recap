@@ -105,7 +105,7 @@ def test_an_arm_without_a_configured_label_is_named_from_its_spec():
 def test_the_real_config_gives_each_pair_both_baskets_or_says_why_not():
     pairs = {p["key"]: p for p in load_config()["sizek"]["pairs"]}
     with_baskets = {k for k, p in pairs.items() if p.get("big_basket")}
-    assert with_baskets == {"sp500", "nasdaq100", "value_growth", "staples_market", "lowvol_market"}
+    assert with_baskets == {"sp500", "nasdaq100", "value_growth", "staples_market", "lowvol_market", "semis_software"}
     for key in with_baskets:
         assert pairs[key].get("small_basket"), key
         P.parse_basket(pairs[key]["big_basket"])
