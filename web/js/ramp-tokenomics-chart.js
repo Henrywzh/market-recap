@@ -18,6 +18,9 @@ const TOKEN_TYPES = ['ALL', 'UNCACHED INPUT', 'OUTPUT'];
 const CHART_HEIGHT = 'height:360px';
 // A newest observation older than this many days gets a visible warning.
 const STALE_DAYS = 21;
+// The sample's own total over every reported series (not the top series
+// drawn), as a dashed line in LEVEL view and a last row in the table.
+const TOTAL_NAME = 'TOTAL · ALL REPORTED';
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
@@ -70,7 +73,7 @@ function tooltipOf(series, dates, { kind, share, fmt }) {
       const s = byName.get(q.seriesName);
       if (!s) return '';
       const level = s.raw[i];
-      const sharePart = !share && isNum(level) && isNum(s.shares[i]) ? ` · ${formatShare(s.shares[i])} of sample` : '';
+      const sharePart = !share && isNum(level) && isNum(s.shares?.[i]) ? ` · ${formatShare(s.shares[i])} of sample` : '';
       const partial = s.partial && s.partial[i] ? ' (partial)' : '';
       return `${q.marker}${esc(q.seriesName)} ${share ? formatShare(s.shares[i]) : fmt(level)}${sharePart}${partial}`;
     });
@@ -80,7 +83,7 @@ function tooltipOf(series, dates, { kind, share, fmt }) {
 
 export function ramptokenomicsCharts(payload) {
   const p = payload !== null && typeof payload === 'object' ? payload : {};
-  const state = { metric: 'VOLUME', breakdown: 'BY MAKER', display: 'LEVEL', scale: 'RAW', tokenType: 'ALL', range: '6M', mode: MODES[0] };
+  const state = { metric: 'SPEND', breakdown: 'BY MAKER', display: 'LEVEL', scale: 'RAW', tokenType: 'ALL', range: '6M', mode: MODES[0] };
   // The legend's selection, per series group (metric and breakdown, or token
   // type), so a toggle survives a switch to another group and back.
   const selections = new Map();
@@ -175,6 +178,12 @@ export function ramptokenomicsCharts(payload) {
       const plotted = share ? shares : raw;
       return { name: s.name, index, raw, shares, partial: s.partial, plotted: log ? logValues(plotted) : plotted };
     });
+    // The total in LEVEL view only: as a share it is 100 throughout.
+    const totalValues = isPrice || share ? null : (monthly ? view.total : picked.total?.slice(start));
+    if (totalValues && totalValues.some(isNum)) {
+      series.push({ name: TOTAL_NAME, total: true, raw: totalValues, shares: null, partial: null,
+        plotted: log ? logValues(totalValues) : totalValues });
+    }
 
     const titles = monthly ? (share ? MONTHLY_SHARE_TITLE : MONTHLY_TITLE) : (share ? SHARE_TITLE : TITLE);
     title.textContent = titles[state.metric];
@@ -205,17 +214,18 @@ export function ramptokenomicsCharts(payload) {
         axisLabel: { color: pal.dim, fontSize: 9, formatter: share ? formatShare : AXIS[state.metric] },
       },
       series: series.map((s) => {
-        const color = SERIES_COLORS[s.index % SERIES_COLORS.length];
+        // The total is the dashed text-coloured line, apart from the series' palette.
+        const color = s.total ? pal.text : SERIES_COLORS[s.index % SERIES_COLORS.length];
         return {
           name: s.name,
           type: 'line',
           // A partial month is a hollow marker. Weekly points are few enough to
           // mark, so a lone week between gaps still shows.
-          data: monthly ? s.plotted.map((v, i) => ({ value: v, symbol: s.partial[i] ? 'emptyCircle' : 'circle' })) : s.plotted,
+          data: monthly ? s.plotted.map((v, i) => ({ value: v, symbol: s.partial?.[i] ? 'emptyCircle' : 'circle' })) : s.plotted,
           showSymbol: !isPrice,
           symbolSize: monthly ? 6 : 4,
           connectNulls: false,
-          lineStyle: { width: 1.4, color },
+          lineStyle: { width: s.total ? 1.8 : 1.4, color, ...(s.total ? { type: 'dashed' } : {}) },
           itemStyle: { color },
         };
       }),
@@ -246,6 +256,12 @@ export function ramptokenomicsCharts(payload) {
         el('td', { text: LEVEL[state.metric](r.value) }),
         ...(isPrice ? [] : [el('td', { class: 'dim', text: formatShare(monthly ? monthShare.get(r.key) ?? null : r.share) })]),
       ]));
+      const totalNow = !isPrice && idx >= 0 ? tableTotal?.[idx] : null;
+      if (isNum(totalNow)) {
+        rows.push(el('tr', { class: 'total-row' }, [
+          el('td', { text: TOTAL_NAME }), el('td', { text: LEVEL[state.metric](totalNow) }), el('td', { class: 'dim', text: formatShare(100) }),
+        ]));
+      }
       const headers = isPrice ? ['SERIES', 'VALUE'] : ['SERIES', 'VALUE', 'SHARE OF REPORTED SAMPLE'];
       tableHost.replaceChildren(table(headers, rows));
     }

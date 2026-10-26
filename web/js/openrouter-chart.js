@@ -64,7 +64,8 @@ function drawSeries(node, data, { log, monthly, fmt, selected, onLegend }) {
     xAxis: { ...option.xAxis, data: data.labels },
     yAxis: { ...option.yAxis, type: log ? 'log' : 'value', scale: true, axisLabel: { color: p.dim, fontSize: 9, formatter: fmt } },
     series: data.series.map((s) => {
-      const color = SERIES_COLORS[s.index % SERIES_COLORS.length];
+      // The all-authors total is the dashed text-coloured line, apart from the providers' palette.
+      const color = s.total ? p.text : SERIES_COLORS[s.index % SERIES_COLORS.length];
       const values = log ? logValues(s.values) : s.values;
       return {
         name: s.name,
@@ -73,7 +74,7 @@ function drawSeries(node, data, { log, monthly, fmt, selected, onLegend }) {
         showSymbol: monthly,
         symbolSize: 6,
         connectNulls: false,
-        lineStyle: { width: 1.4, color },
+        lineStyle: { width: s.total ? 1.8 : 1.4, color, ...(s.total ? { type: 'dashed' } : {}) },
         itemStyle: { color },
       };
     }),

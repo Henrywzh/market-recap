@@ -156,3 +156,27 @@ test('openrouterSeries tolerates a build with no providers or no dates', () => {
   assert.deepEqual(M.openrouterSeries({}, { metric: 'revenue', mode: 'DAILY', range: '6M' }), { labels: [], series: [] });
   assert.deepEqual(M.openrouterSeries({ dates: [] , providers: []}, { metric: 'tokens', mode: 'MONTHLY' }), { labels: [], series: [] });
 });
+
+test('openrouterSeries: the all-authors total comes last, smoothed and run-rated like the providers', () => {
+  const dates = span('2025-12-01', '2026-01-10');
+  const revenueK = dates.map((_, i) => i + 1);
+  const or = {
+    dates,
+    providers: [{ slug: 'openai', name: 'OpenAI', revenue_k: revenueK, tokens_b: revenueK.map((v) => v / 10) }],
+    // Every author, so more than the providers drawn.
+    total_revenue_k: revenueK.map((v) => v * 2),
+    total_tokens_b: revenueK.map((v) => v / 5),
+  };
+  const daily = M.openrouterSeries(or, { metric: 'revenue', mode: 'DAILY', range: '1M' });
+  const total = daily.series.at(-1);
+  assert.equal(total.name, M.TOTAL_NAME);
+  assert.equal(total.slug, M.TOTAL_SLUG);
+  assert.ok(total.total && !daily.series[0].total);
+  assert.equal(total.index, 1);
+  assert.equal(total.values[0], 14);                 // twice OpenAI's 7
+  const tokens = M.openrouterSeries(or, { metric: 'tokens', mode: 'MONTHLY' });
+  near(tokens.series.at(-1).values[0], 3.2);         // twice OpenAI's 1.6
+  // A build without totals draws the providers alone.
+  delete or.total_revenue_k;
+  assert.equal(M.openrouterSeries(or, { metric: 'revenue', mode: 'DAILY', range: '1M' }).series.length, 1);
+});

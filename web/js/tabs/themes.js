@@ -288,6 +288,21 @@ function openrouterCard(or) {
     el('td', { class: 'dim', text: p.revenue_share_pct == null ? DASH : `${num(p.revenue_share_pct, 1)}%` }),
     el('td', { text: p.week_tokens_b == null ? DASH : `${num(p.week_tokens_b / 1000, 2)}T` }),
   ]));
+  // Every author, the denominator of SHARE: the last seven days of the totals, when all seven have one.
+  const last7 = (values) => {
+    const week = Array.isArray(values) ? values.slice(-7) : [];
+    return week.length === 7 && week.every((v) => typeof v === 'number' && Number.isFinite(v)) ? week.reduce((a, b) => a + b, 0) : null;
+  };
+  const totalRevenue = last7(or.total_revenue_k);
+  const totalTokens = last7(or.total_tokens_b);
+  if (totalRevenue !== null || totalTokens !== null) {
+    rows.push(el('tr', { class: 'total-row' }, [
+      el('td', { text: 'All authors' }),
+      el('td', { text: totalRevenue === null ? DASH : `$${num(totalRevenue / 1000, 2)}M` }),
+      el('td', { class: 'dim', text: '100%' }),
+      el('td', { text: totalTokens === null ? DASH : `${num(totalTokens / 1000, 2)}T` }),
+    ]));
+  }
   const through = or.dates?.at(-1) ?? DASH;
   return card(`${title} BY MODEL AUTHOR`, el('span', { class: 'dim', text: `through ${through}${or.commit ? ` · alternative-data ${or.commit.sha.slice(0, 7)}` : ''}` }), [
     openrouterCharts(or),

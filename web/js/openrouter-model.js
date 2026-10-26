@@ -113,27 +113,37 @@ function dailyOf(p, key, dates) {
   return Array.isArray(p[key]) ? p[key] : dates.map(() => null);
 }
 
+// The all-authors line: OpenRouter's own total over every model author, not
+// the sum of the providers drawn (on 2026-10-22 the eight drawn were 72% of
+// tokens). Its slug is not a provider's, so its legend entry is its own.
+export const TOTAL_NAME = 'ALL AUTHORS';
+export const TOTAL_SLUG = 'total';
+
 // What the charts draw. metric: 'revenue' | 'tokens'. mode: 'DAILY' (the
 // trailing 7-day mean, cut to the range after smoothing) or 'MONTHLY' (every
 // month: $M a year for revenue, B a day for tokens). Each series keeps its
 // index in the full provider list so its colour does not move when toggled.
+// The total comes last, marked ``total``, when the build carries one.
 export function openrouterSeries(or, { metric, mode, range }) {
   const dates = or.dates || [];
   const providers = or.providers || [];
+  const key = metric === 'revenue' ? 'revenue_k' : 'tokens_b';
+  const totalDaily = Array.isArray(or[`total_${key}`]) ? or[`total_${key}`] : null;
+  const columns = [
+    ...providers.map((p, index) => ({ slug: p.slug, name: p.name, index, daily: dailyOf(p, key, dates) })),
+    ...(totalDaily ? [{ slug: TOTAL_SLUG, name: TOTAL_NAME, index: providers.length, daily: totalDaily, total: true }] : []),
+  ];
+  const mark = (c, rest) => ({ slug: c.slug, name: c.name, index: c.index, ...(c.total ? { total: true } : {}), ...rest });
   if (mode === 'MONTHLY') {
     const labels = monthSpan(dates);
-    const series = providers.map((p, index) => {
-      const daily = dailyOf(p, metric === 'revenue' ? 'revenue_k' : 'tokens_b', dates);
-      const m = metric === 'revenue' ? monthlyArr(dates, daily) : monthlyAvgTokens(dates, daily);
-      return { slug: p.slug, name: p.name, index, values: metric === 'revenue' ? m.arrM : m.avgB, partial: m.partial };
+    const series = columns.map((c) => {
+      const m = metric === 'revenue' ? monthlyArr(dates, c.daily) : monthlyAvgTokens(dates, c.daily);
+      return mark(c, { values: metric === 'revenue' ? m.arrM : m.avgB, partial: m.partial });
     });
     return { labels, series };
   }
   const start = rangeCut(dates, range);
   const labels = dates.slice(start);
-  const series = providers.map((p, index) => {
-    const daily = dailyOf(p, metric === 'revenue' ? 'revenue_k' : 'tokens_b', dates);
-    return { slug: p.slug, name: p.name, index, values: rolling7(daily).slice(start), partial: labels.map(() => false) };
-  });
+  const series = columns.map((c) => mark(c, { values: rolling7(c.daily).slice(start), partial: labels.map(() => false) }));
   return { labels, series };
 }
