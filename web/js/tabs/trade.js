@@ -4,6 +4,7 @@
 // reads; this page keeps what a single trade needs.
 
 import { card, DASH, dirClass, el, metaRow, num, pct, periodSwitch, table, tag } from '../fmt.js';
+import { withSuggestions } from '../ticker-suggest.js';
 import { render } from '../charts.js';
 import { rangeSwitch, sliceRange, initialRange } from '../range.js';
 import { hashFor, tickerHref } from '../routes.js';
@@ -102,8 +103,7 @@ function ladderTable(ladder, close) {
 function setups(root, technicals, ctx, state) {
   const available = technicals?.available || [];
   const ticker = el('input', { value: ctx.arg || (available.includes('SPY') ? 'SPY' : available[0] || ''),
-    list: 'trade-tickers', placeholder: 'ticker', size: '10' });
-  const list = el('datalist', { id: 'trade-tickers' }, available.map((t) => el('option', { value: t })));
+    placeholder: 'ticker', size: '10' });
   const host = el('div', {});
   const evidence = ctx.loadArtifact('evidence').catch(() => null);
   // Flow links for the loaded ticker only; they clear while another one loads.
@@ -170,9 +170,11 @@ function setups(root, technicals, ctx, state) {
       host.replaceChildren(info(`Unable to load ${symbol}: ${error.message}`));
     }
   };
+  // Wrapped first, so a picked suggestion's Enter is handled before the box's own.
+  const box = withSuggestions(ticker, available, technicals?.names || {}, load, technicals?.rank || []);
   ticker.addEventListener('keydown', (event) => { if (event.key === 'Enter') load(); });
-  root.append(el('div', { class: 'field-row trade-pick' }, [field('STOCK OR ETF', ticker),
-    el('button', { class: 'action', text: 'LOAD', onclick: load }), list, flow]), host);
+  root.append(el('div', { class: 'field-row trade-pick' }, [field('STOCK OR ETF', box),
+    el('button', { class: 'action', text: 'LOAD', onclick: load }), flow]), host);
   load();
 }
 

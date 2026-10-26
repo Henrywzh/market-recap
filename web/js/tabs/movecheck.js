@@ -3,6 +3,7 @@
 // and movecheck-model.js does the arithmetic; this file only lays it out.
 
 import { el, card, num, pct, dirClass, sectionTitle, metaRow, notice, gap, DASH } from '../fmt.js';
+import { withSuggestions } from '../ticker-suggest.js';
 import { render } from '../charts.js';
 import { cleanTicker, resolveTicker } from '../routes.js';
 import * as M from '../movecheck-model.js';
@@ -454,8 +455,7 @@ export default async function renderMoveCheck(root, data, _manifest, ctx = {}) {
   let prefill = { text: '', value: null };
   let run = 0;
 
-  const tickerInput = el('input', { value: '', size: '8', list: 'movecheck-list', autocomplete: 'off', 'aria-label': 'Ticker' });
-  const datalist = el('datalist', { id: 'movecheck-list' }, tickers.map((t) => el('option', { value: t })));
+  const tickerInput = el('input', { value: '', size: '8', autocomplete: 'off', 'aria-label': 'Ticker' });
   const moveInput = el('input', { type: 'number', step: 'any', size: '8', 'aria-label': 'Move in percent' });
   const status = el('span', { class: 'field-note', text: '' });
   // The same ticker's other tools, so a move leads straight to its page, its chart and its trade.
@@ -465,6 +465,8 @@ export default async function renderMoveCheck(root, data, _manifest, ctx = {}) {
     check({ resetMove: true });
   });
   const checkButton = el('button', { class: 'action', text: 'CHECK', onclick: () => check() });
+  // Wrapped first, so a picked suggestion's Enter is handled before the box's own.
+  const tickerBox = withSuggestions(tickerInput, tickers, data?.names || {}, () => check(), data?.rank || []);
   for (const input of [tickerInput, moveInput]) {
     input.addEventListener('keydown', (event) => { if (event.key === 'Enter') check(); });
   }
@@ -530,14 +532,13 @@ export default async function renderMoveCheck(root, data, _manifest, ctx = {}) {
     el('div', { class: 'card' }, [
       el('div', { class: 'card-head' }, [el('span', { class: 'card-title', text: 'CHECK A MOVE' })]),
       el('div', { class: 'field-row' }, [
-        el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), tickerInput]),
+        el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), tickerBox]),
         el('div', { class: 'field' }, [el('label', { text: 'HORIZON' }), horizonSwitch]),
         el('div', { class: 'field' }, [el('label', { text: 'MOVE %' }), moveInput]),
         checkButton,
         status,
       ]),
       flowLinks,
-      datalist,
     ]),
     card('THIS MOVE IN ITS HISTORY', null, [resultBody]),
     distCard,

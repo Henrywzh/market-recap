@@ -1,4 +1,5 @@
 import { el, card, num, pct, sectionTitle, notice, DASH } from '../fmt.js';
+import { withSuggestions } from '../ticker-suggest.js';
 import { resolveTicker } from '../routes.js';
 import renderReverseDcf from './reverse-dcf.js';
 import { viewTabs } from '../view-tabs.js';
@@ -66,17 +67,16 @@ async function renderForwardDcf(root, data, _manifest, ctx = {}) {
   // still opens, on the first company, with the reason in the status line.
   const wanted = resolveTicker(ctx.arg, (t) => data.available.includes(t));
   const requested = wanted && data.available.includes(wanted) ? wanted : null;
-  const tickerInput = el('input', { id: 'dcf-ticker', value: requested || data.available[0], size: '8', list: 'dcf-list' });
-  const datalist = el('datalist', { id: 'dcf-list' }, data.available.map((t) => el('option', { value: t })));
+  const tickerInput = el('input', { id: 'dcf-ticker', value: requested || data.available[0], size: '8' });
+  const tickerBox = withSuggestions(tickerInput, data.available, data.names || {}, () => load(), data.rank || []);
   const status = el('span', { class: 'field-note', text: `${data.available.length} companies available in this build.` });
   const host = el('div', {});
 
   root.append(card('COMPANY', null, [
     el('div', { class: 'field-row' }, [
-      el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), tickerInput]),
+      el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), tickerBox]),
       el('button', { class: 'action', text: 'LOAD', onclick: () => load() }),
       status,
-      datalist,
     ]),
   ]));
   root.append(host);

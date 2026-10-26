@@ -628,7 +628,8 @@ test('a short history says so in words, and an unknown ticker is named', async (
     await renderMoveCheck(root, data, null, ctxWith({ FIX: fixtureTicker() }, 'NOPE'));
     return textOf(root);
   });
-  assert.ok(missing.includes('FIX'), 'an unknown ticker falls back to the first in the build');
+  // The first in the build is TINY; this once passed on FIX, which was only in the datalist.
+  assert.ok(missing.includes('TINY could not be loaded'), 'an unknown ticker falls back to the first in the build');
   assert.ok(!BAD.test(missing));
 });
 

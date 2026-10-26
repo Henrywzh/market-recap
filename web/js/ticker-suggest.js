@@ -25,6 +25,11 @@ export function matchTickers(query, tickers, names = {}, limit = SUGGESTION_LIMI
   return [...bySymbol, ...byName].slice(0, limit).map((ticker) => ({ ticker, name: names[ticker] || '' }));
 }
 
+// The rows' tickers, largest market cap first: the `rank` for a list of companies.
+export function capRank(rows = []) {
+  return rows.filter((r) => r?.ticker).sort((a, b) => (b.market_cap || 0) - (a.market_cap || 0)).map((r) => r.ticker);
+}
+
 // Wraps `input` with the list and returns the wrapper to put in the page in its
 // place. `onPick(ticker)` runs after the box takes the picked symbol.
 export function withSuggestions(input, tickers, names, onPick = () => {}, rank = []) {

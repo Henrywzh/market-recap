@@ -1,5 +1,6 @@
 import { el, card, table, num, DASH } from './fmt.js';
 import { resolveTicker } from './routes.js';
+import { withSuggestions, capRank } from './ticker-suggest.js';
 import { finite, COMPARISON_BASES, comparisonBasisNote, comparisonEvidence, suggestPeer } from './valuation-compare-math.js';
 
 const LABELS = { supports: 'SUPPORTING FACT', counterpoint: 'COUNTERPOINT', context: 'CONTEXT ONLY',
@@ -14,16 +15,19 @@ export function comparisonCard(data, { selectedTicker = null, idPrefix = 'valuat
   const requested = resolveTicker(selectedTicker, (t) => universe.has(t));
   const first = universe.get(requested) || [...rows].sort((a, b) => (b.market_cap || 0) - (a.market_cap || 0))[0];
   const second = suggestPeer(rows, first);
-  const listId = `${idPrefix}-names`;
-  const aInput = el('input', { id: `${idPrefix}-a`, list: listId, value: first.ticker,
+  const aInput = el('input', { id: `${idPrefix}-a`, value: first.ticker,
     'aria-label': 'Compare company A', placeholder: 'Ticker A', size: 10 });
-  const bInput = el('input', { id: `${idPrefix}-b`, list: listId, value: second?.ticker || '',
+  const bInput = el('input', { id: `${idPrefix}-b`, value: second?.ticker || '',
     'aria-label': 'Compare company B', placeholder: 'Ticker B', size: 10 });
   const basis = el('select', { id: `${idPrefix}-basis`, 'aria-label': 'Comparison valuation measure' },
     COMPARISON_BASES.map(([key, label]) => el('option', { value: key, text: label })));
   basis.value = 'pe_forward';
   const status = el('p', { class: 'compare-status note-text', role: 'status' });
   const host = el('div', { class: 'compare-output', 'aria-live': 'polite' });
+  // Ranked suggestions, largest first, wrapped before the boxes' own Enter.
+  const names = Object.fromEntries(rows.map((r) => [r.ticker, r.name || '']));
+  const rank = capRank(rows);
+  const suggest = (input) => withSuggestions(input, rows.map((r) => r.ticker), names, () => draw(), rank);
   const resolve = (input) => universe.get(resolveTicker(input.value.trim().toUpperCase(), (t) => universe.has(t)));
   const draw = () => {
     host.replaceChildren();
@@ -71,8 +75,8 @@ export function comparisonCard(data, { selectedTicker = null, idPrefix = 'valuat
     ]));
   };
   const controls = el('div', { class: 'field-row compare-controls' }, [
-    el('div', { class: 'field' }, [el('label', { for: `${idPrefix}-a`, text: 'COMPANY A' }), aInput]),
-    el('div', { class: 'field' }, [el('label', { for: `${idPrefix}-b`, text: 'COMPANY B' }), bInput]),
+    el('div', { class: 'field' }, [el('label', { for: `${idPrefix}-a`, text: 'COMPANY A' }), suggest(aInput)]),
+    el('div', { class: 'field' }, [el('label', { for: `${idPrefix}-b`, text: 'COMPANY B' }), suggest(bInput)]),
     el('div', { class: 'field' }, [el('label', { for: `${idPrefix}-basis`, text: 'VALUATION MEASURE' }), basis]),
     el('button', { type: 'button', class: 'action', text: 'COMPARE', onclick: draw }),
     el('button', { type: 'button', class: 'action', text: 'SWAP', onclick: () => {
@@ -81,7 +85,6 @@ export function comparisonCard(data, { selectedTicker = null, idPrefix = 'valuat
     el('button', { type: 'button', class: 'action', text: 'SUGGEST PEER', onclick: () => {
       const peer = suggestPeer(rows, resolve(aInput)); bInput.value = peer?.ticker || ''; draw();
     } }),
-    el('datalist', { id: listId }, rows.map((r) => el('option', { value: r.ticker, text: r.name || r.ticker }))),
   ]);
   for (const input of [aInput, bInput]) {
     input.addEventListener('change', draw);

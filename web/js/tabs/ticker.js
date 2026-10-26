@@ -19,6 +19,7 @@ import { viewTabs } from '../view-tabs.js';
 import { renderEarningsForward } from './valuation.js';
 import { comparisonCard } from '../valuation-compare.js';
 import { segmentsCard } from '../segments-card.js';
+import { withSuggestions, capRank } from '../ticker-suggest.js';
 import { chipCard } from '../chip-card.js';
 
 const BILLION = 1e9;
@@ -82,19 +83,21 @@ async function loadPrices(symbol) {
   }
 }
 
-function searchRow(symbol, universe, ctx) {
-  const input = el('input', { value: symbol || '', size: '10', list: 'ticker-list', placeholder: 'ticker' });
-  const datalist = el('datalist', { id: 'ticker-list' },
-    [...universe.entries()].map(([ticker, name]) => el('option', { value: ticker, text: name || '' })));
+// The ticker box with ranked suggestions (ticker-suggest.js), not a datalist:
+// a browser's datalist matches anywhere in the name, so GS listed every
+// "Holdings" company before Goldman Sachs.
+function searchRow(symbol, universe, ctx, rank = []) {
+  const input = el('input', { value: symbol || '', size: '10', placeholder: 'ticker' });
   const go = () => {
     const next = input.value.trim().toUpperCase();
     if (next) ctx.navigate('ticker', next);
   };
+  // Wrapped first, so a picked suggestion's Enter is handled before the box's own.
+  const box = withSuggestions(input, [...universe.keys()], Object.fromEntries(universe), go, rank);
   input.addEventListener('keydown', (event) => { if (event.key === 'Enter') go(); });
   return el('div', { class: 'field-row' }, [
-    el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), input]),
+    el('div', { class: 'field' }, [el('label', { text: 'TICKER' }), box]),
     el('button', { class: 'action', text: 'OPEN', onclick: go }),
-    datalist,
   ]);
 }
 
@@ -433,7 +436,7 @@ export default async function renderTicker(root, valuation, manifest, ctx) {
   root.append(sectionTitle(`${symbol}${name ? ` · ${name}` : ''}`,
     [row?.sector || mon?.sector, row?.indices?.join(' + ') || (mon?.membership === 'watchlist' ? 'watchlist' : null)]
       .filter(Boolean).join(' · ')));
-  root.append(card('COMPANY', null, [searchRow(symbol, universe, ctx), links(symbol, { mon, dcf, pairs: crossListing?.pairs || [] }),
+  root.append(card('COMPANY', null, [searchRow(symbol, universe, ctx, [...capRank(rows), ...(technicals?.rank || [])]), links(symbol, { mon, dcf, pairs: crossListing?.pairs || [] }),
     themeTags(themes?.membership?.[symbol], themes?.member_corr)]));
 
   if (!universe.has(symbol) && !mon) {

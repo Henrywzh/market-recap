@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { matchTickers } from '../../web/js/ticker-suggest.js';
+import { matchTickers, capRank } from '../../web/js/ticker-suggest.js';
 
 const tickers = ['A', 'AAPL', 'ABBV', 'AMZN', 'AXP', 'GOOG', 'GOOGL', 'BKNG', 'MSFT'];
 const names = { AMZN: 'Amazon.com Inc', GOOG: 'Alphabet Inc Class C', GOOGL: 'Alphabet Inc Class A', BKNG: 'Booking Holdings', AXP: 'American Express' };
@@ -22,4 +22,11 @@ test('a name matches on a word start, after the symbols, and the list is capped'
 test('the build\'s weight rank puts the larger companies first within the matches', () => {
   const rank = ['AAPL', 'AMZN', 'GOOGL', 'GOOG', 'ABBV', 'AXP'];
   assert.deepEqual(matchTickers('A', tickers, names, 5, rank).map((m) => m.ticker), ['A', 'AAPL', 'AMZN', 'ABBV', 'AXP']);
+});
+
+test('an exact symbol comes first even when other names contain it, and capRank orders by size', () => {
+  const tickers = ['ARM', 'BKNG', 'CF', 'GS', 'GSK'];
+  const names = { ARM: 'Arm Holdings PLC ADR', BKNG: 'Booking Holdings Inc', CF: 'CF Industries Holdings Inc', GS: 'Goldman Sachs Group Inc', GSK: 'GSK plc' };
+  assert.deepEqual(matchTickers('GS', tickers, names).map((m) => m.ticker), ['GS', 'GSK']);  // "Holdings" is not a word starting GS
+  assert.deepEqual(capRank([{ ticker: 'A', market_cap: 1 }, { ticker: 'B', market_cap: 5 }, { ticker: 'C' }]), ['B', 'A', 'C']);
 });
