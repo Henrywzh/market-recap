@@ -1680,6 +1680,9 @@ a.today-tile:hover { background: var(--panel-alt); }
 .today-headline.up { color: var(--up); }
 .today-headline.down { color: var(--down); }
 .today-headline.flat { color: var(--text); }
+.today-headline.split { color: var(--text); }
+.today-headline-up { color: var(--up); }
+.today-headline-down { color: var(--down); }
 .today-board-chart { margin: 4px 0 10px; }
 .today-chips-label { min-width: 84px; font-size: 10px; letter-spacing: 0.1em; color: var(--text-dim); align-self: center; }
 .chip { display: inline-flex; align-items: center; max-width: 100%; padding: 2px 7px; border: 1px solid var(--border); font-size: 11px; color: var(--text-dim); text-decoration: none; overflow-wrap: anywhere; }

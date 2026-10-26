@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  moveText, sigmaText, sparkPath, sparkSvg, headlineNode, boardSlots, boardLabel, boardOption, drawBoard, boardCard,
+  moveText, sigmaText, sparkPath, sparkSvg, headlineNode, titleSegments, boardSlots, boardLabel, boardOption, drawBoard, boardCard,
   signalGroups, signalsCard, flowChips, flowDollars, scenarioText, moverRecords, moversTable, sectorLine, remainingEvents, eventNodes,
 } from '../../web/js/today-board.js';
 import { tickerHref } from '../../web/js/routes.js';
@@ -126,6 +126,37 @@ test('the headline is one line toned up, down or flat, and absent when the build
   assert.equal(headlineNode({ text: 'Quiet.', tone: 'sideways' }).className, 'today-headline flat');
 }));
 
+test('each sector in the title takes the colour of its own move, not the market\'s', () => {
+  const parts = titleSegments('Up day, led by Semis +3.8% and Tech +2.0%; Comm services −1.4% fell', 'up');
+  assert.deepEqual(parts, [
+    { text: 'Up day', tone: 'up' },
+    { text: ', led by ', tone: null },
+    { text: 'Semis +3.8%', tone: 'up' },
+    { text: ' and ', tone: null },
+    { text: 'Tech +2.0%', tone: 'up' },
+    { text: '; ', tone: null },
+    { text: 'Comm services −1.4%', tone: 'down' },
+    { text: ' fell', tone: null },
+  ]);
+  // A selloff with a sector that rose, a rare move, and a flat day's two lists.
+  const down = titleSegments('Selloff, led by Energy −3.1% (rare); Utilities +0.8% rose', 'down');
+  assert.deepEqual(down.filter((p) => p.tone).map((p) => [p.text, p.tone]),
+    [['Selloff', 'down'], ['Energy −3.1% (rare)', 'down'], ['Utilities +0.8%', 'up']]);
+  const flat = titleSegments('Flat day; up: Semis +1.2%; down: Health care −0.9%', 'flat');
+  assert.deepEqual(flat.filter((p) => p.tone && p.tone !== 'flat').map((p) => p.tone), ['up', 'down']);
+  assert.deepEqual(titleSegments('Up day', 'up'), [{ text: 'Up day', tone: 'up' }]);
+});
+
+test('the headline title is drawn in those pieces, the words between them plain', () => withBrowser(() => {
+  const node = headlineNode({ title: 'Up day; Comm services −1.4% fell', text: 'S&P 500 +0.6%.', tone: 'up' });
+  const title = byClass(node, 'today-headline')[0];
+  assert.equal(title.className, 'today-headline up split');
+  assert.equal(title.children.map((c) => (c.nodeType === 3 ? c.text : c.textContent)).join(''), 'Up day; Comm services −1.4% fell');
+  const spans = title.children.filter((c) => c.className);
+  assert.deepEqual(spans.map((c) => [c.textContent, c.className]),
+    [['Up day', 'today-headline-up'], ['Comm services −1.4%', 'today-headline-down']]);
+}));
+
 test('the board puts the indices first, a gap, then the sectors, each group highest move first', () => {
   const slots = boardSlots(ROWS);
   assert.equal(slots.length, 14, 'thirteen rows and one gap');
@@ -217,7 +248,7 @@ test('the board card: index tiles broad market first, the S&P 500 the lead; sect
 test('the headline shows the title over the line of figures; an old build without a title shows the line alone', () => withBrowser(() => {
   const node = headlineNode({ title: 'Mega-cap selloff, the average stock held up', text: 'S&P 500 −1.2%.', tone: 'down' });
   assert.equal(node.className, 'today-headline-block');
-  assert.equal(byClass(node, 'today-headline')[0].className, 'today-headline down');
+  assert.equal(byClass(node, 'today-headline')[0].className, 'today-headline down split');
   assert.ok(textOf(node).includes('Mega-cap selloff') && textOf(node).includes('S&P 500 −1.2%.'));
 }));
 

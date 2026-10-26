@@ -47,9 +47,34 @@ export function sparkSvg(values, w = 56, h = 16) {
   return d ? `<svg class="today-spark-svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true"><path d="${d}"/></svg>` : '';
 }
 
+// A sector named with its move ("Comm services −1.4%", "(rare)" kept with it): the
+// name starts with a capital and runs to the figure without crossing a comma,
+// semicolon or colon, so "led by" and "and" stay outside it.
+const NAMED_MOVE = /[A-Z][^,;:]*? [+−-]\d+(?:\.\d+)?%(?: \(rare\))?/g;
+
+// The title in pieces, each with its own colour: the opening words (what kind of
+// day) in the market's tone, every named sector by the sign of its own move, the
+// words between them plain. A sector that fell on an up day is red, not green.
+export function titleSegments(title, tone) {
+  const text = String(title || '');
+  const cut = text.search(/[,;]/);
+  const head = cut < 0 ? text : text.slice(0, cut);
+  const out = [{ text: head, tone }];
+  const rest = cut < 0 ? '' : text.slice(cut);
+  let at = 0;
+  for (const match of rest.matchAll(NAMED_MOVE)) {
+    if (match.index > at) out.push({ text: rest.slice(at, match.index), tone: null });
+    out.push({ text: match[0], tone: /[−-]\d/.test(match[0]) ? 'down' : 'up' });
+    at = match.index + match[0].length;
+  }
+  if (at < rest.length) out.push({ text: rest.slice(at), tone: null });
+  return out.filter((part) => part.text);
+}
+
 // The headline the build wrote from the board: a title saying what kind of day it
-// was (the broad market first), and the figures behind it underneath. Toned by the
-// S&P 500. A build from before the title had only the line of figures.
+// was (the broad market first), and the figures behind it underneath. The opening
+// words are toned by the S&P 500, each sector by its own move (titleSegments).
+// A build from before the title had only the line of figures.
 // `live` is the quotes' stamp ("14:32 quotes") when the board is read live, null for the close.
 export function headlineNode(headline, live = null) {
   if (!headline?.text) return null;
@@ -61,7 +86,9 @@ export function headlineNode(headline, live = null) {
   }
   return el('div', { class: 'today-headline-block' }, [
     stamp,
-    el('div', { class: `today-headline ${tone}`, text: headline.title }),
+    // ``split``: the title's own colour is plain; its pieces carry theirs.
+    el('div', { class: `today-headline ${tone} split` }, titleSegments(headline.title, tone)
+      .map((part) => (part.tone ? el('span', { class: `today-headline-${part.tone}`, text: part.text }) : part.text))),
     el('div', { class: 'today-headline-text', text: headline.text }),
   ].filter(Boolean));
 }
