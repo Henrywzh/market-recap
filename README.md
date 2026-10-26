@@ -739,7 +739,7 @@ after validation and published with the site:
 | File | Size | What it is |
 |---|---|---|
 | [`artifacts/agent-index.json`](https://market-recap-b5p.pages.dev/artifacts/agent-index.json) | ≤ 16 KB | The entry point: the market's state in a few numbers, the research candidates in a fixed order, the next seven days and every data-quality alert. |
-| [`artifacts/agent-brief.json`](https://market-recap-b5p.pages.dev/artifacts/agent-brief.json) | ≤ 150 KB | The detail, along the page's chain: risk budget, market, sectors, names (full cards for changes, one line per exit), timing (seven days in full, thirty as one line each), review (the last session's reports against what was expected), every candidate, and the candidate ledger. |
+| [`artifacts/agent-brief.json`](https://market-recap-b5p.pages.dev/artifacts/agent-brief.json) | ≤ 150 KB | The detail, along the page's chain: risk budget, market, sectors, names (full cards for changes, one line per exit), timing (seven days in full, thirty as one line each), review (the last session's reports against what was expected), every candidate, and the candidate ledger. A busy session is fitted under the cap, not dropped: name cards, then reporters' expectations, are cut a step at a time (25, 15, 8, 0 cards; 20, 10, 5, 0 reporters) and last the candidates past the index's top lose their values; no name, event or candidate is removed, and `data_quality.condensed` says what was cut and where the full rows are. |
 
 Both are condensed from the artifacts the same build published
 (`agent_feed.py`): nothing is recomputed, nothing new becomes public, and

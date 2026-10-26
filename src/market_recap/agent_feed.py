@@ -631,52 +631,75 @@ def _drop_nulls(row: dict) -> dict:
             if v is not None and v != [] and v != {}}
 
 
-# How much detail a brief over BRIEF_MAX_BYTES keeps, in the order it gives the
-# rest up: the name cards first (watchlist and queue entries keep theirs), then
-# the lighter reporters. Candidates are never cut: the index points at them.
-KEEP_NAME_CARDS = 25
-KEEP_EARNINGS = 20
+# How much detail a brief over BRIEF_MAX_BYTES keeps, tightened one step at a
+# time while it is still over: the name cards (watchlist and queue entries keep
+# theirs), then the lighter reporters, alternately; last, the candidates past
+# the index's top give up their values, which their trigger still states.
+# Nothing is dropped: the index points at every candidate.
+NAME_CARD_STEPS = (25, 15, 8, 0)
+EARNINGS_STEPS = (20, 10, 5, 0)
+
+
+def _condense_cards(cards: list[dict], keep: int, source: str | None) -> tuple[list[dict], str]:
+    order = sorted(range(len(cards)), key=lambda i: (not cards[i].get("watchlist"), not cards[i].get("in_queue"), i))
+    kept = set(order[:keep])
+    out = [c if i in kept else {"ticker": c.get("ticker"), "sector": c.get("sector"), "changes": c.get("changes"),
+                                "condensed": True}
+           for i, c in enumerate(cards)]
+    return out, (f"names.changed_this_session: full cards for {min(keep, len(cards))} of {len(cards)} "
+                 f"(watchlist and queue entries first); the rest list their changes only. Full rows: {source}")
+
+
+def _condense_earnings(rows: list[dict], keep: int, sources: str) -> tuple[list[dict], str]:
+    # Watchlist and high-importance reporters keep their expectations first, then the heaviest.
+    heavy = set(sorted(range(len(rows)), key=lambda i: (not rows[i].get("watchlist"), rows[i].get("importance") != "high",
+                                                        -(rows[i].get("spx_weight_pct") or 0)))[:keep])
+    out = [r if i in heavy else {**_pick(r, "date", "timing", "symbol", "name", "importance", "watchlist", "spx_weight_pct"),
+                                 "condensed": True}
+           for i, r in enumerate(rows)]
+    return out, (f"timing.earnings: expectations for {min(keep, len(rows))} of {len(rows)} reporters (watchlist, high "
+                 f"importance, then the heaviest); the rest give date and weight only. Full cards: {sources}")
 
 
 def _fit(brief: dict, limit: int) -> None:
-    """Bring the brief under ``limit`` without losing any name or event: empty
-    fields go first; then, only while it is still over, the cards beyond the
-    first few are condensed to what changed, each step recorded in
-    data_quality.condensed with where the full rows are. A busy session (48
-    names changed on 2026-10-23) once made the brief too large to publish, and
-    the index with it."""
+    """Bring the brief under ``limit`` without losing any name, event or
+    candidate: empty fields go first; then, only while it is still over, the
+    steps above, each recorded in data_quality.condensed with where the full
+    rows are. Busy sessions (48 names changed on 2026-10-23, 60 and 40
+    reporters in the week after) made the brief too large to publish, and the
+    index with it; a single fixed cut was not enough in earnings season."""
     names, timing = brief.get("names"), brief.get("timing")
+    cards = [_drop_nulls(c) for c in names.get("changed_this_session") or []] if isinstance(names, dict) else []
+    rows = [_drop_nulls(e) for e in timing.get("earnings") or []] if isinstance(timing, dict) else []
     if isinstance(names, dict):
-        names["changed_this_session"] = [_drop_nulls(c) for c in names.get("changed_this_session") or []]
+        names["changed_this_session"] = cards
     if isinstance(timing, dict):
-        timing["earnings"] = [_drop_nulls(e) for e in timing.get("earnings") or []]
+        timing["earnings"] = rows
     # Recorded where it is read, so each size check counts its own note.
+    notes: dict[str, str] = {}
     condensed: list[str] = []
     if isinstance(brief.get("data_quality"), dict):
         brief["data_quality"]["condensed"] = condensed
-    if _size(brief) > limit and isinstance(names, dict) and len(names["changed_this_session"]) > KEEP_NAME_CARDS:
-        cards = names["changed_this_session"]
-        order = sorted(range(len(cards)), key=lambda i: (not cards[i].get("watchlist"), not cards[i].get("in_queue"), i))
-        keep = set(order[:KEEP_NAME_CARDS])
-        names["changed_this_session"] = [
-            c if i in keep else {"ticker": c.get("ticker"), "sector": c.get("sector"), "changes": c.get("changes"),
-                                 "condensed": True}
-            for i, c in enumerate(cards)]
-        condensed.append(f"names.changed_this_session: full cards for {KEEP_NAME_CARDS} of {len(cards)} "
-                         f"(watchlist and queue entries first); the rest list their changes only. Full rows: {names.get('source')}")
-    if _size(brief) > limit and isinstance(timing, dict) and len(timing["earnings"]) > KEEP_EARNINGS:
-        rows = timing["earnings"]
-        # Watchlist and high-importance reporters keep their expectations first, then the heaviest.
-        heavy = set(sorted(range(len(rows)), key=lambda i: (not rows[i].get("watchlist"), rows[i].get("importance") != "high",
-                                                            -(rows[i].get("spx_weight_pct") or 0)))[:KEEP_EARNINGS])
-        timing["earnings"] = [
-            r if i in heavy else {**_pick(r, "date", "timing", "symbol", "name", "importance", "watchlist", "spx_weight_pct"),
-                                  "condensed": True}
-            for i, r in enumerate(rows)]
-        sources = ", ".join(timing.get("sources") or [])
-        condensed.append(f"timing.earnings: expectations for {KEEP_EARNINGS} of {len(rows)} reporters (watchlist, high importance, "
-                         f"then the heaviest); "
-                         f"the rest give date and weight only. Full cards: {sources}")
+
+    def note(key: str, text: str) -> None:
+        notes[key] = text
+        condensed[:] = list(notes.values())
+
+    for card_keep, earnings_keep in zip(NAME_CARD_STEPS, EARNINGS_STEPS):
+        if _size(brief) > limit and len(cards) > card_keep:
+            names["changed_this_session"], text = _condense_cards(cards, card_keep, names.get("source"))
+            note("names", text)
+        if _size(brief) > limit and len(rows) > earnings_keep:
+            timing["earnings"], text = _condense_earnings(rows, earnings_keep, ", ".join(timing.get("sources") or []))
+            note("earnings", text)
+    candidates = brief.get("research_candidates") or []
+    if _size(brief) > limit and len(candidates) > TOP_CANDIDATES:
+        top = {c["id"] for c in _index_candidates(candidates)["top"]}
+        for c in candidates:
+            if c["id"] not in top:
+                c.pop("values", None)
+        note("candidates", f"research_candidates: values kept for the {len(top)} in the index's top; "
+                           "the rest state them in their trigger. Full values: the artifact each pointer names")
 
 
 def _market_state(brief: dict, f: _Feed) -> dict:
