@@ -129,3 +129,16 @@ test('ratio candles: exact open and close, the day\'s range as bounds, shared se
     assert.ok(r.upper[i] >= Math.max(r.open[i], r.close[i]) && r.lower[i] <= Math.min(r.open[i], r.close[i]));
   });
 });
+
+test('a ratio view is rebased to 1.00 at its first value, gaps kept', () => {
+  const ratio = [null, 2, 3, null, 4];
+  const base = T.firstFinite(ratio);
+  assert.equal(base, 2);
+  assert.deepEqual(T.rebase(ratio, base), [null, 1, 1.5, null, 2]);
+  // A different window starts again at one.
+  assert.deepEqual(T.rebase(ratio.slice(2), T.firstFinite(ratio.slice(2))), [1, null, 4 / 3]);
+  // No usable base leaves the values as they are.
+  assert.deepEqual(T.rebase([1, 2], null), [1, 2]);
+  assert.deepEqual(T.rebase([1, 2], 0), [1, 2]);
+  assert.equal(T.firstFinite([null, NaN]), null);
+});

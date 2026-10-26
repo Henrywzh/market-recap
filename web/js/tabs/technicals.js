@@ -728,21 +728,28 @@ export default async function renderTechnicals(root, data, _manifest, ctx = {}) 
           + '(the numerator\'s high over the denominator\'s low, and the reverse), as the two highs come at different times. '
           + 'Daily bars, split- but not dividend-adjusted; the averages, band and MACD are on the same closes.'
         : (ratioCandles ? `Candles need both names' daily bars, which start ${data.bars_start || '2020-01-01'}; this range is drawn as the close line.` : '');
-      const averages = Object.fromEntries(defaults.ratio_ma_periods.map((w) => [`${w}MA`, cut(T.sma(ratio, w), start)]));
+      // Every line drawn is rebased to 1.00 at the window's first ratio, so a range switch
+      // starts it again at one; the averages, band and MACD scale with it and keep their shape.
+      // They are computed on the whole series first, so a short window still has its long averages.
+      const base = T.firstFinite(cut(ratio, start));
+      const view = (values) => T.rebase(cut(values, start), base);
+      const averages = Object.fromEntries(defaults.ratio_ma_periods.map((w) => [`${w}MA`, view(T.sma(ratio, w))]));
       const bandWindow = Math.max(...defaults.ratio_ma_periods);
       const full = ratio.length >= bandWindow ? T.band(ratio, bandWindow, defaults.band_sigma) : null;
       ratioChart(ratioNode, cut(dates, start), {
-        ratio: cut(ratio, start), averages, sigma: defaults.band_sigma, window: bandWindow,
-        band: full ? { upper: cut(full.upper, start), lower: cut(full.lower, start) } : null,
-        candles: bars ? { open: cut(bars.open, start), close: cut(bars.close, start), upper: cut(bars.upper, start), lower: cut(bars.lower, start) } : null,
+        ratio: view(ratio), averages, sigma: defaults.band_sigma, window: bandWindow,
+        band: full ? { upper: view(full.upper), lower: view(full.lower) } : null,
+        candles: bars ? { open: view(bars.open), close: view(bars.close), upper: view(bars.upper), lower: view(bars.lower) } : null,
       });
       const z = T.zscore(ratio, bandWindow);
       const zNow = z[z.length - 1];
       const m = T.macd(ratio, defaults.macd);
       macdChart(macdNode, cut(dates, start), {
-        macd: cut(m.macd, start), signal: cut(m.signal, start), histogram: cut(m.histogram, start),
+        macd: view(m.macd), signal: view(m.signal), histogram: view(m.histogram),
       });
+      const now = ratio[ratio.length - 1];
       rsStatus.textContent = `Loaded ${a}/${b} as of ${dates[dates.length - 1]} · ${dates.length} shared sessions`
+        + (isNum(base) && isNum(now) ? ` · 1.00 = ${dates[start]} · now ${num(now / base, 3)} (raw ratio ${num(now, 4)})` : '')
         + (isNum(zNow) ? ` · ratio ${zNow >= 0 ? '+' : '−'}${num(Math.abs(zNow), 2)}σ from its ${bandWindow}-day average` : '');
     } catch (error) {
       rsStatus.textContent = error.message;
@@ -761,7 +768,7 @@ export default async function renderTechnicals(root, data, _manifest, ctx = {}) 
       el('button', { class: 'action', text: 'LOAD', onclick: loadRatio }),
       rsStatus,
     ]),
-    el('div', { class: 'card-title', text: `RATIO + ${maShort}/${maLong}-DAY MOVING AVERAGE & ${defaults.band_sigma}σ BAND (${maLong}-DAY)` }),
+    el('div', { class: 'card-title', text: `RATIO + ${maShort}/${maLong}-DAY MOVING AVERAGE & ${defaults.band_sigma}σ BAND (${maLong}-DAY) · 1.00 AT THE WINDOW'S START` }),
     ratioNode,
     ratioNote,
     el('div', { class: 'card-title', text: `MACD (${fast}/${slow}/${signal})` }),

@@ -171,6 +171,18 @@ export function ratioSeries(left, right) {
   return { dates, ratio };
 }
 
+// A view rebased to 1.00 at its first value: each value over ``base`` (the
+// window's first ratio), so a range switch starts the ratio again at one. Null
+// stays null; no base, or a base that is not above zero, gives the values back.
+export function rebase(values, base) {
+  if (!(typeof base === 'number' && Number.isFinite(base) && base > 0)) return values;
+  return values.map((v) => (typeof v === 'number' && Number.isFinite(v) ? v / base : v));
+}
+
+export function firstFinite(values) {
+  return values.find((v) => typeof v === 'number' && Number.isFinite(v)) ?? null;
+}
+
 // Daily candles of a ratio from two sets of bars, on their shared sessions. The
 // open and the close are exact: both legs open and close at the same moment. The
 // day's high and low are not: each leg's comes at its own time, so only bounds
