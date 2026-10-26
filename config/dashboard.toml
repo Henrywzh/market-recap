@@ -1053,6 +1053,28 @@ sector = "Financials"
 "software & computer services" = "Information Technology"
 "electronic equipment & parts" = "Information Technology"
 "information technology" = "Information Technology"
+# ICB sector labels, which Wikipedia's FTSE 100 table carries from October 2026
+# (it had the broader industry before); each to the broad sector of its ICB industry.
+"investment banking and brokerage services" = "Financials"
+"finance and credit services" = "Financials"
+"closed end investments" = "Financials"
+"non-renewable energy" = "Energy"
+"industrial metals and mining" = "Materials"
+"precious metals and mining" = "Materials"
+"pharmaceuticals, biotechnology and marijuana producers" = "Health Care"
+"medical equipment and services" = "Health Care"
+"food producers" = "Consumer Staples"
+"personal care, drug and grocery stores" = "Consumer Staples"
+"household goods and home construction" = "Consumer Discretionary"
+"consumer services" = "Consumer Discretionary"
+"telecommunications service providers" = "Communication Services"
+"electricity" = "Utilities"
+"gas, water and multi-utilities" = "Utilities"
+"aerospace and defense" = "Industrials"
+"aerospace and defence" = "Industrials"
+"construction and materials" = "Industrials"
+"electronic and electrical equipment" = "Industrials"
+"software and computer services" = "Information Technology"
 
 [themes]
 # CATALYSTS -> THEMES. Groups of names that move together, not GICS sectors.

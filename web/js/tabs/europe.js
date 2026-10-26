@@ -2,7 +2,7 @@
 // funds. Returns are in local currency and, for the indices, in dollars (the
 // local return compounded with the currency's move). Prices are Yahoo's.
 
-import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, gap, periodSwitch, DASH } from '../fmt.js';
+import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, gap, notice, periodSwitch, DASH } from '../fmt.js';
 import { multiLine } from '../charts.js';
 import { spark } from '../spark.js';
 import { flagText, mapPeriods, mapGroups, mapColourCap, mapNote, marketCapText } from '../europe-model.js';
@@ -125,7 +125,11 @@ function hideTip() {
 // funds above are equal-size maps because the build has no caps for them.
 function membersCard(data) {
   const universes = Object.entries(data.universes || {}).filter(([, u]) => Array.isArray(u?.names) && u.names.length);
-  if (!universes.length) return null;
+  // A member list that failed is named, with why, rather than dropped from the switch unseen.
+  const failed = Object.entries(data.inputs?.universes_unavailable || {}).map(([key, why]) =>
+    `${data.universes?.[key]?.label || key} members could not be read this build (${why}).`);
+  const missing = failed.length ? notice(failed.join(' ')) : null;
+  if (!universes.length) return failed.length ? card('FTSE 100 / EURO STOXX 50 · MEMBERS BY MARKET CAP', null, [missing]) : null;
   const state = { key: universes[0][0], period: '1M' };
   const periodHost = el('div', { class: 'pc-controls' });
   const node = el('div', { class: 'treemap eu-members-map' });
@@ -156,7 +160,7 @@ function membersCard(data) {
   queueMicrotask(draw);
   window.addEventListener('resize', draw);
   return card('FTSE 100 / EURO STOXX 50 · MEMBERS BY MARKET CAP', null, [
-    el('div', { class: 'pc-controls' }, [switcher]), periodHost, node, note,
+    missing, el('div', { class: 'pc-controls' }, [switcher]), periodHost, node, note,
   ]);
 }
 

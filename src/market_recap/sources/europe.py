@@ -40,16 +40,31 @@ def _tables(url: str) -> list[pd.DataFrame]:
     return pd.read_html(StringIO(get_text(url, timeout=45.0)))
 
 
+def _column(frame: pd.DataFrame, *words: str) -> str:
+    """The first column whose header contains any of ``words`` (case-insensitive)."""
+    for column in frame.columns:
+        if any(w in str(column).lower() for w in words):
+            return column
+    raise ValueError(f"no column for {words} among {list(map(str, frame.columns))}")
+
+
+def parse_ftse_table(frame: pd.DataFrame) -> pd.DataFrame:
+    """Symbol, name and industry from the FTSE 100 table, found by header: the
+    table gained an ISIN column in October 2026, and reading it by position
+    then dropped the whole index from the page."""
+    name, ticker = _column(frame, "company", "name"), _column(frame, "ticker", "epic")
+    sector = _column(frame, "sector", "industry")
+    out = pd.DataFrame({"symbol": frame[ticker].map(ftse_symbol), "name": frame[name],
+                        "sector_source": frame[sector].astype(str).str.strip()})
+    return out.reset_index(drop=True)
+
+
 def fetch_ftse100(*, use_cache: bool = True) -> tuple[pd.DataFrame, str]:
     """Current FTSE 100 members: symbol, name and the table's industry label."""
 
     def _parse() -> pd.DataFrame:
-        frame = next(t for t in _tables(FTSE_URL) if t.shape == (100, 3) or (t.shape[0] in range(95, 106) and "Ticker" in map(str, t.columns)))
-        frame = frame.copy()
-        frame.columns = ["name", "ticker", "sector_source"]
-        frame["symbol"] = frame["ticker"].map(ftse_symbol)
-        frame["sector_source"] = frame["sector_source"].astype(str).str.strip()
-        return frame[["symbol", "name", "sector_source"]]
+        frame = next(t for t in _tables(FTSE_URL) if t.shape[0] in range(95, 106) and "Ticker" in map(str, t.columns))
+        return parse_ftse_table(frame)
 
     return cache.frame(NAMESPACE, "ftse100", _parse, kind="reference_data", use_cache=use_cache), FTSE_URL
 

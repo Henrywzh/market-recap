@@ -19,6 +19,38 @@ def test_ftse_epic_codes_become_london_yahoo_symbols():
     assert S.ftse_symbol(" azn ") == "AZN.L"
 
 
+def test_the_ftse_table_is_read_by_its_headers_with_or_without_an_isin_column():
+    old = pd.DataFrame({"Company": ["3i", "BT Group"], "Ticker": ["III", "BT.A"],
+                        "FTSE industry classification benchmark sector[12]": ["Investment Banking ", "Telecom"]})
+    # October 2026: an ISIN column between the ticker and the sector.
+    new = old.copy()
+    new.insert(2, "ISIN[34]", ["GB00B1YW4409", "GB0030913577"])
+    for table in (old, new):
+        out = S.parse_ftse_table(table)
+        assert list(out.columns) == ["symbol", "name", "sector_source"]
+        assert out["symbol"].tolist() == ["III.L", "BT-A.L"]
+        assert out["sector_source"].tolist() == ["Investment Banking", "Telecom"]
+    with pytest.raises(ValueError, match="ticker"):
+        S.parse_ftse_table(old.drop(columns=["Ticker"]))
+
+
+def test_every_ftse_100_sector_label_of_october_2026_maps_to_a_broad_sector():
+    # The ICB sector labels Wikipedia's FTSE 100 table carried on 2026-10-26.
+    labels = ["Aerospace and Defense", "Banks", "Beverages", "Chemicals", "Closed End Investments",
+              "Construction and Materials", "Consumer Services", "Electricity", "Electronic and Electrical Equipment",
+              "Finance and Credit Services", "Food Producers", "Gas, Water and Multi-utilities", "General Industrials",
+              "Household Goods and Home Construction", "Industrial Engineering", "Industrial Metals and Mining",
+              "Industrial Support Services", "Investment Banking and Brokerage Services", "Leisure Goods", "Life Insurance",
+              "Media", "Medical Equipment and Services", "Non-life Insurance", "Non-Renewable Energy", "Personal Goods",
+              "Personal Care, Drug and Grocery Stores", "Pharmaceuticals, Biotechnology and Marijuana Producers",
+              "Precious Metals and Mining", "Real Estate Investment Trusts", "Retailers", "Software and Computer Services",
+              "Telecommunications Service Providers", "Tobacco", "Travel and Leisure"]
+    mapping = load_config()["europe"]["sector_map"]
+    assert [label for label in labels if E.broad_sector(label, mapping) == "Other"] == []
+    assert E.broad_sector("Non-Renewable Energy", mapping) == "Energy"
+    assert E.broad_sector("Pharmaceuticals, Biotechnology and Marijuana Producers", mapping) == "Health Care"
+
+
 def test_a_symbol_quotes_in_the_currency_of_its_exchange_and_an_index_in_none():
     assert [E.currency_of(s) for s in ("HSBA.L", "MC.PA", "ASML.AS", "CFR.SW", "RACE.MI", "^FTSE", "SPY")] == ["GBp", "EUR", "EUR", "CHF", "EUR", None, None]
     assert E.currency_of("XYZ.L", {"XYZ.L": "USD"}) == "USD"                       # a dollar line on London
