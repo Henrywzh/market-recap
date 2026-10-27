@@ -129,7 +129,15 @@ def build(ctx, inputs: dict) -> dict:
     total = float(now_agg["value"].sum())
     member_frame = members.dropna(subset=["cusip"])
     prices = _prices(ctx, member_frame["yahoo_symbol"])
-    moves = H.changes(now_common, prior_common, member_frame, prices)
+    splits = getattr(ctx, "splits", pd.DataFrame())
+    def factors(start, end):
+        if splits.empty:
+            return {}
+        return {symbol: float(series[(series.index > pd.Timestamp(start)) & (series.index <= pd.Timestamp(end))]
+                              .replace(0, 1).fillna(1).prod())
+                for symbol, series in splits.items()}
+    moves = H.changes(now_common, prior_common, member_frame, prices,
+                      split_factors=factors(prior, period), post_period_split_factors=factors(period, ctx.as_of))
     crowded = H.crowded_names(now_agg, member_frame, total)
     options = H.option_totals(exposures)
     tilt = H.sector_tilt(now_agg, member_frame)
@@ -186,6 +194,13 @@ def build(ctx, inputs: dict) -> dict:
         "sector_tilt": tilt,
         "prices_as_of": to_iso_date(ctx.as_of),
         "lag": LAG_NOTE,
+        "quality": {
+            # A non-empty split matrix does not prove complete symbol coverage.
+            "share_changes_split_adjusted": False,
+            "amendments_applied": False,
+            "status": "original_filings_only",
+            "limits": "13F-HR/A restatements/additions, confidential positions and corporate-action/CUSIP changes are not fully reconciled. Share changes are estimates, not trade cash flows. Reported option values describe underlying securities, not premiums or delta exposure.",
+        },
         "note": (
             "S&P 500 weights are the SPY file's current weights, not quarter-end. Adds and cuts are "
             "share changes valued at the latest close."

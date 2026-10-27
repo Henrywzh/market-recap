@@ -20,7 +20,9 @@ import pandas as pd
 from ..compute import anchor as A
 from ..compute import risk as R
 from ..compute import sentiment as S
-from ..config import ARTIFACT_DIR
+from ..compute import stress_count as SC
+from ..compute import risk_context as RC
+from ..config import ARTIFACT_DIR, CHART_SESSIONS
 from ..sources import cboe, cftc, damodaran, fred, shiller, snapshot_store, treasury, yahoo
 from ..util import SourceRecord, describe_error, to_iso_date, write_json
 
@@ -37,6 +39,7 @@ FRED_SERIES = {
     "WTREGEN": "Treasury General Account (weekly)",
     "RRPONTSYD": "Overnight reverse repo (daily)",
     "NFCI": "Chicago Fed NFCI (weekly)",
+    "ANFCI": "Chicago Fed adjusted NFCI (weekly), the STRESS COUNT conditions votes",
     "DFII10": "10-year TIPS real yield",
     "OVXCLS": "Cboe crude oil volatility (OVX)",
     "DGS10": "10-year Treasury yield",
@@ -60,6 +63,7 @@ TERM_TENORS = {"9D": "VIX9D", "30D": "VIX", "3M": "VIX3M", "6M": "VIX6M", "1Y": 
 # Credit's speed is read on Moody's BAA - 10Y: ICE's HY index on FRED reaches back
 # only three years, too short for a 10-year percentile of its 20-session change.
 DERIVED_LEADS = {"baa10y_4w": {"label": "BAA − 10Y · 20D CHANGE", "unit": "bp", "risk_when": "high"},
+                 "ndx_drawdown": {"label": "NDX FROM 1Y HIGH", "unit": "pct", "risk_when": "low"},
                  "real_10y_3m": {"label": "10Y REAL YIELD · 3M CHANGE", "unit": "bp", "risk_when": "high"}}
 
 
@@ -211,6 +215,12 @@ class _Inputs:
     def yahoo_close(self, symbol: str) -> pd.Series:
         return self.yahoo[symbol].dropna() if symbol in self.yahoo.columns else pd.Series(dtype=float)
 
+    def ndx(self) -> pd.Series:
+        """The Nasdaq-100's closes: the build's own index closes, else Yahoo's."""
+        closes = self.ctx.index_closes
+        own = closes["^NDX"].dropna() if "^NDX" in closes.columns else pd.Series(dtype=float)
+        return own if not own.empty else self.yahoo_close("^NDX")
+
     def spx(self) -> pd.Series:
         """The build's index closes, extended back with Yahoo's full history so
         the long percentiles span more than one cycle. The build's own closes
@@ -308,6 +318,7 @@ def _builders(inputs: _Inputs) -> dict[str, Callable[[], pd.Series]]:
         "dispersion": lambda: corr("disp"),
         "spx_vs_200d": lambda: R.vs_moving_average(inputs.spx(), 200),
         "spx_drawdown": lambda: R.drawdown_from_high(inputs.spx()),
+        "ndx_drawdown": lambda: R.drawdown_from_high(inputs.ndx()),
         "breadth_200d": lambda: R.share_above_average(member_closes) if not member_closes.empty else pd.Series(dtype=float),
         "net_liquidity": lambda: R.change_over(R.net_liquidity(get(f, "WALCL"), get(f, "WTREGEN"), get(f, "RRPONTSYD")),
                                                R.LIQUIDITY_CHANGE_WEEKS),
@@ -354,6 +365,29 @@ WEEKLY_TILES = {"net_liquidity", "nfci", "cftc_es", "cftc_nq", "cftc_zn", "cftc_
 # from one is allowed a month and a half before it is stale.
 MONTHLY_TILES = {"erp_damodaran"}
 DIGITS = {"ratio": 3, "corr": 2, "pct_oi": 1, "bp": 0, "usd_bn": 0}
+
+
+def _stress(inputs: _Inputs, settings: dict) -> dict:
+    """STRESS COUNT from the configured votes; each input's last real date rides along."""
+    spec = settings["stress"]
+    roster = [s for s in spec["sector_roster"] if s in inputs.ctx.etf_closes.columns]
+    get = lambda d, k: d.get(k, pd.Series(dtype=float)).dropna()
+    spx, vix = inputs.spx(), get(inputs.cboe, "VIX")
+    spread, anfci = get(inputs.fred, "BAA10Y"), get(inputs.fred, "ANFCI")
+    if spx.empty:
+        raise ValueError("no S&P 500 closes")
+    series = SC.input_series(spx=spx, sectors=inputs.ctx.etf_closes[roster], vix=vix, spread=spread, anfci=anfci,
+                             long_ma=inputs.ctx.config["market_state"]["long_ma"])
+    last = lambda s: None if s.empty else SC.to_date(s.index[-1])
+    sector_last = inputs.ctx.etf_closes[roster].dropna(how="all")
+    observed = {"price_vs_ma": last(spx), "drawdown": last(spx), "realised_vol": last(spx),
+                "sector_breadth": None if sector_last.empty else SC.to_date(sector_last.index[-1]),
+                "vix": last(vix), "spread_level": last(spread), "spread_change": last(spread),
+                "anfci": last(anfci), "anfci_change": last(anfci)}
+    out = SC.evaluate(series, spec, history_sessions=CHART_SESSIONS, observed=observed)
+    out["note"] = spec.get("note")
+    out["missing_sectors"] = [s for s in spec["sector_roster"] if s not in roster]
+    return out
 
 
 def _sentiment(inputs: _Inputs) -> dict:
@@ -478,6 +512,17 @@ def _matrix(settings: dict, builders: dict, series_of: dict, as_of: str | None) 
     }
 
 
+def _strip(settings: dict, builders: dict, series_of: dict, as_of: str | None) -> list[dict]:
+    """RISK's first line: one lead per channel, read as a matrix cell is (its scale,
+    lines, staleness and one-year sparkline), so a channel's colour means the same
+    in both places."""
+    cfg = settings["matrix"]
+    tiles = {t["key"]: t for t in settings.get("tiles", [])}
+    return [_matrix_cell("strip", item["key"], item, tiles=tiles, series_of=series_of, builders=builders, cfg=cfg, as_of=as_of)
+            | {"channel": item["channel"]}
+            for item in (settings.get("strip") or {}).get("items", [])]
+
+
 def build(ctx) -> dict:
     settings = ctx.config.get("risk", {})
     inputs = _Inputs(ctx)
@@ -539,10 +584,60 @@ def build(ctx) -> dict:
         sentiment = _sentiment(inputs)
     except Exception as exc:
         sentiment = {"score": None, "error": describe_error(exc), "components": [], "history": {"dates": [], "score": []}}
+    try:
+        stress = _stress(inputs, settings)
+    except Exception as exc:
+        stress = {"raw": None, "error": describe_error(exc), "groups": [], "history": {"dates": [], "raw": []}}
+    tile_map = {t["key"]: t for s in sections for t in s["tiles"]}
+    context = None
+    if settings.get("context"):
+        context = RC.assemble(
+            pd.concat([ctx.closes, getattr(ctx, "etf_closes", pd.DataFrame()),
+                       getattr(ctx, "index_closes", pd.DataFrame())], axis=1),
+            as_of=ctx.as_of, cfg=settings["context"],
+            sector_roster=settings.get("stress", {}).get("sector_roster", []),
+            constituents=ctx.members.get(ctx.primary.key, pd.DataFrame()).get("yahoo_symbol", pd.Series(dtype=str)).tolist(), universe_label=ctx.primary.label,
+        )
+        try:
+            raw_p = pd.read_parquet(ARTIFACT_DIR.parent / "data/cache/prices/prices-10y.parquet")
+            vol_p = pd.read_parquet(ARTIFACT_DIR.parent / "data/cache/prices/volume-10y.parquet")
+        except Exception:
+            raw_p, vol_p = pd.DataFrame(), pd.DataFrame()
+        def _opt_json(name: str) -> dict | None:
+            p = ARTIFACT_DIR / f"{name}.json"
+            if not p.exists():
+                return None
+            try:
+                import json as _json
+                return _json.loads(p.read_text())
+            except Exception:
+                return None
+        hm = _opt_json("heatmaps") or {}
+        val = _opt_json("valuation") or {}
+        context["liquidity"] = RC.assemble_liquidity(
+            as_of=ctx.as_of,
+            raw_prices=raw_p,
+            volumes=vol_p,
+            spx_constituents=hm.get("constituents"),
+            catalysts=_opt_json("catalysts"),
+            evidence=_opt_json("evidence"),
+            positioning=_opt_json("positioning"),
+            risk_tiles=tile_map,
+        )
+        context["fed_model"] = RC.assemble_fed_model(
+            as_of=ctx.as_of,
+            valuation_aggregates=val.get("aggregates"),
+            dgs10=inputs.fred.get("DGS10"),
+            dfii10=inputs.fred.get("DFII10"),
+            baa10y=inputs.fred.get("BAA10Y"),
+        )
     return {
         "as_of": ctx.as_of,
+        "context": context,
+        "stress": stress,
         "sections": sections,
         "matrix": _matrix(settings, builders, series_of, ctx.as_of),
+        "strip": _strip(settings, builders, series_of, ctx.as_of),
         "sentiment": sentiment,
         "charts": charts,
         "breaches": breaches,

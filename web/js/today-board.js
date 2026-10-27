@@ -1,4 +1,4 @@
-// TODAY's figure blocks: the day's board by index and sector, the signal chips,
+// TODAY's figure blocks: the day's board by index and sector, the signal list,
 // the movers table with its sparklines, and the events left under it. The pure
 // helpers are what the tests check; the builders turn them into nodes. The
 // numbers come from the build (or the live quotes for MOVERS while the market is
@@ -7,6 +7,7 @@
 import { el, num, card, table, tag, liveBadge, dirClass, DASH } from './fmt.js';
 import { render } from './charts.js';
 import { tickerHref } from './routes.js';
+import { toSignals, rankSignals, readMuted, writeMuted, GROUP_ORDER } from './signals-model.js';
 
 const valid = (v) => typeof v === 'number' && Number.isFinite(v);
 const MINUS = '−';
@@ -254,101 +255,79 @@ export function boardCard(board, live = null) {
 
 // --- Signals -------------------------------------------------------------
 
-const compactValue = (item) => {
-  if (valid(item.days)) return `${item.days} sessions`;
-  if (valid(item.value)) return `${num(item.value, 1)}${item.unit === '%' ? '%' : item.unit ? ` ${item.unit}` : ''}`;
-  return '';
-};
+// The signal text and figures live in the model (signals-model.js), which the e-mail
+// alerts and agents read too; they are re-exported here for the page and its tests.
+export { scenarioText, flowChips, flowDollars } from './signals-model.js';
 
-// CHANGED reads as the state itself: the title after its colon, the build's
-// parenthesis left out ("Treasuries · technical: MOVE moved to elevated (...)").
-function stateText(item) {
-  const title = String(item.title ?? '');
-  const cut = title.includes(':') ? title.slice(title.indexOf(':') + 1) : title;
-  return cut.replace(/\s*\([^)]*\)\s*$/, '').trim() || item.subject;
-}
-
-// A trigger's figure in its unit, to the precision its size needs: "$113", "0.95", "+42bp".
-function triggerFigure(value, unit, signed = false) {
-  const digits = Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 10 ? 1 : 2;
-  const text = `${signed && value > 0 ? '+' : ''}${num(value, digits)}`;
-  return unit === '$' ? `$${text}` : `${text}${unit || ''}`;
-}
-
-export function scenarioText(item) {
-  const { value, threshold, state, unit, op, measure } = item.extra || {};
-  if (valid(value) && valid(threshold)) {
-    const sign = op === 'below' ? '≤' : '≥';
-    return `${item.subject} ${triggerFigure(value, unit, measure && measure !== 'level')} ${sign} ${triggerFigure(threshold, unit)}`;
-  }
-  return [item.subject, state].filter(Boolean).join(' · ');
-}
-
-// The signal chips, one group per kind in the order the page reads them. A group
-// with no chip is left out. Each chip carries its full title as a tooltip.
+// The signals grouped as the build's kinds, each group's signals ranked (toSignals).
+// A group with no signal is left out.
 export function signalGroups(unusual, boardRows, flows) {
-  const names = new Map((Array.isArray(boardRows) ? boardRows : []).filter(Boolean).map((r) => [r.symbol, r.short || r.label]));
-  const nameOf = (item) => names.get(item.extra?.symbol) ?? item.subject;
-  const groups = [
-    ['OVERSOLD', (unusual?.oversold || []).map((item) => {
-      const rsi = item.extra?.rsi ?? item.value;
-      return { text: `${nameOf(item)} ${valid(rsi) ? num(rsi, 1) : DASH}`, title: item.detail, href: item.link, tone: item.extra?.line === 20 ? 'down' : 'warn' };
-    })],
-    ['RARE', (unusual?.tails || []).map((item) => {
-      const share = valid(item.extra?.share_pct) ? `${num(item.extra.share_pct, 1)}%` : DASH;
-      return {
-        text: `${nameOf(item)} ${moveText(item.value)} · ${share}`,
-        title: item.detail,
-        href: item.extra?.symbol ? `#movecheck/${item.extra.symbol}` : item.link,
-        tone: item.value < 0 ? 'down' : 'up',
-      };
-    })],
-    ['CHANGED', (unusual?.states || []).map((item) => ({
-      text: stateText(item), title: item.title, href: item.link, tone: item.extra?.active === false ? 'dim' : 'info',
-    }))],
-    ['SCENARIO', (unusual?.watch || []).map((item) => ({
-      text: scenarioText(item), title: item.title, href: item.link || '#watch', tone: item.extra?.state === 'triggered' ? 'down' : 'warn',
-    }))],
-    ['ONGOING', (unusual?.ongoing || []).map((item) => ({
-      text: [item.subject, compactValue(item)].filter(Boolean).join(' · '), title: item.title, href: item.link, tone: 'dim',
-    }))],
-    ['ETF FLOWS', flowChips(flows)],
-  ];
-  return groups.map(([label, chips]) => ({ label, chips })).filter((group) => group.chips.length);
+  const signals = toSignals(unusual, boardRows, flows);
+  return GROUP_ORDER.map((label) => ({ label, chips: signals.filter((s) => s.group === label) }))
+    .filter((group) => group.chips.length);
 }
 
-// "+$4.4bn", "−$310m": a fund flow in dollars.
-export function flowDollars(v) {
-  if (!valid(v)) return DASH;
-  const a = Math.abs(v);
-  const sign = v > 0 ? '+' : v < 0 ? '−' : '';
-  return a >= 1e9 ? `${sign}$${num(a / 1e9, 1)}bn` : `${sign}$${num(a / 1e6, 0)}m`;
+// The muted keys live in localStorage; a private window or blocked storage has none,
+// and the mute then lasts for this page only.
+function mutedStorage() {
+  try { return globalThis.localStorage ?? null; } catch { return null; }
 }
 
-// The week's ETF flow: the US equity funds together, then the largest funds in and out.
-export function flowChips(flows) {
-  if (!flows || !valid(flows.us_equity_1w)) return [];
-  const rank = valid(flows.us_equity_1w_pct_rank) ? ` · ${num(flows.us_equity_1w_pct_rank, 0)}th pct` : '';
-  const title = `Creations less redemptions over five sessions to ${flows.date}, from the issuers' published shares outstanding; the percentile ranks it against three years of weeks.`;
-  const fund = ([ticker, flow]) => ({ text: `${ticker} ${flowDollars(flow)}`, title, href: '#flows', tone: flow < 0 ? 'down' : 'up' });
-  return [
-    { text: `US equity 1W ${flowDollars(flows.us_equity_1w)}${rank}`, title, href: '#flows', tone: flows.us_equity_1w < 0 ? 'down' : 'up' },
-    ...(flows.top_in || []).map(fund),
-    ...(flows.top_out || []).map(fund),
-  ];
+// The badge's colour class: TRIGGERED and a hot NEW are red, NEW amber, NEAR outlined,
+// ONGOING and CLEARED dim. The class is the state's name, lower case.
+function badgeClass(signal) {
+  if (signal.state === 'NEW') return signal.severity >= 4 ? 'hot' : 'new';
+  return signal.state.toLowerCase();
 }
 
-const chipNode = (chip) => el(chip.href ? 'a' : 'span', { class: `chip ${chip.tone || 'dim'}`, href: chip.href, title: chip.title, text: chip.text });
+// One signal as a row: state, group, the text as a link, the age and distance, and the × to mute it.
+function signalRow(signal, muted, onMute) {
+  return el('div', { class: `today-signal${signal.state === 'CLEARED' ? ' cleared' : ''}${muted ? ' muted' : ''}` }, [
+    el('span', { class: `sig-badge sig-${badgeClass(signal)}`, text: signal.state }),
+    el('span', { class: 'sig-group', text: signal.tag ?? signal.group }),
+    el(signal.href ? 'a' : 'span', { class: `sig-text ${signal.tone || 'dim'}`, href: signal.href, title: signal.title, text: signal.text }),
+    // An ONGOING line already says its sessions ("· 26 sessions"), so no second count beside it.
+    signal.age == null || signal.group === 'ONGOING' ? null : el('span', { class: 'sig-age', text: `day ${signal.age}` }),
+    signal.distance ? el('span', { class: 'sig-distance', text: signal.distance }) : null,
+    el('button', {
+      class: 'sig-mute', type: 'button', title: muted ? 'Show this signal again' : 'Hide this signal',
+      text: muted ? '↺' : '×', onclick: () => onMute(signal.key),
+    }),
+  ]);
+}
 
-// The SIGNALS card: one row per kind, its label then its chips.
-// With `live`, RARE and OVERSOLD are read from today's quotes (the badge says so); the rest are the build's.
+// The SIGNALS card: one ranked list, severity high first, CLEARED last. A row's × hides
+// that signal by its key; the hidden ones come back under "show N muted". With `live`,
+// RARE and OVERSOLD are read from today's quotes (the badge says so); the rest are the build's.
 export function signalsCard(groups, live = null) {
   const stamp = live ? el('span', { class: 'today-live-stamp' }, [liveBadge('LIVE · RARE, OVERSOLD'), ` ${live}`]) : null;
-  if (!groups.length) return card('SIGNALS', stamp, [el('div', { class: 'today-empty dim', text: 'No signal this session.' })]);
-  return card('SIGNALS', stamp, groups.map((group) => el('div', { class: 'today-chips' }, [
-    el('span', { class: 'today-chips-label dim', text: group.label }),
-    ...group.chips.map(chipNode),
-  ])));
+  const signals = rankSignals((Array.isArray(groups) ? groups : []).flatMap((group) => group.chips || []));
+  if (!signals.length) return card('SIGNALS', stamp, [el('div', { class: 'today-empty dim', text: 'No signal this session.' })]);
+  const storage = mutedStorage();
+  const muted = new Set(readMuted(storage));
+  let showMuted = false;
+  const list = el('div', { class: 'today-signals' });
+  const draw = () => {
+    const hidden = signals.filter((s) => muted.has(s.key));
+    const shown = signals.filter((s) => !muted.has(s.key));
+    const onMute = (key) => {
+      if (muted.has(key)) muted.delete(key);
+      else muted.add(key);
+      writeMuted(storage, [...muted]);
+      draw();
+    };
+    const toggle = hidden.length ? el('button', {
+      class: 'sig-more', type: 'button', text: showMuted ? `hide ${hidden.length} muted` : `show ${hidden.length} muted`,
+      onclick: () => { showMuted = !showMuted; draw(); },
+    }) : null;
+    list.replaceChildren(...[
+      ...shown.map((s) => signalRow(s, false, onMute)),
+      ...(showMuted ? hidden.map((s) => signalRow(s, true, onMute)) : []),
+      toggle,
+    ].filter(Boolean));
+  };
+  draw();
+  return card('SIGNALS', stamp, [list]);
 }
 
 // --- Movers --------------------------------------------------------------

@@ -139,7 +139,7 @@ def run(
     # Also honor dependency order when the user passes --panels monitor valuation:
     # monitor after what it reads, industries after monitor, sectors after
     # industries, overview last.
-    for late in ("monitor", "industries", "sectors", "watch", "overview", "today"):
+    for late in ("flows", "monitor", "industries", "sectors", "watch", "overview", "today"):
         if late in selected:
             selected = [name for name in selected if name != late] + [late]
 

@@ -224,10 +224,21 @@ for (const route of list) {
       if (BAD_TEXT.test(await block.innerText())) throw new Error('Blackout section shows invalid text');
     }
     if (route === 'risk' && (await artifact('risk'))?.matrix) {
-      // Six channels by three kinds of evidence; the first cell with a lead opens its drill-down.
-      if (await page.locator('.risk-cell').count() !== 18) throw new Error('Risk matrix should have 18 cells');
-      await page.locator('.risk-cell:not(.placeholder)').first().click();
-      if (!await page.locator('.risk-drill').count()) throw new Error('Clicking a risk cell did not open its drill-down');
+      const context = (await artifact('risk')).context;
+      if (context?.assets?.length) {
+        for (const asset of context.assets) {
+          await page.getByRole('button', { name: `Select ${asset.short}`, exact: true }).click();
+          if (await page.locator('.rc-selected-label').innerText() !== asset.label) throw new Error('Asset selection did not update its reading');
+        }
+        await page.getByRole('button', { name: `Select ${context.assets[0].short}`, exact: true }).click();
+        await page.getByRole('button', { name: 'Close + averages', exact: true }).click();
+        if (!await page.locator('.rc-asset-chart canvas').count()) throw new Error('Asset price chart did not render');
+      }
+      if (context?.fed_model?.indices?.length) {
+        await page.getByText('VALUATION · EARNINGS YIELD & FED MODEL', { exact: true }).click();
+        await page.getByRole('button', { name: 'Reported P/E', exact: true }).click();
+        await page.getByRole('button', { name: 'Earnings Yield vs Bond Yields', exact: true }).click();
+      }
     }
     if (route === 'europe') {
       const maps = page.locator('.card').filter({ has: page.locator('.eu-heatmap') });

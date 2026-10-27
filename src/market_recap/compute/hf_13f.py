@@ -204,7 +204,9 @@ def option_totals(exposures: list[dict]) -> dict:
 
 
 def changes(now: pd.DataFrame, prior: pd.DataFrame, members: pd.DataFrame,
-            prices: dict[str, float], top: int = TOP_FLOWS) -> dict:
+            prices: dict[str, float], top: int = TOP_FLOWS, *,
+            split_factors: dict[str, float] | None = None,
+            post_period_split_factors: dict[str, float] | None = None) -> dict:
     """Adds and cuts between two quarters, for the filers that reported both.
 
     ``now`` and ``prior`` must cover the same filers. Shares are compared, then
@@ -217,9 +219,11 @@ def changes(now: pd.DataFrame, prior: pd.DataFrame, members: pd.DataFrame,
     )
     named = merged.merge(members[["cusip", "ticker", "yahoo_symbol"]], on="cusip", how="inner")
     named["d_holders"] = named["funds_now"] - named["funds_prior"]
-    named["d_shares"] = named["shares_now"] - named["shares_prior"]
+    factors = named["yahoo_symbol"].map(split_factors or {}).fillna(1.0)
+    named["d_shares"] = named["shares_now"] - named["shares_prior"] * factors
     # A name with no price this build has no dollar change, not a zero one.
-    named["d_value"] = named["d_shares"] * named["yahoo_symbol"].map(prices).astype(float)
+    post_factors = named["yahoo_symbol"].map(post_period_split_factors or {}).fillna(1.0)
+    named["d_value"] = named["d_shares"] * post_factors * named["yahoo_symbol"].map(prices).astype(float)
     # Changes in the holder count are read from the same common filers.
     valued = named.dropna(subset=["d_value"])
 

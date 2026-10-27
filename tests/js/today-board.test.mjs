@@ -1,6 +1,6 @@
 // TODAY's figure blocks on synthetic data under node: the signed figures and the
 // sparkline path, the board's bars and their order, the chart option and its click,
-// the signal chips by kind, the movers records and table, and the events left under it.
+// the ranked signal list, the movers records and table, and the events left under it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -252,7 +252,7 @@ test('the headline shows the title over the line of figures; an old build withou
   assert.ok(textOf(node).includes('Mega-cap selloff') && textOf(node).includes('S&P 500 −1.2%.'));
 }));
 
-test('the signal chips come in the order OVERSOLD, RARE, CHANGED, SCENARIO, ONGOING, with the build names and links', () => {
+test('the signal groups come in the order OVERSOLD, RARE, CHANGED, SCENARIO, ONGOING, with the build names and links', () => {
   const unusual = {
     oversold: [item({ kind: 'oversold', subject: 'Semiconductors (SOXX)', title: 'Semis oversold', detail: 'How stretched.', link: '#technicals/SOXX', value: 20.4, extra: { symbol: 'SOXX', rsi: 20.4, line: 20 } })],
     tails: [item({ kind: 'tail', subject: 'Consumer staples (XLP)', title: 'XLP rose 3.3%', value: 3.3, unit: '%', detail: 'Rare.', link: '#movecheck/XLP', extra: { symbol: 'XLP', share_pct: 0.4 } })],
@@ -274,8 +274,11 @@ test('the signal chips come in the order OVERSOLD, RARE, CHANGED, SCENARIO, ONGO
   assert.equal(rare[0].href, '#movecheck/XLP');
   assert.deepEqual(changed.map((c) => c.text), ['MOVE moved to elevated'], 'the state after the colon, the build note left out');
   assert.equal(changed[0].title, 'Treasuries · technical: MOVE moved to elevated (elevated from 100)', 'the full title is the tooltip');
-  assert.deepEqual(scenario.map((c) => c.text), ['Oil supply shock 113 ≥ 120', 'Buyback · triggered']);
-  assert.equal(scenario[1].tone, 'down');
+  // The list is ranked: a triggered scenario (severity 5) comes before a near one (2).
+  assert.deepEqual(scenario.map((c) => c.text), ['Buyback · triggered', 'Oil supply shock 113 ≥ 120']);
+  assert.equal(scenario[0].tone, 'down');
+  assert.equal(scenario[1].state, 'NEAR');
+  assert.equal(scenario[1].distance, 'needs 7.0 more to 120');
   assert.deepEqual(ongoing.map((c) => c.text), ['SMALL CAPS LAGGING · 30 sessions']);
 });
 
@@ -287,14 +290,32 @@ test('a group with no chip is left out, and nothing at all gives no groups', () 
   assert.equal(groups[0].chips[0].text, 'Buyback blackout · 84.8%');
 });
 
-test('the signals card has one row per kind with its chips, and says so when there are none', () => withBrowser(() => {
+test('the signals card is one ranked list, a row per signal with its state, group and distance; none says so', () => withBrowser(() => {
   const groups = signalGroups({ oversold: [item({ subject: 'XLK', value: 28, extra: { rsi: 28, line: 30 } })], ongoing: [item({ subject: 'A' })] }, ROWS);
   const card = signalsCard(groups);
-  const rows = byClass(card, 'today-chips');
+  const rows = byClass(card, 'today-signal');
   assert.equal(rows.length, 2);
-  assert.equal(byClass(card, 'chip').length, 2);
-  assert.equal(rows[0].children[0].textContent, 'OVERSOLD');
+  assert.equal(byClass(rows[0], 'sig-badge')[0].textContent, 'NEW', 'the NEW oversold ranks above the ongoing one');
+  assert.equal(byClass(rows[0], 'sig-group')[0].textContent, 'OVERSOLD');
+  assert.equal(byClass(rows[1], 'sig-badge')[0].textContent, 'ONGOING');
+  assert.ok(textOf(rows[0]).includes('RSI 28.0 · 2.0 below 30'), 'the distance to the line is printed');
+  assert.equal(byClass(card, 'sig-mute').length, 2, 'each row has its × to mute it');
   assert.ok(textOf(signalsCard([])).includes('No signal this session.'));
+}));
+
+test('a muted signal is hidden under "show N muted" until shown; the muted keys come from storage', () => withBrowser(() => {
+  const groups = signalGroups({ ongoing: [item({ key: 'ongoing:A', subject: 'A' }), item({ key: 'ongoing:B', subject: 'B' })] }, ROWS);
+  const saved = globalThis.localStorage;
+  globalThis.localStorage = { getItem: () => JSON.stringify(['ongoing:A']), setItem() {} };
+  try {
+    const card = signalsCard(groups);
+    const rows = byClass(card, 'today-signal');
+    assert.equal(rows.length, 1, 'the muted row is hidden');
+    assert.ok(textOf(rows[0]).includes('B'));
+    assert.equal(byClass(card, 'sig-more')[0].textContent, 'show 1 muted');
+  } finally {
+    globalThis.localStorage = saved;
+  }
 }));
 
 test('the movers records come from the build, with the reporter flag, or from the live rows with the same flag', () => {

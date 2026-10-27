@@ -25,9 +25,11 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 
 from ..util import ERROR_DETAIL_CHARS, SourceRecord
+from ..compute import equity_demand
+from ..sources import yahoo
 from . import flows_cot, flows_etf, flows_hf_13f, flows_hf_leverage, flows_z1
 
-INPUTS = ("positioning", "heatmaps")
+INPUTS = ("positioning", "heatmaps", "valuation", "risk")
 
 SECTIONS = (
     ("etf", flows_etf),
@@ -57,4 +59,21 @@ def build(ctx, inputs: dict | None = None) -> dict:
     if hasattr(ctx, "diagnostics"):
         # Seconds per section, each on its own thread: the panel takes the longest.
         ctx.diagnostics["flows"] = {"seconds": {key: seconds for key, (_, seconds) in results.items()}}
-    return {"as_of": ctx.as_of, **{key: payload for key, (payload, _) in results.items()}}
+    output = {"as_of": ctx.as_of, **{key: payload for key, (payload, _) in results.items()}}
+    cfg = ctx.config.get("risk", {}).get("equity_demand")
+    if cfg:
+        risk = inputs.get("risk") or {}
+        tiles = {t["key"]: t for s in risk.get("sections", []) for t in s.get("tiles", [])}
+        try:
+            output["demand_pipeline"] = equity_demand.assemble_demand_pipeline(
+                as_of=ctx.as_of, cfg=cfg, heatmaps=inputs.get("heatmaps"),
+                valuation=inputs.get("valuation"), flows_artifact=output, risk_tiles=tiles,
+                prices=yahoo.fetch_prices(ctx.history_period),
+                volumes=yahoo.fetch_ohlcv_cache(ctx.history_period)["volume"],
+            )
+            output["demand_pipeline"]["blackout"] = ((risk.get("context") or {}).get("liquidity") or {}).get("blackout")
+            from ..config import PERIOD_TRADING_DAYS
+            output["demand_pipeline"]["trading_days_per_year"] = PERIOD_TRADING_DAYS["1Y"]
+        except Exception as exc:
+            output["demand_pipeline"] = {"unavailable": str(exc)[:ERROR_DETAIL_CHARS]}
+    return output

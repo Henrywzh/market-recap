@@ -2458,6 +2458,191 @@ cftc_start = "2006-01-01"
 put_call_sessions = 400
 vx_contracts = 8
 
+# Descriptive asset context. ETFs are labelled as proxies; no shared vote score.
+[risk.context]
+high_period = "3M"
+volatility_period = "1Y"
+scale_period = "1M"
+ma_sessions = [20, 50, 200]
+realized_vol_sessions = 20
+history_period = "2Y"
+drawdown_references = [1.0, 1.7]
+
+[[risk.context.assets]]
+key = "spx"
+symbol = "^GSPC"
+label = "S&P 500"
+short = "SPX"
+basis = "Price index · excludes dividends"
+[[risk.context.assets]]
+key = "nasdaq"
+symbol = "QQQ"
+label = "Nasdaq-100 · QQQ proxy"
+short = "QQQ"
+basis = "ETF · dividend-adjusted closes"
+[[risk.context.assets]]
+key = "semis"
+symbol = "SOXX"
+label = "Semiconductors · SOXX proxy"
+short = "SOXX"
+basis = "ETF · dividend-adjusted closes; different basket from SOX"
+[[risk.context.assets]]
+key = "treasuries"
+symbol = "IEF"
+label = "7–10Y Treasuries · IEF"
+short = "IEF"
+basis = "Bond ETF · dividend-adjusted closes; price pressure, not yield"
+
+[risk.equity_demand]
+z1_zip_url = "https://www.federalreserve.gov/releases/z1/current/z1_csv_files.zip"
+z1_member = "F51_1_t_tu.csv"
+z1_table_url = "https://www.federalreserve.gov/releases/z1/current/html/F51_1_t.htm"
+z1_first_quarter = "1952Q1"
+z1_chart_quarters = 40
+z1_latest_release = "2026-09-11"
+z1_next_release = "2026-12-10"
+tic_url = "https://ticdata.treasury.gov/resource-center/data-chart-center/tic/Documents/slt_table1.txt"
+tic_country_code = "99996"
+tic_field = "for_lt_eqty_net"
+indices = ["SPX", "NDX"]
+reconciliation_tolerance_usd = 1000000.0
+remaining_tags = [
+  "StockRepurchaseProgramRemainingAuthorizedRepurchaseAmount1",
+  "StockRepurchaseProgramRemainingAuthorizedRepurchaseAmount",
+]
+authorized_tags = [
+  "StockRepurchaseProgramAuthorizedAmount1",
+  "StockRepurchaseProgramAuthorizedAmount",
+]
+
+[risk.equity_demand.z1_series]
+total = "FU893064105.Q"
+households = "FU153064105.Q"
+mutual_funds = "FU653064100.Q"
+etfs = "FU563064100.Q"
+pension_private = "FU573064105.Q"
+pension_federal = "FU343064105.Q"
+pension_state_local = "FU223064145.Q"
+foreign_equities = "FU263064105.Q"
+nfc_net_issuance = "FU103164105.Q"
+financial_net_issuance = "FU793164105.Q"
+foreign_net_issuance = "FU263164105.Q"
+fred_foreign_broad = "BOGZ1FU263064003Q"
+fred_foreign_funds = "BOGZ1FU263081205Q"
+
+[risk.equity_demand.ofr_series]
+le_sec = "FPF-ASSETCLASS_LEQYSEC_SUM"
+se_sec = "FPF-ASSETCLASS_SEQYSEC_SUM"
+le_deriv = "FPF-ASSETCLASS_LEQYDERIV_SUM"
+se_deriv = "FPF-ASSETCLASS_SEQYDERIV_SUM"
+pb_borrow = "FPF-BORROW_PRIMEBROKER_SUM"
+eq_borrow = "FPF-STRATEGY_EQUITY_BORROWING_SUM"
+eq_nav = "FPF-STRATEGY_EQUITY_NAV_SUM"
+eq_gav = "FPF-STRATEGY_EQUITY_GAV_SUM"
+eq_ret = "FPF-STRATEGY_EQUITY_NETRETURN_NAVWMEAN"
+eq_cash_ratio = "FPF-STRATEGY_EQUITY_CASHRATIO_NAVWMEAN"
+
+# STRESS COUNT: nine yes/no stress votes in five groups, fixed before they were
+# tested on 1999-2026 (research/risk_environment_v2). A count of conditions that
+# are on, never a probability or a signal; an unknown vote is not an off vote.
+# "input" names the measured series (compute/stress_count.py); op and threshold
+# decide the vote. Spread and ANFCI are in FRED's own units (percentage points).
+[risk.stress]
+reference = 5
+sector_roster = ["XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLU", "XLV", "XLY"]
+note = "Counts how many stress conditions are on; it does not forecast. Tested on 1999-2026 it was early in the slow bear markets of 2000 and 2007, late against the first 5% fall in fast declines, and added nothing to a forecast built from price and volatility alone. A high count can stay on after the low."
+
+[[risk.stress.groups]]
+key = "price"
+label = "PRICE"
+[[risk.stress.groups]]
+key = "participation"
+label = "PARTICIPATION"
+[[risk.stress.groups]]
+key = "credit"
+label = "CREDIT"
+[[risk.stress.groups]]
+key = "volatility"
+label = "VOLATILITY"
+[[risk.stress.groups]]
+key = "conditions"
+label = "CONDITIONS"
+
+[[risk.stress.votes]]
+key = "below_200"
+group = "price"
+label = "S&P 500 below its 200-day average"
+input = "price_vs_ma"
+op = "lt"
+threshold = 0
+unit = "pct"
+[[risk.stress.votes]]
+key = "drawdown_5"
+group = "price"
+label = "S&P 500 5% or more under its 1-year high"
+input = "drawdown"
+op = "le"
+threshold = -5
+unit = "pct"
+[[risk.stress.votes]]
+key = "thin_sectors"
+group = "participation"
+label = "Fewer than half of nine sector funds above their 200-day"
+input = "sector_breadth"
+op = "lt"
+threshold = 50
+unit = "pct"
+[[risk.stress.votes]]
+key = "spread_high"
+group = "credit"
+label = "BAA − 10Y above 3 points"
+input = "spread_level"
+op = "gt"
+threshold = 3
+unit = "pp"
+[[risk.stress.votes]]
+key = "spread_widening"
+group = "credit"
+label = "BAA − 10Y up more than 0.10 in a month"
+input = "spread_change"
+op = "gt"
+threshold = 0.10
+unit = "pp"
+[[risk.stress.votes]]
+key = "vix_high"
+group = "volatility"
+label = "VIX above 25"
+input = "vix"
+op = "gt"
+threshold = 25
+unit = "pts"
+[[risk.stress.votes]]
+key = "rv_high"
+group = "volatility"
+label = "S&P 500 one-month realised volatility above 25"
+input = "realised_vol"
+op = "gt"
+threshold = 25
+unit = "pts"
+[[risk.stress.votes]]
+key = "anfci_tight"
+group = "conditions"
+label = "Financial conditions tighter than average (ANFCI above 0)"
+input = "anfci"
+op = "gt"
+threshold = 0
+unit = "index"
+frequency = "weekly"
+[[risk.stress.votes]]
+key = "anfci_rising"
+group = "conditions"
+label = "ANFCI up more than 0.10 in four weeks"
+input = "anfci_change"
+op = "gt"
+threshold = 0.10
+unit = "index"
+frequency = "weekly"
+
 [[risk.sections]]
 key = "volatility"
 label = "VOLATILITY"
@@ -2829,6 +3014,47 @@ note = "Cboe total put/call ratio, 5-session average; history is fetched one ses
 #     timing: a thin equity premium has not told the next three months'
 #     drawdowns apart, only deeper falls over two years and lower ten-year
 #     returns (quantamental-lab docs/erp_history_v1.md).
+[risk.strip]
+# RISK's first line: one lead per channel, the six that say most about stress now.
+# Each is read as a matrix cell (scale, lines, staleness); the other leads stay in
+# the matrix and the library. NDX drawdown: -10% a correction, -20% a bear market.
+[[risk.strip.items]]
+key = "ndx"
+channel = "EQUITIES"
+lead = "ndx_drawdown"
+scale = "bands"
+bands = { elevated = -10.0, stressed = -20.0 }
+[[risk.strip.items]]
+key = "vix"
+channel = "VOLATILITY"
+lead = "vix"
+scale = "bands"
+bands = { elevated = 25.0, stressed = 35.0 }
+[[risk.strip.items]]
+key = "move"
+channel = "RATES"
+lead = "move"
+scale = "bands"
+bands = { elevated = 100.0, stressed = 120.0 }
+[[risk.strip.items]]
+key = "credit"
+channel = "CREDIT"
+lead = "baa10y_4w"
+scale = "bands"
+bands = { elevated = 10.0, stressed = 25.0 }
+[[risk.strip.items]]
+key = "stock_bond"
+channel = "CROSS-ASSET"
+lead = "stock_bond_corr"
+scale = "bands"
+bands = { elevated = 0.0, stressed = 0.3 }
+[[risk.strip.items]]
+key = "nfci"
+channel = "CONDITIONS"
+lead = "nfci"
+scale = "bands"
+bands = { elevated = 0.0, stressed = 0.5 }
+
 [risk.matrix]
 elevated = 75
 stressed = 95

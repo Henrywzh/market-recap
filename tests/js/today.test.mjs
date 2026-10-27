@@ -335,12 +335,11 @@ test('after-close reporters without a result collapse into one line of names by 
   assert.equal(byClass(pending[0], 'today-tile').length, 0);
 }));
 
-test('the page shows the signal chips by kind and the E badge on a reporter, with no HIGH or TESTED tags', () => withBrowser(() => {
+test('the page shows one ranked row per signal and the E badge on a reporter, with no HIGH or TESTED tags', () => withBrowser(() => {
   const root = new FakeNode('main');
   renderToday(root, pageFixture(), null, {});
-  const rows = byClass(root, 'today-chips');
-  assert.equal(rows.length, 3, 'OVERSOLD, RARE and ONGOING have chips; CHANGED and SCENARIO are empty');
-  assert.equal(byClass(root, 'chip').length, 3, 'one chip per signal');
+  const rows = byClass(root, 'today-signal');
+  assert.equal(rows.length, 3, 'one OVERSOLD, one RARE and one ONGOING signal; CHANGED and SCENARIO are empty');
   const movers = textOf(byClass(root, 'today-movers-host')[0] || root);
   assert.ok(!/\bHIGH\b/.test(movers) || movers.includes('LATER'), 'no HIGH tag in the movers');
   assert.ok(!textOf(byClass(root, 'today-movers')[0] || root).includes('TESTED'));

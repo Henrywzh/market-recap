@@ -1,14 +1,17 @@
-// RISK: how much risk the market is pricing. Top to bottom: five gauges with
-// fixed lines that marked past drawdowns, the Fear & Greed card, what changed
-// this week, the matrix (six channels down the side, three kinds of evidence
-// across), then every series folded beneath by group. One tile per series --
-// level, where it sits in its year and in its whole history, the week's change,
-// and whether it is past the line written in config beforehand. No score.
+// RISK: the one-lead strip, what changed, then the full matrix in a fold; own-asset
+// pressure, shared sector participation, stocks vs bonds, then pressure families.
+// The sentiment strip sits on the first screen; gauges, charts and original votes
+// stay in folds below.
 
 import { el, card, num, metaRow, tag, gap, DASH } from '../fmt.js';
 import { render } from '../charts.js';
-import { rangeSwitch, sliceRange, initialRange } from '../range.js';
+import { rangeSwitch, sliceRange as sharedSliceRange, initialRange } from '../risk-range.js';
+import { sliceRange } from '../range.js';
 import { spark } from '../spark.js';
+import stressCard from './risk-stress.js';
+import assetContext from './risk-context.js';
+import { stocksBondsCard } from '../stocks-bonds.js';
+import { riskRangeControl } from '../risk-range.js';
 import { cellsByRow, stateCounts, stateOf, stateWord, chipWord, countParts, isPlaceholder, arrowFor, tagFor, scaleText, VALUATION_STATES, upcomingFor } from '../risk-matrix.js';
 
 const HORIZONS = [
@@ -112,30 +115,46 @@ export function chartHistory(tile) {
   return { dates: [...weekly.dates.slice(0, cut), ...recent.dates], values: [...weekly.values.slice(0, cut), ...recent.values] };
 }
 
-export function historyChart(node, tile, range = 'MAX') {
+export function historyChart(node, tile, range = 'MAX', shared = false) {
   const full = chartHistory(tile);
-  const h = sliceRange(full.dates, { values: full.values }, range);
+  const h = (shared ? sharedSliceRange : sliceRange)(full.dates, { values: full.values }, range);
+  const vals = (h.values || []).filter(present);
+  const minV = vals.length ? Math.min(...vals) : 0;
+  const maxV = vals.length ? Math.max(...vals) : 1;
+  const hasLine = vals.length > 1 && tile.risk_when !== 'extreme' && present(tile.threshold);
+  const highRisk = tile.risk_when === 'high';
   render(node, (option, p) => ({
     ...option,
     grid: { ...option.grid, left: 56, right: 16, top: 14 },
-    // A time axis: weekly points then daily ones, each at its own date, so
-    // the daily last year is not stretched across more of the width.
-    tooltip: {
-      ...option.tooltip,
-      formatter: (items) => {
-        const it = [].concat(items)[0];
-        return it ? `${it.value[0]}<br>${it.marker}${tile.label} <b>${formatValue(it.value[1], tile.unit)}</b>` : '';
-      },
-    },
-    xAxis: { ...option.xAxis, type: 'time', boundaryGap: false, data: undefined },
+    visualMap: hasLine ? {
+      show: false,
+      seriesIndex: 0,
+      dimension: 1,
+      pieces: highRisk
+        ? [{ min: -1e9, max: tile.threshold, color: p.up }, { min: tile.threshold, max: 1e9, color: p.down }]
+        : [{ min: -1e9, max: tile.threshold, color: p.down }, { min: tile.threshold, max: 1e9, color: p.up }],
+    } : undefined,
+    tooltip: { ...option.tooltip, valueFormatter: (v) => formatValue(v, tile.unit) },
+    xAxis: { ...option.xAxis, data: h.dates },
     yAxis: { ...option.yAxis, axisLabel: { color: p.dim, fontSize: 10, formatter: (v) => formatValue(v, tile.unit) } },
     series: [{
-      name: tile.label, type: 'line', data: h.dates.map((d, i) => [d, h.values[i]]), showSymbol: false,
-      lineStyle: { width: 1.3, color: tile.breach ? p.down : p.text },
-      markLine: tile.risk_when !== 'extreme' && present(tile.threshold) ? {
+      name: tile.label, type: 'line', data: h.values, showSymbol: false,
+      lineStyle: { width: 1.6, color: hasLine ? undefined : (tile.breach ? p.down : p.text) },
+      areaStyle: hasLine ? { opacity: 0.06 } : undefined,
+      markLine: hasLine ? {
         silent: true, symbol: 'none', data: [{ yAxis: tile.threshold }],
         lineStyle: { color: p.down, type: 'dashed', opacity: 0.7 },
         label: { color: p.down, fontSize: 9, formatter: `threshold ${formatValue(tile.threshold, tile.unit)}`, position: 'insideEndTop' },
+      } : undefined,
+      markArea: hasLine ? {
+        silent: true,
+        data: highRisk ? [
+          [{ yAxis: tile.threshold, itemStyle: { color: p.down, opacity: 0.08 } }, { yAxis: Math.max(maxV, tile.threshold) * 1.05 }],
+          [{ yAxis: Math.min(minV, tile.threshold), itemStyle: { color: p.up, opacity: 0.04 } }, { yAxis: tile.threshold }],
+        ] : [
+          [{ yAxis: Math.min(minV, tile.threshold) - Math.abs(tile.threshold || 1) * 0.1, itemStyle: { color: p.down, opacity: 0.08 } }, { yAxis: tile.threshold }],
+          [{ yAxis: tile.threshold, itemStyle: { color: p.up, opacity: 0.04 } }, { yAxis: Math.max(maxV, tile.threshold) * 1.05 }],
+        ],
       } : undefined,
     }],
   }));
@@ -206,7 +225,7 @@ function sectionCard(section, data, { charts = 1, head = null, lead = null } = {
       const tile = tiles.find((t) => t.key === key);
       if (!tile) return;
       slots[i].title.textContent = `${tile.label} · ${tile.recent?.dates?.length ? 'daily for the last year, weekly before' : 'weekly'} · 10 years or since ${tile.since}`;
-      historyChart(slots[i].node, tile, range);
+      historyChart(slots[i].node, tile, range, true);
     });
   };
   const chartBlocks = slots.map((slot, i) => el('div', {}, [el('div', { class: 'chart-head risk-chart-head' }, [slot.title, i === 0 ? switcher : null]), slot.node]));
@@ -450,7 +469,7 @@ function sentimentCard(g) {
   const chartNode = el('div', { class: 'chart short' });
   let range = initialRange(g.history.dates, '1Y');
   const draw = () => {
-    const h = sliceRange(g.history.dates, { score: g.history.score }, range);
+    const h = sharedSliceRange(g.history.dates, { score: g.history.score }, range);
     render(chartNode, (option, p) => ({
       ...option,
       grid: { left: 30, right: 12, top: 8, bottom: 22 },
@@ -495,9 +514,27 @@ function sentimentGap(g) {
   return gap(`FEAR & GREED · not computed this session${g?.error ? `: ${g.error}` : ''}.`);
 }
 
+function compactSentiment(g) {
+  const score = present(g?.score) ? Math.max(0, Math.min(100, g.score)) : null;
+  const tone = score === null ? 'unknown' : score < 25 ? 'extreme-fear' : score < 45 ? 'fear' : score <= 55 ? 'neutral' : score <= 75 ? 'greed' : 'extreme-greed';
+  const summary = el('summary', { class: `fg-summary ${tone}` }, [
+    el('span', { class: 'fg-summary-label', text: 'FEAR & GREED' }),
+    el('strong', { class: 'fg-summary-score', text: score === null ? DASH : num(score, 0) }),
+    el('span', { class: 'fg-summary-rating', text: g?.rating || 'UNAVAILABLE' }),
+    el('span', { class: 'fg-summary-track', role: 'img', 'aria-label': `Fear and greed ${score === null ? 'unavailable' : num(score, 0) + ' of 100'}` },
+      score === null ? [] : [el('span', { class: 'fg-summary-fill', style: `width:${score}%` })]),
+    el('span', { class: 'fg-summary-more', text: 'DETAILS' }),
+  ]);
+  const fold = el('details', { class: 'fg-summary-fold' }, [summary]);
+  fold.addEventListener('toggle', () => {
+    if (fold.open && fold.children.length === 1) fold.append(present(g?.score) ? sentimentCard(g) : sentimentGap(g));
+  });
+  return fold;
+}
+
 function methodNotes() {
   return [
-    'The five READ THIS FIRST gauges are the series whose fixed lines marked past drawdowns. The matrix: six channels down the side (equities, treasuries, credit, volatility, cross-asset, macro), and three kinds of evidence across (structure, technical, fundamental / premium). Each cell has one lead series. The first two columns say how stressed the market is, read on one of two scales. Levels with a meaning in any decade (VIX, the VIX curve, MOVE, drawdowns, NFCI, BAA − 10Y) are read against fixed lines, set from where each stood in past drawdowns or from a line with its own meaning (an inverted VIX curve at 1.0, NFCI\'s average at 0); a ten-year percentile would compress the tail and let a quiet decade decide what elevated means. Changes and spreads with no outside anchor are read by their percentile in their own last ten years: elevated from the 75th, stressed from the 95th. A lead that failed its out-of-sample test is shown but not coloured. The VALUATION column says how thin the compensation is for holding each risk -- the equity risk premium (Shiller\'s excess CAPE yield, from Robert J. Shiller\'s "Irrational Exuberance" data, shillerdata.com, with Aswath Damodaran\'s implied ERP beside it), the term premium (Kim and Wright, via FRED), the BAA spread and the volatility premium -- against its whole history since 1960 (1990 where it starts then): cheap, fair, rich or very rich. It describes the cushion, not the timing. Grey means no reading yet. Each cell draws its lead\'s last year, with dashed lines where today\'s reading would change colour; hover it for the range and the lines. Cells are never averaged or scored; the other series in a cell open on click.',
+    'Asset pressure shows each asset on its own volatility scale; sector participation and pressure families are shared context. Original fixed-line gauges are used when asset context is unavailable. The matrix: six channels down the side (equities, treasuries, credit, volatility, cross-asset, macro), and three kinds of evidence across (structure, technical, fundamental / premium). Each cell has one lead series. The first two columns say how stressed the market is, read on one of two scales. Levels with a meaning in any decade (VIX, the VIX curve, MOVE, drawdowns, NFCI, BAA − 10Y) are read against fixed lines, set from where each stood in past drawdowns or from a line with its own meaning (an inverted VIX curve at 1.0, NFCI\'s average at 0); a ten-year percentile would compress the tail and let a quiet decade decide what elevated means. Changes and spreads with no outside anchor are read by their percentile in their own last ten years: elevated from the 75th, stressed from the 95th. A lead that failed its out-of-sample test is shown but not coloured. The VALUATION column says how thin the compensation is for holding each risk -- the equity risk premium (Shiller\'s excess CAPE yield, from Robert J. Shiller\'s "Irrational Exuberance" data, shillerdata.com, with Aswath Damodaran\'s implied ERP beside it), the term premium (Kim and Wright, via FRED), the BAA spread and the volatility premium -- against its whole history since 1960 (1990 where it starts then): cheap, fair, rich or very rich. It describes the cushion, not the timing. Grey means no reading yet. Each cell draws its lead\'s last year, with dashed lines where today\'s reading would change colour; hover it for the range and the lines. Cells are never averaged or scored; the other series in a cell open on click.',
     'Each tile is one series. 1Y = its percentile over the last 365 days; 1990– = over all the history the source serves, from the year shown; 1W = change over a week. Nothing is combined into a score.',
     'Thresholds were written in config/dashboard.toml before this page drew any series, and are not fitted to it. A red tile is past its line; NEW means it was not a week ago, CLEARED that it was. Positioning and the put/call ratio are read at extremes: the tails of their own history (≤5th or ≥95th percentile).',
     'Back-calculated history: VIX3M, VIX9D, VIX6M, VIX1Y, VVIX, SKEW and COR1M were launched after the first row of their files; the earlier part is Cboe\'s back-calculation. ICE BofA spreads (HY, IG, CCC) come from FRED, which serves the last three years only; the site archives what FRED serves each evening (a full-history baseline first, then the daily tail), and those archived dates extend the series back as the archive grows. The archive is current-vintage history, not point-in-time; Moody\'s Baa − 10Y runs to 1986.',
@@ -577,7 +614,7 @@ function readFirstCard(data, tiles) {
     const g = gauges.find((x) => x.key === picked);
     if (!g?.tile) return;
     title.textContent = `${g.label} · ${g.tile.recent?.dates?.length ? 'daily for the last year, weekly before' : 'weekly'} · 10 years or since ${g.tile.since}`;
-    historyChart(chart, g.tile, range);
+    historyChart(chart, g.tile, range, true);
   };
   const switcher = rangeSwitch(longest, range, (label) => { range = label; draw(); });
   requestAnimationFrame(draw);
@@ -625,23 +662,117 @@ function rememberFold(fold, name, onOpen) {
   if (stored === 'open') { fold.open = true; onOpen(); }
 }
 
+const MATRIX_MISSING = 'The risk matrix was not built for this session.';
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+const hasStrip = (data) => Array.isArray(data.strip) && data.strip.length > 0;
+
+// Counts only: the calm channels, then each channel that is not calm, named.
+export function stripSentence(strip) {
+  const rest = strip.filter((c) => stateOf(c) !== 'calm');
+  if (!rest.length) return `All ${NUMBER_WORDS[strip.length] ?? strip.length} channels calm.`;
+  const named = rest.map((c) => `1 ${stateWord(stateOf(c))} (${c.channel}: ${String(c.label || '').toLowerCase()} ${formatValue(c.value, c.unit)})`);
+  return [`${strip.length - rest.length} calm`, ...named].join(' · ');
+}
+
+// One channel's lead as a tile: a matrix cell's look, the channel as its eyebrow, and
+// the lines it is read against as the dim line. A click opens the full matrix.
+function stripTile(cell, years, onOpen) {
+  const arrow = arrowFor(cell);
+  return el('button', {
+    type: 'button',
+    class: `${cellClass(cell, false)} risk-strip-cell`,
+    'aria-label': `${cell.channel}: ${cell.label}${present(cell.value) ? ` ${formatValue(cell.value, cell.unit)}` : ''}, ${stateWord(stateOf(cell))}. Opens the full matrix.`,
+    title: cell.note || null,
+    onclick: onOpen,
+  }, [
+    el('span', { class: 'risk-strip-channel', text: cell.channel }),
+    cellHead(cell.label, cell),
+    el('span', { class: 'risk-cell-reading' }, [
+      el('span', { class: 'risk-cell-value', text: formatValue(cell.value, cell.unit) }),
+      arrow ? el('span', { class: `risk-cell-arrow ${arrow.tone}`, title: arrow.word, text: arrow.arrow }) : null,
+      cellSpark(cell),
+    ]),
+    el('span', { class: 'risk-cell-pct', text: percentText(cell, years) }),
+  ]);
+}
+
+export function stripSection(strip, years, onOpen) {
+  return el('div', { class: 'risk-strip-block' }, [
+    el('h2', { class: 'section-title', text: 'RISK NOW · ONE LEAD PER CHANNEL' }),
+    el('p', { class: 'risk-strip-count', text: stripSentence(strip) }),
+    el('div', { class: 'risk-strip' }, strip.map((cell) => stripTile(cell, years, onOpen))),
+  ]);
+}
+
+// The full matrix, closed by default and drawn only when opened. `open` opens it
+// from a strip tile and scrolls it into view.
+function matrixFold(data, calendarOf) {
+  const count = cellsByRow(data.matrix).reduce((n, r) => n + r.cells.length, 0);
+  const fold = el('details', { class: 'risk-more risk-matrix-fold' }, [el('summary', { text: `ALL ${count} LEADS · RISK MATRIX` })]);
+  let drawn = false;
+  const draw = () => {
+    if (drawn) return;
+    drawn = true;
+    fold.append(summary(data.matrix), matrixBlock(data.matrix, data, calendarOf));
+  };
+  rememberFold(fold, 'matrix', draw);
+  const open = () => {
+    fold.open = true;
+    draw();
+    fold.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  };
+  return { fold, open };
+}
+
 export default function renderRisk(root, data, _manifest, ctx = {}) {
   if (!data || data.unavailable) throw new Error(data?.unavailable || 'risk artifact missing');
   const total = data.sections.reduce((n, s) => n + s.tiles.length, 0);
   const tiles = new Map(data.sections.flatMap((s) => s.tiles).map((t) => [t.key, t]));
   root.append(metaRow(`RISK · AS OF ${data.as_of}`, methodNotes()));
-  root.append(readFirstCard(data, tiles));
-  root.append(present(data.sentiment?.score) ? sentimentCard(data.sentiment) : sentimentGap(data.sentiment));
-  root.append(changedCard(data));
-  root.append(el('h2', { class: 'section-title', text: 'RISK MATRIX' }));
-  if (data.matrix) {
-    root.append(summary(data.matrix));
-    // The calendar's tagged events, for "next for this channel" in a cell's drill-down; optional.
-    let calendar = null;
-    ctx.loadArtifact?.('catalysts').then((c) => { calendar = c; }).catch(() => {});
-    root.append(matrixBlock(data.matrix, data, () => calendar));
+  root.append(riskRangeControl(data.as_of));
+  root.append(compactSentiment(data.sentiment));
+  // The calendar's tagged events give a cell's drill-down its "next for this
+  // channel"; optional.
+  let calendar = null;
+  if (data.matrix) ctx.loadArtifact?.('catalysts').then((c) => { calendar = c; }).catch(() => {});
+  const calendarOf = () => calendar;
+  // The first screen: one lead per channel and what changed; the full matrix sits in
+  // a closed fold below them. Without a strip, the older screen: counts, then the matrix.
+  if (hasStrip(data)) {
+    const matrix = data.matrix ? matrixFold(data, calendarOf) : null;
+    root.append(stripSection(data.strip, data.matrix?.years ?? 10, () => matrix?.open()), changedCard(data));
+    root.append(matrix ? matrix.fold : gap(MATRIX_MISSING));
+  } else if (data.matrix) {
+    root.append(summary(data.matrix), changedCard(data), el('h2', { class: 'section-title', text: 'RISK MATRIX' }), matrixBlock(data.matrix, data, calendarOf));
   } else {
-    root.append(gap('The risk matrix was not built for this session.'));
+    root.append(gap(MATRIX_MISSING));
+  }
+  if (data.context?.assets?.length) {
+    root.append(assetContext(data.context));
+  }
+  const bonds = stocksBondsCard(data);
+  if (bonds) root.append(bonds);
+  const detail = el('details', { class: 'risk-more' }, [el('summary', { text: 'GAUGES, CREDIT, VOLATILITY & CORRELATION · CHARTS' })]);
+  let detailDrawn = false;
+  rememberFold(detail, 'market-context', () => {
+    if (detailDrawn) return;
+    detailDrawn = true;
+    detail.append(readFirstCard(data, tiles));
+    for (const key of ['credit', 'volatility', 'correlation']) {
+      const sec = data.sections.find((s) => s.key === key);
+      if (sec) detail.append(sectionCard(sec, data));
+    }
+  });
+  root.append(detail);
+  if (data.stress) {
+    const votesFold = el('details', { class: 'risk-more rc-diagnostics' }, [el('summary', { text: 'ORIGINAL 9-VOTE STRESS COUNT (RESEARCH)' })]);
+    let votesDrawn = false;
+    rememberFold(votesFold, 'votes', () => {
+      if (votesDrawn) return;
+      votesDrawn = true;
+      votesFold.append(stressCard(data.stress));
+    });
+    root.append(votesFold);
   }
 
   // The library is drawn only when opened: a chart laid out while folded

@@ -410,3 +410,20 @@ def test_spark_lines_follow_the_cell_scale():
     assert short["lines"] == [] and len(short["values"]) == 365
     assert R.matrix_spark(series, risk_when="extreme", years=10, min_years=3, thresholds=THRESHOLDS)["lines"] == []
     assert R.matrix_spark(pd.Series(dtype=float), risk_when="high", years=10, min_years=3, thresholds=THRESHOLDS) is None
+
+
+def test_the_strip_reads_one_lead_per_channel_with_its_lines_in_the_risk_direction():
+    settings = load_config()["risk"]
+    series = _daily(np.cumsum(np.random.default_rng(3).normal(size=1460)) + 100)
+    keys = [t["key"] for t in settings["tiles"]] + list(risk.DERIVED_LEADS)
+    strip = risk._strip(settings, {key: (lambda s=series: s) for key in keys}, {}, END)
+    assert [c["channel"] for c in strip] == ["EQUITIES", "VOLATILITY", "RATES", "CREDIT", "CROSS-ASSET", "CONDITIONS"]
+    assert [c["lead"] for c in strip] == ["ndx_drawdown", "vix", "move", "baa10y_4w", "stock_bond_corr", "nfci"]
+    directions = {t["key"]: t["risk_when"] for t in settings["tiles"]}
+    directions.update({k: v["risk_when"] for k, v in risk.DERIVED_LEADS.items()})
+    for cell in strip:
+        assert cell["state"] in RISK_STATES and cell["spark"] and cell["label"], cell["lead"]
+        elevated, stressed = cell["bands"]["elevated"], cell["bands"]["stressed"]
+        assert (stressed > elevated) if directions[cell["lead"]] == "high" else (stressed < elevated), cell["lead"]
+    # The NDX drawdown is its own derived lead: a fall is the risk.
+    assert risk.DERIVED_LEADS["ndx_drawdown"]["risk_when"] == "low"

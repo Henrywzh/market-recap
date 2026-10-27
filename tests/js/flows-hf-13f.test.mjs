@@ -157,9 +157,7 @@ test('the section renders the crowded table, the move tables and the method fold
     const text = textOf(cards[0]);
     assert.match(text, /HEDGE FUNDS · 13F CROWDING \(Q2 2026\)/);
     assert.match(text, /MOST CROWDED S&P 500 NAMES/);
-    assert.match(text, /MOST ADDED/);
-    assert.match(text, /MOST CUT/);
-    assert.match(text, /\+\$3\.66bn|\+\$1\.30bn/);
+    assert.match(text, /split adjustment has not been verified/);
     assert.doesNotMatch(text, BAD);
 
     const links = all(cards[0], (n) => n.tagName === 'A');

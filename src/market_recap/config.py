@@ -59,8 +59,12 @@ MONTHS_PER_YEAR = 12
 PERIOD_TRADING_DAYS: dict[str, int | None] = {
     "1D": 1,
     "1W": 5,
+    "2W": 10,
     "1M": 21,
+    "4W": 20,
+    "2M": 42,
     "3M": 63,
+    "4M": 84,
     "6M": 126,
     "YTD": None,
     "1Y": TRADING_DAYS_PER_YEAR,

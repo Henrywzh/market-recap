@@ -6,7 +6,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cellsByRow, stateCounts, stateOf, stateWord, arrowFor, tagFor, isPlaceholder, scaleText, chipWord, countParts } from '../../web/js/risk-matrix.js';
-import renderRisk, { fgMarkerPercent } from '../../web/js/tabs/risk.js';
+import renderRisk, { fgMarkerPercent, stripSentence } from '../../web/js/tabs/risk.js';
+import { breadthTone, BREADTH_LINES } from '../../web/js/tabs/risk-context.js';
 
 const ROWS = [
   { key: 'equities', label: 'EQUITIES' }, { key: 'treasuries', label: 'TREASURIES' }, { key: 'credit', label: 'CREDIT' },
@@ -62,12 +63,40 @@ const SENTIMENT = {
   history: { dates: ['2026-10-15', '2026-10-16'], score: [30, 24.5] },
 };
 
-function fixture({ matrix = true, sentiment = { score: null } } = {}) {
+// The RISK NOW strip: one lead per channel, in the build's channel order. Each is a
+// matrix cell with the lines it is read against (banded).
+const STRIP_CHANNELS = ['EQUITIES', 'VOLATILITY', 'RATES', 'CREDIT', 'CROSS-ASSET', 'CONDITIONS'];
+const stripCell = (channel, extra) => ({
+  row: 'strip', column: channel.toLowerCase(), lead: 'x', label: null, value: null, unit: null, date: '2026-10-27',
+  risk_when: 'high', percentile: null, state: 'calm', state_prev: 'calm', change_1m: 0, worse_1m: null,
+  scale: 'bands', bands: { elevated: 0, stressed: 0 }, spark: null, evidence: 'description', caution: null,
+  note: null, pending: null, members: [], channel, ...extra,
+});
+const STRIP = [
+  stripCell('EQUITIES', { lead: 'ndx_drawdown', label: 'NDX FROM 1Y HIGH', value: -5.04, unit: 'pct', risk_when: 'low', bands: { elevated: -10, stressed: -20 }, change_1m: -4.63, worse_1m: true, spark: { start: '2025-10-28', values: [0, -2, -5.04], lines: [{ state: 'elevated', value: -10 }, { state: 'stressed', value: -20 }] } }),
+  stripCell('VOLATILITY', { lead: 'vix', label: 'VIX', value: 18.39, unit: 'pts', bands: { elevated: 25, stressed: 35 }, change_1m: 1.2, worse_1m: true, spark: { start: '2025-10-28', values: [14, 18.39], lines: [] } }),
+  stripCell('RATES', { lead: 'move', label: 'MOVE', value: 97.87, unit: 'index', bands: { elevated: 120, stressed: 150 }, change_1m: -3, worse_1m: false }),
+  stripCell('CREDIT', { lead: 'hy_oas_1m', label: 'HY OAS 1M CHANGE', value: 8, unit: 'bp', bands: { elevated: 50, stressed: 100 }, change_1m: 2, worse_1m: true }),
+  stripCell('CROSS-ASSET', { lead: 'stock_bond_corr', label: 'STOCK–BOND CORR', value: 0.27, unit: 'corr', bands: { elevated: 0.2, stressed: 0.4 }, state: 'elevated', state_prev: 'calm', change_1m: 0.1, worse_1m: true }),
+  stripCell('CONDITIONS', { lead: 'nfci', label: 'NFCI', value: -0.5, unit: 'index', bands: { elevated: 0, stressed: 0.5 }, change_1m: 0.02, worse_1m: true }),
+];
+
+// A fed_model as the build writes it, enough for the stocks-vs-bonds card.
+const FED = {
+  as_of: '2026-10-23', dates: ['2016-10-28', '2016-11-04'],
+  indices: [{ key: 'SPX', operating: { spread_real10y_pct: 0.77, spread_real10y_percentile: 1.7, spread_baa_pct: -3.0, spread_baa_percentile: 3.6, history: { spread_real10y_pct: [1, 0.77], spread_baa_pct: [-1, -3] } } }],
+};
+
+// The default page carries the strip, as the build now writes it. `strip: null`
+// or `[]` is the older page; `context` adds the fed model for the stocks card.
+function fixture({ matrix = true, sentiment = { score: null }, strip = STRIP, context = null } = {}) {
   return {
     as_of: '2026-10-16',
     sentiment,
     sections: [{ key: 'all', label: 'ALL', horizon: 'tactical', tiles: TILE_KEYS.map(tile) }],
+    ...(strip ? { strip } : {}),
     ...(matrix ? { matrix: { thresholds: { elevated: 75, stressed: 95 }, years: 10, rows: ROWS, columns: COLUMNS, cells: CELLS } } : {}),
+    ...(context ? { context } : {}),
   };
 }
 
@@ -142,6 +171,8 @@ class FakeNode {
   append(...nodes) { this.children.push(...nodes); }
   replaceChildren(...nodes) { this.children = [...nodes]; }
   querySelectorAll() { return []; }
+  // Chart disposal asks whether a host holds a chart's node: true for itself and its descendants.
+  contains(node) { return node === this || this.children.some((c) => c.nodeType === 1 && c.contains(node)); }
   get isConnected() { return true; }
 }
 
@@ -192,13 +223,18 @@ function all(node, test) {
 }
 
 const hasClass = (node, name) => (node.className || '').split(/\s+/).includes(name);
-const cellsOf = (root) => all(root, (n) => hasClass(n, 'risk-cell'));
+// Matrix cells only: a strip tile wears the cell look too, so it is left out here.
+const cellsOf = (root) => all(root, (n) => hasClass(n, 'risk-cell') && !hasClass(n, 'risk-strip-cell'));
 const drillsOf = (root) => all(root, (n) => hasClass(n, 'risk-drill'));
 const drillHost = (root) => all(root, (n) => hasClass(n, 'risk-drill-host'))[0];
+const stripTilesOf = (root) => all(root, (n) => hasClass(n, 'risk-strip-cell'));
+// The matrix's own fold: a direct child of the page, named by its summary.
+const matrixFoldOf = (root) => root.children.find((c) => c.tagName === 'DETAILS' && textOf(c.children[0]).includes('RISK MATRIX'));
 
-test('the page draws 6 rows of 3 cells, a placeholder with its pending text, and a summary count', () => withBrowser(() => {
+test('the page draws 6 rows of 3 cells, a placeholder with its pending text, and a summary count', () => withBrowser(async () => {
   const root = new FakeNode('main');
   renderRisk(root, fixture());
+  await openFold(matrixFoldOf(root));
   const rows = all(root, (n) => hasClass(n, 'risk-row'));
   assert.equal(rows.length, 6);
   assert.ok(rows.every((r) => r.children.filter((c) => hasClass(c, 'risk-cell')).length === 3));
@@ -214,9 +250,10 @@ test('the page draws 6 rows of 3 cells, a placeholder with its pending text, and
   assert.ok(textOf(root).includes('RISK MATRIX'), 'the matrix has its own title');
 }));
 
-test('a cell opens its drill-down, a second click closes it, and only one is open at a time', () => withBrowser(() => {
+test('a cell opens its drill-down, a second click closes it, and only one is open at a time', () => withBrowser(async () => {
   const root = new FakeNode('main');
   renderRisk(root, fixture());
+  await openFold(matrixFoldOf(root));
   let cells = cellsOf(root);
   assert.equal(drillsOf(root).length, 0);
   cells[0].click();
@@ -234,9 +271,10 @@ test('a cell opens its drill-down, a second click closes it, and only one is ope
   assert.equal(drillHost(root).children.length, 0, 'the same cell again closes it');
 }));
 
-test('a placeholder that names members still opens them under its pending text', () => withBrowser(() => {
+test('a placeholder that names members still opens them under its pending text', () => withBrowser(async () => {
   const root = new FakeNode('main');
   renderRisk(root, fixture());
+  await openFold(matrixFoldOf(root));
   const cells = cellsOf(root);
   assert.equal(cells[3].tagName, 'BUTTON');
   cells[3].click();
@@ -312,9 +350,10 @@ test('the marker sits on the 0–100 bar, pinned at the ends, and absent without
   assert.equal(fgMarkerPercent(undefined), null);
 });
 
-test('every cell carries a state chip, and a calm chip is the quiet one', () => withBrowser(() => {
+test('every cell carries a state chip, and a calm chip is the quiet one', () => withBrowser(async () => {
   const root = new FakeNode('main');
   renderRisk(root, fixture());
+  await openFold(matrixFoldOf(root));
   const cells = cellsOf(root);
   const chips = (cell) => all(cell, (n) => hasClass(n, 'risk-chip'));
   assert.ok(cells.every((c) => chips(c).length === 1));
@@ -323,23 +362,39 @@ test('every cell carries a state chip, and a calm chip is the quiet one', () => 
   assert.equal(textOf(chips(cells[4])[0]), 'STRESSED');
 }));
 
-test('the Fear & Greed card sits open between the gauges and the matrix, with no fold around it', () => withBrowser(() => {
+test('the Fear & Greed strip sits above the matrix, and opens onto its card', () => withBrowser(async () => {
   const root = new FakeNode('main');
   renderRisk(root, fixture({ sentiment: SENTIMENT }));
-  const fg = root.children.findIndex((c) => textOf(c).includes('FEAR & GREED') && textOf(c).includes('EXTREME FEAR'));
-  const matrixTitle = root.children.findIndex((c) => textOf(c) === 'RISK MATRIX');
-  assert.ok(fg > 0 && fg < matrixTitle, 'the card sits above the matrix title');
-  assert.notEqual(root.children[fg].tagName, 'DETAILS', 'the card is not folded');
-  assert.equal(all(root, (n) => hasClass(n, 'risk-fg-more')).length, 0, 'no fold for the card');
-  assert.equal(all(root, (n) => hasClass(n, 'fg-strip')).length, 0, 'no strip while the score is present');
-  assert.ok(textOf(root.children[fg]).includes('self-computed'));
+  const strip = root.children.find((c) => hasClass(c, 'fg-summary-fold'));
+  const matrixTitle = root.children.indexOf(matrixFoldOf(root));
+  assert.ok(strip && root.children.indexOf(strip) < matrixTitle, 'the strip sits above the matrix fold');
+  assert.ok(textOf(strip).includes('EXTREME FEAR'), 'the strip shows the rating');
+  assert.ok(!textOf(strip).includes('self-computed'), 'the card is not drawn until the strip opens');
+  await openFold(strip);
+  assert.ok(textOf(strip).includes('self-computed'));
 }));
 
-test('with no Fear & Greed score, the strip says so and there is no fold', () => withBrowser(() => {
+test('with no Fear & Greed score, the strip says UNAVAILABLE and says why when opened', () => withBrowser(async () => {
   const root = new FakeNode('main');
   renderRisk(root, fixture());
-  assert.ok(textOf(root).includes('not computed this session'));
-  assert.equal(all(root, (n) => hasClass(n, 'risk-fg-more')).length, 0);
+  const strip = root.children.find((c) => hasClass(c, 'fg-summary-fold'));
+  assert.ok(textOf(strip).includes('UNAVAILABLE'));
+  await openFold(strip);
+  assert.ok(textOf(strip).includes('not computed this session'));
+}));
+
+test('the first screen runs: the strip, what changed, the matrix fold, then the charts fold; no quick card', () => withBrowser(() => {
+  const root = new FakeNode('main');
+  renderRisk(root, fixture({ sentiment: SENTIMENT }));
+  const at = (pred) => root.children.findIndex(pred);
+  const strip = at((c) => hasClass(c, 'fg-summary-fold'));
+  const now = at((c) => hasClass(c, 'risk-strip-block'));
+  const changed = at((c) => textOf(c.children?.[0]).includes('WHAT CHANGED THIS WEEK'));
+  const matrixTitle = root.children.indexOf(matrixFoldOf(root));
+  const detail = at((c) => c.tagName === 'DETAILS' && textOf(c.children[0]).includes('GAUGES, CREDIT'));
+  assert.ok(strip < now && now < changed && changed < matrixTitle && matrixTitle < detail, 'in that order, before the charts fold');
+  assert.equal(at((c) => textOf(c).includes('MARKET CONTEXT')), -1, 'no quick MARKET CONTEXT card on the page');
+  assert.ok(textOf(root).includes('GAUGES, CREDIT, VOLATILITY & CORRELATION · CHARTS'));
 }));
 
 // ---------- READ THIS FIRST, WHAT CHANGED, the library fold ----------
@@ -348,12 +403,20 @@ const GAUGE_LABELS = ['VIX / VIX3M', 'HY spread', 'SPX vs 1Y high', 'SPX vs 200-
 const cardOf = (root, title) => root.children.find((c) => textOf(c.children?.[0]).includes(title));
 // A week with no change: every lead's state equals its state a week ago, and no crossings.
 const quietWeek = (f) => ({ ...f, crossed: [], matrix: { ...f.matrix, cells: f.matrix.cells.map((c) => ({ ...c, state_prev: c.state })) } });
+// Opens a fold the way a click does, then lets its scheduled drawing run.
+async function openFold(fold) {
+  fold.open = true;
+  fold.listeners.toggle.forEach((fn) => fn());
+  await flush();
+}
+const foldNamed = (root, title) => all(root, (n) => n.tagName === 'DETAILS' && textOf(n.children[0]).includes(title))[0];
+const GAUGES_FOLD = 'GAUGES, CREDIT, VOLATILITY & CORRELATION';
 
-// The gauge grid is filled on the next frame, so these read it after a flush.
-test('the five gauges open the page in their order, each with its label, state and meaning', () => withBrowser(async () => {
+// The gauges live in the charts fold, which is closed until opened.
+test('the five gauges open in their order inside the charts fold, each with its label, state and meaning', () => withBrowser(async () => {
   const root = new FakeNode('main');
   renderRisk(root, fixture());
-  await flush();
+  await openFold(foldNamed(root, GAUGES_FOLD));
   const gauges = all(root, (n) => hasClass(n, 'gauge'));
   assert.deepEqual(gauges.map((g) => textOf(g.children[0].children[0])), GAUGE_LABELS);
   assert.equal(all(root, (n) => hasClass(n, 'risk-grid') && n.children.length === 5).length, 1, 'five gauges in one grid');
@@ -367,7 +430,7 @@ test('the five gauges open the page in their order, each with its label, state a
 test('a gauge with no series in the build is a dash tile, and the page still draws', () => withBrowser(async () => {
   const root = new FakeNode('main');
   renderRisk(root, fixture());
-  await flush();
+  await openFold(foldNamed(root, GAUGES_FOLD));
   const missing = all(root, (n) => hasClass(n, 'missing'));
   assert.equal(missing.length, 1);
   assert.ok(textOf(missing[0]).includes('SPX vs 200-day'));
@@ -379,7 +442,7 @@ test('a gauge with no series in the build is a dash tile, and the page still dra
 test('clicking a gauge draws its history: the chart head names the picked gauge', () => withBrowser(async () => {
   const root = new FakeNode('main');
   renderRisk(root, fixture());
-  await flush();
+  await openFold(foldNamed(root, GAUGES_FOLD));
   all(root, (n) => hasClass(n, 'gauge'))[1].click();
   const picked = all(root, (n) => hasClass(n, 'gauge') && hasClass(n, 'selected'));
   assert.equal(picked.length, 1, 'one gauge is selected');
@@ -412,20 +475,107 @@ test('the library fold is closed by default and draws when opened, and it rememb
   try {
     const root = new FakeNode('main');
     renderRisk(root, fixture());
-    const more = all(root, (n) => hasClass(n, 'risk-more'))[0];
+    const library = (r) => foldNamed(r, 'LIBRARY');
     assert.equal(all(root, (n) => hasClass(n, 'risk-sections')).length, 0, 'nothing drawn while closed');
-    more.open = true;
-    more.listeners.toggle.forEach((fn) => fn());
-    await flush();
+    assert.ok(!library(root).open, 'closed by default');
+    await openFold(library(root));
     assert.ok(store['risk.fold.library'] === 'open', 'the open state is kept');
     assert.ok(all(root, (n) => hasClass(n, 'risk-sections')).length > 0, 'drawn on open');
 
     const again = new FakeNode('main');
     renderRisk(again, fixture());
-    const reopened = all(again, (n) => hasClass(n, 'risk-more'))[0];
+    const reopened = library(again);
     assert.equal(reopened.open, true, 'a stored open fold opens again');
   } finally {
     if (saved === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = saved;
   }
+}));
+
+// ---------- the RISK NOW strip, the matrix fold, the stocks-vs-bonds card ----------
+
+test('the strip sentence counts the calm channels and names each one that is not', () => {
+  assert.equal(stripSentence(STRIP), '5 calm · 1 elevated (CROSS-ASSET: stock–bond corr 0.27)');
+  assert.equal(stripSentence(STRIP.map((c) => ({ ...c, state: 'calm' }))), 'All six channels calm.');
+  const grey = STRIP.map((c) => (c.channel === 'RATES' ? { ...c, lead: null, state: 'grey' } : c));
+  assert.equal(stripSentence(grey), '4 calm · 1 no reading (RATES: move 97.87) · 1 elevated (CROSS-ASSET: stock–bond corr 0.27)');
+});
+
+test('breadth bar tone: healthy from 60, mixed from 40, weak below 40, and no reading has none', () => {
+  assert.deepEqual(BREADTH_LINES, { healthy: 60, mixed: 40 });
+  assert.equal(breadthTone(100), 'healthy');
+  assert.equal(breadthTone(60), 'healthy');
+  assert.equal(breadthTone(59.99), 'mixed');
+  assert.equal(breadthTone(40), 'mixed');
+  assert.equal(breadthTone(39.99), 'weak');
+  assert.equal(breadthTone(0), 'weak');
+  assert.equal(breadthTone(null), null);
+  assert.equal(breadthTone(Number.NaN), null);
+});
+
+test('the strip draws six tiles, one per channel, in the build order, with its counting sentence', () => withBrowser(() => {
+  const root = new FakeNode('main');
+  renderRisk(root, fixture());
+  const tiles = stripTilesOf(root);
+  assert.equal(tiles.length, 6);
+  assert.deepEqual(tiles.map((t) => textOf(t.children[0])), STRIP_CHANNELS);
+  assert.ok(textOf(root).includes('RISK NOW · ONE LEAD PER CHANNEL'));
+  assert.ok(textOf(root).includes('5 calm · 1 elevated (CROSS-ASSET: stock–bond corr 0.27)'));
+  assert.ok(tiles[4].className.split(' ').includes('elevated'), 'the tile takes its state tint');
+  assert.ok(textOf(tiles[0]).includes('elev ≤ -10.0% · stress ≤ -20.0%'), 'the dim line names the lines');
+}));
+
+test('the matrix is a closed fold: nothing is drawn until it opens, then all 18 cells', () => withBrowser(async () => {
+  const root = new FakeNode('main');
+  renderRisk(root, fixture());
+  const fold = matrixFoldOf(root);
+  assert.ok(fold, 'the fold sits on the page');
+  assert.equal(textOf(fold.children[0]), 'ALL 18 LEADS · RISK MATRIX');
+  assert.ok(!fold.open, 'closed by default');
+  assert.equal(cellsOf(root).length, 0, 'the matrix is not drawn while closed');
+  await openFold(fold);
+  assert.equal(cellsOf(root).length, 18);
+  assert.ok(textOf(fold).includes('4 elevated'));
+}));
+
+test('a strip tile opens the matrix fold, scrolls to it, and draws it once', () => withBrowser(async () => {
+  const root = new FakeNode('main');
+  renderRisk(root, fixture());
+  const fold = matrixFoldOf(root);
+  let scrolled = false;
+  fold.scrollIntoView = () => { scrolled = true; };
+  stripTilesOf(root)[4].click();
+  assert.equal(fold.open, true, 'the fold opens');
+  assert.equal(scrolled, true, 'the page scrolls to it');
+  await flush();
+  assert.equal(cellsOf(root).length, 18, 'the matrix is drawn');
+  stripTilesOf(root)[0].click();
+  assert.equal(cellsOf(root).length, 18, 'a second tile does not draw it again');
+}));
+
+test('without a strip, the page keeps its older first screen: the counts and the matrix, open', () => withBrowser(() => {
+  const root = new FakeNode('main');
+  renderRisk(root, fixture({ strip: null }));
+  assert.equal(stripTilesOf(root).length, 0);
+  assert.equal(textOf(root).includes('RISK NOW'), false);
+  assert.ok(textOf(root).includes('1 stressed'));
+  assert.equal(cellsOf(root).length, 18, 'drawn on the first screen');
+  assert.equal(matrixFoldOf(root), undefined, 'no fold');
+}));
+
+test('an empty strip falls back to the same older first screen', () => withBrowser(() => {
+  const root = new FakeNode('main');
+  renderRisk(root, fixture({ strip: [] }));
+  assert.equal(stripTilesOf(root).length, 0);
+  assert.equal(cellsOf(root).length, 18);
+}));
+
+test('the stocks-vs-bonds card is open on the page, after the matrix, with no fed-model fold', () => withBrowser(() => {
+  const root = new FakeNode('main');
+  renderRisk(root, fixture({ context: { fed_model: FED } }));
+  const bonds = root.children.find((c) => textOf(c.children?.[0]).includes('STOCKS vs BONDS'));
+  assert.ok(bonds, 'the card is on the page');
+  assert.notEqual(bonds.tagName, 'DETAILS', 'it is not folded');
+  assert.ok(root.children.indexOf(bonds) > root.children.indexOf(matrixFoldOf(root)), 'after the matrix');
+  assert.equal(textOf(root).includes('VALUATION · EARNINGS'), false, 'the old valuation fold is gone');
 }));

@@ -74,13 +74,13 @@ export function methodNotes(data) {
     `A proxy, not a census: ${filers.in_aggregate ?? DASH} curated managers (fundamental, growth and activist). Names: ${names || DASH}.`,
     excluded ? `Multi-strategy platforms left out of the default aggregate: ${excluded}.` : '',
     `${data.lag || 'Filings are due 45 days after quarter end.'} The quarter read is ${data.period_label || DASH}, its prior ${data.prior_label || DASH}.`,
-    'Long equity only. Options are counted apart from the longs and not netted against them.',
+    'Long equity only. Options are separate: reported amounts reflect underlying securities, not option premiums or delta exposure.',
     'Crowded names are ranked by the number of funds holding them, then by value. HF % is the share of the funds\' combined long dollars; S&P % is the index weight; the ratio is HF % over S&P %.',
     `S&P 500 weights are the SPY file's current weights, not quarter-end (as of ${data.sp_weight_as_of || DASH}). CUSIPs are matched to tickers through that file.`,
     `Adds and cuts are share changes among the ${data.moves?.common_funds ?? DASH} funds that filed both quarters, valued at one price so price moves do not count as buying.`,
     'Sector tilt is each sector\'s share of the funds\' S&P 500 holdings minus its share of the index, both taken over S&P 500 names alone.',
     `Outside the index: ${outside.names ?? DASH} names, ${percentText(outside.value_share_pct)} of value, not ranked.`,
-    'Limits: a 13F is the quarter-end long book only. It omits shorts, cash, private positions and non-US holdings, and says nothing about what a fund holds today.',
+    'Limits: quarter-end long holdings only; shorts, cash, private positions and many foreign securities are absent. Amendments and confidential positions are not fully reconciled. Changes are estimates, not observed trade cash flow.',
   ].filter(Boolean);
 }
 
@@ -145,12 +145,13 @@ export function section(data) {
   const moves = data.moves || {};
   const body = [
     el('div', { class: 'meta-line', text: metaLine(data) }),
+    el('p', { class: 'field-note', text: 'Curated manager sample, reported up to 45 days after quarter-end. Holdings are long-only; share changes are estimates and do not measure net fund flows. Amendments are not fully reconciled.' }),
     el('div', { class: 'stat-label', text: 'MOST CROWDED S&P 500 NAMES (BY FUNDS HOLDING, THEN VALUE)' }),
     crowdedTable(crowded),
-    el('div', { class: 'flows-13f-pair' }, [
+    data.quality?.share_changes_split_adjusted ? el('div', { class: 'flows-13f-pair' }, [
       movesTable(moves.adds || [], 'MOST ADDED (SHARES × LATEST CLOSE)'),
       movesTable(moves.cuts || [], 'MOST CUT (SHARES × LATEST CLOSE)'),
-    ]),
+    ]) : gap('Estimated share changes withheld: split adjustment has not been verified for this build.'),
     el('div', { class: 'stat-label', text: 'SECTOR TILT: HEDGE FUNDS MINUS S&P 500 WEIGHT' }),
     Array.isArray(data.sector_tilt) && data.sector_tilt.length ? tiltChart(data.sector_tilt) : gap('No sector weights this build.'),
     el('div', { class: 'field-note', text: `Options, not in the longs above: ${optionsText(data.options)}.` }),
