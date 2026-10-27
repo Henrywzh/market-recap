@@ -152,3 +152,25 @@ def test_every_configured_rule_names_a_known_source_with_lines_in_order():
         if lines:
             # Lines run in the rule's direction, so tier n is the n-th line passed.
             assert lines == (sorted(lines, reverse=True) if rule.get("op") == "below" else sorted(lines)), rule["id"]
+
+
+def test_reruns_of_one_session_remember_everything_already_announced():
+    """2026-10-27: the 10-year sat at 5.0%, in and out of the first rerun's list, and was sent twice."""
+    def ev(key, tier, state="ACTIVE"):
+        return {"key": key, "state": state, "tier": tier}
+    first, said = A.fresh_events([ev("ten_year:10Y", 1), ev("openrouter_mom:deepseek", 1)], None)
+    assert first == ["ten_year:10Y", "openrouter_mom:deepseek"]
+    published = {"events": [ev("openrouter_mom:deepseek", 1)], "email": {"announced": said}}   # 10Y dipped out
+    second, said = A.fresh_events([ev("openrouter_mom:deepseek", 1)], published)
+    assert second == []
+    published = {"events": [ev("openrouter_mom:deepseek", 1)], "email": {"announced": said}}
+    # Back above 5.0%: already said. DeepSeek past its second line: news.
+    third, said = A.fresh_events([ev("ten_year:10Y", 1), ev("openrouter_mom:deepseek", 2)], published)
+    assert third == ["openrouter_mom:deepseek"] and said["openrouter_mom:deepseek"] == 2
+    # A file written before ``announced`` existed still counts what it listed.
+    legacy = {"events": [ev("ten_year:10Y", 1)], "email": {}}
+    assert A.fresh_events([ev("ten_year:10Y", 1)], legacy)[0] == []
+    # Cleared within the session is news once.
+    cleared, said = A.fresh_events([ev("ten_year:10Y", 1, "CLEARED")], {"events": [], "email": {"announced": said}})
+    assert cleared == ["ten_year:10Y"]
+    assert A.fresh_events([ev("ten_year:10Y", 1, "CLEARED")], {"events": [], "email": {"announced": said}})[0] == []

@@ -279,8 +279,7 @@ def build(*, root: Path | None = None, fetch: Callable[[str], str] | None = None
     # A rerun of a session announces only what the published build of that session
     # did not: the same changes, or fewer, are not news a second time.
     same_session = bool(previous) and previous.get("as_of") == as_of
-    published = {(e["key"], e["state"], e["tier"]) for e in (previous or {}).get("events") or []} if same_session else set()
-    fresh = [e["key"] for e in events if (e["key"], e["state"], e["tier"]) not in published]
+    fresh, announced = fresh_events(events, previous if same_session else None)
     return {
         "schema": SCHEMA, "as_of": as_of, "edition": manifest.get("edition"), "generated_at": manifest.get("generated_at"),
         "site": site, "compared_with": (base or {}).get("as_of"), "problem": problem,
@@ -291,9 +290,34 @@ def build(*, root: Path | None = None, fetch: Callable[[str], str] | None = None
         "active": sorted(k for k, v in ledger.items() if v["tier"] > 0),
         "ledger": {"as_of": as_of, "entries": ledger},
         "ledger_base": base,
-        "email": {"due": bool(fresh), "signature": signature, "fresh": fresh,
+        "email": {"due": bool(fresh), "signature": signature, "fresh": fresh, "announced": announced,
                   "subject": subject_line(as_of, [e for e in events if e["key"] in set(fresh)] if same_session else events)},
     }
+
+
+def fresh_events(events: list[dict], previous: dict | None) -> tuple[list[str], dict]:
+    """What a session's e-mail has not yet said, and everything it has said so far.
+
+    ``announced`` maps each alert key to the deepest line announced this session
+    (a cleared or eased one as its state and tier). It is carried from the
+    session's published file to its reruns, so a reading wobbling around a line
+    between reruns is not sent again; crossing a further line still is.
+    ``previous`` is that published file, or None on a new session.
+    """
+    said = dict(((previous or {}).get("email") or {}).get("announced") or {})
+    for e in (previous or {}).get("events") or []:   # files written before ``announced``
+        said.setdefault(e["key"], e["tier"] if e["state"] in ("NEW", "ACTIVE") else f"{e['state']}:{e['tier']}")
+    fresh = []
+    for e in events:
+        before = said.get(e["key"])
+        if e["state"] in ("NEW", "ACTIVE"):
+            if not isinstance(before, int) or e["tier"] > before:
+                fresh.append(e["key"])
+                said[e["key"]] = e["tier"]
+        elif before != f"{e['state']}:{e['tier']}":
+            fresh.append(e["key"])
+            said[e["key"]] = f"{e['state']}:{e['tier']}"
+    return fresh, said
 
 
 def subject_line(as_of: str, events: list[dict]) -> str:
