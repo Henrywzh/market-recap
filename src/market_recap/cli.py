@@ -50,6 +50,10 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("validate", help="Re-check the artifacts already on disk.")
     sub.add_parser("site", help="Assemble dist/ from the artifacts already on disk.")
+    sub.add_parser("alerts", help="Re-evaluate the alert rules over the artifacts on disk (alerts.json).")
+    alerts_email = sub.add_parser("alerts-email", help="E-mail this session's alerts digest when it is due (SMTP from the environment).")
+    alerts_email.add_argument("--dry-run", action="store_true", help="Compose and print the digest; send nothing.")
+    alerts_email.add_argument("--force", action="store_true", help="Send even when nothing is due.")
 
     auctions = sub.add_parser("auction-results", help="Collect completed coupon auctions into the existing Treasury source's private evidence store.")
     auctions.add_argument("--days", type=int, default=90, help="Bounded recent window (1..365 calendar days).")
@@ -105,10 +109,23 @@ def main(argv: list[str] | None = None) -> int:
         # that cannot be built is removed, never left over from an older build.
         from . import agent_feed
         _print({"agent_feed": agent_feed.write(validation=report)})
+        # After the feed: the build-health rule reads whether it was written.
+        from . import alerts
+        _print({"alerts": alerts.write()})
         return 1 if args.strict and report["warnings"] else 0
 
     if args.command == "site":
         _print(site.build())
+        return 0
+
+    if args.command == "alerts":
+        from . import alerts
+        _print(alerts.write())
+        return 0
+
+    if args.command == "alerts-email":
+        from . import alerts_email
+        _print(alerts_email.send(dry_run=args.dry_run, force=args.force))
         return 0
 
     if args.command == "validate":

@@ -309,6 +309,18 @@ jobs:
           fi
           make deploy-only
 
+      # The alerts digest, once the site it links to is live. Optional: with the
+      # SMTP secrets unset it says so and sends nothing, and a failed send never
+      # fails the run. alerts.json decides whether this session's changes are news.
+      - name: Email alerts
+        if: steps.deploy.outcome == 'success' && env.MODE != 'site'
+        continue-on-error: true
+        env:
+          ALERT_SMTP_USER: ${{ secrets.ALERT_SMTP_USER }}
+          ALERT_SMTP_PASSWORD: ${{ secrets.ALERT_SMTP_PASSWORD }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+        run: python -m market_recap.cli alerts-email
+
       # What was just published, for the next site or panels run. Only a
       # deployed build: an undeployed one is not what the site shows, and a
       # site run saves nothing (it deployed what it restored).

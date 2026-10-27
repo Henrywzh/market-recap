@@ -3405,3 +3405,163 @@ match = "any"
 triggers = [
   { series = "vix_term", measure = "level", op = "above", threshold = 1.0, near = 0.95 },
 ]
+
+[alerts]
+# ALERTS (alerts.py): fixed rules over this build's artifacts, announced when a
+# reading crosses a line and again when it falls back, compared with the previous
+# published session. ``lines`` in the rule's direction (``op`` above, below, or
+# abs for a move either way); ``reset`` is how far back past a line a reading
+# must go before its tier is left, so a reading hovering at a line does not flip
+# each session. ``high_from_tier`` makes the deeper tiers HIGH in the e-mail.
+# Sources: tile (a RISK tile; ``field`` defaults to value), strip (a RISK NOW
+# lead), risk_state (state changes of the strip, or ``from = "matrix"``), rsi6
+# (TODAY's board: indices and sectors), cross_asset and rate (MARKET's tables),
+# blackout (S&P 500 weight in earnings blackout), openrouter_mom (an author's
+# estimated revenue, month so far against last month), watch (WATCH scenarios
+# triggered), health (the build itself).
+[[alerts.rules]]
+id = "vix"
+group = "VOLATILITY"
+source = "tile"
+key = "vix"
+op = "above"
+lines = [20.0, 25.0, 30.0, 35.0]
+reset = 1.5
+unit = "pts"
+high_from_tier = 3
+[[alerts.rules]]
+id = "vix_jump"
+group = "VOLATILITY"
+source = "tile"
+key = "vix"
+field = "change_1d"
+op = "above"
+lines = [4.0]
+unit = "pts"
+note = "VIX up 4 points or more in a session"
+[[alerts.rules]]
+id = "vix_curve"
+group = "VOLATILITY"
+source = "tile"
+key = "vix_term"
+op = "above"
+lines = [1.0]
+reset = 0.03
+unit = "ratio"
+note = "VIX above VIX3M: protection now costs more than later"
+severity = "high"
+[[alerts.rules]]
+id = "move"
+group = "RATES"
+source = "tile"
+key = "move"
+op = "above"
+lines = [100.0, 120.0]
+reset = 5.0
+unit = "pts"
+high_from_tier = 2
+[[alerts.rules]]
+id = "ndx_drawdown"
+group = "EQUITIES"
+source = "strip"
+key = "ndx"
+op = "below"
+lines = [-5.0, -10.0, -15.0, -20.0]
+reset = 1.5
+unit = "pct"
+high_from_tier = 3
+[[alerts.rules]]
+id = "risk_now"
+group = "RISK NOW"
+source = "risk_state"
+from = "strip"
+high_from_tier = 2
+[[alerts.rules]]
+id = "risk_matrix"
+group = "RISK MATRIX"
+source = "risk_state"
+from = "matrix"
+[[alerts.rules]]
+id = "rsi6"
+group = "TECHNICAL"
+source = "rsi6"
+groups = ["index", "sector"]
+op = "below"
+lines = [30.0, 25.0, 20.0]
+reset = 5.0
+unit = "pts"
+note = "RSI(6) on the close"
+high_from_tier = 3
+[[alerts.rules]]
+id = "oil_high"
+group = "COMMODITIES"
+source = "cross_asset"
+key = "CL=F"
+op = "above"
+lines = [100.0, 120.0]
+reset = 3.0
+unit = "usd"
+[[alerts.rules]]
+id = "oil_low"
+group = "COMMODITIES"
+source = "cross_asset"
+key = "CL=F"
+op = "below"
+lines = [60.0]
+reset = 3.0
+unit = "usd"
+[[alerts.rules]]
+id = "oil_move"
+group = "COMMODITIES"
+source = "cross_asset"
+key = "CL=F"
+field = "1D"
+op = "abs"
+lines = [5.0]
+unit = "pct_move"
+note = "WTI moved 5% or more in a session"
+[[alerts.rules]]
+id = "ten_year"
+group = "RATES"
+source = "rate"
+key = "10Y"
+op = "above"
+lines = [4.5, 5.0]
+reset = 0.1
+unit = "pct"
+[[alerts.rules]]
+id = "buyback_window_open"
+group = "BUYBACKS"
+source = "blackout"
+op = "below"
+lines = [25.0]
+reset = 5.0
+unit = "pct"
+note = "Most S&P 500 weight out of earnings blackout: the buyback window is open (calendar estimate)"
+[[alerts.rules]]
+id = "buyback_blackout"
+group = "BUYBACKS"
+source = "blackout"
+op = "above"
+lines = [50.0]
+reset = 5.0
+unit = "pct"
+note = "Most S&P 500 weight in earnings blackout: company buybacks largely paused (calendar estimate)"
+[[alerts.rules]]
+id = "openrouter_mom"
+group = "AI USAGE"
+source = "openrouter_mom"
+providers = ["anthropic", "openai", "google", "deepseek"]
+op = "abs"
+lines = [30.0, 60.0]
+unit = "pct_change"
+note = "A run-rate this far from last month may show up in the author's next revenue or ARR figure; OpenRouter is a slice of its traffic"
+[[alerts.rules]]
+id = "watch"
+group = "WATCH"
+source = "watch"
+severity = "high"
+[[alerts.rules]]
+id = "health"
+group = "BUILD"
+source = "health"

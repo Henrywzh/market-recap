@@ -774,6 +774,34 @@ candidate pointing at an artifact this build wrote) is deleted, never left
 from an older build; the site answers a missing file with **404**
 (`web/404.html`), not with the dashboard page.
 
+## Alerts
+
+`artifacts/alerts.json` (`alerts.py`, rules in `[alerts]` of `config/dashboard.toml`)
+is written after the agent feed on every refresh: fixed rules over the build's
+artifacts, each placing its reading on a tier (how many of its lines it is past).
+A change of tier against the previous published session is an alert: **NEW**
+(crossed a line), **EASED** (back one line), **CLEARED** (back below every line);
+the first build, with nothing to compare, lists what is past a line as
+**ACTIVE**. A reading that stays past its line is not repeated, and a tier is
+left only once the reading is back past its line by the rule's `reset` margin.
+Rules today: VIX 20 / 25 / 30 / 35 and a 4-point day, VIX above VIX3M, MOVE
+100 / 120, NDX 5 / 10 / 15 / 20% off its high, RISK NOW and matrix state changes,
+RSI(6) under 30 / 25 / 20 for the indices and sectors, WTI above 100 / 120, under
+60 and a 5% day, the 10-year at 4.5 / 5%, the buyback window opening (under 25%
+of S&P 500 weight in blackout) or closing (over 50%), an OpenRouter author's
+month-so-far run-rate 30% / 60% off last month, WATCH scenarios triggered, and
+the build's own health. Descriptive: each says what crossed which line.
+
+The **e-mail digest** (`market-recap alerts-email`, `alerts_email.py`) runs after a
+successful deploy and sends one message per session when `alerts.json` says its
+changes are news (a rerun finding the same changes sends nothing). SMTP comes
+only from the environment: set the repository secrets `ALERT_SMTP_USER` (the
+sending Gmail address), `ALERT_SMTP_PASSWORD` (a Gmail **app password**, Google
+Account → Security → 2-Step Verification → App passwords; never the account
+password) and `ALERT_EMAIL_TO` (comma-separated recipients). Unset, the step says
+so and sends nothing; a failed send never fails the run. `--dry-run` prints the
+digest; `--force` sends even when nothing is due.
+
 ## MCP server
 
 A read-only remote MCP server at `/mcp` lets an assistant (Claude, ChatGPT,
