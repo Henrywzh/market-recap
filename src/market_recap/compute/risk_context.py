@@ -14,6 +14,10 @@ from ..compute.blackout import calendar_momentum
 from ..config import PERIOD_TRADING_DAYS, TRADING_DAYS_PER_YEAR
 
 
+# Share of the price columns a date needs to count as a session.
+SESSION_COVERAGE = 0.5
+
+
 def _number(value):
     return round(float(value), 4) if pd.notna(value) and np.isfinite(value) else None
 
@@ -339,6 +343,11 @@ def assemble(closes: pd.DataFrame, *, as_of: str, cfg: dict, sector_roster: list
     prices = prices.loc[~prices.index.duplicated(keep="last")]
     prices = prices.loc[:, ~prices.columns.duplicated()]
     prices = prices.apply(pd.to_numeric, errors="coerce").where(lambda f: np.isfinite(f) & (f > 0))
+    # A date most series have no close on is not a session (a holiday one source
+    # still dated): kept, it would put a gap in every window it falls in and blank
+    # each 50- and 200-session average. A missing close on a real session stays a gap.
+    if len(prices.columns):
+        prices = prices.loc[prices.notna().mean(axis=1) >= SESSION_COVERAGE]
     assets = []
     for spec in cfg["assets"]:
         price = prices.get(spec["symbol"], pd.Series(dtype=float))

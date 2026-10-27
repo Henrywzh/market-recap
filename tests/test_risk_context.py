@@ -88,3 +88,34 @@ def test_constituent_breadth_excludes_unknown_members_and_reports_coverage():
                        sector_roster=[], constituents=['one', 'two'])['constituent_breadth']
     assert missing['latest']['above_20d_pct'] is None
     assert missing['latest']['eligible_20d'] == 0
+
+
+def test_a_holiday_row_one_source_dated_does_not_blank_the_long_averages():
+    prices, cfg = inputs()
+    clean = build(prices, cfg)
+    # Holidays that only one series carries a value on: every other column is empty there.
+    holidays = pd.DatetimeIndex(["2024-07-04", "2024-11-28", "2024-12-25"]) + pd.Timedelta(hours=1)
+    extra = pd.DataFrame(np.nan, index=holidays, columns=prices.columns)
+    extra[prices.columns[-1]] = 150.0
+    gapped = build(pd.concat([prices, extra]).sort_index(), cfg)
+    for before, after in zip(clean["assets"], gapped["assets"]):
+        assert after["latest"]["ma200"] is not None
+        assert after["latest"]["ma200"] == pytest.approx(before["latest"]["ma200"])
+        assert after["latest"]["drawdown_sigma"] == pytest.approx(before["latest"]["drawdown_sigma"])
+    # A missing close on a real session is still a gap, not bridged.
+    lone = prices.copy()
+    lone.iloc[-5, 0] = np.nan
+    assert build(lone, cfg)["assets"][0]["latest"]["ma20"] is None
+
+
+def test_validation_flags_a_year_of_closes_with_no_long_average():
+    from market_recap.validate import _check_risk_context
+    prices, cfg = inputs()
+    good = {"context": build(prices, cfg)}
+    assert _check_risk_context(good) == []
+    broken = copy.deepcopy(good)
+    broken["context"]["assets"][0]["latest"]["ma200"] = None
+    broken["context"]["constituent_breadth"] = {"latest": {"eligible_20d": 502, "eligible_200d": 0}}
+    findings = _check_risk_context(broken)
+    assert [f.severity for f in findings] == ["warning", "warning"]
+    assert _check_risk_context(None) == []

@@ -501,6 +501,23 @@ def _check_themes(payload: dict | None) -> list[Finding]:
     return out
 
 
+def _check_risk_context(payload: dict | None) -> list[Finding]:
+    """An asset with a year of closes must have its long average and drawdown scale:
+    blank ones mean the windows broke (holiday rows once blanked every chart)."""
+    context = (payload or {}).get("context") or {}
+    findings = []
+    for asset in context.get("assets") or []:
+        closes = [v for v in ((asset.get("history") or {}).get("close") or []) if v is not None]
+        latest = asset.get("latest") or {}
+        if len(closes) >= 260 and (latest.get("ma200") is None or latest.get("drawdown_sigma") is None):
+            findings.append(Finding("warning", "risk_context",
+                                    f"{asset.get('short') or asset.get('key')}: {len(closes)} closes but no 200-session average or drawdown scale"))
+    breadth = (context.get("constituent_breadth") or {}).get("latest") or {}
+    if breadth.get("eligible_20d") and not breadth.get("eligible_200d"):
+        findings.append(Finding("warning", "risk_context", "constituent breadth has 20-session members but none with a 200-session average"))
+    return findings
+
+
 def _check_sector_pages(directory=SECTORS_ARTIFACT_DIR) -> list[Finding]:
     """Each SECTORS page file carries a fundamentals history of the right shape."""
     out = []
@@ -597,6 +614,7 @@ def run() -> dict:
         # The page files are only this build's when SECTORS was built this session; a skipped build leaves older ones.
         + (_check_sector_pages() if panels.get("sectors") else [])
         + _check_themes(panels.get("themes"))
+        + _check_risk_context(panels.get("risk"))
         + _check_sec_filings(manifest)
         + _check_price_actions(manifest)
         + _check_sources(manifest)
