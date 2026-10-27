@@ -144,8 +144,13 @@ _NUMERIC = ("market_value", "weight", "duration", "ytm", "coupon", "par_value", 
 def _parse_holdings(text: str) -> tuple[pd.DataFrame, str | None]:
     rows = _sheet_rows(text, "Holdings")
     header = next((i for i, row in enumerate(rows) if "Weight (%)" in row), None)
+    # Some funds' workbooks dropped the weight column in October 2026 (IWD, IWF):
+    # the header is then the row naming the ticker and the market value, and the
+    # weight is each line's market value over the fund's, as the column was.
     if header is None:
-        raise ValueError("no Holdings sheet with a weight column")
+        header = next((i for i, row in enumerate(rows) if "Ticker" in row and "Market Value" in row), None)
+    if header is None:
+        raise ValueError("no Holdings sheet with a weight or market value column")
     as_of = None
     for row in rows[:header]:
         if len(row) >= 2 and row[0] == "Fund Holdings as of":
@@ -160,6 +165,9 @@ def _parse_holdings(text: str) -> tuple[pd.DataFrame, str | None]:
             frame[column] = pd.to_numeric(frame[column].str.replace(",", "", regex=False), errors="coerce")
     if "maturity" in frame:
         frame["maturity"] = pd.to_datetime(frame["maturity"], format="%b %d, %Y", errors="coerce")
+    if "weight" not in frame:
+        total = frame["market_value"].sum()
+        frame["weight"] = frame["market_value"] / total * 100.0 if total > 0 else float("nan")
     frame["weight"] = frame["weight"] / 100.0
     return frame.dropna(subset=["weight"]).reset_index(drop=True), as_of
 

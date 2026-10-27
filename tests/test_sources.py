@@ -492,3 +492,30 @@ def test_a_maintenance_page_already_in_the_cache_is_refetched_and_fails_without_
     monkeypatch.setattr(fred, "get_text", lambda url, timeout: "observation_date,DGS10\n2026-10-20,4.1\n")
     frame, _ = fred.fetch_series("DGS10")
     assert frame["value"].tolist() == [4.1]
+
+
+def _ishares_workbook(header: list[str], rows: list[list[str]]) -> str:
+    """A minimal iShares SpreadsheetML document with one Holdings sheet."""
+    def row(cells):
+        return "<ss:Row>" + "".join(f'<ss:Cell><ss:Data ss:Type="String">{c}</ss:Data></ss:Cell>' for c in cells) + "</ss:Row>"
+    body = [row(["10/26/2026"]), row(["Fund Holdings as of", "Oct 26, 2026"]), row([""]), row(header)] + [row(r) for r in rows]
+    return '<ss:Worksheet ss:Name="Holdings"><ss:Table>' + "".join(body) + "</ss:Table></ss:Worksheet>"
+
+
+def test_ishares_holdings_take_the_weight_column_or_derive_it_from_market_value():
+    from market_recap.sources import ishares
+
+    old = _ishares_workbook(["Ticker", "Name", "Market Value", "Weight (%)", "Price"],
+                            [["AAPL", "APPLE", "750", "75.0", "343.91"], ["MSFT", "MICROSOFT", "250", "25.0", "532.6"]])
+    frame, as_of = ishares._parse_holdings(old)
+    assert as_of == "2026-10-26" and list(frame["weight"]) == [0.75, 0.25]
+    # October 2026: IWD's and IWF's workbooks carry no weight column; market value over the total is the weight.
+    new = _ishares_workbook(["Ticker", "Name", "Type", "Market Value", "Notional Value", "Price"],
+                            [["AAPL", "APPLE", "EQUITY", "4,997,044,627.54", "4997044627.54", "343.91"],
+                             ["USD", "USD CASH", "CASH", "2,955,372.46", "2955372.46", "100"]])
+    frame, as_of = ishares._parse_holdings(new)
+    assert as_of == "2026-10-26"
+    assert frame["weight"].sum() == pytest.approx(1.0)
+    assert frame.loc[frame["ticker"] == "AAPL", "weight"].iloc[0] == pytest.approx(4997044627.54 / 5000000000.0)
+    with pytest.raises(ValueError):
+        ishares._parse_holdings(_ishares_workbook(["Name", "Price"], [["X", "1"]]))
