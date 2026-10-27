@@ -61,10 +61,8 @@ def assemble_liquidity(
         v.index = pd.to_datetime(v.index)
         p = p.loc[p.index <= pd.Timestamp(as_of)]
         v = v.loc[v.index <= pd.Timestamp(as_of)].reindex(p.index)
-        if spx_constituents:
-            tickers = [r["ticker"] for r in spx_constituents if r.get("ticker") in p.columns and r.get("ticker") in v.columns]
-        else:
-            tickers = [c for c in p.columns if c in v.columns]
+        # Members only, never every column: an index or a fund's volume would swamp the sums.
+        tickers = [r["ticker"] for r in spx_constituents or [] if r.get("ticker") in p.columns and r.get("ticker") in v.columns]
         if tickers:
             p_sub = p[tickers].apply(pd.to_numeric, errors="coerce")
             v_sub = v[tickers].apply(pd.to_numeric, errors="coerce")

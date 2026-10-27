@@ -501,6 +501,10 @@ def _check_themes(payload: dict | None) -> list[Finding]:
     return out
 
 
+CONCENTRATION_MAX_PCT = 80.0
+DOLLAR_VOLUME_MAX_BN = 5000.0
+
+
 def _check_risk_context(payload: dict | None) -> list[Finding]:
     """An asset with a year of closes must have its long average and drawdown scale:
     blank ones mean the windows broke (holiday rows once blanked every chart)."""
@@ -515,6 +519,16 @@ def _check_risk_context(payload: dict | None) -> list[Finding]:
     breadth = (context.get("constituent_breadth") or {}).get("latest") or {}
     if breadth.get("eligible_20d") and not breadth.get("eligible_200d"):
         findings.append(Finding("warning", "risk_context", "constituent breadth has 20-session members but none with a 200-session average"))
+    liquidity = context.get("liquidity") or {}
+    concentration = liquidity.get("concentration") or {}
+    # Ten of ~500 S&P names trade a quarter to a half of its dollar volume, about $0.5
+    # trillion a day in all; far past that, something other than members was summed.
+    if (concentration.get("value") or 0) > CONCENTRATION_MAX_PCT or (concentration.get("total_dvol_bn_20d") or 0) > DOLLAR_VOLUME_MAX_BN:
+        findings.append(Finding("warning", "risk_context",
+                                f"top-10 dollar-volume share {concentration.get('value')}% of ${concentration.get('total_dvol_bn_20d')}bn a day: "
+                                "not member stocks alone"))
+    if context and "blackout" in liquidity and liquidity["blackout"] is None:
+        findings.append(Finding("warning", "risk_context", "no buyback blackout estimate: the catalysts calendar did not reach RISK"))
     return findings
 
 

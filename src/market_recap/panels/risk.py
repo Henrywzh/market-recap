@@ -523,7 +523,15 @@ def _strip(settings: dict, builders: dict, series_of: dict, as_of: str | None) -
             for item in (settings.get("strip") or {}).get("items", [])]
 
 
-def build(ctx) -> dict:
+# This session's panels the liquidity and valuation context reads: the buyback window
+# (catalysts, evidence), short interest (positioning) and index valuation (valuation).
+# Passed in by the build, which runs RISK after them; never read from disk here, as an
+# older or missing file once blanked the liquidity cards.
+INPUTS = ("catalysts", "evidence", "positioning", "valuation")
+
+
+def build(ctx, *, inputs: dict | None = None) -> dict:
+    inputs_panels = inputs or {}
     settings = ctx.config.get("risk", {})
     inputs = _Inputs(ctx)
     inputs.load(settings)
@@ -598,30 +606,23 @@ def build(ctx) -> dict:
             sector_roster=settings.get("stress", {}).get("sector_roster", []),
             constituents=ctx.members.get(ctx.primary.key, pd.DataFrame()).get("yahoo_symbol", pd.Series(dtype=str)).tolist(), universe_label=ctx.primary.label,
         )
+        # This build's own split-adjusted closes and the volumes from the same download,
+        # for the primary index's members only: an index or fund in the frame would
+        # swamp the dollar volume (a full build once read $40 trillion a day).
+        members = ctx.members.get(ctx.primary.key, pd.DataFrame()).get("yahoo_symbol", pd.Series(dtype=str)).dropna().tolist()
         try:
-            raw_p = pd.read_parquet(ARTIFACT_DIR.parent / "data/cache/prices/prices-10y.parquet")
-            vol_p = pd.read_parquet(ARTIFACT_DIR.parent / "data/cache/prices/volume-10y.parquet")
-        except Exception:
-            raw_p, vol_p = pd.DataFrame(), pd.DataFrame()
-        def _opt_json(name: str) -> dict | None:
-            p = ARTIFACT_DIR / f"{name}.json"
-            if not p.exists():
-                return None
-            try:
-                import json as _json
-                return _json.loads(p.read_text())
-            except Exception:
-                return None
-        hm = _opt_json("heatmaps") or {}
-        val = _opt_json("valuation") or {}
+            volumes = yahoo.fetch_ohlcv_cache(ctx.history_period).get("volume", pd.DataFrame())
+        except Exception:  # noqa: BLE001 - no OHLCV companion: the cards say unavailable
+            volumes = pd.DataFrame()
+        val = inputs_panels.get("valuation") or {}
         context["liquidity"] = RC.assemble_liquidity(
             as_of=ctx.as_of,
-            raw_prices=raw_p,
-            volumes=vol_p,
-            spx_constituents=hm.get("constituents"),
-            catalysts=_opt_json("catalysts"),
-            evidence=_opt_json("evidence"),
-            positioning=_opt_json("positioning"),
+            raw_prices=getattr(ctx, "prices", pd.DataFrame()),
+            volumes=volumes,
+            spx_constituents=[{"ticker": t} for t in members],
+            catalysts=inputs_panels.get("catalysts"),
+            evidence=inputs_panels.get("evidence"),
+            positioning=inputs_panels.get("positioning"),
             risk_tiles=tile_map,
         )
         context["fed_model"] = RC.assemble_fed_model(

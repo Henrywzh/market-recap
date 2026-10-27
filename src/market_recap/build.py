@@ -36,7 +36,6 @@ PANELS = {
     "priced": priced.build,
     "earnings": earnings.build,
     "rotation": rotation.build,
-    "risk": risk.build,
     "fixed_income": fixed_income.build,
     "macro": macro.build,
     "technicals": technicals_panel.build,
@@ -63,6 +62,10 @@ PANELS = {
     "overnight": overnight.build,
     # Reads this session's catalysts and evidence (report dates), so after them.
     "positioning": positioning.build,
+    # Reads this session's catalysts, evidence, positioning and valuation (the buyback
+    # window, short interest, index valuation), so after them; FLOWS, OVERVIEW and
+    # TODAY read RISK, so before them.
+    "risk": risk.build,
     # Reads this session's POSITIONING (the trend model, for the CFTC check), so after it.
     "flows": flows.build,
     # Reads this session's VALUATION (names, sectors, market caps) and the parsed filers;
@@ -200,6 +203,8 @@ def run(
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in sectors.INPUTS})
                 elif name == "positioning":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in positioning.INPUTS})
+                elif name == "risk":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in risk.INPUTS})
                 elif name == "flows":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in flows.INPUTS})
                 elif name == "events":
