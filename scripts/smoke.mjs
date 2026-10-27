@@ -234,10 +234,21 @@ for (const route of list) {
         await page.getByRole('button', { name: 'Close + averages', exact: true }).click();
         if (!await page.locator('.rc-asset-chart canvas').count()) throw new Error('Asset price chart did not render');
       }
+      // RISK NOW: one tile per configured lead, and the full matrix behind its fold.
+      const strip = (await artifact('risk')).strip || [];
+      if (strip.length) {
+        if (await page.locator('.risk-strip-cell').count() !== strip.length) throw new Error('RISK NOW should draw one tile per strip lead');
+        await page.locator('.risk-matrix-fold > summary').click();
+        // The fold draws on its toggle event, a moment after the click.
+        await page.locator('.risk-matrix-fold .risk-cell').first().waitFor({ state: 'attached', timeout: RENDER_WAIT_MS })
+          .catch(() => { throw new Error('The matrix fold did not draw its cells'); });
+      }
+      // STOCKS vs BONDS replaces the Fed model: its tiles render, and the NDX switch redraws them.
       if (context?.fed_model?.indices?.length) {
-        await page.getByText('VALUATION · EARNINGS YIELD & FED MODEL', { exact: true }).click();
-        await page.getByRole('button', { name: 'Reported P/E', exact: true }).click();
-        await page.getByRole('button', { name: 'Earnings Yield vs Bond Yields', exact: true }).click();
+        const card = page.locator('.card').filter({ hasText: 'STOCKS vs BONDS' });
+        if (!await card.locator('.sb-tile').count()) throw new Error('STOCKS vs BONDS has no tiles');
+        if (await card.getByRole('button', { name: 'NDX', exact: true }).count()) await card.getByRole('button', { name: 'NDX', exact: true }).click();
+        if (BAD_TEXT.test(await card.innerText())) throw new Error('STOCKS vs BONDS shows invalid text');
       }
     }
     if (route === 'europe') {
