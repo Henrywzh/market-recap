@@ -103,6 +103,24 @@ def test_a_rerun_of_the_session_does_not_send_the_same_digest_twice(tmp_path):
     assert rerun["compared_with"] == "2026-10-26" and rerun["email"]["due"] is False
 
 
+def test_a_first_session_rerun_with_fewer_active_alerts_sends_nothing_but_a_new_one_does(tmp_path):
+    (tmp_path / "manifest.json").write_text(json.dumps({"as_of": "2026-10-27"}))
+    (tmp_path / "agent-index.json").write_text("{}")
+    (tmp_path / "risk.json").write_text(json.dumps(_arts(vix=26.0, strip_state="elevated")["risk"]))
+    first = A.build(root=tmp_path, fetch=lambda url: "<html>")   # nothing published yet
+    assert first["compared_with"] is None and first["email"]["due"] and len(first["events"]) == 2
+    # Rerun: VIX back under 20, so one fewer ACTIVE: nothing new, nothing sent.
+    (tmp_path / "risk.json").write_text(json.dumps(_arts(vix=15.0, strip_state="elevated")["risk"]))
+    fewer = A.build(root=tmp_path, fetch=lambda url: json.dumps(first))
+    assert len(fewer["events"]) == 1 and fewer["email"]["due"] is False
+    # Rerun with a reading past a line the published build did not have: that one is sent.
+    (tmp_path / "risk.json").write_text(json.dumps(_arts(vix=31.0, strip_state="elevated")["risk"]))
+    more = A.build(root=tmp_path, fetch=lambda url: json.dumps(first))
+    assert more["email"]["due"] and more["email"]["fresh"] == ["vix:vix"]
+    subject, text, _ = M.compose(more)
+    assert "VIX" in text and "STOCK–BOND" not in text and "1 active" in subject
+
+
 def test_the_digest_puts_high_first_and_sends_nothing_without_smtp_settings(tmp_path, monkeypatch):
     payload = {"as_of": "2026-10-27", "site": "https://example.test", "compared_with": "2026-10-26",
                "email": {"due": True, "subject": "Market Recap alerts · 2026-10-27 · 2 new"},

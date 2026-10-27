@@ -129,7 +129,7 @@ def _health(arts: dict) -> list[tuple[str, str, Any, str]]:
     return [
         ("skipped_panels", f"Panels not built: {', '.join(map(str, skipped)) or 'none'}", len(skipped), "#"),
         ("build_errors", f"Build errors logged: {len(errors)}", len(errors), "#"),
-        ("agent_feed", "Agent feed written this build", 0 if arts.get("agent-index") else 1, "#"),
+        ("agent_feed", "Agent feed not written this build", 0 if arts.get("agent-index") is not None else 1, "#"),
     ]
 
 
@@ -276,8 +276,11 @@ def build(*, root: Path | None = None, fetch: Callable[[str], str] | None = None
     base = None if problem else _base(previous, as_of)
     events, ledger = evaluate(settings.get("rules") or [], arts, base)
     signature = _signature(events)
-    # Already announced: the published file is this session's and found the same changes.
-    sent_before = bool(previous) and previous.get("as_of") == as_of and (previous.get("email") or {}).get("signature") == signature
+    # A rerun of a session announces only what the published build of that session
+    # did not: the same changes, or fewer, are not news a second time.
+    same_session = bool(previous) and previous.get("as_of") == as_of
+    published = {(e["key"], e["state"], e["tier"]) for e in (previous or {}).get("events") or []} if same_session else set()
+    fresh = [e["key"] for e in events if (e["key"], e["state"], e["tier"]) not in published]
     return {
         "schema": SCHEMA, "as_of": as_of, "edition": manifest.get("edition"), "generated_at": manifest.get("generated_at"),
         "site": site, "compared_with": (base or {}).get("as_of"), "problem": problem,
@@ -288,8 +291,8 @@ def build(*, root: Path | None = None, fetch: Callable[[str], str] | None = None
         "active": sorted(k for k, v in ledger.items() if v["tier"] > 0),
         "ledger": {"as_of": as_of, "entries": ledger},
         "ledger_base": base,
-        "email": {"due": bool(events) and not sent_before, "signature": signature,
-                  "subject": subject_line(as_of, events)},
+        "email": {"due": bool(fresh), "signature": signature, "fresh": fresh,
+                  "subject": subject_line(as_of, [e for e in events if e["key"] in set(fresh)] if same_session else events)},
     }
 
 

@@ -32,6 +32,10 @@ def _line(e: dict) -> str:
 def compose(payload: dict) -> tuple[str, str, str]:
     """(subject, plain text, HTML) for a payload's events, high first, then by state."""
     events = payload.get("events") or []
+    # Only what this build adds to the session's published alerts (a rerun's news).
+    fresh = (payload.get("email") or {}).get("fresh")
+    if fresh is not None:
+        events = [e for e in events if e["key"] in set(fresh)]
     site = payload.get("site", "").rstrip("/")
     subject = (payload.get("email") or {}).get("subject") or f"Market Recap alerts · {payload.get('as_of')}"
     high = [e for e in events if e["severity"] == "high"]
