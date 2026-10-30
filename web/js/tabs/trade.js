@@ -14,6 +14,7 @@ import { resolveTicker } from '../routes.js';
 import { overnightCard } from '../overnight-card.js';
 import { tradePlanCard } from '../plan-card.js';
 import workbench from '../trade-workbench.js';
+import eventLab from '../event-lab.js';
 
 const valid = (v) => typeof v === 'number' && Number.isFinite(v);
 const usd = (v, digits = 2) => (valid(v) ? `$${num(v, digits)}` : DASH);
@@ -390,7 +391,7 @@ export default function renderTrade(root, technicals, _manifest, ctx) {
     'Levels come from the nightly build\'s daily bars; the overnight board is live and separate. A blank is missing coverage, never zero.',
     'Buyback blackout and insider buying are on RISK → POSITIONING with short interest and the trend-follower levels.',
   ]));
-  const tabs = ['STRUCTURE & LAB', 'TRADE PLAN', 'OVERNIGHT', 'SCORECARD'];
+  const tabs = ['STRUCTURE & LAB', 'EVENT LAB', 'TRADE PLAN', 'OVERNIGHT', 'SCORECARD'];
   const host = el('div', {});
   const state = { reference: null, onReference: null, onPlan: null, sizing: null };
   const show = (selected) => {
@@ -398,10 +399,12 @@ export default function renderTrade(root, technicals, _manifest, ctx) {
     if (selected === tabs[0]) {
       workbench(host, technicals, ctx);
     } else if (selected === tabs[1]) {
+      eventLab(host, technicals, ctx);
+    } else if (selected === tabs[2]) {
       setups(host, technicals, ctx, state);
       sizing(host, state);
       tradePlanCard(host, state);
-    } else if (selected === tabs[2]) {
+    } else if (selected === tabs[3]) {
       overnight(host);
       const content = el('div', {});
       const fold = el('details', { class: 'sx-fold' }, [el('summary', { text: 'Historical research · overnight vs intraday returns' }), content]);

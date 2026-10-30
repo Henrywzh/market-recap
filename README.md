@@ -1077,3 +1077,15 @@ TODAY fills today's states. The result sits beside the unconditioned one with
 trades, separate stretches (signals under 91 days apart are one), how many
 trades each condition keeps alone, a small-sample warning, and the share of
 2,000 random draws of as many trades that did as well.
+
+**Trade Desk: EVENT LAB.** One ticker's trigger days (intraday low / high, close,
+open gap or σ move against the prior close) with optional AND conditions read
+at that close (RSI(6), 50/200-day average, distance from the 1-year high, the
+backdrop states in `trade_conditions.json`), excluded periods (presets and
+custom ranges, by trigger date), and one event per N sessions. Outcomes run from
+the trigger close to each of days 1-5, 10 and 20's open and close: n, P(>0),
+mean, median, min, quartiles and max, beside every session in the same window
+as a baseline; a scatter with a rolling median, a table by year, the event list
+as CSV, separate stretches and a random-draw check. Daily bars start in October
+2016, so periods before that are greyed out. `web/js/event-lab-model.js` holds
+the arithmetic.
