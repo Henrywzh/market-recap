@@ -9,14 +9,12 @@ import { rangeStart } from './range.js';
 import { chipView } from './chip-card.js';
 import { dailyMoves, tailShare } from './trade-events.js';
 import { returns as dailyReturns, sigmaOf } from './movecheck-model.js';
-import { likeToday } from './trade-conditions.js';
+import { likeToday, readingText } from './trade-conditions.js';
 
 const note = (text) => el('div', { class: 'wb-note', text });
 const field = (label, node) => el('label', { class: 'wb-field' }, [el('span', { text: label }), node]);
 const stat = (label, value, detail = '') => el('div', { class: 'wb-stat' }, [el('span', { text: label }), el('strong', { text: value, class: /^[−-]/.test(value) ? 'down' : /^\+/.test(value) ? 'up' : '' }), note(detail)]);
 const pctText = (v) => Number.isFinite(v) ? pct(v, 2) : DASH;
-// Today's reading behind each backdrop condition's state.
-const readingText = (key, v) => ({ fed: `${num(v, 2)}%`, rates: `${num(v, 2)}%`, trend: `${pct(v, 1)} vs avg`, vix: num(v, 1), breadth: `z ${num(v, 2)}` })[key] ?? num(v, 2);
 // EVENT LAB's σ trigger for a move of `z`: at least this extreme, to 0.1σ, from 0.5σ.
 export const labSigma = (z) => Math.max(0.5, Math.floor(Math.abs(z) * 10) / 10);
 

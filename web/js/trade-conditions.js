@@ -3,6 +3,11 @@
 // say how much a conditioned result can be trusted (trades, separate stretches,
 // how often a random draw of as many trades did as well).
 
+import { num, pct } from './fmt.js';
+
+// Today's reading behind each backdrop condition's state, for display.
+export const readingText = (key, v) => ({ fed: `${num(v, 2)}%`, rates: `${num(v, 2)}%`, trend: `${pct(v, 1)} vs avg`, vix: num(v, 1), breadth: `z ${num(v, 2)}` })[key] ?? num(v, 2);
+
 // runs: [[first_date, state], ...] sorted; the state holds from that date on.
 export function stateAt(runs, date) {
   let lo = 0; let hi = (runs?.length || 0) - 1; let found = null;

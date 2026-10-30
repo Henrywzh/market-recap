@@ -26,23 +26,44 @@ export function macroSnapshot(overview, regime, gdp, priced, gdpnow = null) {
     : [el('div', { class: 'gap', text: 'Macro snapshot unavailable in this build.' })]);
 }
 
-export function macroRegimeCard(regime, now = null) {
-  const points = (regime?.points || []).filter((p) => finite(p.growth) && finite(p.inflation_change_pp));
+const OFFICIAL = 'OFFICIAL · REVISED';
+const REALTIME = 'REAL-TIME · AS KNOWN THEN';
+
+// Both views on one footing: official points are the revised monthly figures with
+// the nowcast past them; real-time points are each month as read at the time.
+export function regimeViews(regime, now, realtime) {
+  const ok = (p) => finite(p.growth) && finite(p.inflation_change_pp);
+  const official = (regime?.points || []).filter(ok);
+  const officialNow = (now?.points || []).filter(ok);
+  const rt = (realtime?.points || []).filter(ok);
+  return {
+    official: { points: official, now: officialNow },
+    realtime: { points: rt.filter((p) => p.source !== 'ledger'), now: rt.filter((p) => p.source === 'ledger') },
+  };
+}
+
+// Months both views cover, and how many land in the same quadrant.
+export function regimeAgreement(views) {
+  const real = new Map([...views.realtime.points, ...views.realtime.now].map((p) => [p.month, regimeName(p.growth, p.inflation_change_pp)]));
+  const both = views.official.points.filter((p) => real.has(p.month));
+  return { months: both.length, same: both.filter((p) => regimeName(p.growth, p.inflation_change_pp) === real.get(p.month)).length };
+}
+
+function drawRegimeMap(node, points, nowPoints, mode) {
   const latest = points.at(-1);
-  if (!latest) return card('GROWTH / INFLATION MAP', null, [el('div', { class: 'gap', text: 'No matching monthly CFNAI and core PCE observations in this build.' })]);
-  const nowPoints = (now?.points || []).filter((p) => finite(p.growth) && finite(p.inflation_change_pp));
   const all = [...points, ...nowPoints];
   const x = Math.max(.2, ...all.map((p) => Math.abs(p.growth))) * 1.18;
   const y = Math.max(.1, ...all.map((p) => Math.abs(p.inflation_change_pp))) * 1.18;
-  const node = el('div', { class: 'chart', style: 'height:360px', 'aria-label': 'Growth and inflation regime map' });
   const quadrant = (x0, y0, x1, y1, name, color) => [{ name, xAxis: x0, yAxis: y0, itemStyle: { color }, label: { position: x0 < 0 ? (y0 < 0 ? 'insideBottomLeft' : 'insideTopLeft') : (y0 < 0 ? 'insideBottomRight' : 'insideTopRight') } }, { xAxis: x1, yAxis: y1 }];
+  const pointTip = (d) => (mode === REALTIME
+    ? `${d.month} · as known ${d.known || DASH}${d.source === 'ledger' ? ' · nowcast, still moving' : ''}<br>Growth: ${num(d.growth, 3)} (${d.basis === 'ads_raw' ? 'ADS, raw' : 'ADS mapped to CFNAI'})<br>Core PCE YoY change: ${num(d.inflation_change_pp, 2)} pp<br>${regimeName(d.growth, d.inflation_change_pp)}`
+    : `${d.month}<br>CFNAI 3M: ${num(d.growth, 3)}<br>Core PCE YoY change: ${num(d.inflation_change_pp, 2)} pp<br>Core PCE YoY: ${pct(d.inflation_yoy, 2)}`);
   requestAnimationFrame(() => render(node, (o, p) => ({
     ...o,
     grid: { ...o.grid, left: 60, right: 38, top: 32, bottom: 56 },
-    xAxis: { ...o.xAxis, type: 'value', min: -x, max: x, name: 'CFNAI 3M · above / below trend', nameLocation: 'middle', nameGap: 32, nameTextStyle: { color: p.dim }, axisLabel: { ...o.xAxis.axisLabel, showMinLabel: false, showMaxLabel: false } },
-    yAxis: { ...o.yAxis, type: 'value', min: -y, max: y, name: 'Core PCE YoY change · pp / 3M', nameLocation: 'middle', nameGap: 45, nameTextStyle: { color: p.dim } },
-    tooltip: { ...o.tooltip, trigger: 'item', formatter: (v) => (v.data?.now ? nowTooltip(v.data.now)
-      : `${v.data?.month || ''}<br>CFNAI 3M: ${num(v.value?.[0], 3)}<br>Core PCE YoY change: ${num(v.value?.[1], 2)} pp<br>Core PCE YoY: ${pct(v.data?.inflation, 2)}`) },
+    xAxis: { ...o.xAxis, type: 'value', min: -x, max: x, name: mode === REALTIME ? 'Growth as known · ADS on the CFNAI scale' : 'CFNAI 3M · above / below trend', nameLocation: 'middle', nameGap: 32, nameTextStyle: { color: p.dim }, axisLabel: { ...o.xAxis.axisLabel, showMinLabel: false, showMaxLabel: false } },
+    yAxis: { ...o.yAxis, type: 'value', min: -y, max: y, name: 'Core PCE YoY change · pp / 3M', nameLocation: 'middle', nameGap: 45, nameTextStyle: { color: p.dim }, axisLabel: { ...o.yAxis.axisLabel, showMinLabel: false, showMaxLabel: false, formatter: (v) => num(v, 2) } },
+    tooltip: { ...o.tooltip, trigger: 'item', formatter: (v) => (v.data?.now && mode === OFFICIAL ? nowTooltip(v.data.now) : pointTip(v.data?.point || {})) },
     series: [{ type: 'scatter', data: [], silent: true,
       markLine: { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: p.faint, width: 1 }, data: [{ xAxis: 0 }, { yAxis: 0 }] },
       markArea: { silent: true, label: { show: true, color: p.dim, fontSize: 10 }, data: [
@@ -67,33 +88,66 @@ export function macroRegimeCard(regime, now = null) {
         } : {}),
       }];
     }), { type: 'scatter', z: 5, symbol: 'circle',
-      data: points.map((v, i) => ({ value: [v.growth, v.inflation_change_pp], month: v.month, inflation: v.inflation_yoy,
+      data: points.map((v, i) => ({ value: [v.growth, v.inflation_change_pp], point: v,
         symbolSize: i === points.length - 1 ? 15 : i === 0 ? 7 : 5,
         itemStyle: { color: p.accent, opacity: .3 + .7 * (i + 1) / points.length,
           borderColor: i === points.length - 1 ? p.text : p.panel, borderWidth: i === points.length - 1 ? 2 : 1 },
         label: { show: i === 0 || i === points.length - 1,
-          formatter: `${i === points.length - 1 ? 'LATEST · ' : ''}${v.month}`,
+          formatter: `${i === points.length - 1 ? (mode === REALTIME ? 'MONTH-END READ · ' : 'LATEST · ') : ''}${v.month}`,
           position: i === points.length - 1 ? 'bottom' : 'left', distance: 10, color: p.text,
           fontWeight: i === points.length - 1 ? 'bold' : 'normal', fontSize: 10 },
       })),
-    }, ...(nowPoints.length ? [{ type: 'line', silent: true, symbol: 'none', z: 4,
+    }, ...(nowPoints.length && latest ? [{ type: 'line', silent: true, symbol: 'none', z: 4,
       data: [[latest.growth, latest.inflation_change_pp], ...nowPoints.map((v) => [v.growth, v.inflation_change_pp])],
       lineStyle: { color: p.text, width: 1.5, type: 'dashed', opacity: .8 } },
     { type: 'scatter', z: 6, symbol: 'emptyCircle', symbolSize: 14,
-      data: nowPoints.map((v, i) => ({ value: [v.growth, v.inflation_change_pp], now: v,
+      data: nowPoints.map((v, i) => ({ value: [v.growth, v.inflation_change_pp], now: v, point: v,
         itemStyle: { color: p.panel, borderColor: p.text, borderWidth: 2 },
         label: { show: i === nowPoints.length - 1, formatter: `NOW · ${v.month}`, position: 'top', distance: 8,
           color: p.text, fontWeight: 'bold', fontSize: 10 } })) }] : [])],
   })));
-  const nowLast = nowPoints.at(-1);
-  return card('GROWTH / INFLATION MAP · LAST 12 MATCHED MONTHS', null, [el('div', { class: 'macro-trace-key', text: `FADED → RECENT · arrows show the last 3 monthly moves · outlined dot = latest official${nowLast ? ' · dashed ring = NOW (nowcast)' : ''}` }), node,
-    nowLast ? el('div', { class: 'note-text' }, [el('strong', { text: `NOW · ${nowLast.month} · ${regimeName(nowLast.growth, nowLast.inflation_change_pp)}` }),
-      ` · growth ${num(nowLast.growth, 3)} (${nowLast.growth_source === 'ads' ? `ADS through ${now.ads_through}, mapped to CFNAI` : 'official CFNAI'}), core PCE YoY ${pct(nowLast.inflation_yoy, 2)} (${nowLast.inflation_source === 'cleveland' ? `Cleveland Fed nowcast, ${nowLast.inflation_asof}` : 'official'}), change ${num(nowLast.inflation_change_pp, 2)} pp. A real-time estimate, not a print; it moves until the official month arrives.`]) : null,
-    el('div', { class: 'note-text', text: `${latest.month} · ${regimeName(latest.growth, latest.inflation_change_pp)} · growth ${num(latest.growth, 3)}, core PCE YoY ${pct(latest.inflation_yoy, 2)}, change ${num(latest.inflation_change_pp, 2)} pp over ${regime.change_months} months.` }),
-    el('div', { class: 'note-text', text: 'Above/below historical trend is CFNAI’s zero line; inflation direction is the change in core PCE YoY, not its absolute level. Reference months are paired, not release dates. Revised current-vintage data; descriptive, not a trading signal.' }),
-    el('div', { class: 'field-note' }, [el('a', { href: 'https://fred.stlouisfed.org/series/CFNAIMA3', text: 'Chicago Fed CFNAI 3M ↗' }), ' · ', el('a', { href: 'https://fred.stlouisfed.org/series/PCEPILFE', text: 'BEA core PCE via FRED ↗' }),
+}
+
+// opts.title: the card title; opts.compact: leave out the method fold and source links.
+export function macroRegimeCard(regime, now = null, realtime = null, opts = {}) {
+  const views = regimeViews(regime, now, realtime);
+  const latest = views.official.points.at(-1);
+  const title = opts.title || 'GROWTH / INFLATION MAP · LAST 12 MATCHED MONTHS';
+  if (!latest) return card(title, null, [el('div', { class: 'gap', text: 'No matching monthly CFNAI and core PCE observations in this build.' })]);
+  const hasRealtime = views.realtime.points.length > 0;
+  const node = el('div', { class: 'chart', style: 'height:360px', 'aria-label': 'Growth and inflation regime map' });
+  const key = el('div', { class: 'macro-trace-key' });
+  const notes = el('div', {});
+  const agree = regimeAgreement(views);
+  const nowLast = views.official.now.at(-1);
+  const officialFor = (month) => { const o = views.official.points.find((q) => q.month === month); return o ? regimeName(o.growth, o.inflation_change_pp) : null; };
+  const draw = (mode) => {
+    const view = mode === REALTIME ? views.realtime : views.official;
+    drawRegimeMap(node, view.points, view.now, mode);
+    if (mode === REALTIME) {
+      const last = view.points.at(-1); const live = view.now.at(-1);
+      key.textContent = `FADED → RECENT · each month as read the first business day after it, before revisions · outlined dot = latest month-end read${live ? ' · dashed ring = this month so far' : ''}`;
+      notes.replaceChildren(
+        live ? el('div', { class: 'note-text' }, [el('strong', { text: `NOW · ${live.month} · ${regimeName(live.growth, live.inflation_change_pp)}` }), ` · read ${live.known}, still moving until the month ends.`]) : null,
+        last ? el('div', { class: 'note-text' }, [el('strong', { text: `${last.month} · ${regimeName(last.growth, last.inflation_change_pp)}` }),
+          ` as read on ${last.known}${officialFor(last.month) ? ` · official (revised) data now say ${officialFor(last.month)}` : ''}.`]) : null,
+        agree.months ? el('div', { class: 'note-text', text: `Official and real-time agree on ${agree.months ? `${agree.same} of ${agree.months}` : DASH} months shown. The gap is revisions and the nowcast's error: real-time is what a reader could have known, official is what later data says happened.` }) : null,
+        el('div', { class: 'note-text', text: 'Growth: the Philadelphia Fed ADS index\'s 3-month average on that day, mapped onto CFNAI-MA3 by a fit on CFNAI already published then (raw ADS before 2016). Inflation: the Cleveland Fed core PCE YoY nowcast minus the official YoY three months earlier, as published then. config/regime_quadrant_history.json, then this page\'s nowcast ledger.' }));
+    } else {
+      key.textContent = `FADED → RECENT · arrows show the last 3 monthly moves · outlined dot = latest official${nowLast ? ' · dashed ring = NOW (nowcast)' : ''}`;
+      notes.replaceChildren(
+        nowLast ? el('div', { class: 'note-text' }, [el('strong', { text: `NOW · ${nowLast.month} · ${regimeName(nowLast.growth, nowLast.inflation_change_pp)}` }),
+          ` · growth ${num(nowLast.growth, 3)} (${nowLast.growth_source === 'ads' ? `ADS through ${now.ads_through}, mapped to CFNAI` : 'official CFNAI'}), core PCE YoY ${pct(nowLast.inflation_yoy, 2)} (${nowLast.inflation_source === 'cleveland' ? `Cleveland Fed nowcast, ${nowLast.inflation_asof}` : 'official'}), change ${num(nowLast.inflation_change_pp, 2)} pp. A real-time estimate, not a print; it moves until the official month arrives.`]) : null,
+        el('div', { class: 'note-text', text: `${latest.month} · ${regimeName(latest.growth, latest.inflation_change_pp)} · growth ${num(latest.growth, 3)}, core PCE YoY ${pct(latest.inflation_yoy, 2)}, change ${num(latest.inflation_change_pp, 2)} pp over ${regime.change_months} months.` }),
+        el('div', { class: 'note-text', text: 'Above/below historical trend is CFNAI’s zero line; inflation direction is the change in core PCE YoY, not its absolute level. Reference months are paired, not release dates. Revised current-vintage data; descriptive, not a trading signal.' }));
+    }
+  };
+  const tools = hasRealtime ? periodSwitch([OFFICIAL, REALTIME], OFFICIAL, draw) : null;
+  draw(OFFICIAL);
+  return card(title, tools, [key, node, notes,
+    opts.compact ? (opts.link || null) : el('div', { class: 'field-note' }, [el('a', { href: 'https://fred.stlouisfed.org/series/CFNAIMA3', text: 'Chicago Fed CFNAI 3M ↗' }), ' · ', el('a', { href: 'https://fred.stlouisfed.org/series/PCEPILFE', text: 'BEA core PCE via FRED ↗' }),
       ...(now?.sources ? [' · ', el('a', { href: now.sources.cleveland, text: 'Federal Reserve Bank of Cleveland inflation nowcasting ↗' }), ' · ', el('a', { href: now.sources.ads, text: 'Federal Reserve Bank of Philadelphia ADS index ↗' })] : [])]),
-    now ? nowcastFold(now) : null,
+    !opts.compact && now ? nowcastFold(now) : null,
   ]);
 }
 

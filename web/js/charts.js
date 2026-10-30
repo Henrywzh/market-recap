@@ -51,6 +51,9 @@ function baseOption(p) {
     grid: { left: 52, right: 16, top: 16, bottom: 34 },
     tooltip: {
       trigger: 'axis',
+      // Inside the chart, and long lines wrap: a tooltip near an edge is never cut off.
+      confine: true,
+      extraCssText: 'max-width:min(92vw,440px);white-space:normal;overflow-wrap:anywhere;',
       backgroundColor: '#000',
       borderColor: p.border,
       borderWidth: 1,

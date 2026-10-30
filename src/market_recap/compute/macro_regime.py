@@ -131,3 +131,26 @@ def update_ledger(previous: list, now: dict, official: dict, as_of: str) -> list
             row['actual_quadrant'] = quadrant(hit['growth'], hit['inflation_change_pp'])
             row['actual_inflation_yoy'] = hit['inflation_yoy']
     return [rows[d] for d in sorted(rows)]
+
+
+# --- REAL-TIME view: each month as it was known at the time ------------------
+def realtime_points(history: list, ledger: list, first_month: str | None) -> list:
+    """One point per month from ``first_month`` on, as known then.
+
+    Archive rows (``config/regime_quadrant_history.json``) are the month-end reads
+    (known the first business day after the month). A month past the archive takes
+    the nowcast ledger's last read of it, flagged ``source="ledger"``: still moving
+    while that month has no official figures.
+    """
+    by_month = {}
+    for row in ledger or []:                     # date-ordered: the last read wins
+        if row.get('month') and row.get('quadrant'):
+            by_month[row['month']] = {'month': row['month'], 'known': row.get('date'), 'growth': row.get('growth'),
+                                      'inflation_change_pp': row.get('inflation_change_pp'),
+                                      'quadrant': row['quadrant'], 'source': 'ledger'}
+    for row in history or []:
+        if row.get('month') and row.get('quadrant'):
+            by_month[row['month']] = {'month': row['month'], 'known': row.get('known'), 'growth': row.get('growth'),
+                                      'inflation_change_pp': row.get('inflation_change_pp'),
+                                      'quadrant': row['quadrant'], 'source': 'archive', 'basis': row.get('growth_basis')}
+    return [by_month[m] for m in sorted(by_month) if first_month is None or m >= first_month]

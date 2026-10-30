@@ -2205,3 +2205,9 @@ table.data.idm-table tr.idm-section-row td { color: var(--accent); font-size: 10
 .el-trade-config { grid-template-columns:minmax(0,1fr); }
 @media(max-width:700px) { .wb-today { grid-template-columns:1fr; } .wb-today .wb-backdrop-fields { grid-template-columns:1fr 1fr; } }
 .el-path { height:380px; }
+/* TODAY → MACRO BACKDROP: the map beside today's market backdrop states. */
+.today-backdrop { margin-bottom:18px; }
+.today-backdrop-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px 18px; margin:6px 0 12px; }
+.today-backdrop-item { display:flex; flex-direction:column; gap:4px; padding:10px 12px; border:1px solid var(--border); border-radius:4px; min-width:0; }
+.today-backdrop-item strong { font-size:15px; color:var(--text); letter-spacing:.3px; }
+.today-backdrop-item .dim { font-size:11px; }

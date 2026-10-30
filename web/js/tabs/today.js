@@ -4,8 +4,10 @@
 // part that moves during the session is the MOVERS table, which re-ranks the names
 // by today's move (against yesterday's close) while the market is open.
 
-import { el, num, sectionTitle, tag, liveBadge, dirClass, table, DASH } from '../fmt.js';
+import { card, el, num, sectionTitle, tag, liveBadge, dirClass, table, DASH } from '../fmt.js';
 import { mountLive } from '../live.js';
+import { macroRegimeCard } from '../macro-regime.js';
+import { readingText } from '../trade-conditions.js';
 import { createFeed } from '../live-feed.js';
 import { liveView, liveIsCurrent } from '../today-live.js';
 import { liveBoard, headlineOf, liveSignals } from '../today-live-board.js';
@@ -423,6 +425,26 @@ function startLiveBoard(parts, data) {
   });
 }
 
+async function backdropSection(host, ctx) {
+  // Built before the wait: if neither file loads, this is all the section shows.
+  const missing = el('div', { class: 'gap', text: 'Macro backdrop unavailable in this build.' });
+  host.append(el('div', { class: 'gap', text: 'Loading macro backdrop…' }));
+  const [macro, conditions] = await Promise.all(['macro', 'trade_conditions'].map((key) => ctx.loadArtifact(key).catch(() => null)));
+  if (!macro && !conditions) { host.replaceChildren(missing); return; }
+  const link = el('div', { class: 'field-note' }, [el('a', { href: '#rates', text: 'Method, sources and the nowcast\'s record → RISK · RATES & MACRO · CPI & macro' })]);
+  const map = macro?.regime ? macroRegimeCard(macro.regime, macro.regime_nowcast, macro.regime_realtime, { title: 'GROWTH / INFLATION MAP', compact: true, link })
+    : card('GROWTH / INFLATION MAP', null, [el('div', { class: 'gap', text: 'Macro data unavailable in this build.' })]);
+  const list = conditions?.conditions || [];
+  const states = card('MARKET BACKDROP TODAY', el('a', { href: '#trade', class: 'dim', text: 'study it → TRADE DESK' }), list.length ? [
+    el('div', { class: 'today-backdrop-grid' }, list.map((c) => el('div', { class: 'today-backdrop-item', title: c.definition }, [
+      el('span', { class: 'stat-label', text: c.label }),
+      el('strong', { text: c.today || DASH }),
+      el('span', { class: 'dim', text: Number.isFinite(c.reading) ? readingText(c.key, c.reading) : '' })]))),
+    el('div', { class: 'note-text', text: `Each state as of ${conditions.as_of || 'the last close'}; hover for its definition. The same conditions filter EVENT LAB on the Trade Desk.` }),
+  ] : [el('div', { class: 'gap', text: 'Market backdrop unavailable in this build.' })]);
+  host.replaceChildren(map, states);
+}
+
 export default function renderToday(root, data, manifest, ctx = {}) {
   // One element for the whole page, so its phone gutter is its own (CSS).
   const page = el('div', { class: 'today-page' });
@@ -438,6 +460,11 @@ export default function renderToday(root, data, manifest, ctx = {}) {
   const board = boardCard(data.board);
   if (board) parts.board.append(board.node);
   page.append(parts.headline, parts.board);
+  // MACRO BACKDROP: the growth / inflation map and the market's backdrop states,
+  // loaded after the page (they live in other artifacts).
+  const backdrop = el('div', { class: 'grid two today-backdrop' });
+  page.append(sectionTitle('MACRO BACKDROP', 'GROWTH, INFLATION AND THE MARKET\'S STATE'), backdrop);
+  if (ctx.loadArtifact) backdropSection(backdrop, ctx);
   const moversHost = el('div', { class: 'today-movers-host' });
   moversHost.replaceChildren(...moversNodes(data.unusual, { live: null, asOf: data.as_of }));
   page.append(el('div', { class: 'today-columns' }, [

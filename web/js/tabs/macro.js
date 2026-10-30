@@ -121,7 +121,7 @@ export default async function renderMacro(root, data, ctx = {}) {
   root.append(sectionTitle('MACRO'));
   const [overview, catalysts, priced] = await Promise.all(['overview', 'catalysts', 'priced'].map((key) => ctx.loadArtifact?.(key).catch(() => null) || null));
   root.append(macroSnapshot(overview, data.regime, data.regime_gdp, priced, data.regime_nowcast?.gdpnow),
-    el('div', { class: 'grid two' }, [macroRegimeCard(data.regime, data.regime_nowcast), upcomingMacro(catalysts)]));
+    el('div', { class: 'grid two' }, [macroRegimeCard(data.regime, data.regime_nowcast, data.regime_realtime), upcomingMacro(catalysts)]));
   renderCpi(root, data.cpi);
 
   const inflation = data.inflation;

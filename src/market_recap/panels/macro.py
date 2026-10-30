@@ -7,7 +7,7 @@ import os
 
 import pandas as pd
 
-from ..config import ARTIFACT_DIR, NOWCAST_EVALUATION_PATH
+from ..config import ARTIFACT_DIR, NOWCAST_EVALUATION_PATH, REGIME_QUADRANT_HISTORY_PATH
 from ..compute import inflation_releases, macro_regime
 from ..compute import periods as P
 from ..compute import returns as R
@@ -177,6 +177,14 @@ def build(ctx) -> dict:
                                      regime_cfg, previous.get('regime_nowcast') or {},
                                      to_iso_date(closes.index[-1]) if not closes.empty else None)
 
+    # The same map as known at the time: archived month-end reads, then the ledger.
+    try:
+        history = json.loads(REGIME_QUADRANT_HISTORY_PATH.read_text())['rows']
+    except (OSError, ValueError, KeyError):
+        history = []
+    first = (regime.get('points') or [{}])[0].get('month')
+    regime_realtime = {'points': macro_regime.realtime_points(history, regime_nowcast.get('ledger') or [], first)}
+
     return inflation_releases.attach({
         "as_of": to_iso_date(closes.index[-1]) if not closes.empty else None,
         "commodities": {"periods": periods, "rows": commodity_rows},
@@ -184,6 +192,7 @@ def build(ctx) -> dict:
         "regime": regime,
         "regime_gdp": gdp,
         "regime_nowcast": regime_nowcast,
+        "regime_realtime": regime_realtime,
         "cpi": cpi.build(ctx),
         "ppi": ppi.build(ctx),
         "note": (

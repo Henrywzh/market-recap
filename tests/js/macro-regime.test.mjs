@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { regimeName } from '../../web/js/macro-regime.js';
+import { regimeName, regimeViews, regimeAgreement } from '../../web/js/macro-regime.js';
 
 test('four quadrants describe growth relative to trend and inflation direction', () => {
   assert.equal(regimeName(-.1, .2), 'STAGFLATION');
@@ -41,4 +41,20 @@ test('nowcast ledger shows one row per month, its last reading, newest month fir
   ]);
   assert.deepEqual(rows.map(r => [r.month, r.quadrant]), [['2026-11', 'GOLDILOCKS'], ['2026-10', 'REFLATION']]);
   assert.deepEqual(nowcastLedgerRows(null), []);
+});
+
+test('the real-time view splits month-end reads from the still-moving ledger month, and agreement counts shared months', () => {
+  const regime = { points: [{ month: '2026-08', growth: 0.1, inflation_change_pp: 0.1 }, { month: '2026-09', growth: 0.05, inflation_change_pp: 0.08 }] };
+  const now = { points: [{ month: '2026-10', growth: 0.07, inflation_change_pp: 0.2 }] };
+  const realtime = { points: [
+    { month: '2026-08', growth: 0.2, inflation_change_pp: 0.1, source: 'archive' },
+    { month: '2026-09', growth: -0.03, inflation_change_pp: -0.02, source: 'archive' },
+    { month: '2026-10', growth: 0.07, inflation_change_pp: 0.21, source: 'ledger' },
+    { month: '2026-11', growth: null, inflation_change_pp: 0.1, source: 'ledger' }] };
+  const views = regimeViews(regime, now, realtime);
+  assert.deepEqual(views.realtime.points.map((p) => p.month), ['2026-08', '2026-09']);
+  assert.deepEqual(views.realtime.now.map((p) => p.month), ['2026-10']);
+  assert.equal(views.official.now.length, 1);
+  assert.deepEqual(regimeAgreement(views), { months: 2, same: 1 });
+  assert.deepEqual(regimeAgreement(regimeViews(regime, now, null)), { months: 0, same: 0 });
 });
