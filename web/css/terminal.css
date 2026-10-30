@@ -2194,3 +2194,14 @@ table.data.idm-table tr.idm-section-row td { color: var(--accent); font-size: 10
 .el-table tr.el-focus-row td { background:var(--panel-alt); font-weight:600; }
 .el-focus { margin:14px 0 0; max-width:220px; }
 .el-events { max-height:420px; overflow:auto; }
+/* STRUCTURE: today's move, backdrop and the button to EVENT LAB. */
+.wb-today { grid-template-columns:minmax(0,1fr) minmax(0,2fr) minmax(0,1fr); margin-top:16px; }
+.wb-today .wb-backdrop-fields { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.wb-today .wb-backdrop-fields .wb-field { display:flex; flex-direction:column; gap:3px; margin:4px 0; }
+.wb-today-state { font-size:13px; color:var(--text); letter-spacing:.3px; }
+.wb-lab-button { width:100%; margin:4px 0 8px; padding:10px 12px; }
+.wb-lab-button:disabled { opacity:.45; cursor:not-allowed; }
+.el-preset { margin:8px 0 12px; padding:8px 12px; border:1px solid var(--accent); border-radius:4px; color:var(--text); font-size:12px; }
+.el-trade-config { grid-template-columns:minmax(0,1fr); }
+@media(max-width:700px) { .wb-today { grid-template-columns:1fr; } .wb-today .wb-backdrop-fields { grid-template-columns:1fr 1fr; } }
+.el-path { height:380px; }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { eventStudy, simulateNextOpen } from '../../web/js/trade-events.js';
+import { dailyMoves, simulateNextOpen, tailShare } from '../../web/js/trade-events.js';
 
 function sample() {
   const dates = Array.from({ length: 70 }, (_, i) => `D${String(i).padStart(3, '0')}`);
@@ -9,15 +9,16 @@ function sample() {
   return { dates, close };
 }
 
-test('sigma events use prior volatility and expose 1, 3, 5, 10 and 20-session outcomes', () => {
+test('daily moves divide each return by the prior 20 sessions\' volatility', () => {
   const { dates, close } = sample();
-  const study = eventStudy(dates, close, { threshold: -2 });
-  assert.deepEqual(study.rows.map((r) => r.days), [1, 3, 5, 10, 20]);
-  assert.deepEqual(study.events.map((e) => e.worstDate), [dates[30]]);
-  assert.ok(Math.abs(study.events[0].forward[1] - (close[33] / close[30] - 1) * 100) < 1e-9);
-  const later = close.slice();
-  for (let i = 40; i < later.length; i++) later[i] *= 2;
-  assert.ok(eventStudy(dates, later, { threshold: -2 }).events.some((e) => e.worstDate === dates[30]));
+  const moves = dailyMoves(dates, close);
+  assert.equal(moves.length, dates.length - 1);
+  assert.ok(moves.slice(0, 20).every((m) => m.z === null));
+  const prior = moves.slice(9, 29).map((m) => m.ret);
+  const mean = prior.reduce((a, b) => a + b, 0) / 20;
+  const sd = Math.sqrt(prior.reduce((a, b) => a + (b - mean) ** 2, 0) / 19);
+  assert.ok(Math.abs(moves[29].z - moves[29].ret / sd) < 1e-9);
+  assert.ok(moves[29].z < -2);
 });
 
 test('simulation enters next open, exits fifth close and skips overlapping signals', () => {
@@ -29,14 +30,6 @@ test('simulation enters next open, exits fifth close and skips overlapping signa
   assert.equal(trades[0].exit, 'f');
   assert.ok(Math.abs(trades[0].ret - 9.9) < 1e-9);
   assert.deepEqual(simulateNextOpen(['h'], bars), []);
-});
-
-test('sigma excludes insufficient prior history and percent threshold respects sign', () => {
-  const { dates, close } = sample();
-  assert.equal(eventStudy(dates.slice(0, 15), close.slice(0, 15), { threshold: -2 }).eligible, 0);
-  const down = eventStudy(dates, close, { mode: 'percent', threshold: -5 });
-  assert.deepEqual(down.events.map((e) => e.worstDate), [dates[30]]);
-  assert.equal(eventStudy(dates, close, { mode: 'percent', threshold: 5 }).events.length, 0);
 });
 
 test('execution modes use only post-signal opens/closes with explicit holding endpoints', () => {
@@ -52,4 +45,11 @@ test('execution modes use only post-signal opens/closes with explicit holding en
   assert.equal(ret('open-open', 2).exit, 'third');
   assert.deepEqual(simulateNextOpen(['following'], bars, { execution: 'close-close', sessions: 1 }), []);
   assert.deepEqual(simulateNextOpen(['signal'], bars, { execution: 'bad' }), []);
+});
+
+test('tailShare counts values at least as far out, in the move\'s direction', () => {
+  assert.deepEqual(tailShare([-3, -1, 0, 2, 4, NaN, null], -1), { hits: 2, n: 5, share: 0.4 });
+  assert.deepEqual(tailShare([-3, -1, 0, 2, 4], 3), { hits: 1, n: 5, share: 0.2 });
+  assert.equal(tailShare([1, 2], 0), null);
+  assert.equal(tailShare([], -1), null);
 });

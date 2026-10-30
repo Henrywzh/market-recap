@@ -391,15 +391,23 @@ export default function renderTrade(root, technicals, _manifest, ctx) {
     'Levels come from the nightly build\'s daily bars; the overnight board is live and separate. A blank is missing coverage, never zero.',
     'Buyback blackout and insider buying are on RISK → POSITIONING with short interest and the trend-follower levels.',
   ]));
-  const tabs = ['STRUCTURE & LAB', 'EVENT LAB', 'TRADE PLAN', 'OVERNIGHT', 'SCORECARD'];
+  const tabs = ['STRUCTURE', 'EVENT LAB', 'TRADE PLAN', 'OVERNIGHT', 'SCORECARD'];
   const host = el('div', {});
   const state = { reference: null, onReference: null, onPlan: null, sizing: null };
+  // STRUCTURE's button opens EVENT LAB filled in with today's move and backdrop.
+  let labPreset = null;
+  const openLab = (preset) => {
+    labPreset = preset;
+    [...switcher.children].find((b) => b.textContent === tabs[1])?.click();
+    root.scrollIntoView?.({ block: 'start' });
+  };
   const show = (selected) => {
     host.replaceChildren();
     if (selected === tabs[0]) {
-      workbench(host, technicals, ctx);
+      workbench(host, technicals, ctx, { openLab });
     } else if (selected === tabs[1]) {
-      eventLab(host, technicals, ctx);
+      eventLab(host, technicals, ctx, labPreset);
+      labPreset = null;
     } else if (selected === tabs[2]) {
       setups(host, technicals, ctx, state);
       sizing(host, state);
@@ -425,7 +433,8 @@ export default function renderTrade(root, technicals, _manifest, ctx) {
     }
     else scorecard(host, ctx);
   };
-  root.append(el('div', { class: 'trade-nav' }, [periodSwitch(tabs, tabs[0], show),
+  const switcher = periodSwitch(tabs, tabs[0], show);
+  root.append(el('div', { class: 'trade-nav' }, [switcher,
     el('a', { href: '#positioning', class: 'dim', text: 'buyback blackout · insider buying → POSITIONING' })]), host);
   show(tabs[0]);
 }

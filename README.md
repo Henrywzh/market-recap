@@ -1049,40 +1049,36 @@ premium for.
 This is a research and teaching tool. The DCF tab in particular is a model you
 fill in yourself; it does not produce a recommendation.
 
-**Trade Desk structure lab.** STRUCTURE & LAB opens an estimated volume-by-price
-profile with YTD/1Y/2Y/5Y/MAX controls and a historical event simulation.
-The shared ticker search shows company/fund names and stock/ETF badges.
-Signals use close-to-close total returns divided by prior 20-session volatility;
-all entries occur after the signal session. Default 1D open-to-close enters at
-the next open and exits that close. Other modes enter at session +1 and exit
-at session +(N+1), using the selected close/open endpoints. The timeline states
-these endpoints. Trades do not overlap and deduct assumed 10bp round-trip costs;
-dividends, financing and borrow are excluded. Equity compounds at trade exits,
-so its drawdown excludes intratrade losses. These are in-sample descriptions.
-Profile smoothing is presentation only, not a probability density or fair value.
-TRADE PLAN keeps manual sizing; no duplicate event study is added there.
-
-**Trade Desk: your move and the backdrop.** YOUR MOVE takes a typed move in
-percent (today's intraday move, a level being watched): its σ against the last
-20 completed sessions sets the trigger and its sign the direction. BACKDROP AT
-SIGNAL keeps only the signals that fired in a chosen backdrop
-(`trade_conditions.json`, `[trade_conditions]`): Fed cycle (target vs 182 days
-earlier), 10Y vs its 200-session average, SPY vs its 200-session average, VIX
-in fixed bands, RSP/SPY log-ratio z-score, and the real-time growth / inflation
-quadrant (2014+: month-end ADS + Cleveland archive in
-`config/regime_quadrant_history.json`, built by
-`scripts/nowcast_evaluation/quadrant_history.py`, then the MACRO tab's daily
-nowcast ledger). Every state is read at the signal close as known then. LIKE
-TODAY fills today's states. The result sits beside the unconditioned one with
-trades, separate stretches (signals under 91 days apart are one), how many
-trades each condition keeps alone, a small-sample warning, and the share of
-2,000 random draws of as many trades that did as well.
+**Trade Desk: STRUCTURE and EVENT LAB.** STRUCTURE says what is today for one
+ticker: an estimated volume-by-price profile (YTD/1Y/2Y/5Y/MAX), the latest
+close-to-close move (or a typed YOUR MOVE, e.g. today's intraday move) in % and
+in σ of the prior 20 sessions, each with the share of the ticker's own sessions
+since 2016 at least as far out, and the market backdrop today
+(`trade_conditions.json`, `[trade_conditions]`: Fed cycle, 10Y and SPY against
+their 200-session averages, VIX bands, RSP/SPY z-score, the real-time growth /
+inflation quadrant from `config/regime_quadrant_history.json` then the MACRO
+nowcast ledger). STUDY THIS IN EVENT LAB opens EVENT LAB with that move as a
+σ trigger over every backdrop (LIKE TODAY there sets today's). EVENT LAB is the one event study: its
+outcome table runs from the t0 close, and TRADE IT trades the same events from
+the next session (open/close entry and exit, 1-20 sessions held; default close
+→ open, one session: buy session +1's close, sell session +2's open; no overlapping
+trades, split-adjusted bars, dividends, financing and borrow left out; equity
+compounds at exits, so its drawdown excludes losses within a trade). With a
+backdrop set it shows the result against any backdrop: trades, separate
+stretches (signals under 91 days apart are one), how many events each
+condition keeps alone, a small-sample warning and the share of 2,000 random
+draws of as many trades that did as well. In-sample descriptions, not forecasts.
+TRADE PLAN keeps manual sizing.
 
 **Trade Desk: EVENT LAB.** One ticker's trigger days (intraday low / high, close,
 open gap or σ move against the prior close) with optional AND conditions read
 at that close (RSI(6), 50/200-day average, distance from the 1-year high, the
-backdrop states in `trade_conditions.json`), excluded periods (presets and
-custom ranges, by trigger date), and one event per N sessions. Outcomes run from
+backdrop states in `trade_conditions.json`; RSI(6) < 30 by default), excluded
+periods (presets and custom ranges, by trigger date; dot-com, financial crisis,
+COVID and April 2025 tariffs left out by default, 2022's inflation and rate
+hikes kept), and one event per N sessions (5 by default). A path chart walks
+t0 close → each open and close to D20 with median, mean, 25-75% band, min / max
+and the win rate under each step. Outcomes run from
 the trigger close to each of days 1-5, 10 and 20's open and close: n, P(>0),
 mean, median, min, quartiles and max, beside every session in the same window
 as a baseline; a scatter with a rolling median, a table by year, the event list

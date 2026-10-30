@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sessions, fires, passes, decluster, outcomes, stats, study, byYear, rollingMedian, toCsv, excluded } from '../../web/js/event-lab-model.js';
+import { sessions, fires, passes, decluster, outcomes, stats, study, byYear, rollingMedian, rollingShare, toCsv, excluded, path } from '../../web/js/event-lab-model.js';
 
 // 300 flat sessions at 100, with a −5% intraday low on day 250 that closes −1%, and
 // a −6% close on day 260; the price then climbs 1 a day.
@@ -87,4 +87,44 @@ test('years, rolling median and CSV', () => {
   assert.deepEqual(rollingMedian(ev, 'close5', 2), [null, -1, -0.5]);
   const csv = toCsv([{ date: '2020-01-02', lowRet: -4.5, closeRet: -1, gapRet: 0, sigma: null, rsi6: 22, vs50: 1, vs200: 2, fromHigh: -3, out: { close1: 1.5 } }], 'QQQ');
   assert.ok(csv.split('\n')[1].startsWith('QQQ,2020-01-02,-4.500,-1.000,0.000,,22.0,'));
+});
+
+test('repeat studies on the same bars give the same answer whatever ran before', () => {
+  const b = bars();
+  const opts = { trigger: { kind: 'intraday', dir: -1, size: 4 }, gap: 0 };
+  const first = JSON.stringify(study(b, opts));
+  study(b, { ...opts, side: -1, costBps: 10, exclude: [{ from: '2020-01-01', to: '2020-03-01' }] });
+  assert.equal(JSON.stringify(study(b, opts)), first);
+  const short = study(b, { ...opts, side: -1 });
+  assert.ok(Math.abs(short.baseline.close5.mean + study(b, opts).baseline.close5.mean) < 1e-12);
+});
+
+test('distance from the 1Y high uses the highest of the last 252 closes', () => {
+  const n = 300;
+  const close = Array.from({ length: n }, (_, i) => (i === 10 ? 200 : 100));
+  const dates = close.map((_, i) => new Date(Date.UTC(2020, 0, 1) + i * 864e5).toISOString().slice(0, 10));
+  const rows = sessions({ dates, open: close, high: close, low: close, close });
+  assert.equal(rows[250].fromHigh, null);
+  assert.equal(rows[251].fromHigh, -50);
+  assert.equal(rows[261].fromHigh, -50);
+  assert.equal(rows[262].fromHigh, 0);
+});
+
+test('the path starts at zero and walks every open and close in order', () => {
+  const r = study(bars(), { trigger: { kind: 'intraday', dir: -1, size: 4 }, gap: 0 });
+  const p = path(r);
+  assert.equal(p.labels.length, 1 + 2 * 7);
+  assert.deepEqual(p.labels.slice(0, 3), ['t0 CLOSE', 'D1 O', 'D1 C']);
+  assert.equal(p.labels.at(-1), 'D20 C');
+  assert.equal(p.points[0].median, 0);
+  assert.equal(p.points[0].hit, null);
+  assert.equal(p.points.at(-1).median, r.summary.close20.median);
+  assert.equal(p.points.at(-1).max, r.summary.close20.max);
+  assert.equal(p.points[2].hit, r.summary.close1.hit);
+  assert.equal(p.points[2].baseHit, r.baseline.close1.hit);
+});
+
+test('rolling win rate counts outcomes above zero over the last N events', () => {
+  const events = [1, -1, 2, null, -3].map((v) => ({ out: { k: v } }));
+  assert.deepEqual(rollingShare(events, 'k', 2), [null, 0.5, 0.5, 1, 0]);
 });

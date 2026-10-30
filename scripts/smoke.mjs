@@ -289,13 +289,17 @@ for (const route of list) {
       }
     }
     if (route.startsWith('trade')) {
-      // EVENT LAB: the outcome table fills from the default ticker's bars.
-      await page.getByRole('button', { name: 'EVENT LAB', exact: true }).click();
+      // STRUCTURE's button opens EVENT LAB filled in; the outcome table and TRADE IT fill.
+      const toLab = page.getByRole('button', { name: 'STUDY THIS IN EVENT LAB →', exact: true });
+      await toLab.waitFor({ state: 'visible', timeout: RENDER_WAIT_MS });
+      if (await toLab.isEnabled()) await toLab.click();
+      else await page.getByRole('button', { name: 'EVENT LAB', exact: true }).click();
       const outcomes = page.locator('.event-lab .el-table');
       await outcomes.waitFor({ state: 'visible', timeout: RENDER_WAIT_MS });
       if (!(await outcomes.innerText()).includes('D20 CLOSE') || BAD_TEXT.test(await page.locator('.event-lab').innerText())) {
         throw new Error('EVENT LAB outcome table did not render cleanly');
       }
+      if (!(await page.locator('.event-lab .wb-metrics').innerText()).includes('TRADES')) throw new Error('EVENT LAB TRADE IT did not render');
       await page.getByRole('button', { name: 'OVERNIGHT', exact: true }).click();
       const fold = page.locator('details').filter({ hasText: 'Historical research · overnight vs intraday returns' });
       if (await fold.getAttribute('open') !== null) throw new Error('Overnight history should be collapsed by default');
