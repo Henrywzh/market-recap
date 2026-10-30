@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from market_recap.config import load_config
+import numpy as np
 import pandas as pd
 
 from market_recap.compute.buybacks import aggregate_history, attach_turnover, cash_execution, latest_capacity, plan_facts, quarter_at
@@ -146,3 +147,50 @@ def test_hedge_fund_monitor_form_pf():
     assert fpf["cash_equities"]["net_bn"] == 2423.0
     assert fpf["equity_derivatives"]["net_bn"] == -350.0
     assert fpf["financing"]["prime_broker_borrowing_bn"] == 3688.0
+
+
+def _turnover_by_slicing(issuer_quarters, tickers_by_cik, prices, volumes):
+    """The original per-quarter slicing, kept as the definition the running sums must match."""
+    p, v = prices.sort_index(), volumes.sort_index().reindex(prices.index)
+    out = {}
+    for cik, quarters in issuer_quarters.items():
+        names = tickers_by_cik.get(cik, [])
+        good = bool(names) and all(n in p.columns and n in v.columns for n in names)
+        out[cik] = []
+        for row in quarters:
+            item = dict(row)
+            start, end = pd.Timestamp(row['start']), pd.Timestamp(row['end'])
+            cal = p.index[(p.index >= start) & (p.index <= end)]
+            edges = len(cal) and (cal[0] - start).days <= 7 and (end - cal[-1]).days <= 7
+            if good and edges:
+                pp, vv = p.loc[cal, names], v.loc[cal, names]
+                valid = pp.notna() & vv.notna() & (pp > 0) & (vv >= 0)
+                if (valid.sum(axis=0) / len(cal) >= 0.9).all():
+                    item['turnover_usd'] = float((pp * vv).where(valid).sum().sum())
+            out[cik].append(item)
+    return out
+
+
+def test_turnover_running_sums_match_per_quarter_slicing():
+    rng = np.random.default_rng(7)
+    idx = pd.bdate_range('2022-01-03', '2024-12-31')
+    names = ['A', 'B', 'C', 'D']
+    prices = pd.DataFrame(rng.uniform(5, 500, (len(idx), 4)), index=idx, columns=names)
+    volumes = pd.DataFrame(rng.uniform(1e5, 1e7, (len(idx), 4)), index=idx, columns=names)
+    prices[rng.random(prices.shape) < 0.04] = np.nan          # scattered gaps
+    volumes.iloc[300:340, 1] = np.nan                          # one long gap fails coverage
+    prices.iloc[10, 2] = -1.0                                  # a bad print is not valid
+    volumes = volumes.drop(index=idx[500:505])                 # sessions with no volume row
+    quarters = [{'start': s.date().isoformat(), 'end': (s + pd.offsets.QuarterEnd(0)).date().isoformat(), 'value': 1.0}
+                for s in pd.date_range('2021-10-01', '2025-01-01', freq='QS')]
+    tickers = {1: ['A'], 2: ['B'], 3: ['A', 'C'], 4: ['D', 'MISSING'], 5: []}
+    issuers = {cik: quarters for cik in tickers}
+    fast = attach_turnover(issuers, tickers, prices, volumes)
+    slow = _turnover_by_slicing(issuers, tickers, prices, volumes)
+    assert fast.keys() == slow.keys()
+    for cik in fast:
+        for a, b in zip(fast[cik], slow[cik]):
+            assert ('turnover_usd' in a) == ('turnover_usd' in b), (cik, a['start'])
+            if 'turnover_usd' in a:
+                assert a['turnover_usd'] == pytest.approx(b['turnover_usd'], rel=1e-12)
+    assert any('turnover_usd' in r for r in fast[3]) and not any('turnover_usd' in r for r in fast[4])

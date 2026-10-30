@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 
+import numpy as np
 import pandas as pd
 from bs4 import BeautifulSoup
 
@@ -462,27 +463,40 @@ def attach_turnover(issuer_quarters, tickers_by_cik, prices, volumes):
 
     Both series must cover the interval; missing observations never become zero.
     This is a traded-value proxy, not cash flow or exact transaction notional.
+    Each name needs a valid close and volume on at least 90% of the quarter's
+    sessions, read from running sums: slicing the frames per quarter took 80s a build.
     """
     if prices is None or volumes is None or prices.empty or volumes.empty:
         return issuer_quarters
     p, v = prices.copy().sort_index(), volumes.copy().sort_index()
     p.index, v.index = pd.to_datetime(p.index), pd.to_datetime(v.index)
     v = v.reindex(p.index)
+    common = [c for c in p.columns if c in v.columns]
+    pa, va = p[common].to_numpy(dtype=float), v[common].to_numpy(dtype=float)
+    with np.errstate(invalid='ignore'):
+        valid = ~np.isnan(pa) & ~np.isnan(va) & (pa > 0) & (va >= 0)
+    zeros = np.zeros((1, len(common)))
+    # Row k is the total over the first k sessions, so [i0, i1) is row i1 - row i0.
+    valid_sum = np.vstack([zeros, np.cumsum(valid, axis=0)])
+    traded_sum = np.vstack([zeros, np.cumsum(np.where(valid, pa * va, 0.0), axis=0)])
+    column = {name: i for i, name in enumerate(common)}
+    days = p.index.to_numpy()
     out = {}
     for cik, quarters in issuer_quarters.items():
         names = tickers_by_cik.get(cik, [])
-        good_names = bool(names) and all(n in p.columns and n in v.columns for n in names)
+        good_names = bool(names) and all(n in column for n in names)
+        cols = [column[n] for n in names] if good_names else []
         out[cik] = []
         for row in quarters:
             item = dict(row)
             start, end = pd.Timestamp(row['start']), pd.Timestamp(row['end'])
-            calendar = p.index[(p.index >= start) & (p.index <= end)]
-            complete_edges = len(calendar) and (calendar[0] - start).days <= 7 and (end - calendar[-1]).days <= 7
+            i0 = int(np.searchsorted(days, start.to_datetime64(), side='left'))
+            i1 = int(np.searchsorted(days, end.to_datetime64(), side='right'))
+            n = i1 - i0
+            complete_edges = n > 0 and (p.index[i0] - start).days <= 7 and (end - p.index[i1 - 1]).days <= 7
             if good_names and complete_edges:
-                pp, vv = p.loc[calendar, names], v.loc[calendar, names]
-                valid = pp.notna() & vv.notna() & (pp > 0) & (vv >= 0)
-                if (valid.sum(axis=0) / len(calendar) >= 0.9).all():
-                    item['turnover_usd'] = float((pp * vv).where(valid).sum().sum())
+                if ((valid_sum[i1, cols] - valid_sum[i0, cols]) / n >= 0.9).all():
+                    item['turnover_usd'] = float((traded_sum[i1, cols] - traded_sum[i0, cols]).sum())
             out[cik].append(item)
     return out
 
