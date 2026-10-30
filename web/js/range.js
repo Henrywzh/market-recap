@@ -12,7 +12,7 @@ const DAY_MS = 86400000;
 const SLACK_DAYS = 20;
 const SHORT_RANGES = [['1M', 31], ['3M', 92], ['6M', 182], ['YTD', 'YTD'], ['1Y', 365], ['MAX', null]];
 
-const days = (label) => ([...RANGES, ...SHORT_RANGES].find(([l]) => l === label) || [null, null])[1];
+const days = (label) => ([...RANGES, ...SHORT_RANGES, ['2Y', 731]].find(([l]) => l === label) || [null, null])[1];
 
 export function spanDays(dates) {
   if (!dates || dates.length < 2) return 0;

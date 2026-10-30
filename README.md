@@ -1048,3 +1048,16 @@ premium for.
 
 This is a research and teaching tool. The DCF tab in particular is a model you
 fill in yourself; it does not produce a recommendation.
+
+**Trade Desk structure lab.** STRUCTURE & LAB opens an estimated volume-by-price
+profile with YTD/1Y/2Y/5Y/MAX controls and a historical event simulation.
+The shared ticker search shows company/fund names and stock/ETF badges.
+Signals use close-to-close total returns divided by prior 20-session volatility;
+all entries occur after the signal session. Default 1D open-to-close enters at
+the next open and exits that close. Other modes enter at session +1 and exit
+at session +(N+1), using the selected close/open endpoints. The timeline states
+these endpoints. Trades do not overlap and deduct assumed 10bp round-trip costs;
+dividends, financing and borrow are excluded. Equity compounds at trade exits,
+so its drawdown excludes intratrade losses. These are in-sample descriptions.
+Profile smoothing is presentation only, not a probability density or fair value.
+TRADE PLAN keeps manual sizing; no duplicate event study is added there.

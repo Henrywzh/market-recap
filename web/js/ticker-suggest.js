@@ -32,7 +32,7 @@ export function capRank(rows = []) {
 
 // Wraps `input` with the list and returns the wrapper to put in the page in its
 // place. `onPick(ticker)` runs after the box takes the picked symbol.
-export function withSuggestions(input, tickers, names, onPick = () => {}, rank = []) {
+export function withSuggestions(input, tickers, names, onPick = () => {}, rank = [], identities = null) {
   const list = el('div', { class: 'ticker-suggest', role: 'listbox', hidden: '' });
   const wrap = el('span', { class: 'ticker-suggest-wrap' }, [input, list]);
   input.setAttribute('autocomplete', 'off');
@@ -50,14 +50,14 @@ export function withSuggestions(input, tickers, names, onPick = () => {}, rank =
       class: `ticker-suggest-item${i === active ? ' active' : ''}`, role: 'option',
       // mousedown, not click: the box's blur would close the list first.
       onmousedown: (event) => { event.preventDefault(); pick(item.ticker); },
-    }, [el('b', { text: item.ticker }), item.name ? el('span', { text: item.name }) : null])));
+    }, [el('b', { text: item.ticker }), item.name ? el('span', { text: item.name }) : null, identities?.[item.ticker]?.type ? el('small', { class: 'wb-asset-type', text: identities[item.ticker].type }) : null])));
     list.hidden = !items.length;
   };
 
   input.addEventListener('input', () => {
     items = matchTickers(input.value, tickers, names, SUGGESTION_LIMIT, rank);
     // A box that already holds a whole symbol has nothing to suggest but itself.
-    if (items.length === 1 && items[0].ticker === input.value.trim().toUpperCase()) items = [];
+    if (!identities && items.length === 1 && items[0].ticker === input.value.trim().toUpperCase()) items = [];
     active = -1;
     paint();
   });

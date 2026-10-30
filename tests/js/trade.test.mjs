@@ -189,6 +189,8 @@ test('the trade plan card renders its headline, outcomes and sensitivity with no
   await withPage(async () => {
     const page = new FakeNode('div');
     renderTrade(page, { available: ['SPY'] }, null, ctx);
+    const planTab = findNode(page, (n) => n.tagName === 'BUTTON' && textOf(n) === 'TRADE PLAN');
+    (planTab.listeners.click || []).forEach((fn) => fn());
     const settle = async (done) => { for (let i = 0; i < 50 && !done(); i += 1) await new Promise((r) => setTimeout(r, 0)); };
     await settle(() => textOf(page).includes('SPY · data as of'));
     const plan = findNode(page, (n) => n.className === 'card' && textOf(n).startsWith('TRADE PLAN'));

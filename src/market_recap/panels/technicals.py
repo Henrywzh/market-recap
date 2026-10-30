@@ -119,6 +119,8 @@ def ticker_names(ctx, symbols) -> dict[str, str]:
             names.setdefault(str(extra["ticker"]).upper(), extra["name"])
     for sector, fund in ctx.sector_etfs.items():
         names.setdefault(fund, f"{sector} sector fund")
+    for fund, name in (ctx.config.get("etf_names") or {}).items():
+        names[fund] = name
     wanted = set(symbols)
     return {symbol: name for symbol, name in sorted(names.items()) if symbol in wanted}
 
@@ -175,6 +177,7 @@ def build(ctx) -> dict:
         "available": sorted(e["ticker"] for e in baked),
         # Names for the ticker boxes' suggestions (TECHNICALS ratio and single ticker).
         "names": ticker_names(ctx, (e["ticker"] for e in baked)),
+        "etf_names": dict(ctx.config.get("etf_names") or {}),
         # The same symbols by index weight, heaviest first: the suggestions' order.
         "rank": ticker_rank(ctx, [e["ticker"] for e in baked]),
         "partial_history": sorted(e["ticker"] for e in baked if e["sessions"] < zwindow),
