@@ -1087,5 +1087,7 @@ the trigger close to each of days 1-5, 10 and 20's open and close: n, P(>0),
 mean, median, min, quartiles and max, beside every session in the same window
 as a baseline; a scatter with a rolling median, a table by year, the event list
 as CSV, separate stretches and a random-draw check. Daily bars start in October
-2016, so periods before that are greyed out. `web/js/event-lab-model.js` holds
+2016, except the broad-market funds in `[technicals] long_bars` (SPY, QQQ, DIA,
+IWM), whose bars start in 2000 from one 30-year download; a period before a
+ticker's bars is greyed out. `web/js/event-lab-model.js` holds
 the arithmetic.
