@@ -1061,3 +1061,19 @@ dividends, financing and borrow are excluded. Equity compounds at trade exits,
 so its drawdown excludes intratrade losses. These are in-sample descriptions.
 Profile smoothing is presentation only, not a probability density or fair value.
 TRADE PLAN keeps manual sizing; no duplicate event study is added there.
+
+**Trade Desk: your move and the backdrop.** YOUR MOVE takes a typed move in
+percent (today's intraday move, a level being watched): its σ against the last
+20 completed sessions sets the trigger and its sign the direction. BACKDROP AT
+SIGNAL keeps only the signals that fired in a chosen backdrop
+(`trade_conditions.json`, `[trade_conditions]`): Fed cycle (target vs 182 days
+earlier), 10Y vs its 200-session average, SPY vs its 200-session average, VIX
+in fixed bands, RSP/SPY log-ratio z-score, and the real-time growth / inflation
+quadrant (2014+: month-end ADS + Cleveland archive in
+`config/regime_quadrant_history.json`, built by
+`scripts/nowcast_evaluation/quadrant_history.py`, then the MACRO tab's daily
+nowcast ledger). Every state is read at the signal close as known then. LIKE
+TODAY fills today's states. The result sits beside the unconditioned one with
+trades, separate stretches (signals under 91 days apart are one), how many
+trades each condition keeps alone, a small-sample warning, and the share of
+2,000 random draws of as many trades that did as well.

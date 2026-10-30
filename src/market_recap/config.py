@@ -26,6 +26,8 @@ CHAIN_PATH = REPO_ROOT / "config" / "ai_chain.toml"
 CHAIN_EVIDENCE_PATH = REPO_ROOT / "config" / "ai_chain_evidence.json"
 # The archived real-time comparison of the regime map's nowcast candidates.
 NOWCAST_EVALUATION_PATH = REPO_ROOT / "config" / "nowcast_evaluation.json"
+# The month-end real-time growth / inflation quadrant, 2014 on (scripts/nowcast_evaluation).
+REGIME_QUADRANT_HISTORY_PATH = REPO_ROOT / "config" / "regime_quadrant_history.json"
 
 CACHE_DIR = REPO_ROOT / "data" / "cache"
 ARTIFACT_DIR = REPO_ROOT / "artifacts"

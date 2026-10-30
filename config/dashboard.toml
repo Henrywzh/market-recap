@@ -3621,3 +3621,28 @@ severity = "high"
 id = "health"
 group = "BUILD"
 source = "health"
+
+[trade_conditions]
+# TRADE DESK -> MARKET STRUCTURE conditions: the backdrop on each past session as
+# it was known at that close (compute.trade_conditions). The event study can keep
+# only the signals that fired in a chosen backdrop. Thresholds are fixed, not
+# percentiles of a history that includes the future.
+start = "2000-01-01"
+history_period = "30y"
+market = "SPY"
+equal_weight = "RSP"
+vix = "^VIX"
+# Fed funds target: DFEDTAR until 2008-12-15, the range's upper bound after.
+fed_target_series = ["DFEDTAR", "DFEDTARU"]
+fed_lookback_days = 182
+ten_year_series = "DGS10"
+long_ma = 200
+vix_calm = 15
+vix_stressed = 25
+ew_z_window = 252
+ew_z_band = 1.0
+# Trade Desk warnings: fewer trades or separate stretches than these is a small sample.
+min_trades = 30
+min_stretches = 5
+# Signals closer together than this many calendar days are one stretch.
+stretch_gap_days = 91

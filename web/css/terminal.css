@@ -2158,3 +2158,20 @@ table.data.idm-table tr.idm-section-row td { color: var(--accent); font-size: 10
 .wb-symbol-picker .ticker-suggest-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 8px; padding:9px 12px; }
 .wb-symbol-picker .ticker-suggest-item span { grid-column:1; grid-row:2; }
 .wb-symbol-picker .ticker-suggest-item small { grid-column:2; grid-row:1; }
+/* Trade Desk backdrop conditions */
+.wb-backdrop { margin-top:12px; }
+.wb-backdrop-head { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
+.wb-backdrop-head h3 { margin:0; }
+.wb-backdrop-head .wb-pills { margin:0; }
+.wb-backdrop-fields { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; }
+.wb-backdrop-fields small { color:var(--text-faint); font-size:10px; letter-spacing:0; }
+.wb-compare { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr); gap:18px; align-items:start; margin-top:12px; }
+.wb-compare:empty { display:none; }
+.wb-compare-table { width:100%; border-collapse:collapse; font-size:12px; }
+.wb-compare-table th,.wb-compare-table td { padding:6px 10px; border-bottom:1px solid var(--border); text-align:right; }
+.wb-compare-table th:first-child { text-align:left; color:var(--text-dim); font-weight:normal; letter-spacing:1px; font-size:10px; }
+.wb-compare-table thead th { color:var(--text-faint); font-size:10px; letter-spacing:1px; font-weight:normal; }
+.wb-compare-table td:nth-child(2) { color:var(--text); font-weight:600; }
+.wb-warn { color:var(--down); border:1px solid var(--down); border-radius:3px; padding:6px 9px; font-size:12px; }
+@media(max-width:1000px) { .wb-backdrop-fields{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media(max-width:700px) { .wb-backdrop-fields{grid-template-columns:1fr 1fr}.wb-compare{grid-template-columns:1fr} }

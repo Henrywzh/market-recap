@@ -16,7 +16,7 @@ import time
 from . import cache, site
 from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
-from .panels import anchor, catalyst_log, catalysts, chain, credit, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, flows, heatmaps, industries, kshape, macro, market_state, markets, monitor, moves, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, segments, sizek, themes, today, valuation, watch, xray
+from .panels import anchor, catalyst_log, catalysts, chain, credit, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, flows, heatmaps, industries, kshape, macro, market_state, markets, monitor, moves, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, segments, sizek, themes, today, trade_conditions, valuation, watch, xray
 from .panels import technicals as technicals_panel
 from .sources import sec
 from .sources.monitor_state import carry_published, load_previous, validate_previous
@@ -38,6 +38,8 @@ PANELS = {
     "rotation": rotation.build,
     "fixed_income": fixed_income.build,
     "macro": macro.build,
+    # Reads this session's MACRO (the quadrant's nowcast ledger), so after it.
+    "trade_conditions": trade_conditions.build,
     "technicals": technicals_panel.build,
     "cross_listing": cross_listing.build,
     "xray": xray.build,
@@ -210,6 +212,8 @@ def run(
                 elif name == "events":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in events.INPUTS},
                                           finnhub_started=finnhub_started)
+                elif name == "trade_conditions":
+                    payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in trade_conditions.INPUTS})
                 elif name == "kshape":
                     payload = PANELS[name](ctx, inputs={dep: optional_panel(dep) for dep in kshape.INPUTS})
                 elif name == "sizek":
