@@ -6,6 +6,7 @@ import { createFeed } from '../live-feed.js';
 import { boardDelay, extendedMove, marketPhase } from '../live-model.js';
 import { unusualCard, selloffBanner } from '../moves-card.js';
 import { heatmap as europeHeatmap, membersCard as europeMembers } from './europe.js';
+import { viewTabs } from '../view-tabs.js';
 
 const ETF_BASE = 'artifacts/etfs';
 // LIVE is whatever is trading now: the session's move against the previous
@@ -78,7 +79,17 @@ function rowsHtml(values, periods, fmt) {
   }).join('');
 }
 
-export default function renderHeatmaps(root, data, manifest, ctx = {}) {
+// Two sub-tabs: US (index members, ETF flows) opens first; EUROPE is built
+// from europe.json the first time it is picked.
+export default function renderHeatmaps(page, data, manifest, ctx = {}) {
+  const root = el('div', {});
+  let relayout = () => {};
+  const tabs = viewTabs([['us', 'US'], ['europe', 'EUROPE']], 'us', {
+    label: 'Heat map region', idPrefix: 'heatmaps',
+    build: (id) => (id === 'us' ? [root] : europeView(ctx)),
+    onPick: (id) => { if (id === 'us') relayout(); },
+  });
+  page.append(tabs.nav, ...tabs.panes);
   const periods = data.periods;
   // The shortest window the artifact carries, whatever it is called.
   const [defaultPeriod] = periods;
@@ -197,18 +208,6 @@ export default function renderHeatmaps(root, data, manifest, ctx = {}) {
     onTick: (state) => { if (stockPeriod === LIVE) liveNote.textContent = captionNow(state); },
   });
   stockCard.querySelector('.card-head').append(feed.controls);
-
-  // ---------------- Europe: indices, STOXX 600 sectors, index members ------
-  // From EUROPE's own artifact, loaded on its own: a failure is one named gap.
-  if (ctx.loadArtifact) {
-    const europeHost = el('div', {});
-    root.append(europeHost);
-    ctx.loadArtifact('europe').then((eu) => {
-      if (!eu || eu.unavailable || !Array.isArray(eu.indices)) throw new Error(eu?.unavailable || 'no European data in this build');
-      europeHost.replaceChildren(sectionTitle('EUROPE HEAT MAPS', `LOCAL CURRENCY · PRICES THROUGH ${eu.inputs?.prices_through || DASH}`),
-        europeHeatmap(eu, 'indices'), europeHeatmap(eu, 'sectors'), ...[europeMembers(eu)].filter(Boolean));
-    }).catch((error) => europeHost.replaceChildren(el('div', { class: 'gap', text: `Europe heat maps are unavailable: ${error.message}.` })));
-  }
 
   // ---------------- US ETFs by published net flow -----------------------
   root.append(sectionTitle('US ETF HEAT MAP', 'SIZED BY AUM · COLOURED BY PUBLISHED NET FLOW'));
@@ -416,6 +415,21 @@ export default function renderHeatmaps(root, data, manifest, ctx = {}) {
 
   // Treemaps are laid out in pixels, so they need an explicit relayout when
   // the pane is resized or first becomes visible with a non-zero width.
-  const relayout = () => { drawStocks(stockPeriod); drawEtfs(etfPeriod); };
-  window.addEventListener('resize', relayout);
+  relayout = () => { if (root.isConnected && !root.closest('[hidden]')) { drawStocks(stockPeriod); drawEtfs(etfPeriod); } };
+  window.addEventListener('resize', () => relayout());
+  // The maps above were laid out before the pane was on the page: draw them again at its real width.
+  tabs.show('us').then(() => relayout());
+}
+
+// ---------------- Europe: indices, STOXX 600 sectors, index members ------
+// From EUROPE's own artifact, loaded on its own: a failure is one named gap.
+async function europeView(ctx) {
+  try {
+    const eu = await ctx.loadArtifact?.('europe');
+    if (!eu || eu.unavailable || !Array.isArray(eu.indices)) throw new Error(eu?.unavailable || 'no European data in this build');
+    return [sectionTitle('EUROPE HEAT MAPS', `LOCAL CURRENCY · PRICES THROUGH ${eu.inputs?.prices_through || DASH}`),
+      europeHeatmap(eu, 'indices'), europeHeatmap(eu, 'sectors'), europeMembers(eu)];
+  } catch (error) {
+    return [el('div', { class: 'gap', text: `Europe heat maps are unavailable: ${error.message}.` })];
+  }
 }

@@ -83,45 +83,63 @@ export function macroRegimeCard(regime) {
 }
 
 // Source importance is retained, including its measured/judged provenance.
-export function macroCalendarEvents(catalysts, majorOnly = false) {
+// ``days`` keeps events within that many calendar days of the snapshot.
+export function macroCalendarEvents(catalysts, majorOnly = false, days = null) {
+  const end = days === null || !catalysts?.as_of ? null
+    : new Date(Date.parse(`${catalysts.as_of}T00:00:00Z`) + days * 864e5).toISOString().slice(0, 10);
   return (catalysts?.events || []).filter((e) => e.lane === 'macro'
     && ['macro_data', 'monetary_policy'].includes(e.category) && e.date >= catalysts.as_of
+    && (end === null || e.date <= end)
     && (!majorOnly || ['high', 'medium'].includes(e.importance)))
     .sort((a, b) => a.date.localeCompare(b.date) || (a.time || '99:99').localeCompare(b.time || '99:99')
       || a.title.localeCompare(b.title));
 }
 
+const AGENDA_DAYS = 14;
+const MAJOR = 'HIGH + MEDIUM';
+const level = (e) => (['high', 'medium', 'low'].includes(e.importance) ? e.importance : 'unknown');
+const dayLabel = (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', timeZone: 'UTC' });
+
+// One line per release: day (first of its day only), time, name (cut with its
+// full text on hover), reference period, importance. The row carries the colour.
+function agendaRow(e, date) {
+  const lv = level(e);
+  return el('div', { class: `macro-agenda-event importance-${lv}` }, [
+    el('span', { class: 'macro-agenda-day', text: date ? dayLabel(e.date) : '' }),
+    el('span', { class: 'macro-agenda-time', text: e.time || 'TBD' }),
+    el('a', { class: 'macro-agenda-name', href: e.source_url || '#catalysts', text: e.title,
+      title: [e.title, e.reference_period].filter(Boolean).join(' · ') }),
+    el('span', { class: 'macro-agenda-period', text: e.reference_period || '' }),
+    el('span', { class: 'macro-importance', text: lv === 'unknown' ? '?' : lv.slice(0, 3).toUpperCase(),
+      title: e.importance_basis?.text || 'Importance unavailable in source' }),
+  ]);
+}
+
 export function upcomingMacro(catalysts) {
   const host = el('div', { class: 'macro-agenda' });
   const draw = (filter) => {
-    const events = macroCalendarEvents(catalysts, filter === 'HIGH + MEDIUM').slice(0, 14);
+    const all = macroCalendarEvents(catalysts, false, AGENDA_DAYS);
     host.replaceChildren();
-    if (!events.length) host.append(el('div', { class: 'gap', text: 'No matching releases in this calendar snapshot.' }));
-    let date;
-    for (const e of events) {
-      if (date !== e.date) {
-        date = e.date;
-        const day = new Date(`${date}T12:00:00Z`);
-        host.append(el('div', { class: 'macro-agenda-date', text: day.toLocaleDateString('en-US', {
-          weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC',
-        }) }));
+    if (!all.length) { host.append(el('div', { class: 'gap', text: 'No macro releases in the next two weeks of this calendar snapshot.' })); return; }
+    const days = [...new Set(all.map((e) => e.date))];
+    for (const date of days) {
+      const today = all.filter((e) => e.date === date);
+      const shown = filter === MAJOR ? today.filter((e) => ['high', 'medium'].includes(e.importance)) : today;
+      const folded = today.filter((e) => !shown.includes(e));
+      shown.forEach((e, i) => host.append(agendaRow(e, i === 0)));
+      if (folded.length) {
+        // Low-importance releases stay one click away, under the day they belong to.
+        const fold = el('details', { class: 'macro-agenda-more' }, [
+          el('summary', {}, [el('span', { class: 'macro-agenda-day', text: shown.length ? '' : dayLabel(date) }),
+            el('span', { text: `+${folded.length} low` })]),
+          ...folded.map((e) => agendaRow(e, false)),
+        ]);
+        host.append(fold);
       }
-      const level = ['high', 'medium', 'low'].includes(e.importance) ? e.importance : 'unknown';
-      host.append(el('div', { class: `macro-agenda-event importance-${level}` }, [
-        el('span', { class: 'macro-agenda-time', text: e.time ? `${e.time} ET` : 'Time TBD' }),
-        el('div', { class: 'macro-agenda-name' }, [el('a', { href: e.source_url || '#catalysts', text: e.title }),
-          e.reference_period ? el('span', { class: 'sub', text: e.reference_period }) : null]),
-        el('span', { class: 'macro-importance', text: level.toUpperCase(),
-          title: e.importance_basis?.text || 'Importance unavailable in source' }),
-      ]));
     }
   };
-  draw('ALL');
-  const result = card('UPCOMING MACRO & POLICY', el('a', { href: '#catalysts', text: 'FULL CALENDAR →' }), [
-    el('div', { class: 'macro-calendar-tools' }, [periodSwitch(['ALL', 'HIGH + MEDIUM'], 'ALL', draw),
-      el('span', { class: 'dim', text: 'Times · New York' })]), host,
-    el('details', { class: 'macro-calendar-notes' }, [el('summary', { text: 'Importance & calendar dates' }),
-      el('div', { class: 'note-text', text: `Calendar snapshot: ${catalysts?.as_of || 'unavailable'}. Red = high attention, amber = medium; not a market direction forecast. Importance comes from the calendar’s measured release-day moves or editorial judgement (hover a badge for its basis). Dates may change; this is not a live calendar.` })]),
-  ]);
-  return result;
+  draw(MAJOR);
+  const info = el('span', { class: 'rc-info', text: 'ⓘ', title: `Calendar snapshot ${catalysts?.as_of || 'unavailable'}, next ${AGENDA_DAYS} days, times New York. Red = high attention, amber = medium, grey = low; not a market direction forecast. Importance comes from the calendar's measured release-day moves or editorial judgement (hover a badge for its basis). Dates may change; this is not a live calendar.` });
+  return card('UPCOMING MACRO & POLICY', el('div', { class: 'tag-row' }, [periodSwitch([MAJOR, 'ALL'], MAJOR, draw), info,
+    el('a', { href: '#catalysts', text: 'FULL CALENDAR →' })]), [host]);
 }

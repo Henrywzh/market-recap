@@ -25,4 +25,9 @@ test('macro agenda includes policy, orders by date/time and retains source impor
   assert.deepEqual(macroCalendarEvents(source, true).map(e => e.title), ['Fed decision', 'Fed conference']);
   assert.equal(source.events[0].importance, 'low');
   assert.deepEqual(macroCalendarEvents(null), []);
+  // A two-week window ends on the snapshot date plus 14 days, inclusive.
+  const later = { as_of: '2026-10-23', events: [event('In', '2026-11-06', '08:30', 'macro_data', 'high'),
+    event('Out', '2026-11-07', '08:30', 'macro_data', 'high')] };
+  assert.deepEqual(macroCalendarEvents(later, false, 14).map(e => e.title), ['In']);
+  assert.deepEqual(macroCalendarEvents(later).map(e => e.title), ['In', 'Out']);
 });

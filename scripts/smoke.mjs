@@ -262,7 +262,8 @@ for (const route of list) {
       }
     }
     if (route === 'heatmaps' && (await artifact('europe'))?.indices) {
-      // The European performance maps sit on HEAT MAPS, loaded from europe.json.
+      // The European performance maps sit on HEAT MAPS' EUROPE sub-tab, loaded from europe.json.
+      await page.locator('#heatmaps-tab-europe').click();
       await page.locator('.eu-heatmap').first().waitFor({ timeout: RENDER_WAIT_MS });
       const maps = page.locator('.card').filter({ has: page.locator('.eu-heatmap') });
       if (await maps.count() !== 2) throw new Error('HEAT MAPS should carry the Europe indices and sectors maps');
@@ -274,6 +275,7 @@ for (const route of list) {
       }
     }
     if (route === 'heatmaps' && (await artifact('heatmaps'))?.index_maps?.length) {
+      await page.locator('#heatmaps-tab-us').click();
       const map = page.locator('.card').filter({ has: page.locator('.treemap') }).first();
       for (const m of (await artifact('heatmaps')).index_maps) {
         await map.locator('.card-head').getByRole('button', { name: m.label, exact: true }).click();
