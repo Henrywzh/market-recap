@@ -151,6 +151,12 @@ def _check_latest_session(markets: dict | None) -> list[Finding]:
                 f"{key}: only {measured} of {members} members have a 1D change on "
                 f"{markets.get('as_of')}; the prior session is missing at the source",
             ))
+        # INDEX HISTORY's members-above-their-averages chart: a year of members is
+        # in the build, so an empty line is a computation that broke, not a gap.
+        history = block.get("breadth_history")
+        if (block.get("breadth") or {}).get("above_200d") is not None and not (history or {}).get("dates"):
+            out.append(Finding("warning", "breadth_history",
+                               f"{key}: members above their averages has a reading today but no history"))
     index_row = (markets.get("sector_table") or {}).get("index") or {}
     if index_row and index_row.get("1D") is None:
         out.append(Finding("error", "latest_session", "the index row of the sector table has no 1D return"))

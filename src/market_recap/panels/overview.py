@@ -270,7 +270,9 @@ def breadth_history(closes: pd.DataFrame, sessions: int = HIGH_WINDOW) -> dict |
         return None
     out = {}
     for window in (50, 200):
-        sma = closes.rolling(window, min_periods=window).mean()
+        # As in the day's figure (R.pct_above_moving_average): a feed gap -- one
+        # empty session -- must not blank every average for a whole window after it.
+        sma = closes.rolling(window, min_periods=int(window * 0.9)).mean()
         counted = closes.notna() & sma.notna()
         share = ((closes > sma) & counted).sum(axis=1) / counted.sum(axis=1).replace(0, np.nan) * 100
         out[window] = share.dropna().tail(sessions)
