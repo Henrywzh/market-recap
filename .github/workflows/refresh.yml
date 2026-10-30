@@ -132,9 +132,17 @@ jobs:
           # publish an unchanged page from a run that looks like it worked.
           python -c "import os, sys; from market_recap.build import PANELS; bad = [p for p in os.environ['PANELS'].split() if p not in PANELS]; sys.exit('::error::unknown panel(s): ' + ' '.join(bad) + '; known: ' + ' '.join(PANELS)) if bad else None"
 
-      - name: Test
+      # The suite runs in the background, beside the refresh (which mostly waits
+      # on the network), from its own checkout of this commit: some tests read
+      # artifacts/ and data/cache, which the refresh is writing. "Wait for tests"
+      # collects it before the deploy gate, so a failing test still blocks it.
+      - name: Start tests
         if: steps.check.outputs.run == 'true'
-        run: make test PYTHON=python
+        run: |
+          tree="$RUNNER_TEMP/test-tree"
+          git worktree add -q --detach "$tree" HEAD
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$tree/node_modules"
+          ( cd "$tree" && make test PYTHON=python > "$RUNNER_TEMP/test.log" 2>&1; echo $? > "$RUNNER_TEMP/test.status" ) &
 
       # The cache is politeness and speed, not state: every artifact rebuilds
       # from the publishers, so an evicted cache costs one slow run, never a
@@ -272,6 +280,14 @@ jobs:
         if: always() && steps.check.outputs.run == 'true'
         continue-on-error: true
         run: make smoke PYTHON=python
+
+      - name: Wait for tests
+        if: steps.check.outputs.run == 'true'
+        timeout-minutes: 15
+        run: |
+          while [ ! -f "$RUNNER_TEMP/test.status" ]; do sleep 2; done
+          cat "$RUNNER_TEMP/test.log"
+          exit "$(cat "$RUNNER_TEMP/test.status")"
 
       # Only a build that passed --strict is published -- or one whose sole
       # finding is a MONITOR ledger carried forward unchanged, so one panel
