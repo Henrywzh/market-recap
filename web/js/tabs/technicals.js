@@ -11,7 +11,7 @@ import { withSuggestions } from '../ticker-suggest.js';
 import { resolveTicker } from '../routes.js';
 
 const TICKER_BASE = 'artifacts/tickers';
-// Daily bars since 2020 (panels/technicals.py BARS_START), for a range past the payload's own candles.
+// Daily bars since 2016 (panels/technicals.py BARS_START), for a range past the payload's own candles.
 const BARS_BASE = 'artifacts/bars';
 // A sanity bound on typed windows, not a data limit: ten years of history
 // would support more, but nobody means a 2,000-day "moving average".
@@ -727,7 +727,7 @@ export default async function renderTechnicals(root, data, _manifest, ctx = {}) 
         ? 'Candles: the body is the ratio of the two opens and the two closes, exact; the faint wick is the widest the day could have been '
           + '(the numerator\'s high over the denominator\'s low, and the reverse), as the two highs come at different times. '
           + 'Daily bars, split- but not dividend-adjusted; the averages, band and MACD are on the same closes.'
-        : (ratioCandles ? `Candles need both names' daily bars, which start ${data.bars_start || '2020-01-01'}; this range is drawn as the close line.` : '');
+        : (ratioCandles ? `Candles need both names' daily bars, which start ${data.bars_start || '2016-01-01'}; this range is drawn as the close line.` : '');
       // Every line drawn is rebased to 1.00 at the window's first ratio, so a range switch
       // starts it again at one; the averages, band and MACD scale with it and keep their shape.
       // They are computed on the whole series first, so a short window still has its long averages.

@@ -31,7 +31,10 @@ OHLCV_SESSIONS = 520
 # The bars the volume profile and cost distribution read (web/js/chip-math.js):
 # open, high, low, close and volume since BARS_START, in a file of their own so the
 # two-year price artifact every ticker page loads does not grow.
-BARS_START = "2020-01-01"
+# 2016 gives the Trade Desk's event study trades across several rate and growth
+# cycles; the refresh's 10-year download is the binding start (about Oct 2016),
+# so this costs no extra fetch.
+BARS_START = "2016-01-01"
 BARS_ARTIFACT_DIR = TICKER_ARTIFACT_DIR.parent / "bars"
 
 
