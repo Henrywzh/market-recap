@@ -20,7 +20,7 @@ from .. import corporate_actions
 from ..compute.oversold import LINES as OVERSOLD_LINES
 from ..config import PERIOD_TRADING_DAYS, TICKER_ARTIFACT_DIR
 from ..sources import yahoo
-from ..util import clean_float, company_name, prune_stale, write_json
+from ..util import clean_floats, company_name, prune_stale, write_json
 
 # Decimal places kept on a baked close: enough for a sub-dollar ETF, and every
 # extra digit is paid for once per session per ticker.
@@ -59,11 +59,11 @@ def bake_bars(symbol: str, raw_prices: pd.DataFrame, ohlcv: dict[str, pd.DataFra
     digits = _price_digits(close)
     write_json(BARS_ARTIFACT_DIR / f"{symbol}.json", {
         "ticker": symbol,
-        "dates": [d.strftime("%Y-%m-%d") for d in close.index],
-        "open": [clean_float(v, digits) for v in frames["open"].to_numpy()],
-        "high": [clean_float(v, digits) for v in frames["high"].to_numpy()],
-        "low": [clean_float(v, digits) for v in frames["low"].to_numpy()],
-        "close": [clean_float(v, digits) for v in close.to_numpy()],
+        "dates": close.index.strftime("%Y-%m-%d").tolist(),
+        "open": clean_floats(frames["open"].to_numpy(), digits),
+        "high": clean_floats(frames["high"].to_numpy(), digits),
+        "low": clean_floats(frames["low"].to_numpy(), digits),
+        "close": clean_floats(close.to_numpy(), digits),
         "volume": [int(v) if pd.notna(v) else None for v in frames["volume"].to_numpy()],
     })
     return True
@@ -86,8 +86,8 @@ def bake_ticker(symbol: str, closes: pd.Series, *, min_sessions: int,
         "as_of": clean.index[-1].strftime("%Y-%m-%d"),
         "first_session": clean.index[0].strftime("%Y-%m-%d"),
         "sessions": int(len(clean)),
-        "dates": [d.strftime("%Y-%m-%d") for d in clean.index],
-        "close": [clean_float(v, CLOSE_DIGITS) for v in clean.to_numpy()],
+        "dates": clean.index.strftime("%Y-%m-%d").tolist(),
+        "close": clean_floats(clean.to_numpy(), CLOSE_DIGITS),
     }
     # Same Yahoo batch and dates as the total-return close artifact. Keep
     # tradeable OHLC on Yahoo's split-adjusted (not dividend-adjusted) price
@@ -96,12 +96,12 @@ def bake_ticker(symbol: str, closes: pd.Series, *, min_sessions: int,
     if ohlcv and raw_prices is not None and symbol in raw_prices.columns:
         dates = clean.index[-OHLCV_SESSIONS:]
         raw = raw_prices[symbol].reindex(dates)
-        vectors = {"close": [clean_float(v, CLOSE_DIGITS) for v in raw.to_numpy()]}
+        vectors = {"close": clean_floats(raw.to_numpy(), CLOSE_DIGITS)}
         for kind in ("open", "high", "low", "volume"):
             frame = ohlcv.get(kind, pd.DataFrame())
             values = frame[symbol].reindex(dates) if symbol in frame.columns else pd.Series(index=dates, dtype=float)
-            vectors[kind] = [clean_float(v, CLOSE_DIGITS if kind != "volume" else 0) for v in values.to_numpy()]
-        payload["ohlcv"] = {"dates": [d.strftime("%Y-%m-%d") for d in dates], **vectors}
+            vectors[kind] = clean_floats(values.to_numpy(), CLOSE_DIGITS if kind != "volume" else 0)
+        payload["ohlcv"] = {"dates": dates.strftime("%Y-%m-%d").tolist(), **vectors}
     write_json(TICKER_ARTIFACT_DIR / f"{symbol}.json", payload)
     return {"ticker": symbol, "sessions": payload["sessions"]}
 

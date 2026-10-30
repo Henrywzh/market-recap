@@ -109,6 +109,19 @@ def clean_float(value: Any, digits: int | None = None) -> float | None:
     return round(out, digits) if digits is not None else out
 
 
+def clean_floats(values: Any, digits: int | None = None) -> list[float | None]:
+    """``[clean_float(v, digits) for v in values]`` for a numeric array, without a
+    call per element: the ticker artifacts round a million values a build."""
+    try:
+        arr = np.asarray(values, dtype=float)
+    except (TypeError, ValueError):
+        return [clean_float(v, digits) for v in values]
+    finite = np.isfinite(arr).tolist()
+    if digits is None:
+        return [v if ok else None for v, ok in zip(arr.tolist(), finite)]
+    return [round(v, digits) if ok else None for v, ok in zip(arr.tolist(), finite)]
+
+
 def history_payload(series: pd.Series, *, years: int, digits: int, daily_days: int = 365) -> dict:
     """{dates, values} for a history chart with a range switch.
 

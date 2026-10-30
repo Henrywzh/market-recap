@@ -11,6 +11,7 @@ changes (a national day of mourning) are not knowable in advance.
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 from dateutil.easter import easter
@@ -55,6 +56,12 @@ def _observed(day: date) -> date:
 
 
 def nyse_holidays(year: int) -> dict[date, str]:
+    # A fresh dict each call: the calendar is cached, a caller's copy is its own.
+    return dict(_nyse_holidays(year))
+
+
+@lru_cache(maxsize=None)
+def _nyse_holidays(year: int) -> tuple[tuple[date, str], ...]:
     holidays = {
         _nth_weekday(year, 1, MONDAY, 3): "Martin Luther King Jr. Day",
         _nth_weekday(year, 2, MONDAY, 3): "Washington's Birthday",
@@ -71,7 +78,7 @@ def nyse_holidays(year: int) -> dict[date, str]:
     new_year = date(year, 1, 1)
     if new_year.weekday() != SATURDAY:
         holidays[_observed(new_year)] = "New Year's Day"
-    return holidays
+    return tuple(holidays.items())
 
 
 def nyse_early_closes(year: int) -> dict[date, str]:

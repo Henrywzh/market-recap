@@ -159,8 +159,16 @@ def walk_forward_r2(y: pd.Series, factors: pd.DataFrame, *, window: int, step: i
     return {"r2": 1 - sse / sst, "n": scored}
 
 
+def _average_ranks(x: np.ndarray) -> np.ndarray:
+    """1-based ranks, ties sharing their average (pandas' default), for finite values."""
+    _, inverse, counts = np.unique(x, return_inverse=True, return_counts=True)
+    first = np.cumsum(counts) - counts
+    return (first + (counts + 1) / 2)[inverse]
+
+
 def _spearman(a: np.ndarray, b: np.ndarray) -> float:
-    ra, rb = pd.Series(a).rank().to_numpy(), pd.Series(b).rank().to_numpy()
+    # numpy ranks, not pandas': the permutation test calls this thousands of times a build.
+    ra, rb = _average_ranks(np.asarray(a, dtype=float)), _average_ranks(np.asarray(b, dtype=float))
     if ra.std() == 0 or rb.std() == 0:
         return float("nan")
     return float(np.corrcoef(ra, rb)[0, 1])
