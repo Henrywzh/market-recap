@@ -145,7 +145,7 @@ def test_the_digest_puts_high_first_and_sends_nothing_without_smtp_settings(tmp_
 def test_every_configured_rule_names_a_known_source_with_lines_in_order():
     rules = load_config()["alerts"]["rules"]
     assert len({r["id"] for r in rules}) == len(rules)
-    known = {"tile", "strip", "risk_state", "rsi6", "cross_asset", "rate", "blackout", "openrouter_mom", "watch", "health"}
+    known = {"tile", "strip", "risk_state", "rsi6", "cross_asset", "rate", "blackout", "openrouter_mom", "watch", "health", "earnings_eve"}
     for rule in rules:
         assert rule["source"] in known, rule["id"]
         lines = rule.get("lines")
@@ -174,3 +174,24 @@ def test_reruns_of_one_session_remember_everything_already_announced():
     cleared, said = A.fresh_events([ev("ten_year:10Y", 1, "CLEARED")], {"events": [], "email": {"announced": said}})
     assert cleared == ["ten_year:10Y"]
     assert A.fresh_events([ev("ten_year:10Y", 1, "CLEARED")], {"events": [], "email": {"announced": said}})[0] == []
+
+
+def test_the_evening_before_a_large_report_is_announced_once_and_then_leaves_quietly():
+    rule = {"id": "earnings_eve", "group": "EARNINGS", "source": "earnings_eve", "importance": ["high"], "watchlist": True, "symbols": ["SBUX"]}
+    def ev(symbol, day, importance="low", **kw):
+        return {"event_type": "earnings", "symbol": symbol, "name": kw.pop("name", symbol), "date": day, "importance": importance, "timing": "amc", **kw}
+    catalysts = {"as_of": "2026-10-27", "week": [{"date": "2026-10-28", "status": "open"}, {"date": "2026-10-29", "status": "open"}],
+                 "events": [ev("MSFT", "2026-10-28", "high", eps_forecast=4.1), ev("GOOGL", "2026-10-28", "high", name="Alphabet Inc Cl A"),
+                            ev("GOOG", "2026-10-28", "high", name="Alphabet Inc Cl C"), ev("ADP", "2026-10-28", "medium"),
+                            ev("XYZ", "2026-10-28", watchlist=True), ev("SBUX", "2026-10-28"), ev("AMZN", "2026-10-29", "high")]}
+    events, ledger = _run([rule], {"catalysts": catalysts, "manifest": {"as_of": "2026-10-27"}}, {"as_of": "2026-10-26", "entries": {}})
+    assert [e["key"] for e in events] == ["earnings_eve:GOOGL:2026-10-28", "earnings_eve:MSFT:2026-10-28",
+                                          "earnings_eve:SBUX:2026-10-28", "earnings_eve:XYZ:2026-10-28"]
+    msft = next(e for e in events if e["key"].startswith("earnings_eve:MSFT"))
+    assert msft["state"] == "NEW" and "after the close" in msft["label"] and msft["value"] == "EPS est 4.10" and msft["line"] == ""
+    # The next evening: tomorrow's reporters are new, yesterday's leave without a CLEARED.
+    catalysts["as_of"] = "2026-10-28"
+    events, _ = _run([rule], {"catalysts": catalysts, "manifest": {"as_of": "2026-10-28"}}, ledger)
+    assert [(e["key"], e["state"]) for e in events] == [("earnings_eve:AMZN:2026-10-29", "NEW")]
+    # A calendar from another session than the build's names nothing.
+    assert _run([rule], {"catalysts": catalysts, "manifest": {"as_of": "2026-10-29"}}, ledger)[0] == []

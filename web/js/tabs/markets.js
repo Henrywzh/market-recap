@@ -1,10 +1,11 @@
 import { el, card, table, tag, num, pct, dirClass, periodSwitch, sectionTitle, notice, DASH } from '../fmt.js';
-import { areaLine, zeroLine, multiLine, disposeWithin } from '../charts.js';
+import { multiLine, disposeWithin } from '../charts.js';
 import { mountLive } from '../live.js';
 import { mountIndexCharts } from '../live-indices.js';
 import { spark } from '../spark.js';
 import { readingText, readingNote, outcomeCell, stateSummary, daysNow, sectorFlag, statePresentation } from '../market-state-model.js';
-import { sessionCards } from '../session-cards.js';
+import { performanceCard, volatilityLine } from '../session-cards.js';
+import { indexHistory } from '../index-history.js';
 
 // One row per index: how far it sits below its high, and how many members rose.
 // Side by side, so the indices compare before one is opened below.
@@ -29,20 +30,6 @@ function indexComparison(blocks) {
     ]);
   });
   return table(['INDEX', 'DRAWDOWN FROM HIGH', 'ADV / DEC / UNCH', 'RATIO'], rows, { class: 'index-compare' });
-}
-
-function moverTable(title, rows) {
-  const body = rows.map((row) => el('tr', {}, [
-    el('td', { class: 'wrap-cell' }, [
-      el('span', { text: row.ticker }),
-      el('span', { class: 'sub', text: row.name }),
-    ]),
-    el('td', { class: 'wrap-cell dim', text: row.sector }),
-    el('td', { class: 'wrap-cell dim', text: row.sub_sector }),
-    el('td', { text: num(row.price) }),
-    el('td', { class: dirClass(row.change_pct), text: pct(row.change_pct) }),
-  ]));
-  return card(title, null, table(['TICKER', 'SECTOR', 'SUB-SECTOR', 'PRICE', '% CHG'], body));
 }
 
 function sectorTable(data) {
@@ -199,19 +186,17 @@ function marketStateSection(state) {
   ];
 }
 
-// --- session cards -------------------------------------------------------------
-// Breadth, what moved the S&P 500, performance and the volatility reading: the
-// cards that OVERVIEW used to hold. They come from overview.json, loaded here so
-// a failed read leaves one named gap instead of taking the page down.
+// --- performance ---------------------------------------------------------------
+// SPY, QQQ, IWM and RSP rebased, and the bond-vs-equity volatility reading, from
+// overview.json, loaded here so a failed read leaves one named gap.
 
-async function mountSessionCards(host, ctx) {
-  const heading = () => sectionTitle('SESSION', '· BREADTH, WHAT MOVED IT, PERFORMANCE');
+async function mountPerformance(host, ctx) {
   try {
     const overview = await ctx.loadArtifact('overview');
     if (!overview || overview.unavailable) throw new Error('no session figures in this build');
-    host.replaceChildren(heading(), ...sessionCards(overview));
+    host.replaceChildren(...[performanceCard(overview.performance, overview.equal_vs_cap), volatilityLine(overview.vol)].filter(Boolean));
   } catch (error) {
-    host.replaceChildren(heading(), el('div', { class: 'gap', text: `Session cards are unavailable: ${error.message}.` }));
+    host.replaceChildren(el('div', { class: 'gap', text: `Performance is unavailable: ${error.message}.` }));
   }
 }
 
@@ -247,14 +232,6 @@ export default function renderMarkets(root, data, manifest, ctx = {}) {
   root.append(mountLive({ asOf: data.as_of }));
   root.append(mountIndexCharts());
 
-  // The session's breadth, movers and performance, loaded on their own so a
-  // failure leaves a named gap and nothing else on the page moves.
-  if (ctx.loadArtifact) {
-    const sessionHost = el('div', { class: 'session-cards' });
-    root.append(sessionHost);
-    mountSessionCards(sessionHost, ctx);
-  }
-
   // How narrow or stressed the market is; built on its own, so a failure of
   // that panel leaves a named gap here and nothing else on the page.
   if (ctx.loadArtifact) {
@@ -271,43 +248,20 @@ export default function renderMarkets(root, data, manifest, ctx = {}) {
     const block = blocks.find((b) => b.label === label);
     if (!block) return;
     disposeWithin(indexHost);
-    indexHost.replaceChildren();
     indexSection(block.key, block);
   };
   root.append(card('INDEX COMPARISON', null, indexComparison(blocks)));
   root.append(card('INDEX HISTORY · SELECT A UNIVERSE', periodSwitch(labels, labels[0], drawIndex), indexHost));
+  if (ctx.loadArtifact) {
+    const performanceHost = el('div', { class: 'session-cards' });
+    root.append(performanceHost);
+    mountPerformance(performanceHost, ctx);
+  }
 
+  // Price, members above their averages with the day's up / down, what moved it
+  // and the movers: the same layout as EUROPE's (index-history.js).
   function indexSection(key, block) {
-    indexHost.append(sectionTitle(block.label, `(${key}) · ${block.members} MEMBERS · AS OF ${data.as_of}`));
-
-    const priceNode = el('div', { class: 'chart' });
-    const pricePeriods = Object.keys(block.price_chart);
-    const priceDefault = pricePeriods.includes('1Y') ? '1Y' : pricePeriods[pricePeriods.length - 1];
-    const drawPrice = (period) => {
-      const series = block.price_chart[period];
-      if (series) areaLine(priceNode, series.dates, series.values);
-    };
-
-    const breadthNode = el('div', { class: 'chart' });
-    const breadthPeriods = Object.keys(block.breadth_chart);
-    const breadthDefault = breadthPeriods.includes('6M') ? '6M' : breadthPeriods[0];
-    const drawBreadth = (period) => {
-      const series = block.breadth_chart[period];
-      if (series) zeroLine(breadthNode, series.dates, series.values);
-    };
-
-    indexHost.append(el('div', { class: 'grid two' }, [
-      card(`${key} — PRICE`, periodSwitch(pricePeriods, priceDefault, drawPrice), priceNode),
-      card(`${key} — NET BREADTH %`, periodSwitch(breadthPeriods, breadthDefault, drawBreadth), breadthNode),
-    ]));
-
-    indexHost.append(el('div', { class: 'grid two' }, [
-      moverTable(`TOP ${block.gainers.length} GAINERS — ${key}`, block.gainers),
-      moverTable(`TOP ${block.losers.length} LOSERS — ${key}`, block.losers),
-    ]));
-
-    drawPrice(priceDefault);
-    drawBreadth(breadthDefault);
+    indexHistory(indexHost, { ...block, key, history: block.breadth_history, date: data.as_of });
   }
 
   drawIndex(labels[0]);

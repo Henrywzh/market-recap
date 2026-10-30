@@ -6,6 +6,7 @@ import { render } from '../charts.js';
 import { spark } from '../spark.js';
 import { scorecardRows, holderBars, ordinalText, bnText } from '../flows-scorecard.js';
 import { demandPipelineSection } from '../equity-demand.js';
+import { investorDemandView } from '../investor-demand.js';
 import { section as etfSection } from '../flows-etf.js';
 import { section as cotSection } from '../flows-cot.js';
 import { section as z1Section } from '../flows-z1.js';
@@ -140,10 +141,9 @@ export default function renderFlows(root, data) {
     for (const tr of scoreRows) tr.classList.toggle('is-selected', tr.dataset.section === active);
     content.replaceChildren();
     if (active === 'demand') {
-      if (dp) {
-        content.append(demandPipelineSection(dp, {tab: 'z1', only: 'z1'}));
-        content.append(demandPipelineSection(dp, {tab: 'foreign', only: 'foreign'}));
-      } else addSection(data.z1, z1Section);
+      const views = investorDemandView(dp);
+      if (views.length) content.append(...views);
+      else addSection(data.z1, z1Section);
     } else if (active === 'buybacks') {
       const node = dp && demandPipelineSection(dp, {tab: 'buybacks', only: 'buybacks'});
       content.append(node || gap('Buyback history has not been built for this session.'));
@@ -166,8 +166,7 @@ export default function renderFlows(root, data) {
     switcher.append(button);
   }
   root.append(
-    el('div', { class: 'field-note', text: 'Detail' }),
-    switcher,
+    el('div', { class: 'flows-detail-nav' }, [el('span', { class: 'flows-detail-label', text: 'DETAIL' }), switcher]),
     content,
   );
   draw();

@@ -22,9 +22,15 @@ from ..context import YAHOO_URL
 from ..sources import estimates, yahoo
 from ..sources import europe as src
 from ..util import SourceRecord, clean_float, company_name, describe_error, to_iso_date
+from . import markets as US_INDEX
+from . import overview as US_SESSION
 
 HIGH_SESSIONS = 252
 SPARK_SESSIONS = 126
+# The indices drawn together on the session's PERFORMANCE chart, in local currency,
+# with the S&P 500 (price index, in dollars) as the benchmark.
+PERFORMANCE_KEYS = ["stoxx600", "ftse100", "eurostoxx50"]
+SPX = "^GSPC"
 
 
 def _own(closes: pd.DataFrame, symbol: str) -> pd.Series:
@@ -155,6 +161,70 @@ def _sector_summary(names: list[dict], periods: list[str]) -> list[dict]:
     return sorted(out, key=lambda r: -r["n"])
 
 
+def _contributions(panel: pd.DataFrame, names: list[dict], index_change: float | None) -> dict | None:
+    """Each member's share of the last session: its market cap's share of the members' total
+    times its 1-day return, in percentage points. Yahoo's market caps stand in for the index's
+    free-float weights, so the sum is set beside the index's own move as a check."""
+    meta = {n["symbol"]: n for n in names}
+    caps = pd.Series({s: meta[s]["market_cap"] for s in panel.columns if (meta[s].get("market_cap") or 0) > 0}, dtype=float)
+    if panel.shape[0] < 2 or caps.empty:
+        return None
+    change = ((panel.iloc[-1] / panel.iloc[-2] - 1) * 100).reindex(caps.index)
+    contrib = (caps / caps.sum() * change).dropna()
+    if contrib.empty:
+        return None
+    by_sector = contrib.groupby([meta[s]["sector"] or "Unclassified" for s in contrib.index]).sum().sort_values(ascending=False)
+    ranked = contrib.sort_values(ascending=False)
+    row = lambda s: {"ticker": s, "name": meta[s]["name"], "contribution_pp": clean_float(contrib[s], 3), "return_pct": clean_float(change[s], 2)}
+    count = US_SESSION.CONTRIBUTORS
+    return {
+        "date": to_iso_date(panel.index[-1]),
+        "total_pp": clean_float(contrib.sum(), 3),
+        "index_pct": clean_float(index_change, 2),
+        "weighted": int(contrib.size), "members": int(panel.shape[1]),
+        "leaders": [row(s) for s in ranked.index[:count] if contrib[s] > 0],
+        "laggards": [row(s) for s in ranked.index[::-1][:count] if contrib[s] < 0],
+        "sectors": [{"sector": k, "contribution_pp": clean_float(v, 3)} for k, v in by_sector.items()],
+    }
+
+
+def _movers(panel: pd.DataFrame, names: list[dict]) -> list[dict]:
+    if panel.shape[0] < 2:
+        return []
+    meta = {n["symbol"]: n for n in names}
+    change = ((panel.iloc[-1] / panel.iloc[-2] - 1) * 100).dropna().sort_values(ascending=False)
+    return [{"ticker": s, "name": meta[s]["name"], "sector": meta[s]["sector"], "sub_sector": meta[s]["sector_source"],
+             "price": clean_float(panel[s].iloc[-1], 2), "change_pct": clean_float(v, 2)} for s, v in change.items()]
+
+
+def _session(closes: pd.DataFrame, index: pd.Series, names: list[dict], windows: dict) -> dict | None:
+    """The US MARKET tab's session cards for one European universe: breadth, what moved the
+    index, its history and the day's movers -- on the index's own trading days, so a
+    London holiday is not a flat day for the FTSE 100."""
+    # A symbol listed twice (a table quirk) is one member, not two.
+    symbols = list(dict.fromkeys(n["symbol"] for n in names if n["symbol"] in closes.columns))
+    if index.empty or not symbols:
+        return None
+    # A member's missing print on an index day carries its last close for up to three sessions.
+    panel = closes[symbols].reindex(index.index).ffill(limit=3).dropna(axis=1, how="all")
+    if panel.empty:
+        return None
+    movers = _movers(panel, names)
+    index_change = (index.iloc[-1] / index.iloc[-2] - 1) * 100 if len(index) > 1 else None
+    return {
+        "date": to_iso_date(index.index[-1]),
+        **US_SESSION.breadth(panel),
+        "history": US_SESSION.breadth_history(panel),
+        "distribution": US_SESSION.return_distribution(panel),
+        "contributions": _contributions(panel, names, index_change),
+        # A window longer than the history fetched is left out, not drawn short under its label.
+        "price_chart": US_INDEX._chart_windows(index, [w for w in windows["index_price_chart"]
+                                                       if (period_sessions(w) or 0) < len(index)]),
+        "gainers": movers[:US_INDEX.MOVERS_PER_SIDE],
+        "losers": movers[-US_INDEX.MOVERS_PER_SIDE:][::-1],
+    }
+
+
 def build(ctx) -> dict:
     cfg = ctx.config["europe"]
     as_of = date.fromisoformat(ctx.as_of)
@@ -184,7 +254,7 @@ def build(ctx) -> dict:
     fx_symbols = [f["symbol"] for f in cfg["fx"]]
     name_symbols = sorted({r.symbol for f in members.values() for r in f.itertuples(index=False)}
                           | {sym for found in group_members.values() for sym, _, _ in found})
-    wanted = sorted({*index_symbols, *fx_symbols, *name_symbols, cfg["benchmark"], cfg["rotation_benchmark"]})
+    wanted = sorted({*index_symbols, *fx_symbols, *name_symbols, cfg["benchmark"], cfg["rotation_benchmark"], SPX})
     closes = yahoo.fetch_closes(wanted, period=f"{int(cfg['history_years']) + 1}y")
     closes = closes[closes.index <= pd.Timestamp(as_of)]
     missing = sorted(set(wanted) - {c for c in closes.columns if closes[c].notna().any()})
@@ -213,8 +283,10 @@ def build(ctx) -> dict:
             universes[u["key"]] = {"label": u["label"], "unavailable": errors.get(u["key"], "no members")}
             continue
         names = [_name_row(r.symbol, r.name, r.sector_source, closes, cfg, multiples, trends) for r in members[u["key"]].itertuples(index=False)]
+        index = next((_own(closes, i["symbol"]) for i in cfg["indices"] if i["key"] == u["key"]), pd.Series(dtype=float))
         universes[u["key"]] = {"label": u["label"], "source": sources[u["key"]], "names": names,
-                               "sectors": _sector_summary(names, cfg["periods"])}
+                               "sectors": _sector_summary(names, cfg["periods"]),
+                               "session": _session(closes, index, names, ctx.config["periods"])}
     groups = []
     for g in cfg["groups"]:
         names = [_name_row(sym, nm, ss, closes, cfg, multiples, trends) for sym, nm, ss in group_members[g["key"]]]
@@ -231,6 +303,8 @@ def build(ctx) -> dict:
         "benchmark": {"symbol": cfg["benchmark"], **_stats(bench, cfg)},
         "indices": _index_rows(closes, fx, cfg),
         "chart": _chart(closes, fx, cfg),
+        "performance": US_SESSION.performance({**{i["label"]: _own(closes, i["symbol"]) for k in PERFORMANCE_KEYS
+                                                  for i in cfg["indices"] if i["key"] == k}, "S&P 500": _own(closes, SPX)}),
         "sectors": _sector_rows(closes, fx, cfg),
         "universes": universes,
         "groups": groups,

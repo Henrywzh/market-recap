@@ -54,7 +54,6 @@ watchlist = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
 commodities = ["1D", "1W", "1M", "3M", "YTD"]
 heatmap = ["1D", "1W", "1M", "3M", "YTD", "1Y"]
 index_price_chart = ["1M", "3M", "6M", "YTD", "1Y", "3Y", "5Y", "10Y"]
-breadth_chart = ["1M", "3M", "6M", "YTD", "1Y", "2Y"]
 sector_rebased = ["1M", "3M", "6M", "1Y", "3Y"]
 # Display periods on the TECHNICALS charts. Indicators are computed on the full
 # history first and then cut to the period, so a 200-day average is already
@@ -3556,6 +3555,16 @@ op = "abs"
 lines = [30.0, 60.0]
 unit = "pct_change"
 note = "A run-rate this far from last month may show up in the author's next revenue or ARR figure; OpenRouter is a slice of its traffic"
+[[alerts.rules]]
+id = "earnings_eve"
+group = "EARNINGS"
+source = "earnings_eve"
+# The evening before: the high-importance reporters (largest index weights), the
+# watchlist, and any symbol named here.
+importance = ["high"]
+watchlist = true
+symbols = []
+note = "Reports the next session; the calendar is the vendor's and can move"
 [[alerts.rules]]
 id = "watch"
 group = "WATCH"

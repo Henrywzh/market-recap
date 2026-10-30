@@ -4,7 +4,7 @@
 
 import { el, card } from '../fmt.js';
 import renderFixedIncome from './fixed-income.js';
-import renderMacro from './macro.js';
+import renderMacro, { renderCommodities } from './macro.js';
 import renderPpi from './ppi.js';
 import { tileNode, historyChart } from './risk.js';
 import { resizeAll } from '../charts.js';
@@ -26,7 +26,7 @@ function moveCard(risk) {
 
 export default async function renderRates(root, [fixedIncome, macro], _manifest, ctx = {}) {
   // Treasury rates opens first: it is the page's standing view; the macro prints are one click away.
-  const choices = [['yields', 'Treasury rates', renderFixedIncome, fixedIncome], ['macro', 'CPI & macro', renderMacro, macro], ['ppi', 'PPI · AI prices', renderPpi, macro?.ppi]];
+  const choices = [['yields', 'Treasury rates', renderFixedIncome, fixedIncome], ['macro', 'CPI & macro', renderMacro, macro], ['commodities', 'Commodities', renderCommodities, macro], ['ppi', 'PPI · AI prices', renderPpi, macro?.ppi]];
   const nav = el('div', { class: 'view-switch', role: 'tablist', 'aria-label': 'Rates and macro views' });
   const panes = new Map(choices.map(([key]) => [key, el('div', { role: 'tabpanel',
     id: `rates-view-${key}`, 'aria-labelledby': `rates-tab-${key}`, hidden: key !== 'yields' ? '' : null })]));

@@ -4,7 +4,8 @@
 // and a stub ECharts, as the other tab tests are.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { breadthCard, contributionsCard, performanceCard, sessionCards, volatilityLine, volReading } from '../../web/js/session-cards.js';
+import { contributionsCard, performanceCard, volatilityLine, volReading } from '../../web/js/session-cards.js';
+import { breadthLine } from '../../web/js/index-history.js';
 
 class FakeNode {
   constructor(tag) {
@@ -98,22 +99,6 @@ const overview = {
     ratio: 6.5, ratio_pct: 40, ratio_since: '2018-01-05', reading: 'rates' },
 };
 
-test('the breadth card keeps its headline labels and the wider-window fold', () => withBrowser(() => {
-  const node = breadthCard(overview.breadth, overview.breadth_history, overview.distribution);
-  const text = textOf(node);
-  assert.equal(cardTitle(node), 'BREADTH');
-  for (const label of ['Up / down · today', 'Above 50-day average', 'Above 200-day average', 'New 52-week highs / lows']) {
-    assert.ok(text.includes(label), `missing row ${label}`);
-  }
-  assert.ok(text.includes('MORE BREADTH'), 'the wider windows sit behind the fold');
-  assert.ok(text.includes('S&P 500 MEMBERS BY SIZE OF MOVE'));
-}));
-
-test('breadth with no members says so in place of the table', () => withBrowser(() => {
-  const node = breadthCard([], null, null);
-  assert.ok(textOf(node).includes('No member closes in this build.'));
-}));
-
 test('the contributions card names the day, the total and the leaders', () => withBrowser(() => {
   const node = contributionsCard(overview.contributions);
   const text = textOf(node);
@@ -156,18 +141,12 @@ test('an unknown reading draws no volatility line', () => withBrowser(() => {
   assert.equal(volReading(null), null);
 }));
 
-test('sessionCards returns the four cards in reading order', () => withBrowser(() => {
-  const nodes = sessionCards(overview);
-  assert.equal(nodes.length, 4);
-  assert.equal(cardTitle(nodes[0]), 'BREADTH');
-  assert.equal(cardTitle(nodes[1]), 'WHAT MOVED THE S&P 500');
-  assert.equal(cardTitle(nodes[2]), 'PERFORMANCE · SPY QQQ IWM RSP');
-  assert.ok(textOf(nodes[3]).includes('BOND VS EQUITY VOLATILITY'));
-}));
 
-test('sessionCards drops a card whose input is absent instead of leaving a hole', () => withBrowser(() => {
-  const nodes = sessionCards({ ...overview, contributions: null, vol: null });
-  assert.equal(nodes.length, 2);
-  assert.equal(cardTitle(nodes[0]), 'BREADTH');
-  assert.equal(cardTitle(nodes[1]), 'PERFORMANCE · SPY QQQ IWM RSP');
+test('the index-history breadth line reads today\'s up / down, the averages and the highs and lows', () => withBrowser(() => {
+  const text = textOf(breadthLine({ '1D': { up: 57, down: 43 }, above_50d: 61, above_200d: 44.4, new_highs: 1, new_lows: 0 }));
+  assert.match(text, /UP \/ DOWN TODAY\s+57\s+\/\s+43/);
+  assert.match(text, /ABOVE 50D\s+61%/);
+  assert.match(text, /ABOVE 200D\s+44%/);
+  // A breadth the build did not make is a dash, never a zero.
+  assert.match(textOf(breadthLine(null)), /UP \/ DOWN TODAY\s+—/);
 }));

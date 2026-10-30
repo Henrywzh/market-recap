@@ -13,6 +13,7 @@ import pandas as pd
 from ..compute import returns as R
 from ..config import SESSION_COVERAGE_THRESHOLD, period_sessions
 from ..util import clean_float, company_name, to_iso_date
+from . import overview as SESSION
 
 # How many names each mover table lists. A round number with no analytic
 # meaning, which is exactly why it belongs in one named place.
@@ -51,6 +52,13 @@ def _period_returns(series: pd.Series, labels: list[str]) -> dict:
 def _basket_returns(closes: pd.DataFrame, weights: pd.Series, labels: list[str]) -> dict:
     returns = R.basket_returns(closes, weights, labels, min_weight_share=SESSION_COVERAGE_THRESHOLD)
     return {k: clean_float(v, 2) for k, v in returns.items()}
+
+
+def _contributions(panel: pd.DataFrame, members: pd.DataFrame) -> dict | None:
+    """What moved the index; a basket without weights leaves the card out, not the panel."""
+    if members.empty or "weight" not in members.columns:
+        return None
+    return SESSION.contributions(panel, members)
 
 
 def build(ctx) -> dict:
@@ -111,7 +119,10 @@ def build(ctx) -> dict:
             "symbol": spec.symbol,
             "members": len(symbols),
             "price_chart": _chart_windows(ctx.index_closes[spec.symbol], windows["index_price_chart"]),
-            "breadth_chart": _chart_windows(R.net_breadth_series(panel), windows["breadth_chart"]),
+            # INDEX HISTORY's breadth: today's counts and the year's share above the averages.
+            "breadth": SESSION.breadth(panel),
+            "breadth_history": SESSION.breadth_history(panel),
+            "contributions": _contributions(panel, ctx.priced(spec.key)),
             # Breadth on each index's own members. Counting every priced column
             # would credit the S&P 500 with Nasdaq-only names.
             "advance_decline": R.advance_decline(panel),

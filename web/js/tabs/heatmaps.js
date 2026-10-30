@@ -5,6 +5,7 @@ import { tickerHref } from '../routes.js';
 import { createFeed } from '../live-feed.js';
 import { boardDelay, extendedMove, marketPhase } from '../live-model.js';
 import { unusualCard, selloffBanner } from '../moves-card.js';
+import { heatmap as europeHeatmap, membersCard as europeMembers } from './europe.js';
 
 const ETF_BASE = 'artifacts/etfs';
 // LIVE is whatever is trading now: the session's move against the previous
@@ -196,6 +197,18 @@ export default function renderHeatmaps(root, data, manifest, ctx = {}) {
     onTick: (state) => { if (stockPeriod === LIVE) liveNote.textContent = captionNow(state); },
   });
   stockCard.querySelector('.card-head').append(feed.controls);
+
+  // ---------------- Europe: indices, STOXX 600 sectors, index members ------
+  // From EUROPE's own artifact, loaded on its own: a failure is one named gap.
+  if (ctx.loadArtifact) {
+    const europeHost = el('div', {});
+    root.append(europeHost);
+    ctx.loadArtifact('europe').then((eu) => {
+      if (!eu || eu.unavailable || !Array.isArray(eu.indices)) throw new Error(eu?.unavailable || 'no European data in this build');
+      europeHost.replaceChildren(sectionTitle('EUROPE HEAT MAPS', `LOCAL CURRENCY · PRICES THROUGH ${eu.inputs?.prices_through || DASH}`),
+        europeHeatmap(eu, 'indices'), europeHeatmap(eu, 'sectors'), ...[europeMembers(eu)].filter(Boolean));
+    }).catch((error) => europeHost.replaceChildren(el('div', { class: 'gap', text: `Europe heat maps are unavailable: ${error.message}.` })));
+  }
 
   // ---------------- US ETFs by published net flow -----------------------
   root.append(sectionTitle('US ETF HEAT MAP', 'SIZED BY AUM · COLOURED BY PUBLISHED NET FLOW'));

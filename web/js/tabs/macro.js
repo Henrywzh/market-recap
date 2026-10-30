@@ -55,10 +55,9 @@ function pickedChart(rows, { title, preferred = '1Y', line, marks = () => [], va
   return { card: cardNode, pick, isPicked: (row) => row === picked };
 }
 
-export default function renderMacro(root, data) {
-  root.append(sectionTitle('MACRO'));
-  renderCpi(root, data.cpi);
-
+// COMMODITIES: their own view beside CPI & macro -- prices, not prints.
+export function renderCommodities(root, data) {
+  root.append(sectionTitle('COMMODITIES', '· ENERGY, METALS, AGRICULTURE'));
   const cols = data.commodities.periods;
   const commodityChart = pickedChart(data.commodities.rows, {
     title: 'PRICE HISTORY',
@@ -115,6 +114,11 @@ export default function renderMacro(root, data) {
       [tableHost, liveNote]),
     commodityChart.card,
   ]));
+}
+
+export default function renderMacro(root, data) {
+  root.append(sectionTitle('MACRO'));
+  renderCpi(root, data.cpi);
 
   const inflation = data.inflation;
   const header = ['METRIC', 'UNIT', ...inflation.months.map((m) => {

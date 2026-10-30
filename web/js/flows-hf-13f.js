@@ -127,7 +127,7 @@ export function tiltOption(rows, p) {
 function tiltChart(rows) {
   const node = el('div', { class: 'chart flows-13f-tilt', 'aria-label': 'Hedge-fund sector tilt against the S&P 500, in percentage points' });
   // Drawn after the card is attached, so the chart measures a real box.
-  const draw = () => render(node, (option, p) => ({ ...option, ...tiltOption(rows, p) }));
+  const draw = () => render(node, (option, p) => { const tilt = tiltOption(rows, p); return { ...option, ...tilt, tooltip: { ...option.tooltip, ...tilt.tooltip } }; });
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(draw);
   else draw();
   return node;

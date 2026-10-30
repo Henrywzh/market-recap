@@ -12,7 +12,7 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
-from ..config import CHART_SESSIONS, period_sessions
+from ..config import period_sessions
 
 
 def _window_start(index: pd.Index, sessions: int | None) -> int | None:
@@ -155,17 +155,6 @@ def advance_decline(closes: pd.DataFrame) -> dict:
         "unchanged": unchanged,
         "ratio": round(advancers / total, 2) if total else None,
     }
-
-
-def net_breadth_series(closes: pd.DataFrame, lookback_sessions: int = CHART_SESSIONS) -> pd.Series:
-    """Daily (% advancing - % declining) across the constituent panel."""
-    change = closes.pct_change(fill_method=None)
-    tail = change.tail(lookback_sessions)
-    advancing = (tail > 0).sum(axis=1)
-    declining = (tail < 0).sum(axis=1)
-    counted = advancing + declining
-    net = (advancing - declining) / counted.replace(0, np.nan) * 100.0
-    return net.dropna()
 
 
 def pct_above_moving_average(closes: pd.DataFrame, window: int) -> float | None:

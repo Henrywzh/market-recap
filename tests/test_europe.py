@@ -124,7 +124,7 @@ def _cfg():
 def _world(monkeypatch, *, drop=()):
     rng = np.random.default_rng(1)
     idx = pd.bdate_range("2025-01-02", periods=420)
-    syms = ["^FTSE", "^GDAXI", "EXV1.DE", "EXSA.DE", "GBPUSD=X", "EURUSD=X", "CHFUSD=X", "SPY", "HSBA.L", "AZN.L", "RMS.PA"]
+    syms = ["^FTSE", "^GDAXI", "EXV1.DE", "EXSA.DE", "GBPUSD=X", "EURUSD=X", "CHFUSD=X", "SPY", "^GSPC", "HSBA.L", "AZN.L", "RMS.PA"]
     closes = pd.DataFrame({s: 100 * np.exp(np.cumsum(rng.normal(0.0003, 0.01, len(idx)))) for s in syms}, index=idx)
     closes["HSBA.L"] = closes["HSBA.L"].where(closes.index != idx[200])                   # a London holiday that Paris traded
     closes = closes.drop(columns=list(drop))
@@ -181,3 +181,27 @@ def test_an_unavailable_universe_is_a_named_gap_not_a_failure(monkeypatch):
     p = P.build(ctx)
     assert "unavailable" in p["universes"]["ftse100"] and "wikipedia down" in p["inputs"]["universes_unavailable"]["ftse100"]
     assert [g["key"] for g in p["groups"]] == ["lux", "fin"] and p["groups"][1]["names"] == []      # the derived group is empty, not invented
+
+
+def test_each_universe_carries_the_us_session_cards_on_its_index_own_days(monkeypatch):
+    ctx = _world(monkeypatch)
+    p = P.build(ctx)
+    json.dumps(p, allow_nan=False)
+    s = p["universes"]["ftse100"]["session"]
+    assert s["members"] == 2 and s["1D"]["up"] + s["1D"]["down"] <= 2 and s["above_200d"] is not None
+    assert s["history"]["dates"][-1] == ctx.as_of and len(s["gainers"]) == 2 and s["gainers"][0]["change_pct"] >= s["losers"][0]["change_pct"]
+    # Only HSBC has a market cap, so it carries the whole weight: its contribution is its return.
+    c = s["contributions"]
+    assert c["weighted"] == 1 and c["total_pp"] == pytest.approx(next(g for g in s["gainers"] if g["ticker"] == "HSBA.L")["change_pct"], abs=1e-2)
+    assert c["index_pct"] == pytest.approx(next(r for r in p["indices"] if r["key"] == "ftse100")["returns"]["1D"], abs=1e-2)
+    # 420 sessions of history: no 3Y / 5Y / 10Y window drawn short under its label.
+    assert "1Y" in s["price_chart"] and "3Y" not in s["price_chart"]
+    assert list(p["performance"]["series"]) == ["FTSE 100", "S&P 500"]
+
+
+def test_a_member_listed_twice_is_counted_once(monkeypatch):
+    ctx = _world(monkeypatch)
+    twice = pd.DataFrame({"symbol": ["HSBA.L", "AZN.L", "HSBA.L"], "name": ["HSBC", "AstraZeneca", "HSBC"],
+                          "sector_source": ["Banks", "Pharmaceuticals & biotechnology", "Banks"]})
+    monkeypatch.setattr(P.src, "fetch_ftse100", lambda **kw: (twice, "https://example.test/ftse"))
+    assert P.build(ctx)["universes"]["ftse100"]["session"]["members"] == 2

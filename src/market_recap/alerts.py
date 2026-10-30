@@ -21,6 +21,7 @@ from __future__ import annotations
 from datetime import date
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -90,6 +91,8 @@ def _readings(rule: dict, arts: dict) -> list[tuple[str, str, Any, str]]:
                  i.get("link") or "#watch") for i in items]
     if source == "health":
         return _health(arts)
+    if source == "earnings_eve":
+        return _earnings_eve(rule, arts)
     raise ValueError(f"unknown alert source {source!r}")
 
 
@@ -118,6 +121,47 @@ def _openrouter(rule: dict, arts: dict) -> list[tuple[str, str, Any, str]]:
         if change is not None:
             out.append((p["slug"], f"OpenRouter {p.get('name') or p['slug']} est. revenue, month so far vs last month", change,
                         "#themes/SEMIS.DATA.AI-USAGE"))
+    return out
+
+
+TIMING = {"bmo": "before the open", "amc": "after the close"}
+
+
+def next_session(catalysts: dict) -> str | None:
+    """The first open session after the build's: the day the e-mail's reader trades next."""
+    as_of = catalysts.get("as_of") or ""
+    days = [w["date"] for w in catalysts.get("week") or [] if w.get("status") == "open" and w.get("date", "") > as_of]
+    return min(days) if days else None
+
+
+def _earnings_eve(rule: dict, arts: dict) -> list[tuple[str, str, Any, str]]:
+    """Companies reporting the next session: the high-importance ones (index weight), the
+    watchlist and any named in the rule. One reading per company and date, so it is
+    announced on the eve and simply leaves the ledger after, with no CLEARED."""
+    catalysts = arts.get("catalysts") or {}
+    # A calendar left from an earlier session would name the wrong "next" day.
+    if catalysts.get("as_of") != (arts.get("manifest") or {}).get("as_of"):
+        return []
+    day = next_session(catalysts)
+    if not day:
+        return []
+    wanted = set(rule.get("importance") or ["high"])
+    named = {str(s).upper() for s in rule.get("symbols") or []}
+    out, seen = [], set()
+    for e in catalysts.get("events") or []:
+        if e.get("event_type") != "earnings" or e.get("date") != day or not e.get("symbol"):
+            continue
+        symbol = e["symbol"]
+        if not (e.get("importance") in wanted or (rule.get("watchlist", True) and e.get("watchlist")) or symbol in named):
+            continue
+        name = e.get("name") or symbol
+        company = re.sub(r"\s+(Cl|Class)\.?\s+[A-Z]$", "", name)
+        if company in seen:   # GOOG and GOOGL: one company, one alert
+            continue
+        seen.add(company)
+        when = TIMING.get(e.get("timing") or "", "time not given")
+        est = f"EPS est {e['eps_forecast']:.2f}" if _finite(e.get("eps_forecast")) else "no EPS estimate"
+        out.append((f"{symbol}:{day}", f"{symbol} {name} reports {day}, {when}", est, f"#ticker/{symbol}"))
     return out
 
 
@@ -152,6 +196,8 @@ def _tier(rule: dict, value, previous: int) -> int:
         return RISK_TIER.get(value, previous)
     if rule["source"] in ("watch", "health"):
         return 1 if _finite(value) and value > 0 else 0
+    if rule["source"] == "earnings_eve":
+        return 1
     lines = rule["lines"]
     if rule.get("op") == "abs":
         # A move either way: the tier of its size, the sign kept in the text.
@@ -179,7 +225,7 @@ def _fmt(value, unit: str | None) -> str:
 
 def _line_text(rule: dict, tier: int) -> str:
     # A state carries its own word in the value; a watch or the build has no line.
-    if rule["source"] in ("risk_state", "watch", "health") or tier <= 0:
+    if rule["source"] in ("risk_state", "watch", "health", "earnings_eve") or tier <= 0:
         return ""
     line = rule["lines"][tier - 1]
     if rule.get("op") == "abs":
@@ -269,7 +315,7 @@ def build(*, root: Path | None = None, fetch: Callable[[str], str] | None = None
     config = load_config()
     settings = config.get("alerts") or {}
     site = config["monitor"]["published_base_url"]
-    arts = {name: _read(root, name) for name in ("manifest", "risk", "today", "overview", "themes", "agent-index")}
+    arts = {name: _read(root, name) for name in ("manifest", "risk", "today", "overview", "themes", "agent-index", "catalysts")}
     manifest = arts["manifest"] or {}
     as_of = manifest.get("as_of") or date.today().isoformat()
     previous, problem = _previous(site, fetch)

@@ -143,8 +143,8 @@ for (const route of list) {
       }
     }
     if (route === 'rates') {
-      // Each of the three views must draw its own content, not just switch on.
-      for (const name of ['Treasury rates', 'CPI & macro', 'PPI · AI prices']) {
+      // Each of the four views must draw its own content, not just switch on.
+      for (const name of ['Treasury rates', 'CPI & macro', 'Commodities', 'PPI · AI prices']) {
         await page.getByRole('tab', { name, exact: true }).click();
         const panel = page.getByRole('tabpanel', { name, exact: true });
         await panel.waitFor({ state: 'visible', timeout: RENDER_WAIT_MS });
@@ -251,8 +251,21 @@ for (const route of list) {
         if (BAD_TEXT.test(await card.innerText())) throw new Error('STOCKS vs BONDS shows invalid text');
       }
     }
-    if (route === 'europe') {
+    if (route === 'europe' && (await artifact('europe'))?.universes) {
+      // INDEX HISTORY: each universe draws its price and its members above their averages.
+      const index = page.locator('.card').filter({ has: page.locator('.index-history') }).first();
+      await index.locator('.index-history .ih-breadth-line').first().waitFor({ timeout: RENDER_WAIT_MS });
+      for (const button of await index.locator(':scope > .card-head button').all()) {
+        await button.click();
+        if (await index.locator('.index-history .chart').count() !== 2) throw new Error('Europe index switch should show one price / members-above pair');
+        if (BAD_TEXT.test(await index.innerText())) throw new Error('Europe INDEX HISTORY shows invalid text');
+      }
+    }
+    if (route === 'heatmaps' && (await artifact('europe'))?.indices) {
+      // The European performance maps sit on HEAT MAPS, loaded from europe.json.
+      await page.locator('.eu-heatmap').first().waitFor({ timeout: RENDER_WAIT_MS });
       const maps = page.locator('.card').filter({ has: page.locator('.eu-heatmap') });
+      if (await maps.count() !== 2) throw new Error('HEAT MAPS should carry the Europe indices and sectors maps');
       for (const map of await maps.all()) {
         await map.locator('.card-head').getByRole('button', { name: 'YTD', exact: true }).click();
         if (!await map.locator('.eu-heat-tile').count()) throw new Error('Empty Europe heatmap');

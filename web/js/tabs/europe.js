@@ -3,14 +3,16 @@
 // local return compounded with the currency's move). Prices are Yahoo's.
 
 import { el, card, table, num, pct, dirClass, metaRow, sectionTitle, gap, notice, periodSwitch, DASH } from '../fmt.js';
-import { multiLine } from '../charts.js';
+import { multiLine, disposeWithin } from '../charts.js';
+import { performanceCard } from '../session-cards.js';
+import { indexHistory } from '../index-history.js';
 import { spark } from '../spark.js';
 import { flagText, mapPeriods, mapGroups, mapColourCap, mapNote, marketCapText } from '../europe-model.js';
 import { drawTreemap, returnColor } from '../treemap.js';
 
 const present = (v) => v !== null && v !== undefined && Number.isFinite(v);
 
-function heatmap(data, kind) {
+export function heatmap(data, kind) {
   const indices = kind === 'indices';
   const rows = data[kind];
   let period = '1M';
@@ -123,7 +125,7 @@ function hideTip() {
 
 // FTSE 100 / EURO STOXX 50 members sized by market cap. The indices and sector
 // funds above are equal-size maps because the build has no caps for them.
-function membersCard(data) {
+export function membersCard(data) {
   const universes = Object.entries(data.universes || {}).filter(([, u]) => Array.isArray(u?.names) && u.names.length);
   // A member list that failed is named, with why, rather than dropped from the switch unseen.
   const failed = Object.entries(data.inputs?.universes_unavailable || {}).map(([key, why]) =>
@@ -164,6 +166,32 @@ function membersCard(data) {
   ]);
 }
 
+// INDEX HISTORY for the FTSE 100 or the EURO STOXX 50, on the index's own days:
+// its price, its members above their averages (with the day's up / down), what
+// moved it and the day's movers; then the indices against the S&P 500.
+function indexSection(data) {
+  const universes = Object.entries(data.universes || {}).filter(([, u]) => u?.session);
+  if (!universes.length) return data.performance ? [performance(data)] : [];
+  const history = el('div', { class: 'index-history' });
+  const draw = (label) => {
+    const [, u] = universes.find(([, x]) => x.label === label) || universes[0];
+    disposeWithin(history);
+    const v = u.session;
+    indexHistory(history, { ...v, label: u.label, breadth: v, date: v.date || data.as_of }, { contrib: { link: false,
+      note: `Each member's share of the members' combined market cap times its return on the day, in percentage points. Yahoo's market caps stand in for the index's free-float weights, so the sum is set beside the index's own move. ${v.contributions ? `${v.contributions.weighted} of ${v.contributions.members} members have a market cap.` : ''}` } });
+  };
+  const labels = universes.map(([, u]) => u.label);
+  queueMicrotask(() => draw(labels[0]));
+  return [
+    card('INDEX HISTORY · SELECT A UNIVERSE', periodSwitch(labels, labels[0], draw), history),
+    performance(data),
+  ];
+}
+
+function performance(data) {
+  return performanceCard(data.performance, null, 'PERFORMANCE · EUROPEAN INDICES IN LOCAL CURRENCY, S&P 500 IN DOLLARS');
+}
+
 export default function renderEurope(root, data) {
   if (!data || data.unavailable || !Array.isArray(data.indices)) {
     root.append(gap('No European data in this build.'));
@@ -171,9 +199,9 @@ export default function renderEurope(root, data) {
   }
   root.append(sectionTitle('EUROPE', 'INDICES AND SECTORS'));
   root.append(metaRow(`AS OF ${data.as_of} · PRICES THROUGH ${data.inputs.prices_through}${data.inputs.no_prices?.length ? ` · NO PRICES: ${data.inputs.no_prices.join(', ')}` : ''}`, data.notes));
-  root.append(strip(data), heatmap(data, 'indices'), heatmap(data, 'sectors'));
-  const members = membersCard(data);
-  if (members) root.append(members);
+  // The performance maps and the members' market-cap map are on HEAT MAPS.
+  root.append(strip(data), el('div', { class: 'field-note', text: 'Performance maps of the indices, the STOXX 600 sectors and the FTSE 100 / EURO STOXX 50 members: MARKET → HEAT MAPS.' }),
+    ...indexSection(data));
   const details = el('details', { class: 'sx-fold' }, [el('summary', { text: 'Exact readings, trend flags & dollar history' })]);
   let loaded = false;
   details.addEventListener('toggle', () => {
