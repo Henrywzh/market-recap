@@ -7,7 +7,7 @@ import os
 import pandas as pd
 
 from ..config import ARTIFACT_DIR
-from ..compute import inflation_releases
+from ..compute import inflation_releases, macro_regime
 from ..compute import periods as P
 from ..compute import returns as R
 from ..sources import fred, yahoo, inflation_state
@@ -138,10 +138,45 @@ def build(ctx) -> dict:
             # of borrowing the month above it.
             row["latest_month"] = series.index[-1].strftime("%Y-%m") if len(series) else None
 
+    regime_cfg = config['macro']['regime']
+    growth_id = regime_cfg['growth_series']
+    regime = {'points': [], 'latest': None}
+    try:
+        frame, url = fred.fetch_series(growth_id)
+        growth = frame.set_index('date')['value'].sort_index()
+        regime = macro_regime.build(growth, collected.get(regime_cfg['inflation_series'], pd.Series(dtype=float)),
+                                    months=int(regime_cfg['path_months']), change_months=int(regime_cfg['change_months']))
+        ctx.log.add(SourceRecord('fred_macro_regime', 'Chicago Fed activity index', url,
+                                 to_iso_date(growth.index[-1]) if not growth.empty else None,
+                                 rows=len(growth), status='ok' if regime['points'] else 'partial', policy='monthly_release'))
+    except Exception as exc:
+        ctx.log.add(SourceRecord('fred_macro_regime', 'Chicago Fed activity index',
+                                 f'https://fred.stlouisfed.org/series/{growth_id}', status='partial',
+                                 error=str(exc)[:ERROR_DETAIL_CHARS], policy='monthly_release'))
+    regime.update({'growth_series': growth_id, 'inflation_series': regime_cfg['inflation_series'],
+                   'change_months': int(regime_cfg['change_months'])})
+    gdp = None
+    try:
+        gdp_frame, url = fred.fetch_series(regime_cfg['gdp_series'])
+        values = gdp_frame.set_index('date')['value'].dropna().sort_index()
+        if not values.empty:
+            gdp = {'label': 'Real GDP growth · annualized', 'value': clean_float(values.iloc[-1], 2),
+                   'prior': clean_float(values.iloc[-2], 2) if len(values) > 1 else None,
+                   'period': to_iso_date(values.index[-1]), 'unit': '% SAAR'}
+        ctx.log.add(SourceRecord('fred_macro_regime_gdp', 'Real GDP growth', url,
+                                 to_iso_date(values.index[-1]) if not values.empty else None,
+                                 rows=len(values), status='ok' if gdp else 'partial', policy='quarterly_release'))
+    except Exception as exc:
+        ctx.log.add(SourceRecord('fred_macro_regime_gdp', 'Real GDP growth',
+                                 f"https://fred.stlouisfed.org/series/{regime_cfg['gdp_series']}",
+                                 status='partial', error=str(exc)[:ERROR_DETAIL_CHARS], policy='quarterly_release'))
+
     return inflation_releases.attach({
         "as_of": to_iso_date(closes.index[-1]) if not closes.empty else None,
         "commodities": {"periods": periods, "rows": commodity_rows},
         "inflation": {"months": months, "releases": releases, "rows": inflation_rows},
+        "regime": regime,
+        "regime_gdp": gdp,
         "cpi": cpi.build(ctx),
         "ppi": ppi.build(ctx),
         "note": (

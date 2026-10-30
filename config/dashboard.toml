@@ -2283,6 +2283,13 @@ releases = 12
 # Years of each inflation series carried for its chart.
 history_years = 10
 
+[macro.regime]
+growth_series = "CFNAIMA3"
+inflation_series = "PCEPILFE"
+gdp_series = "A191RL1Q225SBEA"
+change_months = 3
+path_months = 12
+
 [macro.cpi]
 history_years = 10
 percentile_min_months = 60

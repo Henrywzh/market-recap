@@ -101,6 +101,9 @@ FRESHNESS = {
     "daily_close": {"stale_after_calendar_days": 7},
     "published_curve": {"stale_after_calendar_days": 7},
     "monthly_release": {"stale_after_calendar_days": 100},
+    # A quarter is dated by its first day and its advance estimate lands about four
+    # months later, so the prior quarter stays current until the next one prints.
+    "quarterly_release": {"stale_after_calendar_days": 190},
     "fund_holdings": {"stale_after_calendar_days": 10},
     # The newest 10-K/10-Q across the whole universe. Some member files one in
     # almost every week of the year; three without any means the check broke.

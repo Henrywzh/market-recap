@@ -44,7 +44,7 @@ export default async function renderRates(root, [fixedIncome, macro], _manifest,
       const [, label, draw, data] = choices.find(([id]) => id === key);
       try {
         if ((!data && key !== 'ppi') || data?.unavailable) throw new Error(data?.unavailable || 'artifact missing');
-        await draw(host, data);
+        await draw(host, data, ctx);
         if (key === 'yields') {
           const risk = await ctx.loadArtifact?.('risk').catch(() => null);
           if (!host.isConnected) return;

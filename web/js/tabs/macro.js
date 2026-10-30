@@ -3,6 +3,7 @@ import { timeLines } from '../charts.js';
 import { rangeSwitch, sliceRange, initialRange } from '../range.js';
 import { createManualFeed } from '../live-feed.js';
 import renderCpi from './cpi.js';
+import { macroRegimeCard, macroSnapshot, upcomingMacro } from '../macro-regime.js';
 
 const HEAT_WARM = [185, 28, 28];
 const HEAT_COOL = [30, 64, 175];
@@ -116,8 +117,11 @@ export function renderCommodities(root, data) {
   ]));
 }
 
-export default function renderMacro(root, data) {
+export default async function renderMacro(root, data, ctx = {}) {
   root.append(sectionTitle('MACRO'));
+  const [overview, catalysts, priced] = await Promise.all(['overview', 'catalysts', 'priced'].map((key) => ctx.loadArtifact?.(key).catch(() => null) || null));
+  root.append(macroSnapshot(overview, data.regime, data.regime_gdp, priced),
+    el('div', { class: 'grid two' }, [macroRegimeCard(data.regime), upcomingMacro(catalysts)]));
   renderCpi(root, data.cpi);
 
   const inflation = data.inflation;
