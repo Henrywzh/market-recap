@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 import pandas as pd
 
-from ..config import ARTIFACT_DIR
+from ..config import ARTIFACT_DIR, NOWCAST_EVALUATION_PATH
 from ..compute import inflation_releases, macro_regime
 from ..compute import periods as P
 from ..compute import returns as R
-from ..sources import fred, yahoo, inflation_state
+from ..sources import fred, yahoo, inflation_state, nowcast as nowcast_source
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, history_payload, to_iso_date
 from . import cpi, ppi
 
@@ -141,6 +142,7 @@ def build(ctx) -> dict:
     regime_cfg = config['macro']['regime']
     growth_id = regime_cfg['growth_series']
     regime = {'points': [], 'latest': None}
+    growth = pd.Series(dtype=float)
     try:
         frame, url = fred.fetch_series(growth_id)
         growth = frame.set_index('date')['value'].sort_index()
@@ -171,12 +173,17 @@ def build(ctx) -> dict:
                                  f"https://fred.stlouisfed.org/series/{regime_cfg['gdp_series']}",
                                  status='partial', error=str(exc)[:ERROR_DETAIL_CHARS], policy='quarterly_release'))
 
+    regime_nowcast = _regime_nowcast(ctx, regime, growth, collected.get(regime_cfg['inflation_series'], pd.Series(dtype=float)),
+                                     regime_cfg, previous.get('regime_nowcast') or {},
+                                     to_iso_date(closes.index[-1]) if not closes.empty else None)
+
     return inflation_releases.attach({
         "as_of": to_iso_date(closes.index[-1]) if not closes.empty else None,
         "commodities": {"periods": periods, "rows": commodity_rows},
         "inflation": {"months": months, "releases": releases, "rows": inflation_rows},
         "regime": regime,
         "regime_gdp": gdp,
+        "regime_nowcast": regime_nowcast,
         "cpi": cpi.build(ctx),
         "ppi": ppi.build(ctx),
         "note": (
@@ -188,3 +195,49 @@ def build(ctx) -> dict:
             "column rather than being shifted a month to fill it."
         ),
     }, previous)
+
+
+def _regime_nowcast(ctx, regime: dict, growth: pd.Series, core_yoy: pd.Series, cfg: dict, previous: dict,
+                    as_of: str | None) -> dict:
+    """The map's NOW point, GDPNow, the carried daily ledger and the archived evaluation."""
+    cleveland, ads = pd.DataFrame(), pd.Series(dtype=float)
+    try:
+        cleveland = nowcast_source.core_pce_nowcasts()
+        ctx.log.add(SourceRecord('nowcast_cleveland', 'Cleveland Fed core PCE nowcast', nowcast_source.CLEVELAND_PAGE,
+                                 to_iso_date(cleveland['asof'].max()) if not cleveland.empty else None, rows=len(cleveland),
+                                 status='ok' if not cleveland.empty else 'partial', policy='nowcast'))
+    except Exception as exc:
+        ctx.log.add(SourceRecord('nowcast_cleveland', 'Cleveland Fed core PCE nowcast', nowcast_source.CLEVELAND_PAGE,
+                                 status='partial', error=str(exc)[:ERROR_DETAIL_CHARS], policy='nowcast'))
+    try:
+        ads = nowcast_source.ads_daily()
+        ctx.log.add(SourceRecord('nowcast_ads', 'Philadelphia Fed ADS index', nowcast_source.ADS_PAGE,
+                                 to_iso_date(ads.index.max()) if not ads.empty else None, rows=len(ads),
+                                 status='ok' if not ads.empty else 'partial', policy='nowcast'))
+    except Exception as exc:
+        ctx.log.add(SourceRecord('nowcast_ads', 'Philadelphia Fed ADS index', nowcast_source.ADS_PAGE,
+                                 status='partial', error=str(exc)[:ERROR_DETAIL_CHARS], policy='nowcast'))
+    result = macro_regime.nowcast(regime, growth, core_yoy, cleveland, ads, change_months=int(cfg['change_months']))
+    gdpnow = None
+    try:
+        frame, url = fred.fetch_series(cfg['gdpnow_series'])
+        values = frame.set_index('date')['value'].dropna().sort_index()
+        if not values.empty:
+            gdpnow = {'label': 'GDPNow · current quarter', 'value': clean_float(values.iloc[-1], 2),
+                      'period': to_iso_date(values.index[-1]), 'unit': '% SAAR'}
+        ctx.log.add(SourceRecord('fred_macro_regime_gdpnow', 'Atlanta Fed GDPNow', url,
+                                 to_iso_date(values.index[-1]) if not values.empty else None, rows=len(values),
+                                 status='ok' if gdpnow else 'partial', policy='quarterly_release'))
+    except Exception as exc:
+        ctx.log.add(SourceRecord('fred_macro_regime_gdpnow', 'Atlanta Fed GDPNow',
+                                 f"https://fred.stlouisfed.org/series/{cfg['gdpnow_series']}", status='partial',
+                                 error=str(exc)[:ERROR_DETAIL_CHARS], policy='quarterly_release'))
+    result['gdpnow'] = gdpnow
+    result['ledger'] = macro_regime.update_ledger(previous.get('ledger') or [], result, regime, as_of)
+    try:
+        result['evaluation'] = json.loads(NOWCAST_EVALUATION_PATH.read_text())
+    except (OSError, ValueError):
+        result['evaluation'] = None
+    result['sources'] = {'cleveland': nowcast_source.CLEVELAND_PAGE, 'ads': nowcast_source.ADS_PAGE,
+                         'gdpnow': f"https://fred.stlouisfed.org/series/{cfg['gdpnow_series']}"}
+    return result

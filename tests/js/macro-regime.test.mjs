@@ -31,3 +31,14 @@ test('macro agenda includes policy, orders by date/time and retains source impor
   assert.deepEqual(macroCalendarEvents(later, false, 14).map(e => e.title), ['In']);
   assert.deepEqual(macroCalendarEvents(later).map(e => e.title), ['In', 'Out']);
 });
+
+test('nowcast ledger shows one row per month, its last reading, newest month first', async () => {
+  const { nowcastLedgerRows } = await import('../../web/js/macro-regime.js');
+  const rows = nowcastLedgerRows([
+    { date: '2026-10-29', month: '2026-10', quadrant: 'SLOWDOWN' },
+    { date: '2026-10-30', month: '2026-10', quadrant: 'REFLATION' },
+    { date: '2026-11-02', month: '2026-11', quadrant: 'GOLDILOCKS' },
+  ]);
+  assert.deepEqual(rows.map(r => [r.month, r.quadrant]), [['2026-11', 'GOLDILOCKS'], ['2026-10', 'REFLATION']]);
+  assert.deepEqual(nowcastLedgerRows(null), []);
+});

@@ -2326,6 +2326,7 @@ history_years = 10
 growth_series = "CFNAIMA3"
 inflation_series = "PCEPILFE"
 gdp_series = "A191RL1Q225SBEA"
+gdpnow_series = "GDPNOW"
 change_months = 3
 path_months = 12
 

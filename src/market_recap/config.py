@@ -24,6 +24,8 @@ CONFIG_PATH = REPO_ROOT / "config" / "dashboard.toml"
 # link (scripts/chain_evidence.py writes it).
 CHAIN_PATH = REPO_ROOT / "config" / "ai_chain.toml"
 CHAIN_EVIDENCE_PATH = REPO_ROOT / "config" / "ai_chain_evidence.json"
+# The archived real-time comparison of the regime map's nowcast candidates.
+NOWCAST_EVALUATION_PATH = REPO_ROOT / "config" / "nowcast_evaluation.json"
 
 CACHE_DIR = REPO_ROOT / "data" / "cache"
 ARTIFACT_DIR = REPO_ROOT / "artifacts"
@@ -104,6 +106,9 @@ FRESHNESS = {
     # A quarter is dated by its first day and its advance estimate lands about four
     # months later, so the prior quarter stays current until the next one prints.
     "quarterly_release": {"stale_after_calendar_days": 190},
+    # Cleveland's inflation nowcast moves daily, ADS after each input release;
+    # two weeks without either means the source stopped, not a quiet stretch.
+    "nowcast": {"stale_after_calendar_days": 14},
     "fund_holdings": {"stale_after_calendar_days": 10},
     # The newest 10-K/10-Q across the whole universe. Some member files one in
     # almost every week of the year; three without any means the check broke.
