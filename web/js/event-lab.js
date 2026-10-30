@@ -49,7 +49,7 @@ export default function eventLab(root, technicals, ctx) {
   const highOp = select('From 1Y high comparison', [['', 'ANY'], ['le', '≤'], ['ge', '≥']], '');
   const highValue = numberInput('From 1Y high level', -10, '1');
   const gap = numberInput('One event per N sessions', 5, '1');
-  const windowSel = select('Study window', [['', 'ALL (FROM 2016)'], ['1260', 'LAST 5 YEARS'], ['756', 'LAST 3 YEARS']], '');
+  const windowSel = select('Study window', [['', 'ALL HISTORY'], ['1260', 'LAST 5 YEARS'], ['756', 'LAST 3 YEARS']], '');
   const side = select('Side', [['1', 'LONG'], ['-1', 'SHORT']], '1');
   const cost = select('Cost', [['0', 'NO COST'], ['10', '10BP ROUND TRIP']], '0');
   const focus = select('Focus outcome', KEYS.map((k) => [k, keyLabel(k)]), 'close5');
@@ -109,7 +109,7 @@ export default function eventLab(root, technicals, ctx) {
     el('div', { class: 'wb-result-grid' }, [card('EVERY EVENT · ROLLING MEDIAN OF LAST 10', null, scatter), card('BY YEAR OF THE TRIGGER', null, yearTable)]),
     card('EVENTS · NEWEST FIRST', csvButton, eventTable),
     el('details', { class: 'method-fold' }, [el('summary', { text: 'How this is computed' }),
-      note('Prices are the nightly build\'s daily bars, split-adjusted but not dividend-adjusted, from October 2016. Outcome = price at day x open or close ÷ t0 close − 1 (short: the negative), less the chosen round-trip cost. Day 1 is the next session.'),
+      note(`Prices are the nightly build's daily bars, split-adjusted but not dividend-adjusted: ${(technicals.long_bars?.symbols || []).join(', ') || 'the broad-market funds'} from ${technicals.long_bars?.first || '2000'}, every other ticker from October 2016. Outcome = price at day x open or close ÷ t0 close − 1 (short: the negative), less the chosen round-trip cost. Day 1 is the next session.'),
       note('Intraday trigger: the day\'s low (high for a rise) against the prior close, so a day that touched −4% and closed higher counts; the summary says how many. It is known before the close, so a t0-close entry is realistic. RSI(6), the averages and the 1Y high use the t0 close itself: in practice what was visible minutes before it.'),
       note('One event per N sessions keeps the first trigger and skips any within N sessions after it, so a crash with a big move every day is not counted many times. Baseline = every session in the same window and exclusions, with no trigger or conditions.'),
       note('Random-draw check: how often the mean of as many randomly chosen sessions (from the baseline) was at least the events\' mean, for the focus outcome. Small = the trigger picked better days than chance; near 50% = no different. A description of the past, not a forecast.')]),

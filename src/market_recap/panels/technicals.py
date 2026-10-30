@@ -20,7 +20,8 @@ from .. import corporate_actions
 from ..compute.oversold import LINES as OVERSOLD_LINES
 from ..config import PERIOD_TRADING_DAYS, TICKER_ARTIFACT_DIR
 from ..sources import yahoo
-from ..util import clean_floats, company_name, prune_stale, write_json
+from ..context import YAHOO_URL
+from ..util import SourceRecord, clean_floats, company_name, describe_error, prune_stale, to_iso_date, write_json
 
 # Decimal places kept on a baked close: enough for a sub-dollar ETF, and every
 # extra digit is paid for once per session per ticker.
@@ -44,11 +45,11 @@ def _price_digits(values: pd.Series) -> int:
     return 4 if pd.notna(low) and low < 1 else 2
 
 
-def bake_bars(symbol: str, raw_prices: pd.DataFrame, ohlcv: dict[str, pd.DataFrame]) -> bool:
-    """Write one ticker's daily bars since BARS_START; False when it has none."""
+def bake_bars(symbol: str, raw_prices: pd.DataFrame, ohlcv: dict[str, pd.DataFrame], *, start: str = BARS_START) -> bool:
+    """Write one ticker's daily bars since ``start``; False when it has none."""
     if symbol not in raw_prices.columns:
         return False
-    close = raw_prices[symbol].loc[BARS_START:].dropna()
+    close = raw_prices[symbol].loc[start:].dropna()
     if close.empty:
         return False
     frames = {kind: (ohlcv.get(kind, pd.DataFrame())[symbol].reindex(close.index)
@@ -104,6 +105,37 @@ def bake_ticker(symbol: str, closes: pd.Series, *, min_sessions: int,
         payload["ohlcv"] = {"dates": dates.strftime("%Y-%m-%d").tolist(), **vectors}
     write_json(TICKER_ARTIFACT_DIR / f"{symbol}.json", payload)
     return {"ticker": symbol, "sessions": payload["sessions"]}
+
+
+def _bake_long_bars(ctx, settings: dict, barred: set[str]) -> dict:
+    """Rewrite the configured broad-market funds' bars from ``long_bars_start``.
+
+    One long download of a few symbols. If it fails, those funds keep the bars
+    written above (from BARS_START) and the source says so; the build goes on.
+    """
+    symbols = [s for s in settings.get("long_bars") or [] if s in barred]
+    start, period = settings.get("long_bars_start", BARS_START), settings.get("long_bars_period", "30y")
+    if not symbols:
+        return {"symbols": [], "start": start}
+    done: list[str] = []
+    try:
+        yahoo.fetch_closes(symbols, period=period, need_ohlcv=True)
+        # Through the build's own session: a download during the next session must not add a half day.
+        through = ctx.closes.index[-1]
+        ohlcv = {kind: (corporate_actions.adjust(frame, ctx.adjustments) if kind != "volume" else frame).loc[:through]
+                 for kind, frame in yahoo.fetch_ohlcv_cache(period).items()}
+        prices = corporate_actions.adjust(yahoo.fetch_prices(period), ctx.adjustments).loc[:through]
+        done = [s for s in symbols if bake_bars(s, prices, ohlcv, start=start)]
+        first = min((prices[s].loc[start:].first_valid_index() for s in done), default=None)
+        ctx.log.add(SourceRecord("technicals_long_bars", f"Daily bars from {start}: {', '.join(symbols)}", YAHOO_URL,
+                                 to_iso_date(prices.index[-1]) if not prices.empty else None, rows=len(done),
+                                 status="ok" if len(done) == len(symbols) else "partial",
+                                 error=None if len(done) == len(symbols) else f"kept {BARS_START} bars for {', '.join(sorted(set(symbols) - set(done)))}"))
+    except Exception as exc:
+        ctx.log.add(SourceRecord("technicals_long_bars", f"Daily bars from {start}", YAHOO_URL, status="partial",
+                                 error=f"kept {BARS_START} bars: {describe_error(exc)}"))
+        first = None
+    return {"symbols": done, "start": start, "first": to_iso_date(first) if first is not None else None}
 
 
 def ticker_names(ctx, symbols) -> dict[str, str]:
@@ -172,6 +204,9 @@ def build(ctx) -> dict:
         if entry:
             baked.append(entry)
 
+    long_bars = _bake_long_bars(ctx, settings, set(barred))
+    barred.extend(s for s in long_bars["symbols"] if s not in barred)
+
     prune_stale(TICKER_ARTIFACT_DIR, (e["ticker"] for e in baked))
     prune_stale(BARS_ARTIFACT_DIR, barred)
     zwindow = int(settings["zscore_window"])
@@ -187,6 +222,8 @@ def build(ctx) -> dict:
         # Tickers with daily bars since BARS_START (artifacts/bars), for the chip distribution.
         "bars": sorted(barred),
         "bars_start": BARS_START,
+        # Funds whose bars reach further back than BARS_START, and from when.
+        "long_bars": long_bars,
         # Everything the page's controls start from, so the defaults live in
         # the contract and not in a second copy in JavaScript.
         "defaults": {
