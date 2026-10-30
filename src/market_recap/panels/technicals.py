@@ -108,7 +108,7 @@ def bake_ticker(symbol: str, closes: pd.Series, *, min_sessions: int,
 
 
 def _bake_long_bars(ctx, settings: dict, barred: set[str]) -> dict:
-    """Rewrite the configured broad-market funds' bars from ``long_bars_start``.
+    """Rewrite the configured long-history funds' bars from ``long_bars_start``.
 
     One long download of a few symbols. If it fails, those funds keep the bars
     written above (from BARS_START) and the source says so; the build goes on.

@@ -2189,10 +2189,14 @@ unit = "MoM %"
 display = "mom"
 
 [technicals]
-# Broad-market funds whose daily bars go back to long_bars_start (the Trade Desk's
-# EVENT LAB and lab read them), from one long download of these few symbols; every
-# other ticker's bars start at panels/technicals.py BARS_START.
-long_bars = ["SPY", "QQQ", "DIA", "IWM"]
+# Broad-market and sector funds whose daily bars go back to long_bars_start (the
+# Trade Desk's EVENT LAB and lab read them), from one long download of these
+# symbols; every other ticker's bars start at panels/technicals.py BARS_START.
+# XLRE (2015) and XLC (2018) start at their launch.
+long_bars = [
+  "SPY", "QQQ", "DIA", "IWM",
+  "XLK", "XLF", "XLV", "XLY", "XLC", "XLI", "XLP", "XLE", "XLU", "XLRE", "XLB",
+]
 long_bars_start = "2000-01-01"
 long_bars_period = "30y"
 # Presets offered by the relative-strength control.
