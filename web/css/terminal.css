@@ -2211,3 +2211,5 @@ table.data.idm-table tr.idm-section-row td { color: var(--accent); font-size: 10
 .today-backdrop-item { display:flex; flex-direction:column; gap:4px; padding:10px 12px; border:1px solid var(--border); border-radius:4px; min-width:0; }
 .today-backdrop-item strong { font-size:15px; color:var(--text); letter-spacing:.3px; }
 .today-backdrop-item .dim { font-size:11px; }
+/* RATES & MACRO → credit charts: range switch and the LOG toggle side by side. */
+.credit-tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }

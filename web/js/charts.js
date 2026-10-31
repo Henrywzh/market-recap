@@ -269,6 +269,8 @@ export function multiLine(node, dates, seriesMap, options = {}) {
 // lines: [{ name, dates, values, color? (a colour or p => colour), axis?: 0|1, dashed?, width? }]
 // options: { left?: axis-0 formatter, right?: axis-1 formatter, value?: tooltip
 //   formatter (value, line) => text, markY?: [{ y, label }] on axis 0 }
+const LOG_AXIS = { type: 'log', logBase: 2, min: (v) => v.min * 0.85, max: (v) => v.max * 1.15 };
+
 export function timeLines(node, lines, options = {}) {
   return render(node, (option, p) => {
     const colorOf = (line, i) => (typeof line.color === 'function' ? line.color(p) : line.color) || SERIES_COLORS[i % SERIES_COLORS.length];
@@ -300,9 +302,12 @@ export function timeLines(node, lines, options = {}) {
         },
       },
       xAxis: { ...option.xAxis, type: 'time', boundaryGap: false, data: undefined },
+      // options.log: a log scale on the left axis (positive values only), so lines an
+      // order of magnitude apart keep their shape. Base 2 puts a tick at each doubling;
+      // the range hugs the data rather than whole powers.
       yAxis: twoAxes
-        ? [axis(options.left), axis(options.right, { position: 'right', splitLine: { show: false } })]
-        : axis(options.left),
+        ? [axis(options.left, options.log ? LOG_AXIS : {}), axis(options.right, { position: 'right', splitLine: { show: false } })]
+        : axis(options.left, options.log ? LOG_AXIS : {}),
       series: lines.map((line, i) => ({
         name: line.name,
         type: 'line',

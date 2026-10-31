@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ..sources import fred, treasury
+from ..sources import fred, snapshot_store, treasury
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, history_payload, to_iso_date
 
 # The curve is compared against its own history, so every snapshot names a
@@ -44,6 +44,48 @@ def _history(ctx, settings) -> dict:
         pair = pd.concat([lines[spread["long"]], lines[spread["short"]]], axis=1, keys=["l", "s"]).dropna()
         out[spread["label"]] = history_payload((pair["l"] - pair["s"]) * BPS_PER_PCT, years=years, digits=0)
     return {"years": years, "series": out, "spread": spread["label"] if spread else None}
+
+
+def _credit(ctx, settings) -> dict:
+    """Corporate spreads by rating and effective yields, over years.
+
+    FRED serves the ICE BofA series for three years only; the site's archive of
+    what FRED served (snapshots/risk.py) supplies older dates, FRED winning
+    where both exist. ``first`` says where each line's history really starts.
+    """
+    years = int(settings.get("credit_years", 10))
+    out: dict[str, dict] = {"spreads": {}, "yields": {}}
+    first: dict[str, str] = {}
+    for group, key in (("spreads", "credit_spreads"), ("yields", "credit_yields")):
+        specs = settings.get(key) or []
+        done, failed, last = 0, [], []
+        for spec in specs:
+            series_id = spec["series_id"]
+            try:
+                frame, _ = fred.fetch_series(series_id)
+                current = frame.set_index("date")["value"].sort_index()
+            except Exception as exc:
+                failed.append(f"{series_id}: {str(exc)[:80]}")
+                current = pd.Series(dtype=float)
+            try:
+                older = snapshot_store.risk_archive("fred", series_id)
+            except Exception:
+                older = pd.Series(dtype=float)
+            if not current.empty and not older.empty:
+                older = older[older.index < pd.to_datetime(current.index).min()]
+            series = pd.concat([older, current]).sort_index() if not older.empty else current
+            if series.dropna().empty:
+                continue
+            out[group][spec["label"]] = history_payload(series, years=years, digits=2)
+            first[spec["label"]] = out[group][spec["label"]]["dates"][0]
+            last.append(out[group][spec["label"]]["dates"][-1])
+            done += 1
+        if specs:
+            ctx.log.add(SourceRecord(f"fred_credit_{group}", f"ICE BofA corporate {group} (FRED + site archive)",
+                                     "https://fred.stlouisfed.org/categories/32413", max(last) if last else None, rows=done,
+                                     status="ok" if done == len(specs) else "partial",
+                                     error="; ".join(failed)[:ERROR_DETAIL_CHARS] or None))
+    return {**out, "years": years, "first": first}
 
 
 def _pivot(frame: pd.DataFrame) -> pd.DataFrame:
@@ -183,6 +225,7 @@ def build(ctx) -> dict:
         "rows": rows,
         "spreads": spread_rows,
         "history": _history(ctx, settings),
+        "credit": _credit(ctx, settings),
         "auctions": treasury.public_auction_summary(),
         "note": (
             '"Latest Published" is the most recent date the U.S. Treasury has posted par yield '

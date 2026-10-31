@@ -2429,6 +2429,22 @@ history_series = [
   { label = "30Y", series_id = "DGS30" },
 ]
 history_spread = { label = "10Y − 2Y", long = "10Y", short = "2Y" }
+# Corporate credit (ICE BofA via FRED, which serves only the last three years; older
+# dates come from the site's own archive of what FRED served, snapshots/risk.py).
+# Spreads are option-adjusted, over Treasuries; yields are effective yields.
+credit_years = 10
+credit_spreads = [
+  { label = "BBB (IG)", series_id = "BAMLC0A4CBBB" },
+  { label = "BB", series_id = "BAMLH0A1HYBB" },
+  { label = "B", series_id = "BAMLH0A2HYB" },
+  { label = "CCC & lower", series_id = "BAMLH0A3HYC" },
+  { label = "HY aggregate", series_id = "BAMLH0A0HYM2" },
+  { label = "IG aggregate", series_id = "BAMLC0A0CM" },
+]
+credit_yields = [
+  { label = "HY effective yield", series_id = "BAMLH0A0HYM2EY" },
+  { label = "IG effective yield", series_id = "BAMLC0A0CMEY" },
+]
 
 [cross_listing_diagnostics]
 # A premium series whose day-to-day changes carry less memory than this is
@@ -2495,7 +2511,7 @@ polymarket_tags = ["fed", "fed-rates"]
 # difference between two evenings' files.
 [snapshots.risk]
 tail = 30
-fred = ["BAMLH0A0HYM2", "BAMLC0A0CM", "BAMLH0A3HYC", "BAMLH0A1HYBB", "BAMLH0A2HYB", "BAMLC0A4CBBB", "NFCI", "ANFCI"]
+fred = ["BAMLH0A0HYM2", "BAMLC0A0CM", "BAMLH0A3HYC", "BAMLH0A1HYBB", "BAMLH0A2HYB", "BAMLC0A4CBBB", "BAMLH0A0HYM2EY", "BAMLC0A0CMEY", "NFCI", "ANFCI"]
 cboe = ["VIX", "VIX9D", "VIX3M", "VIX6M", "VIX1Y", "VVIX", "SKEW", "COR1M"]
 # ETFs whose issuer publishes only today's units (CUSIP from [etf_xray.holdings]):
 # recorded each evening so their flow can be built from the record.

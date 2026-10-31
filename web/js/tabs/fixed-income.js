@@ -66,6 +66,52 @@ function historyCard(history) {
   ]);
 }
 
+// Corporate credit over time: spreads by rating on a log scale (CCC sits near ten
+// times BBB) and the effective yields against the 10-year Treasury.
+const SPREAD_STYLE = { 'HY aggregate': { color: (p) => p.text, dashed: true }, 'IG aggregate': { color: (p) => p.dim, dashed: true } };
+function creditCards(credit, history) {
+  const spreads = credit?.spreads || {}; const yields = credit?.yields || {};
+  const spreadNames = Object.keys(spreads); const yieldNames = Object.keys(yields);
+  if (!spreadNames.length && !yieldNames.length) return [];
+  const longest = [...spreadNames.map((n) => spreads[n].dates), ...yieldNames.map((n) => yields[n].dates)]
+    .reduce((a, b) => (b.length > a.length ? b : a), []);
+  const since = Object.values(credit.first || {}).sort()[0];
+  const sourceNote = `ICE BofA via FRED, which serves only the last three years; older dates come from this site's own archive of what FRED served${since ? `, so the lines start ${since}` : ''}. Daily for the last year, each week's last print before that.`;
+  const cards = [];
+  if (spreadNames.length) {
+    let range = 'MAX'; let log = true;
+    const node = el('div', { class: 'chart tall' });
+    const draw = () => timeLines(node, spreadNames.map((name) => ({ name, ...sliceRange(spreads[name].dates, { values: spreads[name].values }, range), ...(SPREAD_STYLE[name] || {}) })), {
+      log, left: (v) => `${num(v, v < 2 ? 1 : 0)}%`, value: (v) => `${num(v, 2)}%`,
+    });
+    const logButton = el('button', { type: 'button', text: 'LOG', 'aria-pressed': 'true', onclick: () => {
+      log = !log; logButton.setAttribute('aria-pressed', String(log)); draw();
+    } });
+    requestAnimationFrame(draw);
+    cards.push(card(`CREDIT SPREADS BY RATING · OAS · AS OF ${longest.at(-1) || DASH}`,
+      el('div', { class: 'credit-tools' }, [rangeSwitch(longest, range, (label) => { range = label; draw(); }, { short: true }), el('div', { class: 'period-switch' }, [logButton])]), [node,
+        el('div', { class: 'note-text', text: `Option-adjusted spread over Treasuries, in percentage points. A rise is lenders asking more to hold the risk; CCC moves first and furthest. Log scale on by default, so a move from 1% to 2% looks as large as one from 10% to 20%. ${sourceNote}` })]));
+  }
+  if (yieldNames.length) {
+    let range = 'MAX';
+    const node = el('div', { class: 'chart' });
+    // The Treasury line only over the credit series' own dates, so the axes match.
+    const tenAll = history?.series?.['10Y'];
+    const from = longest[0];
+    const ten = tenAll && from ? sliceRange(tenAll.dates, { values: tenAll.values }, 'MAX') : null;
+    if (ten) { const k = ten.dates.findIndex((d) => d >= from); ten.dates = ten.dates.slice(Math.max(0, k)); ten.values = ten.values.slice(Math.max(0, k)); }
+    const draw = () => timeLines(node, [
+      ...yieldNames.map((name) => ({ name, ...sliceRange(yields[name].dates, { values: yields[name].values }, range) })),
+      ...(ten ? [{ name: '10Y Treasury', ...sliceRange(ten.dates, { values: ten.values }, range), color: (p) => p.dim, dashed: true }] : []),
+    ], { left: (v) => `${num(v, 1)}%`, value: (v) => `${num(v, 2)}%` });
+    requestAnimationFrame(draw);
+    cards.push(card(`HIGH-YIELD & INVESTMENT-GRADE YIELDS · AS OF ${longest.at(-1) || DASH}`,
+      rangeSwitch(longest, range, (label) => { range = label; draw(); }, { short: true }), [node,
+        el('div', { class: 'note-text', text: `Effective yield of each ICE BofA index: what the bonds pay to hold, Treasury yield plus spread. The gap to the dashed 10-year Treasury is roughly the spread. ${sourceNote}` })]));
+  }
+  return cards;
+}
+
 export default function renderFixedIncome(root, data) {
   root.append(sectionTitle('U.S. TREASURIES', '(FIXED INCOME)'));
 
@@ -79,6 +125,7 @@ export default function renderFixedIncome(root, data) {
   // how it got there.
   const history = historyCard(data.history);
   root.append(history ? el('div', { class: 'grid two' }, [curveCard, history]) : curveCard);
+  root.append(...creditCards(data.credit, data.history));
 
   // CNBC's live curve joins the chart and the table only after REFRESH.
   let live = null;

@@ -43,7 +43,7 @@ COLUMNS = ("fetched_at", "source", "series", "date", "value")
 OFR_FSI_URL = "https://www.financialresearch.gov/financial-stress-index/data/fsi.csv"
 DEFAULT_FRED = [
     "BAMLH0A0HYM2", "BAMLC0A0CM", "BAMLH0A3HYC", "BAMLH0A1HYBB", "BAMLH0A2HYB", "BAMLC0A4CBBB",
-    "NFCI", "ANFCI",
+    "BAMLH0A0HYM2EY", "BAMLC0A0CMEY", "NFCI", "ANFCI",
 ]
 DEFAULT_CBOE = ["VIX", "VIX9D", "VIX3M", "VIX6M", "VIX1Y", "VVIX", "SKEW", "COR1M"]
 
