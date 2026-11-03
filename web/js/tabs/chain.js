@@ -252,6 +252,8 @@ function edgesCard(data) {
 
 export default async function renderChain(root, data, _manifest, ctx = {}) {
   root.append(sectionTitle('AI CHAIN', 'WHO SELLS TO WHOM, AND WHAT A REPORT CARRIES'));
+  root.append(el('div', { class: 'chain-sister field-note' }, ['More AI data: ',
+    el('a', { class: 'accent-text', href: 'https://ai-data-dashboard.pages.dev/', target: '_blank', rel: 'noopener', text: 'Alt Data dashboard ↗' })]));
   if (!data?.nodes?.length) {
     root.append(gap('The chain is not in this build.'));
     return;

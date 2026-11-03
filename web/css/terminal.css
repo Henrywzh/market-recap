@@ -114,6 +114,18 @@ select.control {
   white-space: nowrap;
 }
 .build-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); }
+.sister-link {
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  padding: 3px 8px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.sister-link:hover { border-color: var(--accent); }
+.chain-sister { margin: 0 0 10px; font-size: 12px; }
 .updated { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
 
 /* ---------- Tabs ---------- */
