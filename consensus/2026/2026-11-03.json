@@ -1,0 +1,13 @@
+{
+  "companies": 510,
+  "failed": {
+    "FOX": "empty quoteSummary answer"
+  },
+  "failed_count": 1,
+  "fetched": 511,
+  "fetched_at": "2026-11-04T03:20:44Z",
+  "kept_from_earlier": 0,
+  "rows": 2039,
+  "session": "2026-11-03",
+  "universe": 512
+}
