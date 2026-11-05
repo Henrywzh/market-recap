@@ -234,8 +234,21 @@ def _line_text(rule: dict, tier: int) -> str:
     return f"{sign} {_fmt(line, rule.get('unit'))}"
 
 
-def evaluate(rules: list[dict], arts: dict, base: dict | None) -> tuple[list[dict], dict]:
-    """The events (tier changes against ``base``) and this session's ledger.
+def _held(rule: dict, value, tier: int) -> bool:
+    """True when a reading is back inside its line but within the reset margin, so its tier holds."""
+    lines = rule.get("lines")
+    if not lines or not _finite(value) or tier <= 0:
+        return False
+    line = lines[tier - 1]
+    op = rule.get("op", "above")
+    if op == "abs":
+        return abs(value) < line
+    return value > line if op == "below" else value < line
+
+
+def evaluate(rules: list[dict], arts: dict, base: dict | None) -> tuple[list[dict], dict, list[dict]]:
+    """The events (tier changes against ``base``), this session's ledger, and the
+    readings still past a line they crossed before (``standing``, not news).
 
     With no base (the first build, or an unreadable previous feed) nothing is
     compared: what is past a line is listed as ACTIVE, once, rather than NEW.
@@ -243,6 +256,7 @@ def evaluate(rules: list[dict], arts: dict, base: dict | None) -> tuple[list[dic
     before = (base or {}).get("entries") or {}
     ledger: dict[str, dict] = {}
     events: list[dict] = []
+    standing: list[dict] = []
     for rule in rules:
         for subject, label, value, link in _readings(rule, arts):
             key = f"{rule['id']}:{subject}"
@@ -258,6 +272,10 @@ def evaluate(rules: list[dict], arts: dict, base: dict | None) -> tuple[list[dic
             else:
                 state = None
             if not state:
+                if tier > 0:
+                    standing.append({"key": key, "group": rule.get("group", "OTHER"), "label": label,
+                                     "value": _fmt(value, rule.get("unit")), "line": _line_text(rule, tier), "link": link,
+                                     "held": _held(rule, value, tier)})
                 continue
             severity = rule.get("severity", "normal")
             if tier >= rule.get("high_from_tier", 99):
@@ -271,7 +289,8 @@ def evaluate(rules: list[dict], arts: dict, base: dict | None) -> tuple[list[dic
             })
     order = {"NEW": 0, "ACTIVE": 1, "EASED": 2, "CLEARED": 3}
     events.sort(key=lambda e: (e["severity"] != "high", order[e["state"]], e["group"], e["label"]))
-    return events, ledger
+    standing.sort(key=lambda e: (e["group"], e["label"]))
+    return events, ledger, standing
 
 
 # --- the file ---------------------------------------------------------------
@@ -320,7 +339,7 @@ def build(*, root: Path | None = None, fetch: Callable[[str], str] | None = None
     as_of = manifest.get("as_of") or date.today().isoformat()
     previous, problem = _previous(site, fetch)
     base = None if problem else _base(previous, as_of)
-    events, ledger = evaluate(settings.get("rules") or [], arts, base)
+    events, ledger, standing = evaluate(settings.get("rules") or [], arts, base)
     signature = _signature(events)
     # A rerun of a session announces only what the published build of that session
     # did not: the same changes, or fewer, are not news a second time.
@@ -334,6 +353,7 @@ def build(*, root: Path | None = None, fetch: Callable[[str], str] | None = None
                         "nothing to compare). A reading staying past its line is not repeated. Descriptive, not a forecast."),
         "events": events,
         "active": sorted(k for k, v in ledger.items() if v["tier"] > 0),
+        "standing": standing,
         "ledger": {"as_of": as_of, "entries": ledger},
         "ledger_base": base,
         "email": {"due": bool(fresh), "signature": signature, "fresh": fresh, "announced": announced,
@@ -370,7 +390,10 @@ def subject_line(as_of: str, events: list[dict]) -> str:
     counts = {s: sum(1 for e in events if e["state"] == s) for s in ("NEW", "ACTIVE", "EASED", "CLEARED")}
     high = sum(1 for e in events if e["severity"] == "high")
     parts = [f"{n} {s.lower()}" for s, n in counts.items() if n]
-    return f"Market Recap alerts · {as_of} · " + (", ".join(parts) or "no change") + (f" · {high} high" if high else "")
+    # The first crossings by name, so the inbox line says what happened.
+    lead = [f"{e['label']} {e['value']}" for e in events if e["state"] in ("NEW", "ACTIVE")][:2]
+    return (f"Market Recap alerts · {as_of} · " + (", ".join(parts) or "no change") + (f" · {high} high" if high else "")
+            + (f" · {', '.join(lead)}" if lead else ""))
 
 
 def write(*, root: Path | None = None, fetch: Callable[[str], str] | None = None) -> dict:

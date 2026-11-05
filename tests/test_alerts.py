@@ -29,7 +29,7 @@ def _arts(vix=None, strip_state="calm", rsi=None):
 
 
 def _run(rules, arts, base):
-    events, ledger = A.evaluate(rules, arts, base)
+    events, ledger, _ = A.evaluate(rules, arts, base)
     return events, {"as_of": "x", "entries": ledger}
 
 
@@ -54,6 +54,9 @@ def test_a_crossing_is_new_once_then_quiet_and_cleared_when_it_falls_back():
     # Still above 20 the next session: nothing to announce.
     events, day2 = _run([VIX], _arts(vix=22.5), day1)
     assert events == []
+    # It is listed as standing instead: past its line, not news.
+    assert [(e["key"], e["value"], e["line"], e["held"]) for e in A.evaluate([VIX], _arts(vix=22.5), day1)[2]] == [("vix:vix", "22.5", "≥ 20.0", False)]
+    assert A.evaluate([VIX], _arts(vix=19.0), day1)[2][0]["held"] is True   # under 20, within the 1.5 reset
     # Up a tier: NEW again, at the deeper line; past the third line it is HIGH.
     events, day3 = _run([VIX], _arts(vix=31.0), day2)
     assert events[0]["state"] == "NEW" and events[0]["tier"] == 3 and events[0]["severity"] == "high"
@@ -132,6 +135,11 @@ def test_the_digest_puts_high_first_and_sends_nothing_without_smtp_settings(tmp_
     assert subject == "Market Recap alerts · 2026-10-27 · 2 new"
     assert text.index("HIGH") < text.index("NEW") and "Oil shock" in text.split("NEW")[0]
     assert "VIX: 21.0 (≥ 20.0)  https://example.test/#risk" in text and "<table" in html
+    assert "<style" not in html and "Tue 27 Oct 2026" in html and "STILL PAST A LINE" not in text
+    payload["standing"] = [{"key": "c", "group": "RATES", "label": "10-year", "value": "4.95%", "line": "≥ 4.75%", "link": "#overview"}]
+    _, text, html = M.compose(payload)
+    assert "10-year: 4.95% (past ≥ 4.75%)" in text.split("STILL PAST A LINE")[1] and "1 STILL PAST A LINE" in html
+    del payload["standing"]
     (tmp_path / "alerts.json").write_text(json.dumps(payload))
     for key in ("ALERT_SMTP_USER", "ALERT_SMTP_PASSWORD", "ALERT_EMAIL_TO"):
         monkeypatch.delenv(key, raising=False)
