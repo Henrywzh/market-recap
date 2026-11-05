@@ -88,5 +88,9 @@ export function liveView({ moves, heat, etfs }, live, nowMs = Date.now()) {
   const quotes = quotesBySymbol([heat, etfs]);
   const market = quotes.get(live.market ?? 'SPY');
   if (!liveIsCurrent(heat, market, nowMs)) return null;
+  // The names come from the heat-map board, which has no fallback source: when
+  // most of it is stale (its feed stopped), a fresh market quote is not enough.
+  const names = (heat.quotes || []).filter((q) => q && !q.error);
+  if (!names.length || names.filter((q) => isStale(q, heat, nowMs)).length * 2 > names.length) return null;
   return { items: liveUnusual(moves, quotes, live), time: market.time ?? null };
 }

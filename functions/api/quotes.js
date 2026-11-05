@@ -211,6 +211,108 @@ async function yahooSpark(entries, { series = false } = {}) {
   });
 }
 
+// --- Nasdaq, when Yahoo goes quiet ------------------------------------------
+// 2026-11-05: Yahoo's prices stopped at 12:10 New York for every symbol while
+// the market traded on, and the page fell back to the close. A quote older than
+// `stale_after_seconds` in an open session (or missing) is asked of Nasdaq's
+// quote endpoint instead, for the small boards only: one call per symbol at
+// 1-3 s each, under a cap, never the 500-name heat map. Nasdaq quotes NDX but
+// not the S&P 500, Russell 2000 or Dow, so those move by their ETF's change
+// on Yahoo's previous close and say so (`proxy`). VIX, futures and the dollar
+// have no Nasdaq quote and stay as they are, marked stale.
+const NASDAQ_CLIENT = 'market-recap-live/0.1';   // Nasdaq's edge drops a User-Agent carrying a URL
+const NASDAQ_TIMEOUT_MS = 6000;
+export const NASDAQ_CAP = 24;
+const NASDAQ_INDEX = { '^GSPC': ['SPY', 'etf'], '^NDX': ['NDX', 'index'], '^RUT': ['IWM', 'etf'], '^DJI': ['DIA', 'etf'] };
+const FALLBACK_BOARDS = new Set(['today', 'indices', 'sector_etfs']);
+
+// The Nasdaq symbol and asset classes to try for one of ours, or null for none.
+export function nasdaqTarget(symbol) {
+  if (NASDAQ_INDEX[symbol]) {
+    const [target, asset] = NASDAQ_INDEX[symbol];
+    return { symbol: target, assets: [asset], proxy: target !== symbol.replace('^', '') ? target : null };
+  }
+  if (!/^[A-Z][A-Z.-]{0,5}$/.test(symbol)) return null;   // ^VIX, CL=F, DX-Y.NYB
+  return { symbol: symbol.replace('-', '.'), assets: ['etf', 'stocks'], proxy: null };
+}
+
+const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+
+// "Nov 5, 2026 1:17 PM ET" as epoch seconds, New York's offset on that day.
+export function nasdaqTime(text) {
+  const m = /^(\w{3}) (\d{1,2}), (\d{4}) (\d{1,2}):(\d{2}) (AM|PM)/.exec(String(text || ''));
+  if (!m || MONTHS[m[1]] === undefined) return null;
+  const hour = (Number(m[4]) % 12) + (m[6] === 'PM' ? 12 : 0);
+  const wall = Date.UTC(Number(m[3]), MONTHS[m[1]], Number(m[2]), hour, Number(m[5]));
+  const name = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'shortOffset' })
+    .formatToParts(new Date(wall + 5 * 3600e3)).find((p) => p.type === 'timeZoneName')?.value || 'GMT-5';
+  const [, sign, hours, minutes] = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(name) || [null, '-', '5', '0'];
+  const offset = (sign === '-' ? -1 : 1) * (Number(hours) * 60 + Number(minutes || 0));
+  return Math.floor((wall - offset * 60e3) / 1000);
+}
+
+export function parseNasdaqQuote(payload) {
+  const primary = payload?.data?.primaryData;
+  const price = numberIn(String(primary?.lastSalePrice ?? '').replace('$', ''));
+  if (price === null) return { error: payload?.status?.bCodeMessage?.[0]?.errorMessage || 'no price in response' };
+  const change = numberIn(primary.netChange);
+  const prev = change === null ? null : price - change;
+  return { price, previous_close: prev, change, change_pct: numberIn(primary.percentageChange) ?? (prev ? (price / prev - 1) * 100 : null),
+    time: nasdaqTime(primary.lastTradeTimestamp) };
+}
+
+async function nasdaqQuote(target) {
+  let last = 'no answer';
+  for (const asset of target.assets) {
+    try {
+      const response = await fetch(`https://api.nasdaq.com/api/quote/${encodeURIComponent(target.symbol)}/info?assetclass=${asset}`, {
+        headers: { 'User-Agent': NASDAQ_CLIENT, Accept: 'application/json' }, signal: AbortSignal.timeout(NASDAQ_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const quote = parseNasdaqQuote(await response.json());
+      if (!quote.error) return quote;
+      last = quote.error;
+    } catch (error) {
+      last = error?.name === 'TimeoutError' ? `no answer in ${NASDAQ_TIMEOUT_MS / 1000}s` : String(error?.message || error);
+    }
+  }
+  return { error: last };
+}
+
+// A stale Yahoo row with Nasdaq's figures, or null to keep the Yahoo row.
+export function nasdaqRow(row, quote, target) {
+  if (quote.error || !Number.isFinite(quote.time) || (Number.isFinite(row.time) && quote.time <= row.time)) return null;
+  const out = { ...row, source: target.proxy ? `Nasdaq (via ${target.proxy})` : 'Nasdaq', stale_source: { source: row.source, time: row.time ?? null } };
+  delete out.error;
+  if (target.proxy) {
+    // The index moved by its ETF's change, from the index's own previous close.
+    const prev = Number.isFinite(row.previous_close) ? row.previous_close : null;
+    out.proxy = target.proxy;
+    out.change_pct = quote.change_pct;
+    out.price = prev !== null && Number.isFinite(quote.change_pct) ? prev * (1 + quote.change_pct / 100) : null;
+    out.change = out.price === null ? null : out.price - prev;
+  } else {
+    Object.assign(out, { price: quote.price, previous_close: quote.previous_close, change: quote.change, change_pct: quote.change_pct });
+  }
+  out.time = quote.time;
+  out.extended_price = out.price;
+  return out;
+}
+
+// Replace the rows Yahoo left stale with Nasdaq's, while the session is open.
+export async function fillStale(quotes, session, staleAfter, nowMs, { cap = NASDAQ_CAP, ask = nasdaqQuote } = {}) {
+  if (session?.open !== true) return quotes;
+  const now = Math.floor(nowMs / 1000);
+  const stale = quotes.map((q, i) => [q, i]).filter(([q]) => (q.error || !Number.isFinite(q.time) || now - q.time > staleAfter)
+    && q.kind !== 'rate' && nasdaqTarget(q.symbol)).slice(0, cap);
+  const out = quotes.slice();
+  await Promise.all(stale.map(async ([q, i]) => {
+    const target = nasdaqTarget(q.symbol);
+    out[i] = nasdaqRow(q, await ask(target), target) || q;
+  }));
+  return out;
+}
+
 function sessionOf(quotes, nowMs) {
   const session = sessionState(quotes, Math.floor(nowMs / 1000));
   quotes.forEach((q) => { delete q.session; });
@@ -229,16 +331,19 @@ export async function buildBody(contract, nowMs = Date.now(), scope = 'default')
     if (!board) return { error: `no board ${scope.slice(6)}` };
     const entries = board.symbols.map((symbol) => ({ symbol, label: board.labels?.[symbol] ?? symbol, kind: 'board' }));
     // The yield board is CNBC's: one call carries the whole curve.
-    const quotes = board.source === 'cnbc' ? await cnbcRates(entries) : await yahooSpark(entries, { series: Boolean(board.series) });
+    let quotes = board.source === 'cnbc' ? await cnbcRates(entries) : await yahooSpark(entries, { series: Boolean(board.series) });
     // A board's session is the US cash session: its index or its stocks.
-    return { fetched_at: new Date(nowMs).toISOString(), session: sessionOf(quotes, nowMs),
+    const session = sessionOf(quotes, nowMs);
+    if (FALLBACK_BOARDS.has(scope.slice(6))) quotes = await fillStale(quotes, session, contract.stale_after_seconds ?? 1200, nowMs);
+    return { fetched_at: new Date(nowMs).toISOString(), session,
       refresh_seconds: board.refresh_seconds, closed_refresh_seconds: board.closed_refresh_seconds,
       extended_refresh_seconds: board.extended_refresh_seconds,
       stale_after_seconds: contract.stale_after_seconds, quotes };
   }
-  const [equities, rates] = await Promise.all([yahooSpark(contract.strip || []), rateRows(contract.rates || [])]);
-  const session = sessionOf(equities.filter((q) => q.kind === 'index'), nowMs);
-  equities.forEach((q) => { delete q.session; });
+  const [fetched, rates] = await Promise.all([yahooSpark(contract.strip || []), rateRows(contract.rates || [])]);
+  const session = sessionOf(fetched.filter((q) => q.kind === 'index'), nowMs);
+  fetched.forEach((q) => { delete q.session; });
+  const equities = await fillStale(fetched, session, contract.stale_after_seconds ?? 1200, nowMs);
   return {
     fetched_at: new Date(nowMs).toISOString(),
     session,

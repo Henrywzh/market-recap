@@ -2,7 +2,8 @@
 // and when the page asks again.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseYahooChart, parseCnbcRates, sessionState, buildBody, parseSpark, batches, scopeOf, SPARK_BATCH } from '../../functions/api/quotes.js';
+import { parseYahooChart, parseCnbcRates, sessionState, buildBody, parseSpark, batches, scopeOf, SPARK_BATCH,
+  nasdaqTarget, nasdaqTime, parseNasdaqQuote, nasdaqRow, fillStale } from '../../functions/api/quotes.js';
 import * as L from '../../web/js/live-model.js';
 
 const yahoo = (meta) => ({ chart: { result: [{ meta }], error: null } });
@@ -333,4 +334,48 @@ test('the trading day by the New York clock, and the heat map\'s schedule across
   assert.equal(L.boardDelay(body, false, at('2026-10-21T00:00:00Z')), 8 * 3600);   // overnight: wake at 04:00
   assert.equal(L.boardDelay(body, false, at('2026-10-24T03:30:00Z')), 52.5 * 3600); // Friday 23:30 ET: Monday 04:00
   assert.equal(L.boardDelay(body, true, at('2026-10-20T21:00:00Z')), null);
+});
+
+test('Nasdaq times read in New York, in and out of daylight saving', () => {
+  assert.equal(nasdaqTime('Nov 5, 2026 1:17 PM ET'), Date.UTC(2026, 10, 5, 18, 17) / 1000);
+  assert.equal(nasdaqTime('Jul 1, 2026 9:30 AM ET'), Date.UTC(2026, 6, 1, 13, 30) / 1000);
+  assert.equal(nasdaqTime('Jul 1, 2026 12:05 PM ET'), Date.UTC(2026, 6, 1, 16, 5) / 1000);
+  assert.equal(nasdaqTime('soon'), null);
+});
+
+test('a Nasdaq quote parses its dollars, change and percent', () => {
+  const q = parseNasdaqQuote({ data: { primaryData: { lastSalePrice: '$736.37', netChange: '-30.44', percentageChange: '-3.97%', lastTradeTimestamp: 'Nov 5, 2026 1:17 PM ET' } } });
+  assert.equal(q.price, 736.37);
+  assert.ok(Math.abs(q.previous_close - 766.81) < 1e-9);
+  assert.equal(q.change_pct, -3.97);
+  assert.ok(parseNasdaqQuote({ data: null, status: { bCodeMessage: [{ errorMessage: 'Symbol not exists' }] } }).error.includes('Symbol'));
+});
+
+test('indices map to what Nasdaq quotes; futures and the dollar have no fallback', () => {
+  assert.deepEqual(nasdaqTarget('^GSPC'), { symbol: 'SPY', assets: ['etf'], proxy: 'SPY' });
+  assert.equal(nasdaqTarget('^NDX').proxy, null);
+  assert.deepEqual(nasdaqTarget('BRK-B').symbol, 'BRK.B');
+  for (const s of ['^VIX', 'CL=F', 'DX-Y.NYB']) assert.equal(nasdaqTarget(s), null);
+});
+
+test('stale rows are refilled from Nasdaq in an open session, an index through its ETF', async () => {
+  const now = Date.UTC(2026, 10, 5, 18, 20);
+  const old = now / 1000 - 3900;
+  const rows = [
+    { symbol: '^GSPC', label: 'SPX', kind: 'index', source: 'Yahoo', price: 7427.81, previous_close: 7688.62, change_pct: -3.39, time: old },
+    { symbol: 'XLE', label: 'XLE', kind: 'board', source: 'Yahoo', price: 60, previous_close: 63, change_pct: -4.7, time: now / 1000 - 30 },
+    { symbol: '^VIX', label: 'VIX', kind: 'macro', source: 'Yahoo', price: 23.8, time: old },
+  ];
+  const asked = [];
+  const ask = async (target) => { asked.push(target.symbol); return { price: 736.37, previous_close: 766.81, change: -30.44, change_pct: -3.97, time: now / 1000 - 180 }; };
+  const out = await fillStale(rows, { open: true }, 1200, now, { ask });
+  assert.deepEqual(asked, ['SPY']);   // XLE is fresh, VIX has no fallback
+  assert.equal(out[0].source, 'Nasdaq (via SPY)');
+  assert.ok(Math.abs(out[0].price - 7688.62 * (1 - 0.0397)) < 1e-6);
+  assert.deepEqual(out[0].stale_source, { source: 'Yahoo', time: old });
+  assert.equal(out[1], rows[1]);
+  assert.equal(out[2], rows[2]);
+  // Closed: nothing is asked. An older Nasdaq price never replaces a newer Yahoo one.
+  assert.equal(await fillStale(rows, { open: false }, 1200, now, { ask }), rows);
+  assert.equal(nasdaqRow(rows[0], { price: 1, change_pct: 0, time: old - 60 }, nasdaqTarget('^GSPC')), null);
 });

@@ -394,6 +394,14 @@ function startLive(host, data, ctx) {
 // chips follow the 'today' quote board while the session is open and the S&P 500's
 // quote is fresh; otherwise -- closed, stale, or no quotes -- the build's close stands.
 // The other signal groups (CHANGED, SCENARIO, ONGOING, ETF FLOWS) are the build's.
+// The session is open but the live quotes are too old to stand for it.
+function stalledNote(spx, asOf) {
+  return el('div', { class: 'today-stalled' }, [
+    el('strong', { text: 'LIVE QUOTES STALLED' }),
+    ` · the last S&P 500 price (${spx.source}) is from ${clock(spx.time)} · showing the ${asOf} close until quotes resume`,
+  ]);
+}
+
 function startLiveBoard(parts, data) {
   let body = null;
   let showing = false;
@@ -406,12 +414,16 @@ function startLiveBoard(parts, data) {
   const paint = () => {
     const board = view();
     showing = Boolean(board);
-    const stamp = board ? `${clock(board.time)} quotes` : null;
+    const spx = (body?.quotes || []).find((q) => q?.symbol === '^GSPC' && !q.error);
+    // Quotes from the Nasdaq fallback say so; a stall with no fallback says why the close stands.
+    const via = board && spx?.stale_source ? ` · from Nasdaq: ${spx.stale_source.source}'s feed stopped at ${clock(spx.stale_source.time)}` : '';
+    const stamp = board ? `${clock(board.time)} quotes${via}` : null;
+    const stalled = !board && body?.session?.open === true && spx ? stalledNote(spx, data.as_of) : null;
     const headline = board ? headlineOf(board) : data.headline;
     const unusual = board
       ? { ...data.unusual, ...liveSignals(board, { oversoldDetail: data.live?.oversold_detail || '' }) }
       : data.unusual;
-    parts.headline.replaceChildren(...[headlineNode(headline, stamp)].filter(Boolean));
+    parts.headline.replaceChildren(...[stalled, headlineNode(headline, stamp)].filter(Boolean));
     const card = boardCard(board || data.board, stamp);
     parts.board.replaceChildren(...(card ? [card.node] : []));
     card?.draw();
