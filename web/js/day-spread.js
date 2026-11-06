@@ -62,7 +62,8 @@ export function spreadOption(binned, stats, mode, p, widthPx) {
       splitLine: { show: false },
     },
     yAxis: {
-      type: 'value', min: 0, max: tallest * (1.08 + rows * ROW_STEP),
+      // Headroom over the top row of names, so its labels stay clear of the line labels above the plot.
+      type: 'value', min: 0, max: tallest * (1.08 + (rows + 0.6) * ROW_STEP),
       axisLine: { show: false }, axisTick: { show: false },
       axisLabel: { color: p.dim, fontSize: 10, formatter: (v) => (v > tallest * 1.02 ? '' : mode === 'WEIGHT' ? `${num(v, 0)}%` : num(v, 0)) },
       splitLine: { lineStyle: { color: p.border, opacity: 0.45 } },
