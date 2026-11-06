@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {
   moveText, sigmaText, sparkPath, sparkSvg, headlineNode, titleSegments, boardSlots, boardLabel, boardOption, drawBoard, boardCard,
   signalGroups, signalsCard, flowChips, flowDollars, scenarioText, moverRecords, moversTable, sectorLine, remainingEvents, eventNodes,
+  barOpacity,
 } from '../../web/js/today-board.js';
 import { tickerHref } from '../../web/js/routes.js';
 
@@ -189,7 +190,9 @@ test('the chart option has one bar per row, coloured by direction, full strength
   assert.equal(bars[soxxAt].label.position, 'left', 'a fall labels its bar end on the left');
   const xleAt = slots.findIndex((r) => r?.symbol === 'XLE');
   assert.equal(bars[xleAt].itemStyle.color, '#u');
-  assert.equal(bars[xleAt].itemStyle.opacity, 0.55, '|z| 0.8 is faded');
+  assert.ok(Math.abs(bars[xleAt].itemStyle.opacity - (0.35 + 0.65 * 0.8 / 3)) < 1e-9, '|z| 0.8 fades in proportion');
+  // A quiet day's bars still differ: 1.6σ is drawn stronger than 0.1σ.
+  assert.ok(barOpacity({ z: 1.6 }) > barOpacity({ z: 0.1 }) + 0.3 && barOpacity({ z: -4 }) === 1);
   assert.equal(option.series[0].label.formatter({ dataIndex: soxxAt }), '−6.8%', 'the bar end holds the move only');
   assert.equal(option.yAxis[1].data[soxxAt], `{rare|3.1σ · RARE: ${ROWS[5].share_pct.toFixed(1)}% of days}`, 'σ and the share in the right column, RARE accented');
   assert.equal(option.series[0].label.formatter({ dataIndex: 5 }), '', 'the gap has no label');

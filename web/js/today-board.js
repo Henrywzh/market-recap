@@ -12,7 +12,7 @@ import { toSignals, rankSignals, readMuted, writeMuted, GROUP_ORDER } from './si
 const valid = (v) => typeof v === 'number' && Number.isFinite(v);
 const MINUS = '−';
 const STRONG_Z = 3;          // a mover this far beyond its own volatility is bold
-const BOARD_STRONG_Z = 2;    // a board bar this far is drawn at full strength
+const BOARD_STRONG_Z = 3;    // a board bar this far is drawn at full strength; nearer ones fade with their σ
 const BOARD_ROW_PX = 22;
 const EVENTS_SHOWN = 6;
 
@@ -106,7 +106,9 @@ export function boardSlots(rows) {
   return indices.length && sectors.length ? [...indices, null, ...sectors] : [...indices, ...sectors];
 }
 
-const strongBar = (row) => valid(row.z) && Math.abs(row.z) >= BOARD_STRONG_Z;
+// A bar's strength follows its σ: 0.35 at no move, full at BOARD_STRONG_Z, so a
+// quiet day's bars still differ from one another (a cut at 2σ drew them all alike).
+export const barOpacity = (row) => (valid(row.z) ? 0.35 + 0.65 * Math.min(Math.abs(row.z) / BOARD_STRONG_Z, 1) : 0.55);
 
 // How often the history moved this far, for a label: "0.5% of days". Shown only
 // when it is uncommon (SHARE_SHOWN_PCT or less); RARE marks 1% or less.
@@ -187,7 +189,7 @@ export function boardOption(slots, p) {
       markLine: { silent: true, symbol: 'none', data: [{ xAxis: 0 }], lineStyle: { color: p.faint }, label: { show: false } },
       data: slots.map((r) => (r ? {
         value: r.ret_pct,
-        itemStyle: { color: r.ret_pct >= 0 ? p.up : p.down, opacity: strongBar(r) ? 1 : 0.55 },
+        itemStyle: { color: r.ret_pct >= 0 ? p.up : p.down, opacity: barOpacity(r) },
         label: { position: r.ret_pct >= 0 ? 'right' : 'left' },
       } : { value: null })),
       label: { show: true, color: p.dim, fontSize: 11, formatter: (q) => (slots[q.dataIndex] ? moveText(slots[q.dataIndex].ret_pct) : '') },
