@@ -122,7 +122,7 @@ export function mountDaySpread(host, ctx) {
       lead.textContent = verdict(s) || '';
       note.textContent = `${s.n} members of the ${u.label}${missing ? ` (${missing} with no ${live ? 'live quote' : 'move'} left out)` : ''}, `
         + `${live ? 'moves so far today from the heat map\'s live quotes, against the last close' : `moves on ${heat.as_of}`}, in ${num(binned.width, 2)}-point bins; `
-        + `moves past ±${num(binned.clip, 0)}% share the end bins. BY WEIGHT stacks each bin by index weight instead of counting members. `
+        + `moves past ±${num(binned.clip, binned.clip % 1 ? 1 : 0)}% share the end bins. BY WEIGHT stacks each bin by index weight instead of counting members. `
         + 'The index line is the members\' moves weighted by today\'s index weights; the median is the typical member. Marked: the ten heaviest names, with the points of the index\'s move each accounts for.';
       requestAnimationFrame(() => render(chart, (_o, p) => spreadOption(binned, s, mode, p, Math.max(200, (chart.clientWidth || 600) - GRID.left - GRID.right))));
     };
