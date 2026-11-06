@@ -17,15 +17,19 @@ START_OF_YEAR = ("start_of_year", "Start of Year", None)
 BPS_PER_PCT = 100.0
 
 
-def _history(ctx, settings) -> dict:
+def _history(ctx, settings, curve: pd.DataFrame | None = None) -> dict:
     """Constant-maturity yields and the 10Y-2Y spread over years, from FRED.
 
     The par curve above comes from Treasury's yearly files; for a chart that
     reaches back a decade FRED's DGS series are the same Treasury yields in
     one file each. A series that fails is left out and says so in the log.
+    FRED posts a business day after Treasury, so the sessions Treasury has and
+    FRED does not yet are taken from ``curve`` (Treasury's own par yields, the
+    same numbers); ``from_treasury`` lists them.
     """
     years = int(settings.get("history_years", 10))
     lines: dict[str, pd.Series] = {}
+    added: set[str] = set()
     for spec in settings.get("history_series", []):
         try:
             frame, url = fred.fetch_series(spec["series_id"])
@@ -35,6 +39,11 @@ def _history(ctx, settings) -> dict:
                                      status="error", error=str(exc)[:ERROR_DETAIL_CHARS]))
             continue
         series = frame.set_index("date")["value"].sort_index()
+        if curve is not None and spec["label"] in curve.columns and not series.dropna().empty:
+            newer = curve[spec["label"]].dropna()
+            newer = newer[newer.index > pd.to_datetime(series.dropna().index).max()]
+            added.update(d.strftime("%Y-%m-%d") for d in newer.index)
+            series = pd.concat([series, newer]).sort_index()
         lines[spec["label"]] = series
         ctx.log.add(SourceRecord(f"fred_{spec['series_id'].lower()}", f"Treasury {spec['label']} yield history", url,
                                  to_iso_date(series.index[-1]), rows=len(series)))
@@ -43,7 +52,8 @@ def _history(ctx, settings) -> dict:
     if spread and spread["long"] in lines and spread["short"] in lines:
         pair = pd.concat([lines[spread["long"]], lines[spread["short"]]], axis=1, keys=["l", "s"]).dropna()
         out[spread["label"]] = history_payload((pair["l"] - pair["s"]) * BPS_PER_PCT, years=years, digits=0)
-    return {"years": years, "series": out, "spread": spread["label"] if spread else None}
+    return {"years": years, "series": out, "spread": spread["label"] if spread else None,
+            "from_treasury": sorted(added)}
 
 
 def _credit(ctx, settings) -> dict:
@@ -224,7 +234,7 @@ def build(ctx) -> dict:
         "curves": curves,
         "rows": rows,
         "spreads": spread_rows,
-        "history": _history(ctx, settings),
+        "history": _history(ctx, settings, wide),
         "credit": _credit(ctx, settings),
         "auctions": treasury.public_auction_summary(),
         "note": (

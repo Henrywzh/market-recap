@@ -62,7 +62,8 @@ function historyCard(history) {
     node,
     series[spreadName] ? el('div', { class: 'chart-head' }, [el('span', { class: 'dim', text: `${spreadName} SPREAD · BP` })]) : null,
     series[spreadName] ? spreadNode : null,
-    el('div', { class: 'note-text', text: `FRED constant-maturity yields (Treasury's own series), ${history.years} years: daily for the last year, each week's last print before that. FRED posts a day after Treasury, so the last point can trail the table above by a session.` }),
+    el('div', { class: 'note-text', text: `FRED constant-maturity yields (Treasury's own series), ${history.years} years: daily for the last year, each week's last print before that. FRED posts a day after Treasury, so ${
+      history.from_treasury?.length ? `the last point${history.from_treasury.length > 1 ? 's' : ''} (${history.from_treasury.join(', ')}) ${history.from_treasury.length > 1 ? 'are' : 'is'} Treasury's own par yield, as in the table above.` : 'the last point can trail the table above by a session.'}` }),
   ]);
 }
 
@@ -76,7 +77,7 @@ function creditCards(credit, history) {
   const longest = [...spreadNames.map((n) => spreads[n].dates), ...yieldNames.map((n) => yields[n].dates)]
     .reduce((a, b) => (b.length > a.length ? b : a), []);
   const since = Object.values(credit.first || {}).sort()[0];
-  const sourceNote = `ICE BofA via FRED, which serves only the last three years; older dates come from this site's own archive of what FRED served${since ? `, so the lines start ${since}` : ''}. Daily for the last year, each week's last print before that.`;
+  const sourceNote = `ICE BofA via FRED, which posts each day's values the next business day (no same-day free source carries them) and serves only the last three years; older dates come from this site's own archive of what FRED served${since ? `, so the lines start ${since}` : ''}. Daily for the last year, each week's last print before that.`;
   const cards = [];
   if (spreadNames.length) {
     let range = 'MAX'; let log = true;
@@ -88,7 +89,7 @@ function creditCards(credit, history) {
       log = !log; logButton.setAttribute('aria-pressed', String(log)); draw();
     } });
     requestAnimationFrame(draw);
-    cards.push(card(`CREDIT SPREADS BY RATING · OAS · AS OF ${longest.at(-1) || DASH}`,
+    cards.push(card(`CREDIT SPREADS BY RATING · OAS · AS OF ${longest.at(-1) || DASH} · FRED POSTS A DAY LATER`,
       el('div', { class: 'credit-tools' }, [rangeSwitch(longest, range, (label) => { range = label; draw(); }, { short: true }), el('div', { class: 'period-switch' }, [logButton])]), [node,
         el('div', { class: 'note-text', text: `Option-adjusted spread over Treasuries, in percentage points. A rise is lenders asking more to hold the risk; CCC moves first and furthest. Log scale on by default, so a move from 1% to 2% looks as large as one from 10% to 20%. ${sourceNote}` })]));
   }
@@ -105,7 +106,7 @@ function creditCards(credit, history) {
       ...(ten ? [{ name: '10Y Treasury', ...sliceRange(ten.dates, { values: ten.values }, range), color: (p) => p.dim, dashed: true }] : []),
     ], { left: (v) => `${num(v, 1)}%`, value: (v) => `${num(v, 2)}%` });
     requestAnimationFrame(draw);
-    cards.push(card(`HIGH-YIELD & INVESTMENT-GRADE YIELDS · AS OF ${longest.at(-1) || DASH}`,
+    cards.push(card(`HIGH-YIELD & INVESTMENT-GRADE YIELDS · AS OF ${longest.at(-1) || DASH} · FRED POSTS A DAY LATER`,
       rangeSwitch(longest, range, (label) => { range = label; draw(); }, { short: true }), [node,
         el('div', { class: 'note-text', text: `Effective yield of each ICE BofA index: what the bonds pay to hold, Treasury yield plus spread. The gap to the dashed 10-year Treasury is roughly the spread. ${sourceNote}` })]));
   }

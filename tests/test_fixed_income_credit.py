@@ -45,3 +45,16 @@ def test_a_failed_series_is_left_out_and_marks_the_source_partial(monkeypatch):
     out = fixed_income._credit(ctx, {"credit_spreads": [{"label": "B", "series_id": "A"}]})
     assert out["spreads"] == {}
     assert ctx.log.records[0].status == "partial" and "FRED down" in ctx.log.records[0].error
+
+
+def test_yield_history_takes_the_sessions_fred_has_not_posted_from_treasurys_curve(monkeypatch):
+    fred_data = {"DGS2": _frame(["2026-11-03", "2026-11-04"], [4.61, 4.58]),
+                 "DGS10": _frame(["2026-11-03", "2026-11-04"], [4.95, 4.90])}
+    monkeypatch.setattr(fixed_income.fred, "fetch_series", lambda sid: (fred_data[sid], "url"))
+    curve = pd.DataFrame({"2Y": [4.58, 4.46], "10Y": [4.90, 4.84]}, index=pd.to_datetime(["2026-11-04", "2026-11-05"]))
+    out = fixed_income._history(_Ctx(), {"history_series": [{"label": "2Y", "series_id": "DGS2"}, {"label": "10Y", "series_id": "DGS10"}],
+                                         "history_spread": {"label": "10Y − 2Y", "long": "10Y", "short": "2Y"}}, curve)
+    assert out["series"]["10Y"]["dates"][-1] == "2026-11-05" and out["series"]["10Y"]["values"][-1] == 4.84
+    assert out["series"]["10Y − 2Y"]["values"][-1] == 38 and out["from_treasury"] == ["2026-11-05"]
+    # Where FRED has a session, FRED's value stands.
+    assert out["series"]["10Y"]["values"][-2] == 4.90
