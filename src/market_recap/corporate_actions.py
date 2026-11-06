@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 REQUIRED = ("ticker", "kind", "ex_date", "distributed", "ratio", "source")
@@ -117,37 +118,53 @@ def adjust(frame: pd.DataFrame, adjustments: list[Adjustment]) -> pd.DataFrame:
 
 
 def unapplied_splits(frame: pd.DataFrame, splits: pd.DataFrame | None, *,
-                     tolerance: float = 0.25) -> tuple[pd.DataFrame, list[dict]]:
+                     tolerance: float = 0.25, min_ratio: float = 1.5) -> tuple[pd.DataFrame, list[dict]]:
     """``frame`` with each split Yahoo has recorded but not yet applied to the
     history before it, and the list of those it applied.
 
     2026-11-05: SOXX split 3:1. On the ex-date Yahoo's split event and its new
-    close (131.90) were out, but the closes before it were still unadjusted
-    (11-04: 450.41), so the board read Semis -70.7% -- rare indeed. A split is
-    applied here only when the ex-date's move is the split's own ratio, within
-    ``tolerance`` of it (a real move of up to a quarter either way); once Yahoo
-    adjusts its history the move is ordinary and nothing is changed.
+    close (131.90) were out, but closes before it were still unadjusted (11-04:
+    450.41), so the board read Semis -70.7% -- rare indeed. Later that night its
+    history was adjusted up to 10-30 and not after: 11-02 to 11-04 stayed at the
+    old scale. So a split is applied only
+
+    - when it is a real split, at least ``min_ratio`` either way: Yahoo also
+      records ratios like 1.03 (spin-offs, special dividends), and "the move is
+      that ratio" is true of almost any day for those;
+    - when the ex-date's move is the split's own ratio, within ``tolerance`` of
+      it in log terms relative to the ratio's size;
+    - and only to the stretch still at the old scale: back to the last session
+      that jumped by the ratio in the last 60 (where adjusted history meets
+      unadjusted), or the whole history when there is no such jump.
+
+    Once Yahoo adjusts its history the ex-date move is ordinary and nothing is changed.
     """
     if frame.empty or splits is None or splits.empty:
         return frame, []
     out, applied = frame, []
     for ticker in splits.columns.intersection(frame.columns):
         for day, ratio in splits[ticker].dropna().items():
-            if not ratio or ratio <= 0 or ratio == 1 or day not in out.index:
+            if not ratio or ratio <= 0 or max(ratio, 1 / ratio) < min_ratio or day not in out.index:
                 continue
             series = out[ticker]
             before = series[series.index < day].dropna()
-            if before.empty or pd.isna(series.at[day]):
+            if before.empty or pd.isna(series.at[day]) or before.iloc[-1] <= 0:
                 continue
-            move = float(series.at[day]) / float(before.iloc[-1])
+            size = abs(np.log(ratio))
             # Unadjusted, a 3:1 split reads as the price falling to a third.
-            if abs(move * ratio - 1) > tolerance:
+            if abs(np.log(float(series.at[day]) / float(before.iloc[-1]) * ratio)) > tolerance * size:
                 continue
+            # Only a recent seam: an old genuine jump of the ratio's size is not one.
+            steps = np.log(before / before.shift(1)).dropna().tail(60)
+            jumps = steps[(steps - size).abs() <= tolerance * size]
+            start = jumps.index[-1] if len(jumps) else None
+            stretch = (out.index < day) & ((out.index >= start) if start is not None else True)
             if out is frame:
                 out = frame.copy()
-            out.loc[out.index < day, ticker] = out.loc[out.index < day, ticker] / ratio
+            out.loc[stretch, ticker] = out.loc[stretch, ticker] / ratio
             applied.append({"ticker": str(ticker), "date": day.strftime("%Y-%m-%d"), "ratio": float(ratio),
-                            "move_pct": round((move - 1) * 100, 1)})
+                            "from": (start or before.index[0]).strftime("%Y-%m-%d"),
+                            "move_pct": round((float(series.at[day]) / float(before.iloc[-1]) - 1) * 100, 1)})
     return out, sorted(applied, key=lambda a: (a["date"], a["ticker"]))
 
 

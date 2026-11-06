@@ -114,3 +114,15 @@ def test_a_split_yahoo_announced_but_did_not_apply_is_applied_once():
     assert none == [] and again.equals(fixed)
     # A split day whose move is not the split's ratio (a real -12% on adjusted history) is left alone.
     assert ca.unapplied_splits(raw.assign(SOXX=[465.0, 150.14, 131.90, 133.0]), splits)[1] == []
+
+
+def test_small_ratios_are_not_splits_and_only_the_unadjusted_stretch_is_rescaled():
+    days = pd.to_datetime(["2026-10-29", "2026-10-30", "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05"])
+    # Yahoo's SOXX that night: adjusted to 10-30, the old scale from 11-02, the new close on 11-05.
+    raw = pd.DataFrame({"SOXX": [171.29, 157.17, 453.65, 465.0, 450.41, 131.90],
+                        "GE": [100.0, 101.0, 99.0, 100.5, 102.0, 101.0]}, index=days)
+    splits = pd.DataFrame({"SOXX": [np.nan] * 5 + [3.0], "GE": [np.nan] * 5 + [1.04]}, index=days)
+    fixed, applied = ca.unapplied_splits(raw, splits)
+    assert [(a["ticker"], a["from"]) for a in applied] == [("SOXX", "2026-11-02")]   # GE's 1.04 is not a split
+    assert fixed["GE"].equals(raw["GE"])
+    assert list(fixed["SOXX"].round(2)) == [171.29, 157.17, 151.22, 155.0, 150.14, 131.90]
