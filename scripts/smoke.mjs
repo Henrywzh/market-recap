@@ -179,13 +179,12 @@ for (const route of list) {
         if (await index.locator('.index-history .chart').count() !== 2) throw new Error('Index switch should show one price / breadth pair');
       }
       if (await page.locator('#main').innerText().then((text) => text.includes('overnight.json'))) throw new Error('Indices should not request overnight history');
-      const markets = await artifact('markets');
-      if (markets?.indices) {
-        const indices = markets.index_order || Object.keys(markets.indices);
-        if (await page.locator('table.index-compare tbody tr').count() !== indices.length) throw new Error('Index comparison should show one row per index');
-      }
       const state = await artifact('market_state');
       if (state?.states) {
+        // MARKET STATE is folded on INDICES; its line names the count, and opening it shows the chips.
+        const fold = page.locator('details.page-fold', { has: page.locator('.ms-active-list') });
+        if (!/conditions active|unavailable/.test(await fold.locator('summary').innerText())) throw new Error('The market-state fold should say how many conditions are active');
+        await fold.locator('summary').click();
         if (await page.locator('.ms-chip').count() !== state.states.filter((s) => s.active_now).length) throw new Error('Compact list should contain active conditions only');
         if (await page.locator('.ms-chip[data-risk-level="inactive"]').count()) throw new Error('Inactive conditions should be folded');
         const labels = await page.locator('.ms-chip-status').allInnerTexts();

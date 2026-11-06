@@ -6,31 +6,7 @@ import { spark } from '../spark.js';
 import { readingText, readingNote, outcomeCell, stateSummary, daysNow, sectorFlag, statePresentation } from '../market-state-model.js';
 import { performanceCard, volatilityLine } from '../session-cards.js';
 import { indexHistory } from '../index-history.js';
-
-// One row per index: how far it sits below its high, and how many members rose.
-// Side by side, so the indices compare before one is opened below.
-function indexComparison(blocks) {
-  const rows = blocks.map((block) => {
-    const drawdown = block.drawdown || {};
-    const ad = block.advance_decline;
-    return el('tr', {}, [
-      el('td', {}, [el('span', { text: block.key }), el('span', { class: 'sub', text: block.label })]),
-      el('td', {}, [
-        el('span', { class: dirClass(drawdown.drawdown_pct), text: pct(drawdown.drawdown_pct) }),
-        el('span', { class: 'sub', text: `${drawdown.trading_days_since_high ?? DASH} TRADING DAYS · HIGH ${drawdown.high_date ?? DASH}` }),
-      ]),
-      el('td', {}, ad ? [
-        el('span', { class: 'up', text: ad.advancers }),
-        ' / ',
-        el('span', { class: 'down', text: ad.decliners }),
-        ' / ',
-        el('span', { class: 'dim', text: ad.unchanged }),
-      ] : [el('span', { class: 'dim', text: DASH })]),
-      el('td', { text: ad?.ratio ?? DASH }),
-    ]);
-  });
-  return table(['INDEX', 'DRAWDOWN FROM HIGH', 'ADV / DEC / UNCH', 'RATIO'], rows, { class: 'index-compare' });
-}
+import { mountDaySpread } from '../day-spread.js';
 
 function sectorTable(data) {
   // Columns come from the artifact, which got them from the contract. A list
@@ -200,13 +176,21 @@ async function mountPerformance(host, ctx) {
   }
 }
 
-async function mountMarketState(host, ctx) {
+async function mountMarketState(host, ctx, line = null) {
   try {
     const state = await ctx.loadArtifact('market_state');
     if (!state || state.unavailable || !Array.isArray(state.states)) throw new Error('no market-state measurements in this build');
     host.replaceChildren(...marketStateSection(state));
+    if (line) {
+      const active = state.states.filter((st) => st.active_now);
+      const caution = state.states.filter((st) => statePresentation(st).level === 'risk').length;
+      line.textContent = `${active.length} / ${state.states.length} conditions active${caution ? ` · ${caution} caution` : ''}`
+        + (active.length ? ` (${active.map((st) => st.label).join(', ')})` : '');
+      line.className = caution ? 'warn' : 'dim';
+    }
   } catch (error) {
     host.replaceChildren(sectionTitle('MARKET STATE', 'BREADTH AND STRESS'), el('div', { class: 'gap', text: `Market state is unavailable: ${error.message}.` }));
+    if (line) line.textContent = 'unavailable';
   }
 }
 
@@ -232,12 +216,12 @@ export default function renderMarkets(root, data, manifest, ctx = {}) {
   root.append(mountLive({ asOf: data.as_of }));
   root.append(mountIndexCharts());
 
-  // How narrow or stressed the market is; built on its own, so a failure of
-  // that panel leaves a named gap here and nothing else on the page.
+  // Every member's move today, beside the intraday charts: a broad day or a few
+  // heavy names carrying the index.
   if (ctx.loadArtifact) {
-    const stateHost = el('div', {});
-    root.append(stateHost);
-    mountMarketState(stateHost, ctx);
+    const spreadHost = el('div', {});
+    root.append(spreadHost);
+    mountDaySpread(spreadHost, ctx);
   }
 
   // One section per index, rendered by the same function so the two read
@@ -250,12 +234,18 @@ export default function renderMarkets(root, data, manifest, ctx = {}) {
     disposeWithin(indexHost);
     indexSection(block.key, block);
   };
-  root.append(card('INDEX COMPARISON', null, indexComparison(blocks)));
   root.append(card('INDEX HISTORY · SELECT A UNIVERSE', periodSwitch(labels, labels[0], drawIndex), indexHost));
   if (ctx.loadArtifact) {
     const performanceHost = el('div', { class: 'session-cards' });
     root.append(performanceHost);
     mountPerformance(performanceHost, ctx);
+    // How narrow or stressed the market is: reference, so folded, its status in
+    // the fold's line. Built on its own, so a failure leaves a named gap here only.
+    const stateLine = el('span', { class: 'dim', text: 'loading…' });
+    const stateHost = el('div', {});
+    root.append(el('details', { class: 'sx-fold page-fold' }, [
+      el('summary', {}, ['MARKET STATE · BREADTH AND STRESS FROM FUND PRICES · ', stateLine]), stateHost]));
+    mountMarketState(stateHost, ctx, stateLine);
   }
 
   // Price, members above their averages with the day's up / down, what moved it
@@ -308,15 +298,24 @@ export default function renderMarkets(root, data, manifest, ctx = {}) {
     if (payload) multiLine(rebasedNode, payload.dates, payload.series);
   };
 
-  root.append(el('div', { class: 'grid two' }, [
-    sectorTable(data.sector_table),
-    card('SECTORS REBASED TO 100', periodSwitch(rebasedPeriods, rebasedDefault, drawRebased), rebasedNode),
-  ]));
-
-  root.append(el('div', { class: 'grid two' }, [
-    breadthTable(data.breadth_by_sector),
-    slopeTable(data.sma_slope_by_sector),
-  ]));
+  // Reference for the sectors (SECTORS has them in depth), so folded; a chart
+  // cannot size itself while hidden, so the rebased lines draw on first open.
+  const sectorFold = el('details', { class: 'sx-fold page-fold' }, [
+    el('summary', { text: 'SECTOR DETAIL · 1D PERFORMANCE & CONTRIBUTION, REBASED TO 100, BREADTH, 200-DAY SLOPE' }),
+    el('div', { class: 'grid two' }, [
+      sectorTable(data.sector_table),
+      card('SECTORS REBASED TO 100', periodSwitch(rebasedPeriods, rebasedDefault, drawRebased), rebasedNode),
+    ]),
+    el('div', { class: 'grid two' }, [
+      breadthTable(data.breadth_by_sector),
+      slopeTable(data.sma_slope_by_sector),
+    ]),
+  ]);
+  let rebasedDrawn = false;
+  sectorFold.addEventListener('toggle', () => {
+    if (sectorFold.open && !rebasedDrawn) { rebasedDrawn = true; requestAnimationFrame(() => drawRebased(rebasedDefault)); }
+  });
+  root.append(sectorFold);
 
   // Any index whose members are labelled from two taxonomies says so, rather
   // than only the one that happened to need it when this was written.
@@ -331,5 +330,4 @@ export default function renderMarkets(root, data, manifest, ctx = {}) {
     ]));
   });
 
-  drawRebased(rebasedDefault);
 }

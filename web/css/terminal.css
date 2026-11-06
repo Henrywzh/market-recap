@@ -125,6 +125,14 @@ select.control {
   white-space: nowrap;
 }
 .sister-link:hover { border-color: var(--accent); }
+.page-fold { margin: 12px 0; border: 1px solid var(--border); padding: 0 12px; }
+.page-fold > summary { cursor: pointer; padding: 10px 0; font-size: 12px; letter-spacing: 0.06em; color: var(--text); }
+.page-fold[open] > summary { border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.spread-chart { height: 340px; }
+.spread-verdict { font-size: 13px; color: var(--text); margin: 2px 0 8px; }
+.spread-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin-bottom: 8px; }
+.spread-stat { display: inline-flex; flex-direction: column; gap: 2px; }
+.spread-value { font-size: 14px; }
 .today-stalled {
   margin: 0 0 8px;
   padding: 6px 10px;
