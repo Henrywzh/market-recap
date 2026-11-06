@@ -27,12 +27,28 @@ const ARTIFACT_BASE = 'artifacts';
 const cache = new Map();
 const state = { manifest: null, active: null, arg: null, version: 'dev' };
 
+// A server error or a dropped connection is asked once more after a pause (on
+// 2026-11-06 Cloudflare answered today.json with a 500 once, then 200); a 404
+// is not, since the file is not in this build. A failed load leaves the cache,
+// so the next visit to the tab asks again instead of repeating the failure.
+export const RETRY_MS = 1500;
+
+async function fetchArtifact(name, retries = 1) {
+  let response;
+  try {
+    response = await fetch(`${ARTIFACT_BASE}/${name}.json`, { cache: 'no-cache' });
+  } catch (error) {
+    if (retries > 0) { await new Promise((r) => setTimeout(r, RETRY_MS)); return fetchArtifact(name, retries - 1); }
+    throw Object.assign(new Error(`${name}.json could not be fetched (${error.message})`), { transient: true });
+  }
+  if (response.status >= 500 && retries > 0) { await new Promise((r) => setTimeout(r, RETRY_MS)); return fetchArtifact(name, retries - 1); }
+  if (!response.ok) throw Object.assign(new Error(`${name}.json returned ${response.status}`), { transient: response.status >= 500 });
+  return response.json();
+}
+
 export async function loadArtifact(name) {
   if (cache.has(name)) return cache.get(name);
-  const promise = fetch(`${ARTIFACT_BASE}/${name}.json`, { cache: 'no-cache' }).then((response) => {
-    if (!response.ok) throw new Error(`${name}.json returned ${response.status}`);
-    return response.json();
-  });
+  const promise = fetchArtifact(name).catch((error) => { cache.delete(name); throw error; });
   cache.set(name, promise);
   return promise;
 }
@@ -174,7 +190,8 @@ async function select(id, { silent = false, arg = null } = {}) {
     main.innerHTML = '';
     main.append(el('div', { class: 'gap' }, [
       `${view.label} is unavailable: ${error.message}. `,
-      'Run the refresh command to rebuild its artifact.',
+      error.transient ? 'The server did not answer properly; reload the page to try again.'
+        : 'Run the refresh command to rebuild its artifact.',
     ]));
   }
   requestAnimationFrame(resizeAll);
