@@ -182,9 +182,9 @@ for (const route of list) {
       const state = await artifact('market_state');
       if (state?.states) {
         // MARKET STATE is folded on INDICES; its line names the count, and opening it shows the chips.
-        const fold = page.locator('details.page-fold', { has: page.locator('.ms-active-list') });
-        if (!/conditions active|unavailable/.test(await fold.locator('summary').innerText())) throw new Error('The market-state fold should say how many conditions are active');
-        await fold.locator('summary').click();
+        const stateFold = page.locator('details.page-fold', { has: page.locator('.ms-active-list') });
+        if (!/conditions active|unavailable/.test(await stateFold.locator(':scope > summary').innerText())) throw new Error('The market-state fold should say how many conditions are active');
+        await stateFold.locator(':scope > summary').click();
         if (await page.locator('.ms-chip').count() !== state.states.filter((s) => s.active_now).length) throw new Error('Compact list should contain active conditions only');
         if (await page.locator('.ms-chip[data-risk-level="inactive"]').count()) throw new Error('Inactive conditions should be folded');
         const labels = await page.locator('.ms-chip-status').allInnerTexts();
@@ -197,7 +197,7 @@ for (const route of list) {
           const type = await namedChip.locator('.ms-chip-name').evaluate((node) => ({ size: parseFloat(getComputedStyle(node).fontSize), weight: parseInt(getComputedStyle(node).fontWeight, 10) }));
           if (type.size < 13 || type.weight < 600) throw new Error('State names should be readable and bold');
         }
-        const fold = page.locator('details').filter({ hasText: 'Historical context · next' });
+        const fold = page.locator('details.ms-history');
         if (await fold.getAttribute('open') !== null) throw new Error('State history should start folded');
         if (await page.locator('.ms-chip').count()) {
           await page.locator('.ms-chip').first().click();
