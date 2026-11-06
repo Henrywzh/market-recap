@@ -18,7 +18,7 @@ from .config import ARTIFACT_DIR, BUILD_AGE_HOURS, ensure_dirs, load_config
 from .context import build_context
 from .panels import anchor, catalyst_log, catalysts, chain, credit, cross_listing, dcf, earnings, events, europe, evidence, financials, fixed_income, flows, heatmaps, industries, kshape, macro, market_state, markets, monitor, moves, overnight, overview, positioning, priced, risk, rotation, scenarios, sectors, segments, sizek, themes, today, trade_conditions, valuation, watch, xray
 from .panels import technicals as technicals_panel
-from .sources import sec
+from .sources import sec, yahoo
 from .sources.monitor_state import carry_published, load_previous, validate_previous
 from .util import SourceRecord, describe_error, utc_now_iso, write_json
 
@@ -311,6 +311,8 @@ def run(
         # trust, which may be one that is not yet configured.
         "corporate_actions": [item.as_dict() for item in ctx.adjustments],
         "price_jumps": ctx.price_jumps,
+        # Splits Yahoo announced before rescaling its history, put right on read.
+        "splits_applied": sorted(yahoo.APPLIED_SPLITS.values(), key=lambda a: (a["date"], a["ticker"])),
         "panels": written,
         "skipped_panels": sorted(set(selected) - set(written)),
         # Set when MONITOR could not be rebuilt and the published ledger was

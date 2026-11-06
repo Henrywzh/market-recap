@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from .. import cache
+from .. import cache, corporate_actions
 from ..compute.catalysts import latest_completed_session
 
 CHUNK_SIZE = 60
@@ -90,6 +90,9 @@ FIELDS = {"closes": ADJUSTED_FIELD, "prices": PRICE_FIELD, "splits": SPLITS_FIEL
 # artifact requests these; other consumers do not re-download their history.
 OHLCV_FIELDS = {"open": "Open", "high": "High", "low": "Low", "volume": "Volume"}
 OHLCV_REQUIRED = ("open", "high", "low")
+# (ticker, ex-date) -> the split this process applied to history Yahoo had not
+# yet rescaled; the build lists them in its manifest.
+APPLIED_SPLITS: dict[tuple[str, str], dict] = {}
 
 
 def _download_chunk(chunk: Sequence[str], period: str) -> dict[str, pd.DataFrame] | None:
@@ -172,12 +175,18 @@ def fetch_prices(period: str) -> pd.DataFrame:
     frame = _read(_cache_path(period, "prices"))
     if not frame.empty:
         frame.index = pd.to_datetime(frame.index).tz_localize(None)
-    return frame
+    return _split_fixed(frame, period)
 
 
 def fetch_ohlcv_cache(period: str) -> dict[str, pd.DataFrame]:
     """OHLCV companions of the existing close download; never a new fetch."""
-    return {kind: _read(_cache_path(period, kind)) for kind in OHLCV_FIELDS}
+    return {kind: _read(_cache_path(period, kind)) if kind == "volume" else _split_fixed(_read(_cache_path(period, kind)), period)
+            for kind in OHLCV_FIELDS}
+
+
+def _split_fixed(frame: pd.DataFrame, period: str) -> pd.DataFrame:
+    """A cached price field with any split its history missed applied (see fetch_closes)."""
+    return corporate_actions.unapplied_splits(frame, _read(_cache_path(period, "splits")))[0] if not frame.empty else frame
 
 
 def fetch_closes(
@@ -259,20 +268,38 @@ def fetch_closes(
     out = pd.DataFrame(collected)
     out.index = pd.to_datetime(out.index).tz_localize(None)
     out = out.sort_index().dropna(axis=1, how="all")
+    frames = {}
+    for kind, series in companions.items():
+        frame = pd.DataFrame(series)
+        if not frame.empty:
+            frame.index = pd.to_datetime(frame.index).tz_localize(None)
+        frames[kind] = frame.sort_index()
+    # On a split's ex-date Yahoo can carry the split and the new close before it
+    # rescales the history (SOXX, 2026-11-05): every price field is put right
+    # here, before anything reads or caches it.
+    known = frames.get("splits")
+    cached_splits = _read(_cache_path(period, "splits")) if use_cache and _cache_path(period, "splits").exists() else pd.DataFrame()
+    if not cached_splits.empty:
+        known = cached_splits if known is None or known.empty else known.combine_first(cached_splits)
+    out, applied = corporate_actions.unapplied_splits(out, known)
+    if applied:
+        APPLIED_SPLITS.update({(a["ticker"], a["date"]): a for a in applied})
+        for kind in ("prices", "open", "high", "low"):
+            if kind in frames:
+                frames[kind], _ = corporate_actions.unapplied_splits(frames[kind], known)
 
     if use_cache:
         # combine_first unions both the index and the columns, so a run that
         # only recovered part of the universe still adds to the day's cache.
-        frames = {"closes": out}
-        for kind, series in companions.items():
-            frame = pd.DataFrame(series)
-            if not frame.empty:
-                frame.index = pd.to_datetime(frame.index).tz_localize(None)
-            frames[kind] = frame
+        frames["closes"] = out
         for kind, frame in frames.items():
             path = _cache_path(period, kind)
             cached = _read(path) if path.exists() else pd.DataFrame()
             frame = frame.sort_index()
+            # A split put right this run replaces the cached unadjusted history.
+            if applied and not cached.empty:
+                cached = cached.drop(columns=[a["ticker"] for a in applied
+                                              if a["ticker"] in cached.columns and a["ticker"] in frame.columns])
             merged = frame if cached.empty else cached.combine_first(frame)
             _save(path, merged.loc[:, ~merged.columns.duplicated()])
     return out

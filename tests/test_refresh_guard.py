@@ -125,3 +125,27 @@ def test_fallback_runs_when_live_manifest_cannot_be_verified(monkeypatch, capsys
     monkeypatch.setattr(refresh_guard.http, "get_text", fail)
     assert refresh_guard.main() == 0
     assert "run=true" in capsys.readouterr().out
+
+
+def test_yahoo_applies_a_split_it_announced_before_rescaling_the_history(monkeypatch, tmp_path):
+    """SOXX, 2026-11-05: the 3:1 split and the new close arrived with the old closes."""
+    monkeypatch.setattr(yahoo, "latest_completed_session", lambda *a: date(2026, 11, 5))
+    monkeypatch.setattr(yahoo.time, "sleep", lambda *a: None)
+    monkeypatch.setattr(yahoo, "_cache_path", lambda period, kind="closes": tmp_path / f"{kind}.parquet")
+    days = pd.to_datetime(["2026-11-03", "2026-11-04", "2026-11-05"])
+    closes = pd.DataFrame({"SOXX": [465.0, 450.41, 131.90]}, index=days)
+    splits = pd.DataFrame({"SOXX": [0.0, 0.0, 3.0]}, index=days)
+    monkeypatch.setattr(yahoo, "_download_chunk", lambda *a: {
+        "closes": closes, "prices": closes, "splits": splits, **{kind: closes for kind in yahoo.OHLCV_REQUIRED}})
+    frame = yahoo.fetch_closes(["SOXX"], retries=0, need_ohlcv=True)
+    assert round(frame.loc["2026-11-04", "SOXX"], 2) == 150.14 and frame.loc["2026-11-05", "SOXX"] == 131.90
+    assert round(yahoo.fetch_prices("2y").loc["2026-11-04", "SOXX"], 2) == 150.14
+    assert round(yahoo.fetch_ohlcv_cache("2y")["high"].loc["2026-11-04", "SOXX"], 2) == 150.14
+    assert yahoo.APPLIED_SPLITS[("SOXX", "2026-11-05")]["ratio"] == 3.0
+
+    # A cache written before the fix still holds the unadjusted history: it is put right on read too.
+    yahoo._save(tmp_path / "closes.parquet", closes)
+    yahoo._save(tmp_path / "prices.parquet", closes)
+    monkeypatch.setattr(yahoo, "_download_chunk", lambda *a: None)
+    assert round(yahoo.fetch_closes(["SOXX"], retries=0).loc["2026-11-04", "SOXX"], 2) == 150.14
+    assert round(yahoo.fetch_prices("2y").loc["2026-11-04", "SOXX"], 2) == 150.14

@@ -98,3 +98,19 @@ def test_an_unknown_factor_names_the_line_without_a_price():
     assert item.factor is None and item.unpriced == ("CTVA",)
     findings = validate._check_price_actions({"corporate_actions": [item.as_dict()]})
     assert "no price for CTVA on 2026-10-01" in findings[0].detail
+
+
+def test_a_split_yahoo_announced_but_did_not_apply_is_applied_once():
+    """2026-11-05: SOXX split 3:1; the new close came with the old history and read -70.7%."""
+    days = pd.to_datetime(["2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06"])
+    raw = pd.DataFrame({"SOXX": [465.0, 450.41, 131.90, 133.0], "XLK": [170.0, 176.5, 162.4, 163.0]}, index=days)
+    splits = pd.DataFrame({"SOXX": [float("nan"), float("nan"), 3.0, float("nan")]}, index=days)
+    fixed, applied = ca.unapplied_splits(raw, splits)
+    assert [a["ticker"] for a in applied] == ["SOXX"] and applied[0]["ratio"] == 3.0
+    assert abs(fixed.at[days[1], "SOXX"] - 150.1367) < 1e-3 and fixed.at[days[2], "SOXX"] == 131.90
+    assert fixed["XLK"].equals(raw["XLK"]) and raw.at[days[1], "SOXX"] == 450.41   # the input is not changed
+    # Once Yahoo has rescaled its history the ex-date move is ordinary: nothing more is done.
+    again, none = ca.unapplied_splits(fixed, splits)
+    assert none == [] and again.equals(fixed)
+    # A split day whose move is not the split's ratio (a real -12% on adjusted history) is left alone.
+    assert ca.unapplied_splits(raw.assign(SOXX=[465.0, 150.14, 131.90, 133.0]), splits)[1] == []

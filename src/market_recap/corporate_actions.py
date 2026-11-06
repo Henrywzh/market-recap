@@ -116,6 +116,41 @@ def adjust(frame: pd.DataFrame, adjustments: list[Adjustment]) -> pd.DataFrame:
     return out
 
 
+def unapplied_splits(frame: pd.DataFrame, splits: pd.DataFrame | None, *,
+                     tolerance: float = 0.25) -> tuple[pd.DataFrame, list[dict]]:
+    """``frame`` with each split Yahoo has recorded but not yet applied to the
+    history before it, and the list of those it applied.
+
+    2026-11-05: SOXX split 3:1. On the ex-date Yahoo's split event and its new
+    close (131.90) were out, but the closes before it were still unadjusted
+    (11-04: 450.41), so the board read Semis -70.7% -- rare indeed. A split is
+    applied here only when the ex-date's move is the split's own ratio, within
+    ``tolerance`` of it (a real move of up to a quarter either way); once Yahoo
+    adjusts its history the move is ordinary and nothing is changed.
+    """
+    if frame.empty or splits is None or splits.empty:
+        return frame, []
+    out, applied = frame, []
+    for ticker in splits.columns.intersection(frame.columns):
+        for day, ratio in splits[ticker].dropna().items():
+            if not ratio or ratio <= 0 or ratio == 1 or day not in out.index:
+                continue
+            series = out[ticker]
+            before = series[series.index < day].dropna()
+            if before.empty or pd.isna(series.at[day]):
+                continue
+            move = float(series.at[day]) / float(before.iloc[-1])
+            # Unadjusted, a 3:1 split reads as the price falling to a third.
+            if abs(move * ratio - 1) > tolerance:
+                continue
+            if out is frame:
+                out = frame.copy()
+            out.loc[out.index < day, ticker] = out.loc[out.index < day, ticker] / ratio
+            applied.append({"ticker": str(ticker), "date": day.strftime("%Y-%m-%d"), "ratio": float(ratio),
+                            "move_pct": round((move - 1) * 100, 1)})
+    return out, sorted(applied, key=lambda a: (a["date"], a["ticker"]))
+
+
 def unexplained_moves(prices: pd.DataFrame, splits: pd.DataFrame | None, *, drop_pct: float,
                       rise_pct: float, sessions: int) -> list[dict]:
     """Recent one-session moves too large to take on trust.
