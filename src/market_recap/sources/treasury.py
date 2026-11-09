@@ -125,7 +125,8 @@ def _auction_value(value) -> float | None:
     return number
 
 
-def parse_auction_results(payload: dict, *, observed_at: str, since: str, until: str) -> list[dict]:
+def parse_auction_results(payload: dict, *, observed_at: str, since: str, until: str,
+                          source_url: str = AUCTIONS_PAGE) -> list[dict]:
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
         raise ValueError("Treasury response has no data array")
     rows, seen = [], set()
@@ -162,16 +163,76 @@ def parse_auction_results(payload: dict, *, observed_at: str, since: str, until:
         for field in ("direct_bidder_accepted", "indirect_bidder_accepted", "primary_dealer_accepted"):
             row[field.removesuffix("_accepted") + "_share_pct"] = None if total is None or row[field] is None else 100 * row[field] / total
         row.update(observed_at=observed_at, release_time=None, vintage_class="current_vintage",
-                   source_url=AUCTIONS_PAGE, tail_bps=None,
+                   source_url=source_url, tail_bps=None,
                    comparison_group=f"{row['security_type']}|{row['original_security_term']}|reopening={row['reopening']}")
         rows.append(row)
     return rows
 
 
+# TreasuryDirect's results service, the same auction results under other names.
+# Fiscal Data stopped posting results after 2026-10-08 while the auctions went
+# on (10-21's 20-year sat there with no result; 10-26..29's 2/5/7-year were not
+# listed at all), so its recent gap is filled from here. The 2026-10-06 3-year
+# reads identically in both: bid-to-cover 2.62, 56,995,537,500 competitive,
+# direct 18,047,610,000, indirect 32,826,490,000, dealers 6,121,437,500.
+TD_AUCTIONS_URL = "https://www.treasurydirect.gov/TA_WS/securities/auctioned"
+TD_AUCTIONS_PAGE = "https://www.treasurydirect.gov/auctions/auction-query/"
+TD_FIELDS = {
+    "cusip": "cusip", "security_type": "securityType", "security_term": "securityTerm",
+    "original_security_term": "originalSecurityTerm", "reopening": "reopening", "high_yield": "highYield",
+    "bid_to_cover_ratio": "bidToCoverRatio", "comp_accepted": "subtotalCompetitiveParAwardedInsideOfOfferingAmount",
+    "direct_bidder_accepted": "directBiddersCompetitiveParAwarded",
+    "indirect_bidder_accepted": "indirectBiddersCompetitiveParAwarded",
+    "primary_dealer_accepted": "primaryDealersCompetitiveParAwarded",
+    "pdf_filenm_comp_results": "treasuryAuctionResultsPressReleaseFileName",
+    "xml_filenm_comp_results": "treasuryAuctionResultsXmlFileName",
+    "inflation_index_security": "inflationProtected", "floating_rate": "floatingRate",
+}
+
+
+def treasurydirect_items(records: list) -> list[dict]:
+    """TreasuryDirect records in Fiscal Data's field names (empty strings as nulls)."""
+    out = []
+    for r in records if isinstance(records, list) else []:
+        if not isinstance(r, dict):
+            continue
+        item = {ours: (r.get(theirs) if r.get(theirs) not in ("", None) else None) for ours, theirs in TD_FIELDS.items()}
+        day = str(r.get("auctionDate") or r.get("competitiveAuctionCloseDate") or "")[:10]
+        issue = str(r.get("issueDate") or "")[:10] or None
+        item.update(auction_date=day, issue_date=issue, record_date=issue)
+        out.append(item)
+    return out
+
+
+def _treasurydirect_recent(use_cache: bool) -> list[dict]:
+    items = []
+    for kind in ("Note", "Bond"):
+        body = cache.fetch_bytes("treasury", f"td-auctioned-{kind.lower()}",
+                                 lambda k=kind: get_bytes(f"{TD_AUCTIONS_URL}?format=json&type={k}&pagesize=60", timeout=60),
+                                 kind="macro_series", suffix=".json", use_cache=use_cache)
+        items += treasurydirect_items(json.loads(body))
+    return items
+
+
 def fetch_auction_history(*, since: str = "2008-01-01", use_cache: bool = True) -> list[dict]:
     """Every completed coupon auction from ``since``, for RISK's auction-demand
     cell: the same schema checks as the private collection, read through the
-    build cache (twice a day), never written to the private snapshots."""
+    build cache (twice a day), never written to the private snapshots. Results
+    Fiscal Data does not carry yet come from TreasuryDirect, under the same checks."""
+    rows = _fiscal_auction_history(since=since, use_cache=use_cache)
+    try:
+        recent = _treasurydirect_recent(use_cache)
+    except Exception:
+        return rows   # the fill is optional; Fiscal Data's history stands, and its age shows in the log
+    have = {(r["cusip"], r["auction_date"]) for r in rows}
+    nominal = [i for i in recent if i.get("inflation_index_security") != "Yes" and i.get("floating_rate") != "Yes"
+               and i.get("security_type") in ("Note", "Bond") and (i.get("cusip"), i.get("auction_date")) not in have]
+    until = date.today().isoformat()
+    added = parse_auction_results({"data": nominal}, observed_at=until, since=since, until=until, source_url=TD_AUCTIONS_PAGE)
+    return sorted(rows + added, key=lambda r: (r["auction_date"], r["cusip"]))
+
+
+def _fiscal_auction_history(*, since: str, use_cache: bool) -> list[dict]:
     until = date.today().isoformat()
     rows: list[dict] = []
     for page in range(1, 6):
