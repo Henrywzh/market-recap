@@ -53,3 +53,13 @@ test('chart options: names, categories, legend state and formatter output', () =
   assert.equal(option.tooltip.formatter(), '<b>中位数</b> 4.2');
   assert.equal(translateHtml('plain MEDIAN'), 'plain MEDIAN');
 });
+
+test('a formatter gets the English names its chart code keys by, and its output is translated', () => {
+  const kindOf = { Revenue: 'money' };
+  const option = translateOption({
+    series: [{ name: 'Revenue', data: [1] }],
+    tooltip: { formatter: (items) => [].concat(items).map((it) => `${it.seriesName} ${kindOf[it.seriesName]}`).join('<br>') },
+  });
+  assert.equal(option.series[0].name, '营收');
+  assert.equal(option.tooltip.formatter([{ seriesName: '营收', value: 1 }]), 'Revenue money');
+});

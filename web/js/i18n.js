@@ -194,16 +194,37 @@ const LABEL_KEYS = new Set(['data']);
 // and axis names, category and legend entries, and whatever a formatter returns.
 export function translateOption(option) {
   if (!ZH) return option;
+  // Chart code keys its own lookups by the English name (a tooltip finds a
+  // series' unit by seriesName): a formatter is handed the English back, and
+  // only what it returns is translated.
+  const english = new Map();
+  const shown = (value) => {
+    const out = translateText(value);
+    if (out !== value) english.set(out, value);
+    return out;
+  };
+  const back = (value) => {
+    if (typeof value === 'string') return english.get(value) ?? value;
+    if (Array.isArray(value)) return value.map(back);
+    if (value && typeof value === 'object' && !(value instanceof Date)) {
+      const out = { ...value };
+      for (const key of ['seriesName', 'name', 'axisValue', 'axisValueLabel']) {
+        if (typeof out[key] === 'string') out[key] = english.get(out[key]) ?? out[key];
+      }
+      return out;
+    }
+    return value;
+  };
   const walk = (value, key) => {
     if (typeof value === 'string') {
       // A formatter given as plain text is a label; one with {a}/{b} placeholders is a template.
       if (key === 'formatter') return value.includes('{') ? value : translateText(value);
-      return TEXT_KEYS.has(key) || LABEL_KEYS.has(key) ? translateText(value) : value;
+      return TEXT_KEYS.has(key) || LABEL_KEYS.has(key) ? shown(value) : value;
     }
     if (typeof value === 'function') {
       if (key !== 'formatter' && key !== 'valueFormatter') return value;
       const fn = value;
-      return function translated(...args) { return translateHtml(fn.apply(this, args)); };
+      return function translated(...args) { return translateHtml(fn.apply(this, args.map(back))); };
     }
     if (Array.isArray(value)) return value.map((item) => walk(item, key === 'data' ? 'data' : key));
     if (value && typeof value === 'object' && !(value instanceof Date)) {
@@ -211,7 +232,7 @@ export function translateOption(option) {
       for (const [k, v] of Object.entries(value)) {
         // Legend state is keyed by series name, so its keys follow the names.
         if (k === 'selected' && v && typeof v === 'object' && !Array.isArray(v)) {
-          out[k] = Object.fromEntries(Object.entries(v).map(([name, on]) => [translateText(name), on]));
+          out[k] = Object.fromEntries(Object.entries(v).map(([name, on]) => [shown(name), on]));
         } else {
           out[k] = walk(v, k);
         }
