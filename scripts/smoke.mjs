@@ -314,6 +314,22 @@ for (const route of list) {
     problems.push(`${route}: interaction: ${error.message}`);
   }
 }
+// The Chinese page (i18n.js): the busiest views once more through the translation
+// layer, which rewrites every text node and chart option -- errors and blank pages only.
+if (!requested.length) {
+  for (const route of ['overview', 'markets', 'risk', 'rates', 'sectors', 'trade/SPY']) {
+    current = `zh:${route}`;
+    // A full load each time: the language is read once, when the page starts.
+    await page.goto(`${base}?lang=zh#${route}`, { waitUntil: 'networkidle', timeout: PAGE_TIMEOUT_MS }).catch(() => {});
+    await page.waitForFunction((min) => ((document.querySelector('main') || document.body).innerText || '').trim().length >= min,
+      MIN_TEXT, { timeout: RENDER_WAIT_MS }).catch(() => {});
+    await page.waitForTimeout(SETTLE_MS);
+    const text = await page.evaluate(() => (document.querySelector('main') || document.body).innerText);
+    if (text.trim().length < MIN_TEXT) problems.push(`${current}: rendered almost nothing in Chinese`);
+    if (!/[\u4e00-\u9fff]/.test(text)) problems.push(`${current}: no Chinese on the Chinese page`);
+  }
+  await page.evaluate(() => { localStorage.removeItem('mr-lang'); });
+}
 await browser.close();
 server.close();
 

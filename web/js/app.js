@@ -5,6 +5,7 @@ import { slowestParts } from './timings.js';
 import { resizeAll, disposeAll } from './charts.js';
 import { GROUPS, parseHash, hashFor, viewById, viewsIn } from './routes.js';
 import { monitorSession } from './artifact-session.js';
+import { ZH, setLanguage, startTranslating, translateText } from './i18n.js';
 
 // View modules load on demand, stamped with the build they belong to. A
 // browser keeps an ES module in memory under its URL, so an unversioned
@@ -285,6 +286,14 @@ export async function boot(manifest, version) {
   // Retire only the old theme preference; keep the reader's monitor/watchlist.
   try { localStorage.removeItem('mr-theme'); } catch { /* private window */ }
 
+  // 中 / EN: the page is written in English and translated as it renders (i18n.js).
+  const lang = document.getElementById('lang-switch');
+  if (lang) {
+    lang.textContent = ZH ? 'EN' : '中文';
+    lang.title = ZH ? 'Switch to English' : '切换到简体中文';
+    lang.addEventListener('click', () => setLanguage(ZH ? 'en' : 'zh'));
+  }
+  startTranslating();
   buildTabs();
 
   if (!manifest) {
@@ -304,7 +313,7 @@ export async function boot(manifest, version) {
   const edition = manifest.edition === 'close' ? ' · close edition, evening data to follow' : '';
   document.getElementById('updated').textContent = `Built ${manifest.generated_at} · session ${manifest.as_of}${edition}`;
   startBuildAge(manifest.generated_at, manifest.build_age_hours);
-  document.title = `${brand.title || 'Market Recap'} · ${manifest.as_of || ''}`;
+  document.title = translateText(`${brand.title || 'Market Recap'} · ${manifest.as_of || ''}`);
   renderFooter(manifest);
 
   // An old hash (#financials, #fixed-income) or a ?ticker= link is rewritten

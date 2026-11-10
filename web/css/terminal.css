@@ -2242,3 +2242,5 @@ table.data.idm-table tr.idm-section-row td { color: var(--accent); font-size: 10
 .today-backdrop-item .dim { font-size:11px; }
 /* RATES & MACRO → credit charts: range switch and the LOG toggle side by side. */
 .credit-tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.lang-switch { background: transparent; font-family: inherit; cursor: pointer; }
+:lang(zh-Hans) body { font-family: ui-monospace, "SF Mono", Menlo, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", monospace; }

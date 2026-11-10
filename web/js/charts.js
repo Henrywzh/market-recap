@@ -3,6 +3,7 @@
 // chart on the old palette.
 
 import { formatTick, formatValue, niceStepFromRange } from './axis-format.js';
+import { translateOption } from './i18n.js';
 
 const registry = new Map();
 
@@ -86,7 +87,7 @@ export function render(node, build) {
   if (chart) chart.dispose();
   chart = window.echarts.init(node, null, { renderer: 'canvas' });
   const p = palette();
-  const option = build(baseOption(p), p);
+  const option = translateOption(build(baseOption(p), p));
   chart.setOption(option, true);
   fitTickLabels(chart, option);
   if (option.legend && typeof chart.on === 'function') legendSolo(chart, node);
