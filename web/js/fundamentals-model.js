@@ -141,6 +141,10 @@ export function seriesFor(company, mode = 'annual') {
     net,
     netIncome: labels.map((_, i) => billions(at(values.net_income, i))),
     eps: pick(values.eps_diluted),
+    // Free cash flow is operating cash flow less capex; the chart draws all three,
+    // capex below zero, so the bars reconcile with each other.
+    ocf: labels.map((_, i) => billions(at(values.operating_cash_flow, i))),
+    capex: labels.map((_, i) => { const c = at(values.capex, i); return c === null ? null : -Math.abs(billions(c)); }),
     fcf: labels.map((_, i) => billions(at(ratios.free_cash_flow, i))),
     fcfMargin: pick(ratios.fcf_margin),
     roe: pick(ratios.roe),

@@ -316,3 +316,13 @@ test('without quarters the grid opens on ANNUAL and the quarterly views are disa
   assert.equal(options.length, 6);
   assert.equal(buttonNamed(host, 'ANNUAL').attrs['aria-pressed'], 'true');
 }));
+
+test('cash flow shows operating cash flow and capex below zero, which add up to free cash flow', () => {
+  const company = annualCompany();
+  company.values = { ...company.values, operating_cash_flow: [30e9, null, 45e9], capex: [10e9, 5e9, 12e9] };
+  company.ratios = { ...company.ratios, free_cash_flow: [20e9, null, 33e9] };
+  const s = seriesFor(company, 'annual');
+  assert.deepEqual(s.ocf, [30, null, 45]);
+  assert.deepEqual(s.capex, [-10, -5, -12]);
+  s.ocf.forEach((ocf, i) => { if (ocf !== null) assert.equal(ocf + s.capex[i], s.fcf[i]); });
+});

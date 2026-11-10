@@ -2632,6 +2632,13 @@ export const EXACT = {
   "CROSS-ASSET": "跨资产",
   "NOT PUBLISHED": "未发布",
   "BLS did not collect October # data (the # lapse in appropriations), so it does not publish #-month changes where that month is missing.": "BLS 未采集 # 年 10 月的数据（# 年政府停摆），因此在缺少该月数据的情况下不发布 # 个月变化。",
+  "CASH FLOW: OPERATING, CAPEX & FREE ($B, %)": "现金流：经营、资本开支与自由现金流（十亿美元，%）",
+  "Operating cash flow": "经营现金流",
+  "Capex": "资本开支",
+  "Free cash flow": "自由现金流",
+  "FCF margin": "自由现金流利润率",
+  "Not meaningful for a bank or insurer: its operating cash flow moves with loans, deposits and float, and it files no capital-spending line.": "对银行或保险公司没有意义：其经营现金流随贷款、存款和浮存金变动，且不申报资本开支项目。",
+  "Not tagged in this company's filings for these periods.": "该公司在这些期间的文件中未标注此项。",
 };
 
 // Sentence patterns: first match wins. tr(s) translates a piece and returns it

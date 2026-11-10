@@ -17,7 +17,7 @@ const TREND_GROUP = 'fundamental-trends';
 const MODE_LABELS = { annual: 'ANNUAL', quarterly: 'QUARTERLY', ttm: 'TTM' };
 const NO_QUARTERS = 'Quarterly statements are not built for this ticker';
 const TREND_TITLES = [
-  'REVENUE & GROWTH ($B, %)', 'MARGINS (%)', 'NET INCOME & DILUTED EPS', 'FREE CASH FLOW & FCF MARGIN', 'RETURNS (%)', 'BALANCE SHEET ($B)',
+  'REVENUE & GROWTH ($B, %)', 'MARGINS (%)', 'NET INCOME & DILUTED EPS', 'CASH FLOW: OPERATING, CAPEX & FREE ($B, %)', 'RETURNS (%)', 'BALANCE SHEET ($B)',
 ];
 
 async function loadCompany(symbol) {
@@ -98,7 +98,7 @@ function ratioTable(company, ratios) {
 function trendColors(p) {
   return {
     revenue: p.blue, growth: p.accent, gross: p.purple, operating: '#22d3ee', net: p.text,
-    netIncome: '#fb923c', eps: '#f472b6', fcf: '#34d399', fcfMargin: '#fbbf24',
+    netIncome: '#fb923c', eps: '#f472b6', ocf: '#60a5fa', capex: '#f87171', fcf: '#34d399', fcfMargin: '#fbbf24',
     roe: '#94a3b8', roic: '#e2e8f0', cash: '#4ade80', debt: '#f87171', netDebt: '#c084fc',
   };
 }
@@ -184,7 +184,11 @@ function trendSpecs(s) {
       bars: [{ name: 'Net income', data: s.netIncome, color: 'netIncome', kind: 'money' }],
       lines: [{ name: 'Diluted EPS', data: s.eps, color: 'eps', kind: 'eps', axis: 1 }] },
     { left: 'money', right: 'pct',
-      bars: [{ name: 'Free cash flow', data: s.fcf, color: 'fcf', kind: 'money' }],
+      bars: [
+        { name: 'Operating cash flow', data: s.ocf, color: 'ocf', kind: 'money' },
+        { name: 'Capex', data: s.capex, color: 'capex', kind: 'money' },
+        { name: 'Free cash flow', data: s.fcf, color: 'fcf', kind: 'money' },
+      ],
       lines: [{ name: 'FCF margin', data: s.fcfMargin, color: 'fcfMargin', kind: 'pct', axis: 1 }] },
     { left: 'pct', right: null,
       bars: [],
@@ -217,8 +221,12 @@ export function withData(spec) {
 // Why a chart is blank. A bank's or insurer's operating cash flow moves with its
 // loans, deposits and float, and it files no capital-spending line, so there is
 // no free cash flow to draw rather than a missing one.
+// A bank's or insurer's cash flow is left blank: it has an operating cash flow, but
+// one that moves with loans, deposits and float, and no capex line to net.
+const cashFlowBlank = (index, company) => TREND_TITLES[index].startsWith('CASH FLOW') && company?.sector === 'Financials';
+
 export function emptyNote(index, company) {
-  if (TREND_TITLES[index].startsWith('FREE CASH FLOW') && company?.sector === 'Financials') {
+  if (cashFlowBlank(index, company)) {
     return 'Not meaningful for a bank or insurer: its operating cash flow moves with loans, deposits and float, and it files no capital-spending line.';
   }
   return 'Not tagged in this company\'s filings for these periods.';
@@ -230,7 +238,7 @@ function drawGrid(nodes, company, mode) {
   const series = seriesFor(company, mode);
   const notes = pointNotes(series);
   const charts = trendSpecs(series).map((spec, i) => {
-    const shown = withData(spec);
+    const shown = cashFlowBlank(i, company) ? null : withData(spec);
     if (shown) return drawTrend(nodes[i], series.labels, shown, notes);
     disposeWithin(nodes[i]);
     nodes[i].replaceChildren(el('div', { class: 'note-text', text: emptyNote(i, company) }));
