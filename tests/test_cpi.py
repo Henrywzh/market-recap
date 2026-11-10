@@ -173,3 +173,18 @@ def test_unexpected_cpi_error_becomes_a_named_gap_not_an_exception(monkeypatch):
     assert out['status'] == 'unavailable' and 'All items' in out['reason']
     # The earlier ok record of the same failed build is replaced, not left beside it.
     assert [r.status for r in log.sources if r.source_id == 'bls_cpi'] == ['error']
+
+
+def test_october_2026_prints_no_year_on_year_and_says_why():
+    """October 2025 was never collected (2025 lapse in appropriations): its 12-month changes are '-'."""
+    gap = release_html().replace('<td>3.7</td>', '<td>-</td>')
+    with pytest.raises(ValueError, match='required release figure missing'):
+        B.parse(gap)                                   # no statement from BLS: still a failed read
+    stated = gap.replace('<table id="cpipress1">', '<p>As a result, BLS cannot publish 12-month percent changes '
+                         'for October 2026.</p><table id="cpipress1">')
+    out = B.parse(stated)
+    assert out['rows']['All items']['yoy'] is None and out['rows']['All items']['mom'] == .6
+    assert 'October 2025' in out['yoy_note']
+    row = next(r for r in P.release_comparison(out, [dict(country='US', date='2026-10-14T12:30:00Z',
+               referenceDate='2026-09-30T00:00:00Z', title='Inflation Rate YoY', forecast=3.9)]) if r['key'] == 'cpi_yoy')
+    assert row['actual'] is None and row['surprise_pp'] is None

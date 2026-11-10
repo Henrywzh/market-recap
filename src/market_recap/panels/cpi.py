@@ -52,7 +52,7 @@ def release_comparison(release: dict, calendar: list[dict]) -> list[dict]:
             rows.append({"key": metric, "label": ("Headline" if key == "cpi" else "Core"),
                          "basis": "MoM SA" if basis == "mom" else "YoY NSA",
                          "actual": actual, "consensus": forecast,
-                         "surprise_pp": clean_float(actual - forecast, 4) if forecast is not None else None,
+                         "surprise_pp": clean_float(actual - forecast, 4) if forecast is not None and actual is not None else None,
                          "previous": clean_float(raw.get("previous"), 4),
                          "previous_basis": "Calendar previous; may include revisions",
                          "previous_mom_bls": release["rows"][category]["previous_mom"] if basis == "mom" else None,
@@ -181,6 +181,8 @@ def _build(ctx) -> dict:
             "published_at": release["published_at"], "retrieved_at": release["retrieved_at"],
             "source_url": release["source_url"], "source_sha256": release["sha256"],
             "weight_month": release["weight_month"], "comparisons": comparisons,
+            # Set when BLS publishes no 12-month change for the month (October 2026).
+            "yoy_note": release.get("yoy_note"),
             "consensus_retrieved_at": consensus_retrieved, "consensus_note": consensus_note,
             "components": components, "persistence": persistence, "failed_sources": failed,
             "contributions": {"keys": config["contribution_keys"], "sum_pp": clean_float(effect_sum, 4),

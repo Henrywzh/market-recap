@@ -107,11 +107,20 @@ def parse(text: str, *, expected_release: datetime | None = None) -> dict:
             "yoy": original[4] if original else None,
             "previous_mom": original[7] if original else None,
         }
+    # October 2025 was never collected (the 2025 lapse in appropriations), so the
+    # October 2026 release prints "-" for every 12-month change and says why. A
+    # year-on-year figure is then a published gap, kept empty, not a failed read;
+    # one missing without that statement is still an error.
+    text = " ".join(_text(doc).split())
+    no_yoy = re.search(r"cannot publish 12-month percent changes", text, re.I)
     for key in ("All items", "All items less food and energy"):
-        if key not in rows or rows[key]["mom"] is None or rows[key]["yoy"] is None:
+        if key not in rows or rows[key]["mom"] is None or (rows[key]["yoy"] is None and not no_yoy):
             raise ValueError(f"BLS CPI required release figure missing: {key}")
-    return {"month": month, "weight_month": weight_month,
-            "published_at": published.isoformat(), "rows": rows}
+    out = {"month": month, "weight_month": weight_month, "published_at": published.isoformat(), "rows": rows}
+    if no_yoy and any(r["yoy"] is None for r in rows.values()):
+        out["yoy_note"] = ("BLS did not collect October 2025 data (the 2025 lapse in appropriations), so it does not "
+                           "publish 12-month changes where that month is missing.")
+    return out
 
 
 def fetch_release() -> dict:

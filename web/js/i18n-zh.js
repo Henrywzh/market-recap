@@ -2630,6 +2630,8 @@ export const EXACT = {
   "EQUITIES": "股票",
   "VOLATILITY": "波动率",
   "CROSS-ASSET": "跨资产",
+  "NOT PUBLISHED": "未发布",
+  "BLS did not collect October # data (the # lapse in appropriations), so it does not publish #-month changes where that month is missing.": "BLS 未采集 # 年 10 月的数据（# 年政府停摆），因此在缺少该月数据的情况下不发布 # 个月变化。",
 };
 
 // Sentence patterns: first match wins. tr(s) translates a piece and returns it

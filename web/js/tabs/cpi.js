@@ -13,7 +13,8 @@ export function releaseStrip(data, kind = 'CPI') {
     timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
   const tiles = (data.comparisons || []).map((r) => {
-    const state = surpriseState(r.surprise_pp);
+    // BLS publishing no figure (October 2026's 12-month changes) is not a missing consensus.
+    const state = finite(r.actual) ? surpriseState(r.surprise_pp) : { label: 'NOT PUBLISHED', tone: 'dim' };
     return el('div', { class: 'cpi-print', [`data-${kind.toLowerCase()}-metric`]: r.key }, [
       el('div', { class: 'cpi-print-label', text: `${r.label} · ${r.basis}` }),
       el('div', { class: 'cpi-print-value', text: rate(r.actual) }),
@@ -27,6 +28,7 @@ export function releaseStrip(data, kind = 'CPI') {
   return card(`${kind} RELEASE · ${monthName(data.month).toUpperCase()}`, el('a', { href: data.source_url, target: '_blank', rel: 'noopener', class: 'dim', text: 'BLS release ↗' }), [
     el('div', { class: 'cpi-release-date', text: `Published ${published} New York · reference month ${data.month}` }),
     el('div', { class: 'cpi-prints' }, tiles),
+    data.yoy_note ? el('div', { class: 'field-note', text: data.yoy_note }) : null,
     ...caveats('Consensus is a retrospective TradingView calendar figure, not a frozen pre-release survey.',
       'Actual: official BLS. Consensus / previous: TradingView calendar, recovered retrospectively. Surprise = actual − consensus, in percentage points. Previous may include revisions.'),
   ]);
