@@ -119,7 +119,7 @@ export function ramptokenomicsCharts(payload) {
     : null;
   const notes = [
     'Ramp Token Spend Management: usage and billing of connected providers from participating Ramp businesses. This is not Ramp\'s monthly AI Index sample and does not represent total Ramp AI spend, any provider\'s revenue, or ARR.',
-    `Weeks run Monday to Sunday. Model series keep Ramp's raw identifiers, including aliases: they are not a count of distinct models. Showing the top ${shown} of ${total}; shares use every reported series.`,
+    `${p.week_runs?.length === 2 ? `Weeks run ${p.week_runs[0]} to ${p.week_runs[1]}, as Ramp dates them.` : 'Weekly, as Ramp dates the weeks.'} Model series keep Ramp's raw identifiers, including aliases: they are not a count of distinct models. Showing the top ${shown} of ${total}; shares use every reported series.`,
     'Spend and volume have different coverage, so spend divided by volume is not a price. Prices are observed effective prices (rolling 7-day cost / tokens), not list prices; the all-token price also moves with the mix of input, output and cached tokens; only OpenAI and Anthropic are covered, with no model-level prices.',
     'Missing weeks are gaps; reported zeros are zeros.',
   ].map((text) => el('div', { class: 'field-note', text }));

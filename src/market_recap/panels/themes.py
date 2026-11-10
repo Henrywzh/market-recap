@@ -494,6 +494,19 @@ def _ramp_prices(prices: pd.DataFrame, names: dict) -> dict:
     return {"unit": "USD per million tokens", "dates": [d.strftime("%Y-%m-%d") for d in days], "types": types}
 
 
+def _ramp_weeks(ends: pd.Series) -> pd.DatetimeIndex:
+    """Every week from the first to the last, on the weekday Ramp's weeks end.
+
+    Ramp moved its week ends from Sunday to Friday (republished history, seen
+    2026-11-03); a grid fixed to Sundays then matched no row and every total came
+    out empty. Seven-day steps from the first end keep a week with no rows as a
+    gap; if the ends are not all on one weekday, the dates themselves are used.
+    """
+    dates = pd.DatetimeIndex(ends.dropna().unique()).sort_values()
+    grid = pd.date_range(dates.min(), dates.max(), freq="7D", name="period_end")
+    return grid if dates.isin(grid).all() else dates.rename("period_end")
+
+
 def _ramp_tokenomics(settings: dict) -> dict:
     """Ramp Token Spend Management (alternative-data): weekly tokens and spend by model, and effective prices.
 
@@ -510,7 +523,7 @@ def _ramp_tokenomics(settings: dict) -> dict:
     activity["maker"] = activity["model_maker"].astype(str)
     activity["series_key"] = activity["series_key"].astype(str)
     activity["key"] = activity["maker"] + " · " + activity["series_key"]
-    weeks = pd.date_range(activity["period_end"].min(), activity["period_end"].max(), freq="W-SUN", name="period_end")
+    weeks = _ramp_weeks(activity["period_end"])
     latest = activity["period_end"].max()
     # One row per series (maker and raw key, never the label): its most recent row supplies the label.
     meta = (activity.sort_values("period_end", kind="stable").drop_duplicates("key", keep="last")
@@ -525,6 +538,9 @@ def _ramp_tokenomics(settings: dict) -> dict:
     today = datetime.now(timezone.utc).date()
     return {
         "weeks": [w.strftime("%Y-%m-%d") for w in weeks],
+        # The days a week runs, from Ramp's own period start and end, for the note.
+        "week_runs": [pd.to_datetime(activity["period_start"].iloc[-1]).strftime("%A"), latest.strftime("%A")]
+        if "period_start" in activity.columns else None,
         "volume": volume, "spend": spend,
         "prices": _ramp_prices(prices, names),
         "default_makers": [m for m in settings.get("ramp_tokenomics_default_makers") or [] if m in shown_makers],

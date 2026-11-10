@@ -164,3 +164,17 @@ def test_reader_fetches_the_activity_and_price_files_and_the_activity_commit(mon
     assert sorted(read_paths) == ["ramp/ramp_ai_token_activity.parquet", "ramp/ramp_ai_token_prices.parquet"]
     assert commit_paths == ["ramp/ramp_ai_token_activity.parquet"]
     assert set(tables) == {"activity", "prices"} and commit == {"sha": "s", "date": "d"}
+
+
+def test_weeks_follow_the_weekday_ramp_ends_them_on(monkeypatch):
+    """2026-11-03: Ramp's weeks ended on Fridays; a Sunday grid matched no row and every total was empty."""
+    activity = _activity()
+    shift = {w: (pd.Timestamp(w) + pd.Timedelta(days=5)).strftime("%Y-%m-%d") for w in WEEKS}   # Sundays to Fridays
+    activity["period_end"] = activity["period_end"].map(shift)
+    activity["period_start"] = (pd.to_datetime(activity["period_end"]) - pd.Timedelta(days=6)).dt.strftime("%Y-%m-%d")
+    _patch(monkeypatch, activity)
+    out = TH._ramp_tokenomics(SETTINGS)
+    assert out["weeks"] == list(shift.values())
+    assert out["volume"]["total"] == [8.0, 7.0, 10.0, 13.0, 14.0]
+    assert {m["key"]: m["values"] for m in out["volume"]["makers"]}["google"] == [1.0, 1.0, None, 2.0, 2.0]
+    assert out["week_runs"] == ["Saturday", "Friday"] and out["latest_week"] == shift[WEEKS[-1]]
