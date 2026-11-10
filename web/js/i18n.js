@@ -34,9 +34,14 @@ if (REPORT) window.__i18nMisses = new Map();
 
 export function setLanguage(lang) {
   try { localStorage.setItem(KEY, lang); } catch { /* storage unavailable: the URL still carries it */ }
+  // A real reload: replacing the address with itself, hash and all, is a hash-only
+  // navigation that reloads nothing, so the switch did nothing until ⌘R.
   const url = new URL(window.location.href);
-  url.searchParams.delete('lang');
-  window.location.replace(url.toString());
+  if (url.searchParams.has('lang')) {
+    url.searchParams.delete('lang');
+    window.history.replaceState(null, '', url.toString());
+  }
+  window.location.reload();
 }
 
 const UPPER = new Map(Object.entries(EXACT).map(([k, v]) => [k.toUpperCase(), v]));
