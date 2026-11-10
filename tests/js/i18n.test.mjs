@@ -63,3 +63,17 @@ test('a formatter gets the English names its chart code keys by, and its output 
   assert.equal(option.series[0].name, '营收');
   assert.equal(option.tooltip.formatter([{ seriesName: '营收', value: 1 }]), 'Revenue money');
 });
+
+test('words that change meaning with their place read as meant there', () => {
+  assert.equal(translateText('OPEN', { label: true }), '打开');            // the ticker box's button, not the market open
+  assert.equal(translateText('D1 OPEN'), 'D1 开盘');
+  assert.equal(translateText('3M', { label: true }), '3个月');             // a window, not March
+  assert.equal(translateText('VALUE · IWD'), '价值 · IWD');                // the style, not a table's value column
+});
+
+test('templates put every figure where it belongs', () => {
+  assert.equal(translateText('-0.4% vs S&P 5 sessions later'), '5 个交易日后相对标普 -0.4%');
+  assert.equal(translateText('beat 6 of 7'), '7 次中 6 次超预期');
+  assert.equal(translateText('top 30 S&P 500 weights + watchlist'), '标普 500 前 30 大权重 + 自选');
+  assert.equal(translateText('top-1% median'), '前 1% 中位数');
+});
