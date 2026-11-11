@@ -77,3 +77,11 @@ test('templates put every figure where it belongs', () => {
   assert.equal(translateText('top 30 S&P 500 weights + watchlist'), '标普 500 前 30 大权重 + 自选');
   assert.equal(translateText('top-1% median'), '前 1% 中位数');
 });
+
+test('a click on a translated chart reaches the view with the names it wrote', () => {
+  const option = translateOption({ yAxis: { type: 'category', data: ['Energy'] }, series: [{ name: 'Utilities', data: [1] }] });
+  assert.equal(option.series[0].name, '公用事业');
+  const event = option.englishNames({ seriesName: '公用事业', name: '公用事业', value: '能源', data: { x: 1 } });
+  assert.deepEqual([event.seriesName, event.name, event.value, event.data], ['Utilities', 'Utilities', 'Energy', { x: 1 }]);
+  assert.deepEqual(option.englishNames({ name: '公用事业', selected: { 公用事业: false } }).selected, { Utilities: false });
+});

@@ -208,8 +208,12 @@ export function translateOption(option) {
     if (Array.isArray(value)) return value.map(back);
     if (value && typeof value === 'object' && !(value instanceof Date)) {
       const out = { ...value };
-      for (const key of ['seriesName', 'name', 'axisValue', 'axisValueLabel']) {
+      for (const key of ['seriesName', 'name', 'value', 'axisValue', 'axisValueLabel']) {
         if (typeof out[key] === 'string') out[key] = english.get(out[key]) ?? out[key];
+      }
+      // A legend event's state is keyed by the shown names.
+      if (out.selected && typeof out.selected === 'object' && !Array.isArray(out.selected)) {
+        out.selected = Object.fromEntries(Object.entries(out.selected).map(([name, on]) => [english.get(name) ?? name, on]));
       }
       return out;
     }
@@ -241,5 +245,8 @@ export function translateOption(option) {
     }
     return value;
   };
-  return walk(option, null);
+  const out = walk(option, null);
+  // Event handlers (a click that picks a series) get the English names back too: charts.js reads this.
+  if (out && typeof out === 'object') Object.defineProperty(out, 'englishNames', { value: back });
+  return out;
 }

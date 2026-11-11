@@ -91,6 +91,18 @@ export function render(node, build) {
   chart.setOption(option, true);
   fitTickLabels(chart, option);
   if (option.legend && typeof chart.on === 'function') legendSolo(chart, node);
+  // A view's own handlers key their lookups by the names it wrote, in English:
+  // on a translated chart each event is handed back with those names.
+  if (option.englishNames && typeof chart.on === 'function') {
+    const on = chart.on.bind(chart);
+    chart.on = (type, ...rest) => {
+      const at = rest.findIndex((arg) => typeof arg === 'function');
+      if (at < 0) return on(type, ...rest);
+      const handler = rest[at];
+      rest[at] = function english(event, ...more) { return handler.call(this, option.englishNames(event), ...more); };
+      return on(type, ...rest);
+    };
+  }
   registry.set(node, chart);
   return chart;
 }
