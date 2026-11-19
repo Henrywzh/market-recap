@@ -28,6 +28,9 @@ CHAIN_EVIDENCE_PATH = REPO_ROOT / "config" / "ai_chain_evidence.json"
 NOWCAST_EVALUATION_PATH = REPO_ROOT / "config" / "nowcast_evaluation.json"
 # The month-end real-time growth / inflation quadrant, 2014 on (scripts/nowcast_evaluation).
 REGIME_QUADRANT_HISTORY_PATH = REPO_ROOT / "config" / "regime_quadrant_history.json"
+# The S&P 500's breadth on each day's own members, 2021 to its freeze date
+# (scripts/freeze_spx_pit_breadth.py); the live build continues it.
+SPX_PIT_BREADTH_PATH = REPO_ROOT / "config" / "spx_pit_breadth.json"
 
 CACHE_DIR = REPO_ROOT / "data" / "cache"
 ARTIFACT_DIR = REPO_ROOT / "artifacts"

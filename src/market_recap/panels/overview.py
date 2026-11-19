@@ -264,10 +264,28 @@ def sector_returns(etf_closes: pd.DataFrame, sector_etfs: dict[str, str], member
     return sorted(out, key=lambda r: -(r["weight_pct"] or 0))
 
 
-def breadth_history(closes: pd.DataFrame, sessions: int = HIGH_WINDOW) -> dict | None:
-    """Share of members above their 50- and 200-day averages, last year."""
+def breadth_history(closes: pd.DataFrame, sessions: int = HIGH_WINDOW, frozen: dict | None = None) -> dict | None:
+    """Share of members above their 50- and 200-day averages, last year.
+
+    ``frozen`` (config/spx_pit_breadth.json) carries the S&P 500's past counted
+    on each day's own members: its sessions come first and today's members only
+    continue it after its last date, so the long view is not rebuilt from the
+    names that happen to be in the index now.
+    """
     if closes.shape[0] < 200 + 20:
         return None
+    if frozen and frozen.get("dates"):
+        live = breadth_history(closes, sessions=closes.shape[0])
+        if live is None:
+            return None
+        through = frozen["through"]
+        keep = [i for i, d in enumerate(live["dates"]) if d > through]
+        n = len(frozen["dates"])
+        return {"dates": frozen["dates"] + [live["dates"][i] for i in keep],
+                "above_50d": frozen["above_50d"] + [live["above_50d"][i] for i in keep],
+                "above_200d": frozen["above_200d"] + [live["above_200d"][i] for i in keep],
+                "coverage": frozen["coverage"] + [None] * len(keep),
+                "own_members_through": through, "own_members_sessions": n}
     out = {}
     for window in (50, 200):
         # As in the day's figure (R.pct_above_moving_average): a feed gap -- one

@@ -2704,6 +2704,9 @@ export const EXACT = {
   "REV · NEXT QUARTER": "营收 · 下季度",
   "REV · THIS YEAR": "营收 · 今年",
   "REV · NEXT YEAR": "营收 · 明年",
+  "Through #, each day counts the members the index had that day (reconstructed from public lists of index changes, not S&P's own files), not today's names. Members with no price history, mostly companies since acquired or delisted, are left out: at least # of each day's members are counted. After that date, today's members.": "# 之前，每一天按指数当天的成分股计算（依据公开的指数调整记录重建，并非标普官方文件），而不是今天的成分股。没有价格历史的成分股（多为后来被收购或退市的公司）未计入：每天至少计入当天成分股的 #。此日期之后按今天的成分股计算。",
+  "members of that day": "当天的成分股",
+  "#% counted": "计入 #%",
 };
 
 // Sentence patterns: first match wins. tr(s) translates a piece and returns it

@@ -8,16 +8,26 @@ look like an error on the page.
 
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 
 from ..compute import returns as R
-from ..config import SESSION_COVERAGE_THRESHOLD, period_sessions
+from ..config import SESSION_COVERAGE_THRESHOLD, SPX_PIT_BREADTH_PATH, period_sessions
 from ..util import clean_float, company_name, to_iso_date
 from . import overview as SESSION
 
 # How many names each mover table lists. A round number with no analytic
 # meaning, which is exactly why it belongs in one named place.
 MOVERS_PER_SIDE = 10
+
+
+def _frozen_breadth() -> dict | None:
+    """The S&P 500's breadth on each day's own members, as frozen (none if the file is absent)."""
+    try:
+        return json.loads(SPX_PIT_BREADTH_PATH.read_text())
+    except (OSError, ValueError):
+        return None
 
 
 def _series_payload(series: pd.Series) -> dict:
@@ -121,7 +131,7 @@ def build(ctx) -> dict:
             "price_chart": _chart_windows(ctx.index_closes[spec.symbol], windows["index_price_chart"]),
             # INDEX HISTORY's breadth: today's counts and the year's share above the averages.
             "breadth": SESSION.breadth(panel),
-            "breadth_history": SESSION.breadth_history(panel),
+            "breadth_history": SESSION.breadth_history(panel, frozen=_frozen_breadth() if spec.key == "SPX" else None),
             "contributions": _contributions(panel, ctx.priced(spec.key)),
             # Breadth on each index's own members. Counting every priced column
             # would credit the S&P 500 with Nasdaq-only names.
