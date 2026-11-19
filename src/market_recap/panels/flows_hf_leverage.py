@@ -15,7 +15,7 @@ from ..sources import ofr
 from ..util import ERROR_DETAIL_CHARS, SourceRecord, clean_float, to_iso_date
 
 LABEL = "OFR Hedge Fund Monitor: SEC Form PF aggregates (qualifying hedge funds)"
-POLICY = "quarterly_filing"
+POLICY = "form_pf_release"
 
 # The OFR mnemonics read from the dataset. GAV and NAV form the leverage ratio;
 # NAV is also the base for net equity exposure.

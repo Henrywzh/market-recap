@@ -131,6 +131,15 @@ FRESHNESS = {
     # A quarter-end figure (capex from 10-Qs): due about 45 days after the
     # quarter closes, so it is not stale until the next one is overdue.
     "quarterly_filing": {"stale_after_calendar_days": 140},
+    # The Fed's Z.1 comes out about ten weeks after a quarter ends, but on its
+    # own calendar: Q2 on 2026-09-11, Q3 on 2026-12-10, so a quarter-end figure
+    # stays the newest for about 163 days. 140 failed every build from
+    # 2026-11-18 until the December release.
+    "z1_release": {"stale_after_calendar_days": 185},
+    # OFR's Form PF aggregates trail further: large advisers file within 60
+    # days of quarter end, and OFR publishes the quarter months after that, so
+    # a quarter-end figure is the newest for well over five months.
+    "form_pf_release": {"stale_after_calendar_days": 250},
 }
 DEFAULT_FRESHNESS_POLICY = "daily_close"
 

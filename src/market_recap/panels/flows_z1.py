@@ -33,7 +33,7 @@ BASIS = "NSA"
 # FRED is served behind a rate limit. Pause between uncached requests.
 PACING_SECONDS = 2.0
 # Source policy: a quarter-end figure published about ten weeks after quarter end.
-SOURCE_POLICY = "quarterly_filing"
+SOURCE_POLICY = "z1_release"
 
 # FRED id per line, in millions of dollars for the quarter (FRED's Z.1 units).
 SERIES = {

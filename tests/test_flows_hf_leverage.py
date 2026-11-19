@@ -182,7 +182,7 @@ def test_build_payload_from_the_fixture(monkeypatch, sample):
     assert by_id["equity_long"]["ofr_names"] == ["SYNTHETIC TEST FIXTURE: FPF-ASSETCLASS_EQUITIES_LGNE_SUM"]
     record = ctx.log.sources[-1]
     assert record.source_id == "ofr_formpf" and record.status == "ok"
-    assert record.observed_date == "2026-06-30" and record.policy == "quarterly_filing"
+    assert record.observed_date == "2026-06-30" and record.policy == "form_pf_release"
 
 
 def test_build_is_unavailable_and_logged_when_the_fetch_fails(monkeypatch):
@@ -203,3 +203,13 @@ def test_build_is_unavailable_when_a_needed_series_is_absent(monkeypatch, sample
     out = panel.build(ctx, None)
     assert "FPF-ALLQHF_NAV_SUM" in out["unavailable"]
     assert ctx.log.sources[-1].status == "error"
+
+
+def test_quarter_end_sources_are_not_stale_before_their_next_release():
+    """Z.1 Q2 stays current until the Fed's December release; Form PF trails further still."""
+    from datetime import date
+
+    from market_recap.config import FRESHNESS as P
+
+    assert (date(2026, 12, 10) - date(2026, 6, 30)).days < P["z1_release"]["stale_after_calendar_days"]
+    assert P["form_pf_release"]["stale_after_calendar_days"] > P["z1_release"]["stale_after_calendar_days"]
