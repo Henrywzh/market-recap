@@ -173,7 +173,7 @@ for (const route of list) {
     }
     if (route === 'markets') {
       const index = page.locator('.card').filter({ has: page.locator('.index-history') }).first();
-      const choices = await index.locator('.card-head button').all();
+      const choices = await index.locator(':scope > .card-head button').all();
       for (const button of choices) {
         await button.click();
         if (await index.locator('.index-history .chart').count() !== 2) throw new Error('Index switch should show one price / breadth pair');
