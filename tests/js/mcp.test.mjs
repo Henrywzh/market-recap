@@ -225,7 +225,7 @@ test('a notification gets 202 and no body; ping gets an empty result', async () 
 test('tools/list names every tool with an input and an output schema, read-only', async () => {
   const { json } = await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
   const names = json.result.tools.map((t) => t.name);
-  assert.deepEqual(names, ['today', 'market_snapshot', 'catalysts', 'ticker', 'financials', 'screen', 'unusual_moves', 'sector', 'theme', 'macro', 'search', 'fetch']);
+  assert.deepEqual(names, ['today', 'market_snapshot', 'catalysts', 'ticker', 'financials', 'screen', 'event_study', 'unusual_moves', 'sector', 'theme', 'macro', 'search', 'fetch']);
   json.result.tools.forEach((t) => {
     assert.equal(t.inputSchema.type, 'object');
     assert.equal(t.outputSchema.type, 'object');
@@ -762,7 +762,7 @@ test('tools only ever ask the ASSETS binding for artifacts/ files', async () => 
   const files = fixture();
   const spy = { async fetch(request) { asked.push(request.method + ' ' + new URL(request.url).pathname); return memoryAssets(files).fetch(request); } };
   for (const tool of TOOLS) {
-    const args = { today: {}, market_snapshot: {}, catalysts: {}, ticker: { symbol: 'NVDA' }, financials: { symbol: 'NVDA' }, screen: { sector: 'Semiconductors' }, unusual_moves: {}, sector: { key: 'XLK' }, theme: { key: 'cloud' }, macro: { kind: 'cpi' }, search: { query: 'nvda' }, fetch: { id: 'ticker:NVDA' } }[tool.name];
+    const args = { today: {}, market_snapshot: {}, catalysts: {}, ticker: { symbol: 'NVDA' }, financials: { symbol: 'NVDA' }, screen: { sector: 'Semiconductors' }, event_study: { symbol: 'NVDA', trigger: { kind: 'close', direction: 'down', size: 3 } }, unusual_moves: {}, sector: { key: 'XLK' }, theme: { key: 'cloud' }, macro: { kind: 'cpi' }, search: { query: 'nvda' }, fetch: { id: 'ticker:NVDA' } }[tool.name];
     await handleMcp(new Request('https://market-recap-b5p.pages.dev/mcp', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool.name, arguments: args } }) }), { ASSETS: spy }, { now: NOW });
   }
   assert.ok(asked.length > 10);

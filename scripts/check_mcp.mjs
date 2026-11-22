@@ -24,6 +24,8 @@ import { counting, directoryAssets, withoutSlices } from '../mcp/fake-assets.mjs
 import { validate } from '../mcp/schema.mjs';
 import { handleMcp } from '../mcp/server.mjs';
 import { TOOLS } from '../mcp/tools.mjs';
+import { readings } from '../mcp/tools/event_study.mjs';
+import { sessions } from '../web/js/event-lab-model.js';
 
 const ROOT = resolve(process.argv[2] || 'dist');
 const ORIGIN = 'https://market-recap-b5p.pages.dev';
@@ -57,6 +59,9 @@ async function plan(manifest) {
     { tool: 'screen', args: {}, paths: ['rows.0.values.pe_forward', 'rows.0.values.operating_margin'], nonEmpty: ['rows', 'metrics'] },
     { tool: 'screen', args: { sector: 'Semiconductors', filters: [{ metric: 'operating_margin', min: 0 }], sort: 'pe_forward', limit: 100 }, nonEmpty: ['rows'] },
     { tool: 'screen', args: { index: 'NDX', filters: [{ metric: 'gross_margin', min: 40 }, { metric: 'pe_vs_median', max: 0 }], fields: ['fcf_margin', 'roic', 'ev_ebitda'], limit: 100 } },
+    { tool: 'event_study', args: { symbol: top, trigger: { kind: 'close', direction: 'down', size: 3 } }, paths: ['latest_session.date', 'outcomes.0.every_session.mean_pct'], expect: ['latest_session'], nonEmpty: ['outcomes'] },
+    { tool: 'event_study', args: { symbol: 'SPY', trigger: { kind: 'intraday', direction: 'down', size: 1.5 }, filters: { rsi: { period: 14, max: 40 }, ma: [{ period: 200, side: 'above' }], from_high: { window: 63, max: -3 } } }, nonEmpty: ['outcomes'] },
+    { tool: 'event_study', args: { symbol: 'SPY', trigger: { kind: 'close', direction: 'down', size: 2 }, like_today: true }, nonEmpty: ['outcomes'] },
     { tool: 'unusual_moves', args: {}, paths: ['threshold_sigma', 'technology_selloff.active'], expect: ['technology_selloff'] },
     { tool: 'sector', args: { key: sector.key }, paths: ['summary.returns_pct.1M', 'valuation_strip.current'], expect: ['valuation_strip'], nonEmpty: ['sub_industries'] },
     { tool: 'sector', args: { key: sub.key }, expect: ['parent'] },
@@ -159,6 +164,13 @@ async function main() {
   const wanted = TOOLS.map((t) => t.name).sort();
   report('tools/list', JSON.stringify(listed) === JSON.stringify(wanted) ? [] : [`listed ${listed.join(',')}`], ` (${listed.length} tools)`);
   report('slices match this build', await sliceProblems());
+  // event_study reads sessions() column by column for speed; on this build's own
+  // bars it must give the model's rows exactly, or Trade Desk's model has moved.
+  for (const symbol of ['SPY', (await artifact('heatmaps')).constituents.filter((r) => r.ticker).sort((a, b) => (b.weight || 0) - (a.weight || 0))[0].ticker]) {
+    const bars = await artifact(`bars/${symbol}`).catch(() => null);
+    const same = bars ? JSON.stringify(readings(bars)) === JSON.stringify(sessions(bars)) : null;
+    report(`event_study readings match EVENT LAB's sessions() on ${symbol}`, same === false ? ['the rows differ: update mcp/tools/event_study.mjs readings() to the model'] : same === null ? [`WARN no bars/${symbol}.json`] : []);
+  }
 
   // Each tool's calls, summarised: the worst bytes parsed with and without slices.
   const perTool = new Map();

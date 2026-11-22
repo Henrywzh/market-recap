@@ -32,6 +32,7 @@ artifacts.
 | `ticker(symbol)` | What do we know about this company? Identity, valuation (P/E, operating P/E, own-history percentile, forward) and TTM margins and ROIC, MONITOR state and evidence, next report (consensus, implied move) and last outcome, and the MOVES row: own z, market/sector/own parts, gap vs session, calibrated range with factor and reason, and what past shocks like this did next. `BRK.B` and `BRK-B` both work. | valuation, monitor, moves, events/\<T\> |
 | `financials(symbol, period?, quarters?)` | What did this company file? Income statement, balance sheet and cash flow line by line from its own SEC XBRL facts, annual (up to ten fiscal years) or the last `quarters` (default 8, at most 24), with growth, gross / operating / net / FCF margins, ROE, ROA, ROIC, net debt and interest coverage. Each period says when it was last filed; quarters worked out from year-to-date figures are listed under `derived`. `ttm` gives trailing-twelve-month margins and returns on the P/E's basis. | financials, financials/\<T\>, valuation |
 | `screen(filters?, sector?, index?, sort?, order?, fields?, limit?)` | Which members meet these conditions? The VALUATION table filtered (`[{metric, min?, max?}]`, all must hold) and sorted: multiples and their own-history percentile, yields, TTM margins, returns, leverage, growth. A row missing a filtered value is left out and counted in `excluded_missing`. Default sort market cap; the default order follows the metric (cheapest first for multiples). A filter, not a ranking. | valuation |
+| `event_study(symbol, trigger, filters?, backdrop?, like_today?, exclude?, from?, gap?, side?, cost_bps?, focus?)` | What did this ticker do after days like this one? TRADE DESK -> EVENT LAB on the same model: a trigger (intraday low, close, open gap or a move in its own 20-day sigma, down or up, at least `size`), filters read at that close (RSI of any period 2-50, up to three moving averages with a side and a % distance band, distance from the high of any 20-756-session window), the market backdrop (six states, or `like_today`), the crisis periods left out by default, one event per `gap` sessions. Returns events against every session in the same window at each next open and close to day 20, counts, separate stretches, the random-draw check with the page's sample-size verdict, results by year, the last session's readings (does today fire?) and the ten latest events. | bars/\<T\>, trade_conditions |
 | `unusual_moves(direction?, limit?)` | Which names moved beyond their own norm last session? Plus the technology sell-off flag. | moves |
 | `sector(key)` | One sector (`XLK`, or its name) or sub-industry (`XLK-S`): returns and relative performance, breadth, revisions, valuation strip, sub-industries. | sectors, sectors/\<KEY\> |
 | `theme(key)` | One theme board (`cloud`, `semis`, `energy`, ...): run-in, relative-strength state, breadth, revisions, bellwethers with next report, calendar, drivers. | themes |
@@ -167,3 +168,18 @@ curl -s -X POST http://127.0.0.1:8788/mcp -H 'Content-Type: application/json' \
   says so through `source_as_of`.
 - No rate limit beyond Cloudflare's own. The data is public and cached by
   `no-cache` revalidation, not by the function.
+
+## event_study and EVENT LAB
+
+`event_study` imports Trade Desk's model (`web/js/event-lab-model.js`,
+`web/js/trade-conditions.js`) and does not change it. Two parts are its own, for
+one call's ~10 ms of CPU on SPY's 6,700 sessions: `readings()` is the model's
+`sessions()` column by column (identical rows, checked on every deploy against
+this build's SPY and largest member), and the baseline statistics use a
+selection instead of fourteen sorts (values agree to the 0.001 the tool
+reports). The random-draw check is the page's own 2,000 seeded draws up to 60
+events; above that, its normal approximation, and `random_draw_method` says
+which. The page's settings (RSI 6, the 50- or 200-day average, the 252-session
+high) give the page's numbers: `tests/js/mcp-event-study.test.mjs` holds them
+to `study()`.
+
