@@ -8,6 +8,7 @@ import { fitBudget } from '../../mcp/context.mjs';
 import { validate } from '../../mcp/schema.mjs';
 import { handleMcp } from '../../mcp/server.mjs';
 import { TOOLS } from '../../mcp/tools.mjs';
+import { SCREEN_ROW_KEYS } from '../../mcp/tools/screen.mjs';
 
 // Nothing in the server may reach the network: only ASSETS.
 globalThis.fetch = () => { throw new Error('the MCP server must not call fetch()'); };
@@ -88,9 +89,43 @@ function fixture() {
       semis: { adata: { notes: [{ month: '2026-09', url: 'https://x', headline: 'Enterprise SSD prices projected +235%' }] } },
     },
     [art('valuation')]: { as_of: '2026-10-14', rows: [
-      { ticker: 'NVDA', name: 'NVIDIA Corp', sector: 'Information Technology', sub_sector: 'Semiconductors', indices: ['SPX', 'NDX'], price: 226, market_cap: 5.4e12, pe: 28, pe_operating: 32, pe_basis: 'operating', pe_percentile: 4.5, pe_vs_median: -43.7, pe_forward: 16.3, eps_ntm: 13.9, ptbv: 26, fcf_yield: 2.3, revenue_growth: 83 },
+      { ticker: 'NVDA', name: 'NVIDIA Corp', sector: 'Information Technology', sub_sector: 'Semiconductors', indices: ['SPX', 'NDX'], price: 226, market_cap: 5.4e12, period_end: '2026-07-26', filed: '2026-08-26', pe: 28, pe_operating: 32, pe_basis: 'operating', pe_percentile: 4.5, pe_vs_median: -43.7, pe_forward: 16.3, eps_ntm: 13.9, ptbv: 26, fcf_yield: 2.3, revenue_growth: 83,
+        gross_margin: 71.1, operating_margin: 60.4, net_margin: 55.6, fcf_margin: 44.8, roic: 94.5, roe: 101.5 },
       { ticker: 'BRK-B', name: 'Berkshire Hathaway Inc Cl B', sector: 'Financials', sub_sector: 'Multi-Sector Holdings', indices: ['SPX'], price: 480, market_cap: 1e12, pe: 15 },
-    ] },
+      { ticker: 'INTC', name: 'Intel Corp', sector: 'Information Technology', sub_sector: 'Semiconductors', indices: ['SPX', 'NDX'], price: 30, market_cap: 1.3e11, period_end: '2026-06-27', pe: null, pe_forward: 40, pe_vs_median: 60, revenue_growth: -2,
+        gross_margin: 35, operating_margin: -5, net_margin: -10, fcf_margin: -8 },
+      { ticker: 'AVGO', name: 'Broadcom Inc', sector: 'Information Technology', sub_sector: 'Semiconductors', indices: ['SPX', 'NDX'], price: 300, market_cap: 1.4e12, period_end: '2026-08-03', pe: 60, pe_forward: 30, pe_vs_median: -5, revenue_growth: 25,
+        gross_margin: 77, operating_margin: 40, net_margin: 35, fcf_margin: 40 },
+    ], metrics: [
+      { key: 'pe', label: 'P/E (TTM)', unit: 'x', group: 'valuation', better: 'low', banks: true },
+      { key: 'pe_forward', label: 'P/E forward (NTM consensus)', unit: 'x', group: 'valuation', better: 'low', banks: true },
+      { key: 'operating_margin', label: 'Operating margin (TTM)', unit: 'pct', group: 'quality', better: 'high', banks: false },
+    ], note: 'Market cap is the closing price times a filed share count.' },
+    [art('financials')]: {
+      as_of: '2026-10-14', available: [{ ticker: 'NVDA', name: 'NVIDIA Corp' }, { ticker: 'AVGO', name: 'Broadcom Inc' }], skipped: { ASML: 'no annual US-GAAP statements filed yet' },
+      statements: {
+        income: { label: 'INCOME STATEMENT', items: [{ key: 'revenue', label: 'Revenue', unit: 'USD' }, { key: 'ebit', label: 'Operating income (EBIT)', unit: 'USD' }] },
+        cash_flow: { label: 'CASH FLOW', items: [{ key: 'operating_cash_flow', label: 'Operating cash flow', unit: 'USD' }, { key: 'capex', label: 'Capex', unit: 'USD' }] },
+      },
+      ratios: [{ key: 'gross_margin', label: 'Gross margin', unit: 'pct' }, { key: 'operating_margin', label: 'Operating margin', unit: 'pct' }, { key: 'roic', label: 'Return on invested capital (avg)', unit: 'pct' }],
+      note: 'Annual figures from each company\'s own 10-K XBRL facts, as most recently filed.',
+    },
+    [art('financials/NVDA')]: {
+      ticker: 'NVDA', name: 'NVIDIA Corp', sector: 'Information Technology', entity_name: 'NVIDIA CORP', cik: 1045810, source_url: 'https://data.sec.gov/api/xbrl/companyfacts/CIK0001045810.json',
+      columns: [{ fiscal_year: 2025, period_end: '2025-01-26', filed: '2026-02-25' }, { fiscal_year: 2026, period_end: '2026-01-25', filed: '2026-02-25' }],
+      values: { revenue: [130.5e9, 216e9], ebit: [81.5e9, 130e9], operating_cash_flow: [64e9, 102e9], capex: [3.2e9, 5.5e9] },
+      ratios: { gross_margin: [75, 71.1], operating_margin: [62.4, 60.2], roic: [113.4, 94.5] },
+      quarters: {
+        columns: [
+          { period_end: '2025-10-26', label: 'FY2026 Q3', fiscal_year: 2026, quarter: 3, filed: '2025-11-19' },
+          { period_end: '2026-01-25', label: 'FY2026 Q4', fiscal_year: 2026, quarter: 4, filed: '2026-02-25' },
+          { period_end: '2026-04-26', label: 'FY2027 Q1', fiscal_year: 2027, quarter: 1, filed: '2026-05-28' },
+        ],
+        values: { revenue: [57e9, 68e9, 74e9], ebit: [36e9, 44e9, 46e9], operating_cash_flow: [24e9, 30e9, 33e9], capex: [1e9, 1.5e9, 1.6e9] },
+        derived: { revenue: [false, true, false], ebit: [false, true, false], operating_cash_flow: [false, false, false], capex: [false, false, false] },
+        ratios: { gross_margin: [73.4, 75, 72], operating_margin: [63.2, 64.7, 62.2] },
+      },
+    },
     [art('monitor')]: { as_of: '2026-10-14', rows: [
       { ticker: 'NVDA', name: 'NVIDIA Corp', price_state: 'weak', evidence_state: 'steady', candidate: false, reasons: [], drawdown_pct: -5.4, price_as_of: '2026-10-14', evidence_for: ['FY1 EPS within +-2%'], evidence_against: [], gaps: [], earnings_date: '2026-11-18',
         expectations: { fiscal_year_end: '2027-01-31', eps: 9.3, change_30d_pct: 0.06, change_90d_pct: 4.2, analysts: 51, state: 'steady' } },
@@ -190,7 +225,7 @@ test('a notification gets 202 and no body; ping gets an empty result', async () 
 test('tools/list names every tool with an input and an output schema, read-only', async () => {
   const { json } = await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
   const names = json.result.tools.map((t) => t.name);
-  assert.deepEqual(names, ['today', 'market_snapshot', 'catalysts', 'ticker', 'unusual_moves', 'sector', 'theme', 'macro', 'search', 'fetch']);
+  assert.deepEqual(names, ['today', 'market_snapshot', 'catalysts', 'ticker', 'financials', 'screen', 'unusual_moves', 'sector', 'theme', 'macro', 'search', 'fetch']);
   json.result.tools.forEach((t) => {
     assert.equal(t.inputSchema.type, 'object');
     assert.equal(t.outputSchema.type, 'object');
@@ -234,7 +269,8 @@ test('bad tool arguments are a tool error the model can read, not a protocol err
 
 test('every tool result carries the envelope and matches its own schema', async () => {
   const calls = [['market_snapshot', {}], ['catalysts', {}], ['ticker', { symbol: 'NVDA' }], ['unusual_moves', {}], ['sector', { key: 'XLK' }], ['theme', { key: 'cloud' }],
-    ['macro', { kind: 'cpi' }], ['macro', { kind: 'rates' }], ['macro', { kind: 'commodities' }], ['search', { query: 'nvidia' }], ['fetch', { id: 'ticker:NVDA' }]];
+    ['macro', { kind: 'cpi' }], ['macro', { kind: 'rates' }], ['macro', { kind: 'commodities' }], ['search', { query: 'nvidia' }], ['fetch', { id: 'ticker:NVDA' }],
+    ['financials', { symbol: 'NVDA' }], ['financials', { symbol: 'NVDA', period: 'quarterly' }], ['screen', {}], ['screen', { sector: 'semiconductors', filters: [{ metric: 'operating_margin', min: 30 }] }]];
   for (const [name, args] of calls) {
     const result = await call(name, args);
     assert.notEqual(result.isError, true, `${name}: ${result.content[0].text}`);
@@ -726,11 +762,101 @@ test('tools only ever ask the ASSETS binding for artifacts/ files', async () => 
   const files = fixture();
   const spy = { async fetch(request) { asked.push(request.method + ' ' + new URL(request.url).pathname); return memoryAssets(files).fetch(request); } };
   for (const tool of TOOLS) {
-    const args = { today: {}, market_snapshot: {}, catalysts: {}, ticker: { symbol: 'NVDA' }, unusual_moves: {}, sector: { key: 'XLK' }, theme: { key: 'cloud' }, macro: { kind: 'cpi' }, search: { query: 'nvda' }, fetch: { id: 'ticker:NVDA' } }[tool.name];
+    const args = { today: {}, market_snapshot: {}, catalysts: {}, ticker: { symbol: 'NVDA' }, financials: { symbol: 'NVDA' }, screen: { sector: 'Semiconductors' }, unusual_moves: {}, sector: { key: 'XLK' }, theme: { key: 'cloud' }, macro: { kind: 'cpi' }, search: { query: 'nvda' }, fetch: { id: 'ticker:NVDA' } }[tool.name];
     await handleMcp(new Request('https://market-recap-b5p.pages.dev/mcp', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool.name, arguments: args } }) }), { ASSETS: spy }, { now: NOW });
   }
   assert.ok(asked.length > 10);
   assert.ok(asked.every((a) => /^GET \/artifacts\/[A-Za-z0-9_\-./]+\.json$/.test(a)), asked.filter((a) => !/^GET \/artifacts\//.test(a)).join(', '));
+});
+
+// ------------------------------------------------------------ financials and screen
+
+test('financials gives the annual statements by group, the ratios and the TTM margins, oldest first', async () => {
+  const data = (await call('financials', { symbol: 'nvda' })).structuredContent;
+  assert.equal(data.symbol, 'NVDA');
+  assert.equal(data.period, 'annual');
+  assert.deepEqual(data.periods.map((p) => p.label), ['FY2025', 'FY2026']);
+  assert.equal(data.periods[1].filed, '2026-02-25');
+  assert.deepEqual(Object.keys(data.statements), ['income', 'cash_flow']);
+  assert.deepEqual(data.statements.income.lines[0], { key: 'revenue', label: 'Revenue', unit: 'USD', values: [130.5e9, 216e9] });
+  assert.deepEqual(data.ratios.find((r) => r.key === 'operating_margin').values, [62.4, 60.2]);
+  assert.equal(data.derived, null);
+  assert.equal(data.ttm.gross_margin_pct, 71.1);
+  assert.equal(data.ttm.fcf_margin_pct, 44.8);
+  assert.equal(data.ttm.period_end, '2026-07-26');
+  assert.equal(data.identity.source_url, 'https://data.sec.gov/api/xbrl/companyfacts/CIK0001045810.json');
+  assert.ok(data.sources.includes('financials/NVDA.json'));
+});
+
+test('financials quarterly keeps the latest quarters and marks only the lines worked out from year-to-date figures', async () => {
+  const data = (await call('financials', { symbol: 'NVDA', period: 'quarterly', quarters: 2 })).structuredContent;
+  assert.deepEqual(data.periods.map((p) => p.label), ['FY2026 Q4', 'FY2027 Q1']);
+  assert.deepEqual(data.statements.income.lines[0].values, [68e9, 74e9]);
+  assert.deepEqual(data.ratios.map((r) => r.key), ['gross_margin', 'operating_margin']);
+  assert.deepEqual(data.derived, { revenue: [true, false], ebit: [true, false] });
+});
+
+test('financials for a name with no statements says why; an unknown name points to search', async () => {
+  const skipped = await call('financials', { symbol: 'ASML' });
+  assert.equal(skipped.isError, true);
+  assert.equal(skipped.content[0].text, 'No filed statements for ASML: no annual US-GAAP statements filed yet.');
+  const noFile = await call('financials', { symbol: 'BRK.B' });
+  assert.equal(noFile.isError, true);
+  assert.match(noFile.content[0].text, /No filed statements for BRK-B/);
+  const unknown = await call('financials', { symbol: 'ZZZZ' });
+  assert.match(unknown.content[0].text, /search tool/);
+});
+
+test('financials without a VALUATION row still returns the statements, with ttm null and the reason', async () => {
+  const files = fixture();
+  files[art('valuation')] = { ...files[art('valuation')], rows: files[art('valuation')].rows.filter((r) => r.ticker !== 'AVGO') };
+  files[art('financials/AVGO')] = { ...files[art('financials/NVDA')], ticker: 'AVGO', name: 'Broadcom Inc' };
+  const data = (await call('financials', { symbol: 'AVGO' }, files)).structuredContent;
+  assert.equal(data.symbol, 'AVGO');
+  assert.equal(data.ttm, null);
+  assert.ok(data.unavailable.some((u) => u.part === 'ttm'));
+});
+
+test('screen filters a sub-industry, leaves out and counts rows missing a filtered value, and sorts as asked', async () => {
+  const data = (await call('screen', { sector: 'semiconductors', filters: [{ metric: 'gross_margin', min: 50 }, { metric: 'pe', max: 100 }], sort: 'pe_forward' })).structuredContent;
+  assert.equal(data.universe, 3);
+  assert.deepEqual(data.excluded_missing, {});   // INTC fails the margin filter before P/E is read
+  assert.deepEqual(data.rows.map((r) => r.ticker), ['NVDA', 'AVGO']);   // forward P/E low first
+  assert.equal(data.applied.order, 'asc');
+  assert.equal(data.rows[0].values.gross_margin, 71.1);
+  assert.ok('pe_forward' in data.rows[0].values && 'market_cap' in data.rows[0].values);
+  assert.equal(data.metrics.find((m) => m.key === 'pe_forward').label, 'P/E forward (NTM consensus)');
+  assert.equal(data.metrics.find((m) => m.key === 'gross_margin').label, 'Gross margin (TTM)');
+});
+
+test('screen counts a filtered metric a row lacks instead of passing it', async () => {
+  const data = (await call('screen', { filters: [{ metric: 'pe', max: 30 }] })).structuredContent;
+  assert.equal(data.universe, 4);
+  assert.deepEqual(data.excluded_missing, { pe: 1 });           // INTC has no P/E
+  assert.deepEqual(data.rows.map((r) => r.ticker), ['NVDA', 'BRK-B']);   // market cap, largest first
+});
+
+test('screen by index, with a limit, says how many it left out', async () => {
+  const data = (await call('screen', { index: 'NDX', limit: 1, sort: 'revenue_growth' })).structuredContent;
+  assert.equal(data.matched, 3);
+  assert.equal(data.more, 2);
+  assert.deepEqual(data.rows.map((r) => r.ticker), ['NVDA']);
+  assert.equal(data.applied.order, 'desc');
+});
+
+test('screen rejects a filter without bounds, an unknown sector and an unknown metric as tool errors', async () => {
+  assert.match((await call('screen', { filters: [{ metric: 'pe' }] })).content[0].text, /min, max or both: pe/);
+  assert.match((await call('screen', { sector: 'nope' })).content[0].text, /Sectors: Financials, Information Technology/);
+  assert.match((await call('screen', { sort: 'beauty' })).content[0].text, /Invalid arguments/);
+});
+
+test('ticker carries the TTM margins and ROIC beside the multiples', async () => {
+  const v = (await call('ticker', { symbol: 'NVDA' })).structuredContent.valuation;
+  assert.equal(v.gross_margin_pct, 71.1);
+  assert.equal(v.operating_margin_pct, 60.4);
+  assert.equal(v.net_margin_pct, 55.6);
+  assert.equal(v.fcf_margin_pct, 44.8);
+  assert.equal(v.roic_pct, 94.5);
 });
 
 // ------------------------------------------------------------ slices
@@ -767,6 +893,9 @@ function sliceFiles(files) {
   out['/artifacts/mcp/search_index.json'] = { artifacts: { valuation, sectors, themes, catalysts: files[art('catalysts')] } };
   out['/artifacts/mcp/snapshot.json'] = { artifacts: { overview: files[art('overview')], market_state: files[art('market_state')], risk: files[art('risk')], positioning: files[art('positioning')], sectors } };
   out['/artifacts/mcp/unusual.json'] = { artifacts: { moves } };
+  const keep = (o, keys) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
+  out['/artifacts/mcp/screen.json'] = { artifacts: { valuation: { as_of: valuation.as_of, note: valuation.note,
+    rows: valuation.rows.map((r) => keep(r, SCREEN_ROW_KEYS)), metrics: valuation.metrics.map((m) => keep(m, ['key', 'label', 'unit', 'better'])) } } };
   out['/artifacts/mcp/sector_hub.json'] = { artifacts: { sectors } };
   for (const kind of ['cpi', 'ppi', 'commodities']) out[`/artifacts/mcp/macro/${kind}.json`] = { artifacts: { macro } };
   return out;
@@ -783,6 +912,8 @@ const TOOL_CALLS = [
   ['search', { query: 'nvda' }], ['search', { query: 'cloud' }],
   ['fetch', { id: 'ticker:NVDA' }], ['fetch', { id: 'sector:XLK' }], ['fetch', { id: 'theme:cloud' }], ['fetch', { id: 'macro:cpi' }],
   ['fetch', { id: 'event:nasdaq:2026-10-20:GE' }],
+  ['financials', { symbol: 'NVDA' }], ['financials', { symbol: 'nvda', period: 'quarterly', quarters: 2 }], ['financials', { symbol: 'AMD' }], ['financials', { symbol: 'ASML' }],
+  ['screen', {}], ['screen', { sector: 'Semiconductors', filters: [{ metric: 'gross_margin', min: 50 }], sort: 'pe_forward' }], ['screen', { sector: 'nope' }],
 ];
 
 // A call, and the paths it read through ASSETS.
@@ -822,6 +953,14 @@ test('an artifact a slice does not hold is read from its own file, the rest from
   assert.ok(paths.includes('/artifacts/monitor.json'));
   assert.ok(!paths.includes('/artifacts/valuation.json'));
   assert.equal(canon(result.structuredContent), canon((await call('ticker', { symbol: 'NVDA' }, files)).structuredContent));
+});
+
+test('a screen call reads its slice, not the full VALUATION table', async () => {
+  const files = fixture();
+  const { result, paths } = await callLogged('screen', { sector: 'Semiconductors' }, { ...files, ...sliceFiles(files) });
+  assert.equal(result.isError, undefined);
+  assert.ok(paths.includes('/artifacts/mcp/screen.json'));
+  assert.ok(!paths.includes('/artifacts/valuation.json'));
 });
 
 test('a slice that is not a JSON object is ignored, and the full artifacts answer', async () => {

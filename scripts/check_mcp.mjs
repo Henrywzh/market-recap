@@ -39,8 +39,8 @@ async function artifact(name) {
 // The arguments a reader would plausibly use, taken from the build itself.
 // Every ticker, sector, theme and macro kind the build has is called too.
 async function plan(manifest) {
-  const [heat, catalysts, sectors, themes, tickers] = await Promise.all([
-    artifact('heatmaps'), artifact('catalysts'), artifact('sectors'), artifact('themes'), artifact('mcp/ticker/index'),
+  const [heat, catalysts, sectors, themes, tickers, financials] = await Promise.all([
+    artifact('heatmaps'), artifact('catalysts'), artifact('sectors'), artifact('themes'), artifact('mcp/ticker/index'), artifact('financials'),
   ]);
   const top = [...heat.constituents].filter((r) => r.ticker).sort((a, b) => (b.weight || 0) - (a.weight || 0))[0].ticker;
   const upcoming = catalysts.events.filter((e) => e.date >= manifest.as_of).sort((a, b) => a.date.localeCompare(b.date));
@@ -52,6 +52,11 @@ async function plan(manifest) {
     { tool: 'today', args: {}, paths: ['sessions.0', 'coming_up.days'] },
     { tool: 'catalysts', args: { from, to: addDays(from, 7) }, paths: ['recent_session.session', 'events.0.title'], expect: ['events', 'recent_session'], nonEmpty: ['events'] },
     { tool: 'ticker', args: { symbol: top }, paths: ['valuation.price', 'valuation.pe_percentile_own_10y', 'monitor.price_state', 'reports.last.date', 'moves.parts.own_z', 'moves.range.bands.0.price'], expect: ['valuation', 'monitor', 'moves'] },
+    { tool: 'financials', args: { symbol: top }, paths: ['ttm.operating_margin_pct', 'ttm.gross_margin_pct', 'periods.0.filed'], expect: ['ttm'], nonEmpty: ['periods', 'ratios'] },
+    { tool: 'financials', args: { symbol: top, period: 'quarterly', quarters: 24 }, nonEmpty: ['periods', 'ratios'] },
+    { tool: 'screen', args: {}, paths: ['rows.0.values.pe_forward', 'rows.0.values.operating_margin'], nonEmpty: ['rows', 'metrics'] },
+    { tool: 'screen', args: { sector: 'Semiconductors', filters: [{ metric: 'operating_margin', min: 0 }], sort: 'pe_forward', limit: 100 }, nonEmpty: ['rows'] },
+    { tool: 'screen', args: { index: 'NDX', filters: [{ metric: 'gross_margin', min: 40 }, { metric: 'pe_vs_median', max: 0 }], fields: ['fcf_margin', 'roic', 'ev_ebitda'], limit: 100 } },
     { tool: 'unusual_moves', args: {}, paths: ['threshold_sigma', 'technology_selloff.active'], expect: ['technology_selloff'] },
     { tool: 'sector', args: { key: sector.key }, paths: ['summary.returns_pct.1M', 'valuation_strip.current'], expect: ['valuation_strip'], nonEmpty: ['sub_industries'] },
     { tool: 'sector', args: { key: sub.key }, expect: ['parent'] },
@@ -67,6 +72,7 @@ async function plan(manifest) {
   [...sectors.sectors, ...sectors.sub_industries].forEach((s) => calls.push({ tool: 'sector', args: { key: s.key } }));
   ['cpi', 'ppi', 'rates', 'commodities'].forEach((kind) => calls.push({ tool: 'macro', args: { kind } }));
   for (const symbol of [...new Set([...tickers.rows, ...tickers.events])]) calls.push({ tool: 'ticker', args: { symbol } });
+  for (const { ticker } of financials.available || []) calls.push({ tool: 'financials', args: { symbol: ticker } });
   for (const query of ['semis', 'cpi', sector.label, top]) calls.push({ tool: 'search', args: { query } });
   if (upcoming.length) calls.push({ tool: 'fetch', args: { id: `event:${upcoming[0].event_key}` }, expect: ['text'] });
   // A share class typed the exchange's way must reach the build's key.

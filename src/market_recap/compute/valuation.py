@@ -368,6 +368,23 @@ def compute(inputs: Inputs, *, sector: str | None) -> dict[str, float | None]:
     return {metric.key: (None if bank and not metric.banks else fn(inputs)) for metric, fn in METRICS}
 
 
+def margins(snapshot: dict, *, sector: str | None) -> dict[str, float | None]:
+    """Trailing-twelve-month gross, net and FCF margins, on the same TTM flows as
+    the metrics. Row fields, not table columns: MCP's screen and ticker read them
+    beside operating_margin. Blank for the Financials sector, like operating
+    margin, because a bank's "revenue" is not a sales line."""
+    if sector == FINANCIALS_SECTOR:
+        return {"gross_margin": None, "net_margin": None, "fcf_margin": None}
+    flows = snapshot["ttm"]
+    revenue = flows.get("revenue")
+    ocf, capex = flows.get("operating_cash_flow"), flows.get("capex")
+    return {
+        "gross_margin": _pct(gross_profit(flows), revenue),
+        "net_margin": _pct(flows.get("net_income"), revenue),
+        "fcf_margin": None if ocf is None or capex is None else _pct(ocf - capex, revenue),
+    }
+
+
 # --- P/E against its own history ---------------------------------------------
 # The window a current multiple is compared with, and the least history that
 # makes a percentile describe a range rather than one market regime.

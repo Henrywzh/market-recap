@@ -51,6 +51,17 @@ UNUSUAL_ROW_KEYS = (
     "intraday_pct", "volume_ratio", "reported", "tags", "range_factor", "range_reason",
 )
 SECTOR_HUB_KEYS = ("as_of", "benchmark", "notes", "sectors", "sub_industries")
+# The VALUATION row fields mcp/tools/screen.mjs reads (its SCREEN_ROW_KEYS), and
+# the parts of each `metrics` entry it labels them with.
+SCREEN_METRICS = (
+    "pe", "pe_operating", "pe_forward", "pe_percentile", "pe_vs_median", "ev_ebitda", "ev_sales", "pb", "ptbv", "ptbv_percentile",
+    "fcf_yield", "dividend_yield", "shareholder_yield", "implied_growth", "consensus_growth",
+    "roe", "rotce", "roic", "gross_profitability", "operating_margin", "revenue_growth", "accruals", "net_debt_ebitda",
+    "interest_coverage", "piotroski", "margin_stability",
+    "market_cap", "price", "gross_margin", "net_margin", "fcf_margin",
+)
+SCREEN_ROW_KEYS = ("ticker", "name", "sector", "sub_sector", "indices", "period_end", *SCREEN_METRICS)
+SCREEN_METRIC_DEF_KEYS = ("key", "label", "unit", "better")
 
 
 class _Sources:
@@ -248,6 +259,12 @@ def write(artifacts: Path, out: Path | None = None) -> dict:
         emit("unusual", {"artifacts": {"moves": unusual}}, "unusual")
     else:
         emit("unusual", {"artifacts": {"moves": None}}, "unusual")
+
+    # --- screen: every VALUATION row, cut to the fields the screen reads.
+    if valuation is not None:
+        emit("screen", {"artifacts": {"valuation": _slim(valuation, ("as_of", "note"), {"rows": SCREEN_ROW_KEYS, "metrics": SCREEN_METRIC_DEF_KEYS})}}, "screen")
+    else:
+        emit("screen", {"artifacts": {"valuation": None}}, "screen")
 
     # --- sector: the hub without its member list (the largest part of it).
     if sectors is not None:

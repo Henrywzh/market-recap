@@ -824,3 +824,12 @@ def test_the_last_tagged_quarter_is_carried_within_a_year_and_said_so():
 def test_debt_older_than_a_year_is_not_carried():
     snapshot = sec.trailing_snapshot(_facts_with({"LongTermDebtNoncurrent": [("10-K", "2024-12-31", 40.0, "2025-02-20")]}))
     assert V.debt(snapshot) == (0.0, "no debt tagged")
+
+
+def test_ttm_margins_use_the_ttm_flows_and_stay_blank_for_banks():
+    snapshot = {"ttm": {"revenue": 200.0, "cost_of_revenue": 80.0, "net_income": 30.0, "operating_cash_flow": 50.0, "capex": 10.0}}
+    assert V.margins(snapshot, sector="Information Technology") == {"gross_margin": 60.0, "net_margin": 15.0, "fcf_margin": 20.0}
+    assert V.margins(snapshot, sector="Financials") == {"gross_margin": None, "net_margin": None, "fcf_margin": None}
+    # A missing capex line leaves FCF margin blank, never OCF over revenue.
+    partial = {"ttm": {"revenue": 200.0, "gross_profit": 90.0, "operating_cash_flow": 50.0}}
+    assert V.margins(partial, sector=None) == {"gross_margin": 45.0, "net_margin": None, "fcf_margin": None}

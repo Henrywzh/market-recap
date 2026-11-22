@@ -5,16 +5,18 @@
 import { Context } from './context.mjs';
 import { validate } from './schema.mjs';
 import { catalystsTool } from './tools/catalysts.mjs';
+import { financialsTool } from './tools/financials.mjs';
 import { macroTool } from './tools/macro.mjs';
 import { marketSnapshotTool } from './tools/market.mjs';
 import { unusualMovesTool } from './tools/moves.mjs';
+import { screenTool } from './tools/screen.mjs';
 import { fetchTool, searchTool } from './tools/search.mjs';
 import { sectorTool, themeTool } from './tools/sector.mjs';
 import { tickerTool } from './tools/ticker.mjs';
 import { todayTool } from './tools/today.mjs';
 
 export const TOOLS = [
-  todayTool, marketSnapshotTool, catalystsTool, tickerTool, unusualMovesTool, sectorTool, themeTool, macroTool, searchTool, fetchTool,
+  todayTool, marketSnapshotTool, catalystsTool, tickerTool, financialsTool, screenTool, unusualMovesTool, sectorTool, themeTool, macroTool, searchTool, fetchTool,
 ];
 
 const ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };

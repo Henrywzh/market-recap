@@ -225,6 +225,7 @@ def _row(symbol: str, meta: dict, data: sec.Filer, price: float | None, indices:
         "lagged": snapshot.get("lagged") or [],
         "piotroski_tested": tested,
         **{key: clean_float(value, 4) for key, value in metrics.items()},
+        **{key: clean_float(value, 4) for key, value in V.margins(snapshot, sector=meta.get("sector")).items()},
         # Signed, unlike P/E and P/B: an ETF's look-through multiple is its
         # total earnings over its total price, losses included, as for an index.
         "earnings_yield": clean_float(V._pct(snapshot["ttm"].get("net_income"), market_cap), 4),

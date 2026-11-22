@@ -195,3 +195,32 @@ def test_values_are_copied_not_rounded(tmp_path):
     mcp_slices.write(root)
     row = _read(root, "ticker/NVDA")["artifacts"]["valuation"]["rows"][0]
     assert row["pe"] == 28.123456789012345 and row["price"] == 1e-9
+
+
+def test_screen_slice_keeps_every_row_with_only_the_screen_fields(tmp_path):
+    root = _artifacts(tmp_path)
+    valuation = json.loads((root / "valuation.json").read_text())
+    valuation["metrics"] = [{"key": "pe", "label": "P/E (TTM)", "unit": "x", "group": "valuation", "better": "low", "banks": True}]
+    valuation["rows"][0].update({"gross_margin": 71.1, "sub_sector": "Semiconductors", "indices": ["SPX"], "period_end": "2026-07-26"})
+    (root / "valuation.json").write_text(json.dumps(valuation), encoding="utf-8")
+    mcp_slices.write(root)
+    screen = json.loads((root / "mcp" / "screen.json").read_text())["artifacts"]["valuation"]
+    assert screen["as_of"] == "2026-10-14" and screen["note"] == "valuation note"
+    assert [r["ticker"] for r in screen["rows"]] == ["NVDA", "AMD"]
+    assert screen["rows"][0] == {"ticker": "NVDA", "name": "NVIDIA", "sector": "Information Technology", "sub_sector": "Semiconductors",
+                                 "indices": ["SPX"], "period_end": "2026-07-26", "price": 226, "pe": 28, "gross_margin": 71.1}
+    assert "cik" not in screen["rows"][1]
+    assert screen["metrics"] == [{"key": "pe", "label": "P/E (TTM)", "unit": "x", "better": "low"}]
+
+
+def test_screen_fields_match_the_adapter():
+    """mcp/tools/screen.mjs reads SCREEN_ROW_KEYS; the slice must keep exactly those."""
+    from pathlib import Path
+    import re
+    source = (Path(__file__).resolve().parents[1] / "mcp" / "tools" / "screen.mjs").read_text()
+    def listed(name):
+        body = re.search(rf"export const {name} = \[(.*?)\];", source, re.S).group(1)
+        return re.findall(r"'([a-z_0-9]+)'", body)
+    js_metrics = listed("TABLE_METRICS") + re.findall(r"^  ([a-z_]+): \{ label", source, re.M)
+    assert tuple(js_metrics) == mcp_slices.SCREEN_METRICS
+    assert mcp_slices.SCREEN_ROW_KEYS[:6] == ("ticker", "name", "sector", "sub_sector", "indices", "period_end")
