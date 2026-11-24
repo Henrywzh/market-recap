@@ -473,21 +473,36 @@ def _ramp_metric(activity: pd.DataFrame, metric: str, weeks: pd.DatetimeIndex, n
 
 
 def _ramp_prices(prices: pd.DataFrame, names: dict) -> dict:
-    """Effective USD per million tokens by maker: the sum of cost over the sum of tokens, per day."""
+    """USD per million tokens by maker, per day.
+
+    Ramp now publishes the price itself (``price_per_million``, seen 2026-11-24,
+    with a ``blend`` row across the covered makers) and no longer the 7-day cost
+    and token count. The two are different measures -- on the seam (2025-01-06/07)
+    Anthropic's all-token figure goes from 2.56 to 1.16 -- so they are never
+    spliced: once any published price exists only published prices are drawn.
+    Older files keep the effective price, the sum of cost over the sum of tokens.
+    """
     if prices.empty:
         return {"unit": "USD per million tokens", "dates": [], "types": {t: [] for t in RAMP_TOKEN_TYPES}}
     frame = prices.copy()
     frame["usage_date"] = pd.to_datetime(frame["usage_date"], utc=True).dt.tz_localize(None)
-    columns = ["token_cost_usd_7d", "token_count_7d"]
+    columns = ["token_cost_usd_7d", "token_count_7d", "price_per_million"]
     for column in columns:
-        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+        frame[column] = pd.to_numeric(frame[column], errors="coerce") if column in frame.columns else float("nan")
+    published = frame["price_per_million"].notna()
+    if published.any():
+        frame = frame.loc[published]
     days = pd.date_range(frame["usage_date"].min(), frame["usage_date"].max(), freq="D", name="usage_date")
     types = {}
     for token_type in RAMP_TOKEN_TYPES:
         rows = frame.loc[frame["token_type"].eq(token_type)]
-        grouped = rows.groupby(["usage_date", "model_maker"])[columns].sum(min_count=1)
-        count = grouped["token_count_7d"].where(grouped["token_count_7d"].gt(0))   # zero tokens: no price
-        wide = (grouped["token_cost_usd_7d"] / count * 1_000_000).unstack("model_maker").reindex(days)
+        if published.any():
+            values = rows.groupby(["usage_date", "model_maker"])["price_per_million"].last()
+        else:
+            grouped = rows.groupby(["usage_date", "model_maker"])[columns].sum(min_count=1)
+            count = grouped["token_count_7d"].where(grouped["token_count_7d"].gt(0))   # zero tokens: no price
+            values = grouped["token_cost_usd_7d"] / count * 1_000_000
+        wide = values.unstack("model_maker").reindex(days)
         makers = [m for m in wide.columns if wide[m].notna().any()]
         types[token_type] = [{"key": m, "name": names.get(m, m), "values": [clean_float(v, 4) for v in wide[m]]}
                              for m in sorted(makers)]

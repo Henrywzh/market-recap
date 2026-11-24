@@ -1140,7 +1140,7 @@ ramp_tokenomics_default_makers = ["openai", "anthropic", "google", "xai", "deeps
 # shares are computed over every reported series, shipped or not.
 ramp_tokenomics_models = 25
 # Display names for model makers; a maker not listed shows its raw key.
-ramp_tokenomics_names = { openai = "OpenAI", anthropic = "Anthropic", xai = "xAI", nvidia = "NVIDIA", google = "Google", meta = "Meta", deepseek = "DeepSeek", alibaba = "Alibaba", minimax = "MiniMax", moonshot = "Moonshot AI", zhipu = "Zhipu AI" }
+ramp_tokenomics_names = { blend = "Blend (Ramp)", openai = "OpenAI", anthropic = "Anthropic", xai = "xAI", nvidia = "NVIDIA", google = "Google", meta = "Meta", deepseek = "DeepSeek", alibaba = "Alibaba", minimax = "MiniMax", moonshot = "Moonshot AI", zhipu = "Zhipu AI" }
 capex_filers = ["MSFT", "GOOGL", "AMZN", "META", "ORCL"]
 capex_quarters = 12
 nvda_quarters = 8

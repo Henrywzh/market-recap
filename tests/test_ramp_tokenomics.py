@@ -178,3 +178,21 @@ def test_weeks_follow_the_weekday_ramp_ends_them_on(monkeypatch):
     assert out["volume"]["total"] == [8.0, 7.0, 10.0, 13.0, 14.0]
     assert {m["key"]: m["values"] for m in out["volume"]["makers"]}["google"] == [1.0, 1.0, None, 2.0, 2.0]
     assert out["week_runs"] == ["Saturday", "Friday"] and out["latest_week"] == shift[WEEKS[-1]]
+
+
+def test_published_prices_are_used_as_is_and_never_spliced_onto_cost_over_tokens(monkeypatch):
+    """2026-11-24: Ramp publishes price_per_million (and a blend row) instead of 7-day cost and tokens."""
+    rows = [_price(DAYS[0], "openai", 2.0, 1e6), _price(DAYS[0], "anthropic", 3.0, 1e6)]
+    for day in DAYS[1:]:
+        for maker, price in (("openai", 0.5), ("anthropic", 1.5), ("blend", 0.9)):
+            rows.append({**_price(day, maker, None, None), "price_per_million": price})
+    rows.append({**_price(DAYS[2], "openai", None, None, token_type="output"), "price_per_million": 4.0})
+    _patch(monkeypatch, _activity(), prices=pd.DataFrame(rows))
+    out = TH._ramp_tokenomics({**SETTINGS, "ramp_tokenomics_names": {"blend": "Blend (Ramp)", "openai": "OpenAI"}})
+    all_tokens = {p["key"]: p for p in out["prices"]["types"]["all_tokens"]}
+    assert out["prices"]["dates"] == DAYS[1:]                              # the cost/tokens day is a different measure: dropped
+    assert list(all_tokens) == ["anthropic", "blend", "openai"]
+    assert all_tokens["openai"]["values"] == [0.5] * 9
+    assert all_tokens["anthropic"]["values"] == [1.5] * 9
+    assert all_tokens["blend"]["values"] == [0.9] * 9 and all_tokens["blend"]["name"] == "Blend (Ramp)"
+    assert out["prices"]["types"]["output"][0]["values"][1] == 4.0
